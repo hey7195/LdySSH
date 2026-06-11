@@ -44,6 +44,7 @@ class SSHSession:
         self.hostname = ""
         self.username = ""
         self.port = 22
+        self.os_type = None
         
         # Port forwarding
         self.port_forwards = {}  # {forward_id: forward_info}
@@ -490,6 +491,11 @@ class SSHSession:
             if error.strip():
                 self.logger.warning(f"Command '{command}' produced error: {error.strip()}")
             
+            # Close the channel to prevent leaking sessions
+            stdin.close()
+            stdout.close()
+            stderr.close()
+            
             return output.strip()
         except Exception as e:
             self.logger.error(f"Error executing command '{command}': {e}")
@@ -497,18 +503,24 @@ class SSHSession:
     
     def _detect_os(self) -> str:
         """Detect the operating system of the remote host."""
+        if self.os_type:
+            return self.os_type
+            
         try:
             # Try Windows first
             result = self._execute_command("echo %OS%", timeout=5)
             if "Windows" in result:
-                return "windows"
+                self.os_type = "windows"
+                return self.os_type
             
             # Try Linux/Unix
             result = self._execute_command("uname -s", timeout=5)
             if result:
-                return "linux"
+                self.os_type = "linux"
+                return self.os_type
             
-            return "unknown"
+            self.os_type = "unknown"
+            return self.os_type
         except:
             return "unknown"
     

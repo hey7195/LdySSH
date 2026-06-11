@@ -470,7 +470,7 @@ async function processUploadQueue() {
                 } else if (progress.status === 'error' || progress.status === 'cancelled') {
                     completed = true;
                     failedCount++;
-                    console.error('Upload failed:', fileName, progress.error || progress.status);
+                    console.error('上传失败:', fileName, progress.error || progress.status);
                 } else if (progress.status === 'unknown') {
                     completed = true;
                     uploadedCount++;
@@ -2261,8 +2261,8 @@ async function connect() {
             
             console.log('Terminal setup complete');
         } else {
-            console.error('Connection failed:', result.error);
-            alert('Connection failed: ' + (result.error || 'Unknown error'));
+            console.error('连接失败:', result.error);
+            alert('连接失败: ' + (result.error || 'Unknown error'));
             document.getElementById('connectingScreen').style.display = 'none';
             document.getElementById('welcomeScreen').style.display = 'flex';
         }
@@ -2439,18 +2439,18 @@ async function startOutputPolling(sessionId) {
                 if (!statusResult.connected) {
                     // Session disconnected
                     console.log(`Session ${sessionId} disconnected`);
-                    handleSessionDisconnect(sessionId, false);
+                    handleSession断开(sessionId, false);
                 }
             } catch (error) {
                 console.error('Error polling output:', error);
                 // If we can't poll, assume session is disconnected
-                handleSessionDisconnect(sessionId, false);
+                handleSession断开(sessionId, false);
             }
         }
     }, 50); // Poll every 50ms
 }
 
-function handleSessionDisconnect(sessionId, wasLogout) {
+function handleSession断开(sessionId, wasLogout) {
     if (!sessions[sessionId]) return;
     
     console.log(`Handling disconnect for session ${sessionId}, logout: ${wasLogout}`);
@@ -2631,11 +2631,11 @@ function updateSessionsList() {
             <div class="session-status" style="background: ${isConnected ? '#00ff88' : '#ff4444'}"></div>
             <div class="session-info">
                 <div class="session-name">${escapeHtml(session.username)}@${escapeHtml(session.hostname)}</div>
-                <div class="session-host">Session ${escapeHtml(session.id.split('_')[1])} ${!isConnected ? '(Disconnected)' : ''}</div>
+                <div class="session-host">Session ${escapeHtml(session.id.split('_')[1])} ${!isConnected ? '(断开ed)' : ''}</div>
             </div>
             <div class="session-actions" style="opacity: 0; transition: opacity 0.2s ease;">
                 ${isConnected ? 
-                    '<button class="action-btn" onclick="disconnectSession(\'' + escapeJs(session.id) + '\'); event.stopPropagation();">Disconnect</button>' :
+                    '<button class="action-btn" onclick="disconnectSession(\'' + escapeJs(session.id) + '\'); event.stopPropagation();">断开</button>' :
                     '<button class="action-btn" onclick="removeSession(\'' + escapeJs(session.id) + '\'); event.stopPropagation();">Remove</button>'
                 }
             </div>
@@ -2675,11 +2675,11 @@ async function disconnectSession(sessionId) {
             await window.pywebview.api.disconnect(sessionId);
             
             // Handle as disconnection
-            handleSessionDisconnect(sessionId, true);
+            handleSession断开(sessionId, true);
         } catch (error) {
             console.error('Error disconnecting session:', error);
             // Force local disconnect
-            handleSessionDisconnect(sessionId, false);
+            handleSession断开(sessionId, false);
         }
     }
 }
@@ -2807,7 +2807,7 @@ async function initializeSystemMonitor() {
     
     // Check if we have an active session
     if (!currentSessionId || !sessions[currentSessionId]) {
-        document.getElementById('systemInfo').innerHTML = '<div class="error-message">No active session. Please connect to a server first.</div>';
+        document.getElementById('systemInfo').innerHTML = '<div class="error-message">No active session. 请先连接到服务器。</div>';
         return;
     }
     
@@ -2819,11 +2819,17 @@ async function initializeSystemMonitor() {
         clearInterval(systemMonitorInterval);
     }
     
+    let isUpdating = false;
     systemMonitorInterval = setInterval(async () => {
         // Only update if monitor panel is still open and we have a session
-        if (document.getElementById('monitorPanel').classList.contains('active') && 
+        if (!isUpdating && document.getElementById('monitorPanel').classList.contains('active') && 
             currentSessionId && sessions[currentSessionId]) {
-            await loadSystemMonitorData();
+            isUpdating = true;
+            try {
+                await loadSystemMonitorData();
+            } finally {
+                isUpdating = false;
+            }
         }
     }, 5000);
 }
@@ -2832,14 +2838,12 @@ async function loadSystemMonitorData() {
     try {
         console.log('Loading system monitor data...');
         
-        // Load all data in parallel
-        const [systemInfo, systemStats, processList, diskUsage, networkInfo] = await Promise.all([
-            loadSystemInfo(),
-            loadSystemStats(),
-            loadProcessList(),
-            loadDiskUsage(),
-            loadNetworkInfo()
-        ]);
+        // Load all data sequentially to prevent SSH channel exhaustion
+        await loadSystemInfo();
+        await loadSystemStats();
+        await loadProcessList();
+        await loadDiskUsage();
+        await loadNetworkInfo();
         
         console.log('System monitor data loaded successfully');
         
@@ -3392,3 +3396,238 @@ window.addEventListener('resize', () => {
         }, 100);
     }
 });
+
+// --- FinalShell Style Shortcut Panel ---
+function sendShortcut(cmd) {
+    if (!currentSessionId || !sessions[currentSessionId]) {
+        alert('请先连接到服务器。');
+        return;
+    }
+    window.pywebview.api.send_input(currentSessionId, cmd);
+}
+
+let shortcutFolders = [];
+try {
+    const data = localStorage.getItem('shortcutFolders');
+    if (data) {
+        shortcutFolders = JSON.parse(data);
+    }
+} catch(e) {
+    console.error("Failed to parse shortcutFolders:", e);
+}
+
+let isValid = true;
+if (!Array.isArray(shortcutFolders) || shortcutFolders.length === 0) {
+    isValid = false;
+} else {
+    for (let f of shortcutFolders) {
+        if (!f.name || !Array.isArray(f.commands)) {
+            isValid = false;
+            break;
+        }
+    }
+}
+if (!isValid) {
+
+    shortcutFolders = [
+    {
+        name: '默认分类',
+        commands: [
+            { name: 'ls -la', cmd: 'ls -la\n' },
+            { name: 'htop', cmd: 'htop\n' },
+            { name: 'docker ps', cmd: 'docker ps\n' },
+            { name: 'tail syslog', cmd: 'tail -f /var/log/syslog\n' },
+            { name: 'df -h', cmd: 'df -h\n' },
+            { name: 'free -m', cmd: 'free -m\n' }
+        ]
+    }
+];
+let activeShortcutFolderIndex = 0;
+
+function saveShortcuts() {
+    localStorage.setItem('shortcutFolders', JSON.stringify(shortcutFolders));
+}
+
+function renderShortcuts() {
+    const tabsContainer = document.getElementById('shortcutTabs');
+    const grid = document.getElementById('shortcutGrid');
+    if (!tabsContainer || !grid) return;
+    
+    tabsContainer.innerHTML = '';
+    shortcutFolders.forEach((folder, index) => {
+        const tab = document.createElement('div');
+        tab.className = 'shortcut-tab' + (index === activeShortcutFolderIndex ? ' active' : '');
+        tab.textContent = folder.name;
+        tab.onclick = () => {
+            activeShortcutFolderIndex = index;
+            renderShortcuts();
+        };
+        // Add context menu for right click to delete folder
+        tab.oncontextmenu = async (e) => {
+            e.preventDefault();
+            if (await showCustomModal(`确定要删除分类 "${folder.name}" 及其所有指令吗？`, true)) {
+                shortcutFolders.splice(index, 1);
+                if (activeShortcutFolderIndex >= shortcutFolders.length) {
+                    activeShortcutFolderIndex = Math.max(0, shortcutFolders.length - 1);
+                }
+                saveShortcuts();
+                renderShortcuts();
+            }
+        };
+        tabsContainer.appendChild(tab);
+    });
+    
+    const addFolderBtn = document.createElement('div');
+    addFolderBtn.className = 'shortcut-tab add-tab';
+    addFolderBtn.innerHTML = '+ 新建分类';
+    addFolderBtn.onclick = async () => {
+        const folderName = await showCustomModal('请输入新分类名称:');
+        if (folderName) {
+            shortcutFolders.push({ name: folderName, commands: [] });
+            activeShortcutFolderIndex = shortcutFolders.length - 1;
+            saveShortcuts();
+            renderShortcuts();
+        }
+    };
+    tabsContainer.appendChild(addFolderBtn);
+
+    grid.innerHTML = '';
+    if (shortcutFolders.length > 0 && shortcutFolders[activeShortcutFolderIndex]) {
+        shortcutFolders[activeShortcutFolderIndex].commands.forEach((cmd, idx) => {
+            const btn = document.createElement('div');
+            btn.className = 'shortcut-btn';
+            btn.textContent = cmd.name;
+            btn.onclick = () => sendShortcut(cmd.cmd);
+            // Right click to delete command
+            btn.oncontextmenu = async (e) => {
+                e.preventDefault();
+                if (await showCustomModal(`确定要删除指令 "${cmd.name}" 吗？`, true)) {
+                    shortcutFolders[activeShortcutFolderIndex].commands.splice(idx, 1);
+                    saveShortcuts();
+                    renderShortcuts();
+                }
+            };
+            grid.appendChild(btn);
+        });
+    }
+}
+
+async function addShortcut() {
+    if (shortcutFolders.length === 0) {
+        alert('请先新建一个分类');
+        return;
+    }
+    const cmdName = await showCustomModal('请输入指令名称:');
+    if (!cmdName) return;
+    const cmdContent = await showCustomModal('请输入指令内容(如: ls -la):');
+    if (!cmdContent) return;
+    
+    const parsedCmd = cmdContent.replace(/\\n/g, '\n') + (cmdContent.endsWith('\n') ? '' : '\n');
+    shortcutFolders[activeShortcutFolderIndex].commands.push({ name: cmdName, cmd: parsedCmd });
+    saveShortcuts();
+    renderShortcuts();
+}
+
+function initShortcuts() {
+    if (document.getElementById('shortcutTabs')) {
+        renderShortcuts();
+    }
+}
+// Try running immediately in case DOM is already parsed
+if (document.readyState === 'interactive' || document.readyState === 'complete') {
+    initShortcuts();
+} else {
+    document.addEventListener('DOMContentLoaded', initShortcuts);
+}
+// Also hook into pywebviewready to be absolutely sure
+window.addEventListener('pywebviewready', initShortcuts);
+
+
+
+// Shortcut Resizer Logic
+document.addEventListener('DOMContentLoaded', () => {
+    let isResizingShortcut = false;
+    const shortcutResizer = document.getElementById('shortcutResizer');
+    const shortcutGrid = document.getElementById('shortcutGrid');
+
+    if (shortcutResizer && shortcutGrid) {
+        shortcutResizer.addEventListener('mousedown', function(e) {
+            isResizingShortcut = true;
+            shortcutResizer.classList.add('active');
+            document.body.style.cursor = 'ns-resize';
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (!isResizingShortcut) return;
+            const newHeight = window.innerHeight - e.clientY - 60; // Approximate offset for header/footer
+            if (newHeight > 40 && newHeight < window.innerHeight * 0.7) {
+                shortcutGrid.style.maxHeight = newHeight + 'px';
+                shortcutGrid.style.height = newHeight + 'px';
+            }
+            if (typeof fitAddon !== 'undefined' && fitAddon) fitAddon.fit();
+        });
+
+        document.addEventListener('mouseup', function(e) {
+            if (isResizingShortcut) {
+                isResizingShortcut = false;
+                shortcutResizer.classList.remove('active');
+                document.body.style.cursor = '';
+                if (typeof fitAddon !== 'undefined' && fitAddon) fitAddon.fit();
+            }
+        });
+    }
+});
+
+
+function showCustomModal(title, isConfirm = false) {
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('customModalOverlay');
+        const titleEl = document.getElementById('customModalTitle');
+        const inputEl = document.getElementById('customModalInput');
+        const btnCancel = document.getElementById('customModalCancel');
+        const btnOk = document.getElementById('customModalOk');
+        
+        titleEl.textContent = title;
+        if (!isConfirm) {
+            inputEl.style.display = 'block';
+            inputEl.value = '';
+            inputEl.focus();
+        } else {
+            inputEl.style.display = 'none';
+        }
+        
+        overlay.style.display = 'flex';
+        
+        const cleanup = () => {
+            overlay.style.display = 'none';
+            btnOk.onclick = null;
+            btnCancel.onclick = null;
+            inputEl.onkeydown = null;
+        };
+        
+        btnOk.onclick = () => {
+            cleanup();
+            resolve(isConfirm ? true : inputEl.value.trim());
+        };
+        
+        btnCancel.onclick = () => {
+            cleanup();
+            resolve(isConfirm ? false : null);
+        };
+        
+        if (!isConfirm) {
+            inputEl.onkeydown = (e) => {
+                if (e.key === 'Enter') btnOk.click();
+                if (e.key === 'Escape') btnCancel.click();
+            };
+        } else {
+            // handle escape for confirm
+            document.addEventListener('keydown', function escListener(e) {
+                if (e.key === 'Escape') {
+                    document.removeEventListener('keydown', escListener);
+                    btnCancel.click();
+                }
+            }, { once: true });
+        }
+    });
+}

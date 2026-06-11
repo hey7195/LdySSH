@@ -6,8 +6,8 @@
 
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    background: #0a0a0a;
-    color: #e0e0e0;
+    background: #0A0E17;
+    color: #A0A5B5;
     height: 100vh;
     overflow: hidden;
 }
@@ -15,11 +15,11 @@ body {
 .app {
     display: flex;
     height: 100vh;
-    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+    background: linear-gradient(135deg, #0A0E17 0%, #131722 100%);
 }
 
 .sidebar {
-    width: 300px;
+    width: 220px;
     background: rgba(20, 20, 20, 0.9);
     border-right: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
@@ -760,6 +760,90 @@ input[type="checkbox"] {
     color: #666;
 }
 
+/* Shortcut Panel (FinalShell Style) */
+.shortcut-panel {
+    background: rgba(10, 14, 23, 0.9);
+    border-top: 1px solid rgba(0, 212, 255, 0.2);
+    padding: 10px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 -5px 15px rgba(0,0,0,0.3);
+}
+
+.shortcut-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.shortcut-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #00d4ff;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-shadow: 0 0 5px rgba(0, 212, 255, 0.3);
+}
+
+.shortcut-add-btn {
+    background: transparent;
+    border: 1px solid #00d4ff;
+    color: #00d4ff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.shortcut-add-btn:hover {
+    background: rgba(0, 212, 255, 0.1);
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+}
+
+.shortcut-grid {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 8px;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.shortcut-grid::-webkit-scrollbar {
+    width: 4px;
+}
+.shortcut-grid::-webkit-scrollbar-thumb {
+    background: rgba(0, 212, 255, 0.2);
+    border-radius: 2px;
+}
+
+.shortcut-btn {
+    background: rgba(20, 25, 35, 0.8);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    border-radius: 4px;
+    padding: 4px 12px;
+    color: #a0a5b5;
+    font-size: 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.shortcut-btn:hover {
+    background: rgba(0, 212, 255, 0.1);
+    border-color: #00d4ff;
+    color: #fff;
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.2), inset 0 0 10px rgba(0, 212, 255, 0.1);
+    transform: translateY(-1px);
+}
+
 .status-bar {
     background: rgba(20, 20, 20, 0.9);
     border-top: 1px solid rgba(255, 255, 255, 0.1);
@@ -1396,4 +1480,57 @@ input[type="checkbox"] {
     border-radius: 50%;
     background: #00ff88;
     box-shadow: 0 0 6px rgba(0, 255, 136, 0.5);
+}
+.shortcut-resizer {
+    height: 4px;
+    cursor: ns-resize;
+    background: transparent;
+    width: 100%;
+    transition: background 0.2s;
+    z-index: 10;
+}
+.shortcut-resizer:hover, .shortcut-resizer.active {
+    background: rgba(0, 212, 255, 0.5);
+}
+
+.shortcut-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    padding-bottom: 0px;
+    margin-bottom: 8px;
+}
+.shortcut-tabs {
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+}
+.shortcut-tabs::-webkit-scrollbar {
+    height: 0px;
+}
+.shortcut-tab {
+    padding: 6px 14px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #888;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+    user-select: none;
+}
+.shortcut-tab.active {
+    background: rgba(0, 212, 255, 0.1);
+    color: #00d4ff;
+    border-bottom: 2px solid #00d4ff;
+}
+.shortcut-tab:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ccc;
+}
+.shortcut-tab.add-tab {
+    padding: 6px 10px;
+    color: #aaa;
 }

@@ -29,9 +29,14 @@ except ImportError:
 
 def load_html_template() -> str:
     """Load the HTML template and embed CSS/JS."""
-    template_path = Path(__file__).parent / "ui" / "template.html"
-    css_path = Path(__file__).parent / "ui" / "static" / "styles.css"
-    js_path = Path(__file__).parent / "ui" / "static" / "app.js"
+    if hasattr(sys, '_MEIPASS'):
+        base_dir = Path(sys._MEIPASS) / "src"
+    else:
+        base_dir = Path(__file__).parent
+        
+    template_path = base_dir / "ui" / "template.html"
+    css_path = base_dir / "ui" / "static" / "styles.css"
+    js_path = base_dir / "ui" / "static" / "app.js"
     
     if not template_path.exists():
         # Fallback to inline HTML if template file doesn't exist
@@ -93,7 +98,7 @@ def load_html_template() -> str:
 
 def main():
     """Main application entry point."""
-    print("PrismSSH Starting...")
+    pass # Removed print("PrismSSH Starting...")
     
     # Initialize configuration
     config = Config()
@@ -175,8 +180,6 @@ if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print("\nShutdown requested by user")
-        sys.exit(0)
+        pass
     except Exception as e:
-        print(f"Fatal error: {e}")
-        sys.exit(1)
+        pass
