@@ -769,8 +769,20 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::wstring cmdPath = configDir + L"\\command_library.json";
             std::string cmdData = ReadFileToUtf8(cmdPath);
             
+            nlohmann::json retObj;
+            retObj["success"] = true;
+            if (cmdData.empty()) {
+                retObj["folders"] = nlohmann::json::array();
+            } else {
+                try {
+                    retObj["folders"] = nlohmann::json::parse(cmdData);
+                } catch(...) {
+                    retObj["folders"] = nlohmann::json::array();
+                }
+            }
+            
             response["status"] = "success";
-            response["result"] = cmdData.empty() ? "[]" : cmdData;
+            response["result"] = retObj.dump();
         }
         else if (action == "save_command_library") {
             std::string cmdData = args[0].get<std::string>();
