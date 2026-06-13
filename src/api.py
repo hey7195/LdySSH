@@ -1430,6 +1430,58 @@ class PrismSSHAPI:
             self.logger.error(f"API: Error reading from clipboard: {e}")
             return json.dumps({'success': False, 'error': str(e)})
 
+    def get_quick_download_path(self, filename: str) -> str:
+        """Get a safe, collision-free download path in the user's default downloads directory."""
+        try:
+            import os
+            from pathlib import Path
+            
+            # Get default directory
+            downloads_dir = os.path.expanduser('~/Downloads')
+            if not os.path.exists(downloads_dir):
+                downloads_dir = os.path.expanduser('~')
+                
+            path = Path(downloads_dir) / filename
+            base_name = path.stem
+            suffix = path.suffix
+            
+            # Deal with name collision: test.log -> test (1).log -> test (2).log...
+            counter = 1
+            while path.exists():
+                path = Path(downloads_dir) / f"{base_name} ({counter}){suffix}"
+                counter += 1
+                
+            return json.dumps({
+                'success': True,
+                'path': str(path.absolute())
+            })
+        except Exception as e:
+            self.logger.error(f"API: Error generating quick download path: {e}")
+            return json.dumps({'success': False, 'error': str(e)})
+
+    def open_local_file(self, file_path: str) -> str:
+        """Open a local file using the system default application."""
+        try:
+            import os
+            import platform
+            import subprocess
+            
+            if not os.path.exists(file_path):
+                return json.dumps({'success': False, 'error': 'File not found'})
+                
+            system = platform.system().lower()
+            if system == 'windows':
+                os.startfile(file_path)
+            elif system == 'darwin':
+                subprocess.run(['open', file_path], check=True)
+            else:
+                subprocess.run(['xdg-open', file_path], check=True)
+                
+            return json.dumps({'success': True})
+        except Exception as e:
+            self.logger.error(f"API: Error opening local file {file_path}: {e}")
+            return json.dumps({'success': False, 'error': str(e)})
+
     def cleanup(self):
         """Cleanup resources on shutdown."""
         self.logger.info("API: Cleaning up resources")
