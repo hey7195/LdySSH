@@ -319,6 +319,172 @@ std::string Base64Decode(std::string const& encoded_string) {
   return ret;
 }
 
+// AES-128-CBC Encryption via Windows BCrypt (CNG)
+std::string EncryptAES128CBC(const std::string& key, const std::string& iv, const std::string& plaintext) {
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    DWORD cbKeyObject = 0, cbData = 0;
+    PBYTE pbKeyObject = NULL;
+    std::string ciphertext;
+
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) return "";
+    
+    if (BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0) != 0) {
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return "";
+    }
+
+    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbData, 0) != 0) {
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return "";
+    }
+
+    pbKeyObject = (PBYTE)HeapAlloc(GetProcessHeap(), 0, cbKeyObject);
+    if (pbKeyObject == NULL) {
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return "";
+    }
+
+    if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, (PBYTE)key.data(), (ULONG)key.size(), 0) != 0) {
+        HeapFree(GetProcessHeap(), 0, pbKeyObject);
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return "";
+    }
+
+    // PKCS7 Padding
+    size_t padLen = 16 - (plaintext.size() % 16);
+    std::string paddedText = plaintext;
+    paddedText.append(padLen, (char)padLen);
+
+    std::string ivCopy = iv;
+    DWORD cbCipherText = 0;
+
+    if (BCryptEncrypt(hKey, (PBYTE)paddedText.data(), (ULONG)paddedText.size(), NULL, (PBYTE)ivCopy.data(), (ULONG)ivCopy.size(), NULL, 0, &cbCipherText, 0) != 0) {
+        BCryptDestroyKey(hKey);
+        HeapFree(GetProcessHeap(), 0, pbKeyObject);
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return "";
+    }
+
+    ciphertext.resize(cbCipherText);
+    if (BCryptEncrypt(hKey, (PBYTE)paddedText.data(), (ULONG)paddedText.size(), NULL, (PBYTE)ivCopy.data(), (ULONG)ivCopy.size(), (PBYTE)ciphertext.data(), cbCipherText, &cbCipherText, 0) != 0) {
+        BCryptDestroyKey(hKey);
+        HeapFree(GetProcessHeap(), 0, pbKeyObject);
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return "";
+    }
+
+    BCryptDestroyKey(hKey);
+    HeapFree(GetProcessHeap(), 0, pbKeyObject);
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+
+    return ciphertext;
+}
+
+std::string CalculateHmacSha256(const std::string& key, const std::string& data) {
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_HASH_HANDLE hHash = NULL;
+    DWORD cbHash = 0, cbData = 0;
+    std::string hashVal;
+
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, NULL, BCRYPT_ALG_HANDLE_HMAC_FLAG) != 0) return "";
+
+    if (BCryptGetProperty(hAlg, BCRYPT_HASH_LENGTH, (PBYTE)&cbHash, sizeof(DWORD), &cbData, 0) != 0) {
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return "";
+    }
+
+    if (BCryptCreateHash(hAlg, &hHash, NULL, 0, (PBYTE)key.data(), (ULONG)key.size(), 0) != 0) {
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return "";
+    }
+
+    if (BCryptHashData(hHash, (PBYTE)data.data(), (ULONG)data.size(), 0) != 0) {
+        BCryptDestroyHash(hHash);
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return "";
+    }
+
+    hashVal.resize(cbHash);
+    if (BCryptFinishHash(hHash, (PBYTE)hashVal.data(), cbHash, 0) != 0) {
+        BCryptDestroyHash(hHash);
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return "";
+    }
+
+    BCryptDestroyHash(hHash);
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+
+    return hashVal;
+}
+
+std::string EncryptFernetPassword(const std::string& fernetKeyBase64, const std::string& plainText) {
+    std::string rawKey = Base64Decode(fernetKeyBase64);
+    if (rawKey.size() != 32) return "";
+
+    std::string iv(16, '\0');
+    BCRYPT_ALG_HANDLE hRng = NULL;
+    if (BCryptOpenAlgorithmProvider(&hRng, BCRYPT_RNG_ALGORITHM, NULL, 0) == 0) {
+        BCryptGenRandom(hRng, (PUCHAR)iv.data(), 16, 0);
+        BCryptCloseAlgorithmProvider(hRng, 0);
+    } else {
+        for (int i = 0; i < 16; ++i) iv[i] = (char)(rand() % 256);
+    }
+
+    std::string header(9, '\0');
+    header[0] = (char)0x80;
+    
+    long long timestamp = (long long)time(NULL);
+    for (int i = 0; i < 8; ++i) {
+        header[8 - i] = (char)(timestamp & 0xFF);
+        timestamp >>= 8;
+    }
+
+    std::string aesKey = rawKey.substr(16, 16);
+    std::string ciphertext = EncryptAES128CBC(aesKey, iv, plainText);
+    if (ciphertext.empty()) return "";
+
+    std::string signTarget = header + iv + ciphertext;
+
+    std::string hmacKey = rawKey.substr(0, 16);
+    std::string hmacVal = CalculateHmacSha256(hmacKey, signTarget);
+    if (hmacVal.empty()) return "";
+
+    std::string finalRaw = signTarget + hmacVal;
+    return Base64Encode(finalRaw);
+}
+
+std::string GetOrCreateFernetKey() {
+    std::wstring configDir = GetConfigDirectory();
+    std::wstring keyPath = configDir + L"\\.key";
+    std::string keyData = ReadFileToUtf8(keyPath);
+    if (!keyData.empty()) {
+        return keyData;
+    }
+
+    std::string rawKey(32, '\0');
+    BCRYPT_ALG_HANDLE hRng = NULL;
+    if (BCryptOpenAlgorithmProvider(&hRng, BCRYPT_RNG_ALGORITHM, NULL, 0) == 0) {
+        BCryptGenRandom(hRng, (PUCHAR)rawKey.data(), 32, 0);
+        BCryptCloseAlgorithmProvider(hRng, 0);
+    } else {
+        for (int i = 0; i < 32; ++i) rawKey[i] = (char)(rand() % 256);
+    }
+
+    std::string keyBase64 = Base64Encode(rawKey);
+    WriteUtf8ToFile(keyPath, keyBase64);
+    
+    std::wstring keyInfoPath = configDir + L"\\.key_info";
+    std::string rawSalt(32, '\0');
+    if (BCryptOpenAlgorithmProvider(&hRng, BCRYPT_RNG_ALGORITHM, NULL, 0) == 0) {
+        BCryptGenRandom(hRng, (PUCHAR)rawSalt.data(), 32, 0);
+        BCryptCloseAlgorithmProvider(hRng, 0);
+    }
+    WriteUtf8ToFile(keyInfoPath, rawSalt);
+
+    return keyBase64;
+}
+
 // AES-128-CBC Decryption via Windows BCrypt (CNG)
 std::string DecryptAES128CBC(const std::string& key, const std::string& iv, const std::string& ciphertext) {
     BCRYPT_ALG_HANDLE hAlg = NULL;
@@ -637,6 +803,8 @@ public:
     bool StopPortForward(const std::string& forwardId);
     std::string ListPortForwards();
     void RelayData(SOCKET localSock, LIBSSH2_CHANNEL* channel, std::shared_ptr<SSHSession> session, std::shared_ptr<PortForwardInfo> pfInfo);
+    bool DownloadFile(const std::string& remotePath, const std::wstring& localPath);
+    bool UploadFile(const std::wstring& localPath, const std::string& remotePath);
     SOCKET sock = INVALID_SOCKET;
     LIBSSH2_SESSION* sshSession = NULL;
     LIBSSH2_CHANNEL* sshChannel = NULL;
@@ -2633,6 +2801,155 @@ void SSHSession::RelayData(SOCKET localSock, LIBSSH2_CHANNEL* channel, std::shar
     pfInfo->connections = (std::max)(0, pfInfo->connections - 1);
 }
 
+bool SSHSession::DownloadFile(const std::string& remotePath, const std::wstring& localPath) {
+    if (!sftpSession) {
+        lastError = "SFTP session not initialized";
+        return false;
+    }
+    
+    std::ofstream out(localPath.c_str(), std::ios::binary);
+    if (!out.is_open()) {
+        lastError = "Failed to open local file for writing";
+        return false;
+    }
+    
+    LIBSSH2_SFTP_HANDLE* handle = NULL;
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(sshMutex);
+            handle = libssh2_sftp_open(sftpSession, remotePath.c_str(), LIBSSH2_FXF_READ, 0);
+            if (handle) break;
+            int err = libssh2_session_last_errno(sshSession);
+            if (err != LIBSSH2_ERROR_EAGAIN) {
+                char *err_msg = NULL;
+                int err_msg_len = 0;
+                libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+                lastError = "open failed: " + ((err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error");
+                return false;
+            }
+        }
+        Sleep(5);
+    }
+
+    char buffer[32768];
+    bool success = true;
+    while (true) {
+        int rc = 0;
+        {
+            std::lock_guard<std::mutex> lock(sshMutex);
+            rc = libssh2_sftp_read(handle, buffer, sizeof(buffer));
+        }
+        if (rc < 0) {
+            if (rc == LIBSSH2_ERROR_EAGAIN) {
+                Sleep(5);
+                continue;
+            }
+            lastError = "read failed";
+            success = false;
+            break;
+        }
+        if (rc == 0) break;
+        out.write(buffer, rc);
+        if (!out) {
+            lastError = "write to local file failed";
+            success = false;
+            break;
+        }
+    }
+    
+    out.close();
+    
+    while (true) {
+        int c_rc = 0;
+        {
+            std::lock_guard<std::mutex> lock(sshMutex);
+            c_rc = libssh2_sftp_close(handle);
+        }
+        if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+        Sleep(5);
+    }
+    
+    if (!success) {
+        ::DeleteFileW(localPath.c_str());
+    }
+    
+    return success;
+}
+
+bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& remotePath) {
+    if (!sftpSession) {
+        lastError = "SFTP session not initialized";
+        return false;
+    }
+    
+    std::ifstream in(localPath.c_str(), std::ios::binary);
+    if (!in.is_open()) {
+        lastError = "Failed to open local file for reading";
+        return false;
+    }
+    
+    LIBSSH2_SFTP_HANDLE* handle = NULL;
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(sshMutex);
+            handle = libssh2_sftp_open(sftpSession, remotePath.c_str(), LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC, 0644);
+            if (handle) break;
+            int err = libssh2_session_last_errno(sshSession);
+            if (err != LIBSSH2_ERROR_EAGAIN) {
+                char *err_msg = NULL;
+                int err_msg_len = 0;
+                libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+                lastError = "open failed: " + ((err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error");
+                return false;
+            }
+        }
+        Sleep(5);
+    }
+    
+    char buffer[32768];
+    bool success = true;
+    while (true) {
+        in.read(buffer, sizeof(buffer));
+        std::streamsize bytesRead = in.gcount();
+        if (bytesRead <= 0) break;
+        
+        int totalWritten = 0;
+        while (totalWritten < bytesRead) {
+            int rc = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_sftp_write(handle, buffer + totalWritten, (size_t)(bytesRead - totalWritten));
+            }
+            if (rc < 0) {
+                if (rc == LIBSSH2_ERROR_EAGAIN) {
+                    Sleep(5);
+                    continue;
+                }
+                lastError = "write failed";
+                success = false;
+                break;
+            }
+            totalWritten += rc;
+        }
+        
+        if (!success) break;
+    }
+    
+    in.close();
+    
+    while (true) {
+        int c_rc = 0;
+        {
+            std::lock_guard<std::mutex> lock(sshMutex);
+            c_rc = libssh2_sftp_close(handle);
+        }
+        if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+        Sleep(5);
+    }
+    
+    return success;
+}
+
 // 异步文件上传线程
 void UploadThread(std::shared_ptr<SSHSession> session, std::string fileData, std::string remotePath, std::string uploadId) {
     long long totalBytes = fileData.size();
@@ -3214,6 +3531,79 @@ void CleanupEditMappings() {
     editMappings.clear();
 }
 
+void AsyncDownloadFileThread(std::string reqId, std::shared_ptr<SSHSession> session, std::string remotePath, std::wstring localPath) {
+    bool ok = session->DownloadFile(remotePath, localPath);
+    
+    nlohmann::json response;
+    response["id"] = reqId;
+    response["status"] = "success";
+    
+    nlohmann::json res;
+    res["success"] = ok;
+    if (!ok) {
+        res["error"] = session->lastError;
+    }
+    response["result"] = res.dump();
+    
+    if (webviewWindow != nullptr) {
+        std::wstring responseW = Utf8ToUtf16(response.dump());
+        webviewWindow->PostWebMessageAsJson(responseW.c_str());
+    }
+}
+
+void AsyncUploadFileThread(std::string reqId, std::shared_ptr<SSHSession> session, std::wstring localPath, std::string remotePath) {
+    bool ok = session->UploadFile(localPath, remotePath);
+    
+    nlohmann::json response;
+    response["id"] = reqId;
+    response["status"] = "success";
+    
+    nlohmann::json res;
+    res["success"] = ok;
+    if (!ok) {
+        res["error"] = session->lastError;
+    }
+    response["result"] = res.dump();
+    
+    if (webviewWindow != nullptr) {
+        std::wstring responseW = Utf8ToUtf16(response.dump());
+        webviewWindow->PostWebMessageAsJson(responseW.c_str());
+    }
+}
+
+std::string SafeGetJsonString(const nlohmann::json& j, const std::string& key, const std::string& defaultVal = "") {
+    if (j.contains(key) && !j[key].is_null()) {
+        try {
+            if (j[key].is_string()) {
+                return j[key].get<std::string>();
+            }
+        } catch(...) {}
+    }
+    return defaultVal;
+}
+
+bool SafeGetJsonBool(const nlohmann::json& j, const std::string& key, bool defaultVal = false) {
+    if (j.contains(key) && !j[key].is_null()) {
+        try {
+            if (j[key].is_boolean()) {
+                return j[key].get<bool>();
+            }
+        } catch(...) {}
+    }
+    return defaultVal;
+}
+
+int SafeGetJsonInt(const nlohmann::json& j, const std::string& key, int defaultVal = 0) {
+    if (j.contains(key) && !j[key].is_null()) {
+        try {
+            if (j[key].is_number()) {
+                return j[key].get<int>();
+            }
+        } catch(...) {}
+    }
+    return defaultVal;
+}
+
 // API router and handler
 void HandleApiCall(const std::string& reqId, const std::string& action, const nlohmann::json& args) {
     nlohmann::json response;
@@ -3320,11 +3710,51 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string paramsStr = args[1].get<std::string>();
             
             auto params = nlohmann::json::parse(paramsStr);
-            std::string hostname = params.value("hostname", "");
-            int port = params.value("port", 22);
-            std::string username = params.value("username", "");
-            std::string password = params.value("password", "");
+            std::string hostname = SafeGetJsonString(params, "hostname", "");
+            int port = SafeGetJsonInt(params, "port", 22);
+            std::string username = SafeGetJsonString(params, "username", "");
+            std::string password = SafeGetJsonString(params, "password", "");
             
+            if (SafeGetJsonBool(params, "save", false)) {
+                std::wstring configDir = GetConfigDirectory();
+                std::wstring connPath = configDir + L"\\connections.json";
+                std::string connData = ReadFileToUtf8(connPath);
+                
+                nlohmann::json conns = nlohmann::json::object();
+                if (!connData.empty()) {
+                    try {
+                        conns = nlohmann::json::parse(connData);
+                    } catch(...) {}
+                }
+                
+                nlohmann::json connObj;
+                connObj["hostname"] = hostname;
+                connObj["port"] = port;
+                connObj["username"] = username;
+                connObj["name"] = SafeGetJsonString(params, "name", username + "@" + hostname);
+                connObj["keyPath"] = SafeGetJsonString(params, "keyPath", "");
+                
+                if (!password.empty()) {
+                    std::string fernetKey = GetOrCreateFernetKey();
+                    std::string encrypted = EncryptFernetPassword(fernetKey, password);
+                    if (!encrypted.empty()) {
+                        connObj["password"] = encrypted;
+                        connObj["password_encrypted"] = true;
+                    } else {
+                        connObj["password"] = password;
+                        connObj["password_encrypted"] = false;
+                    }
+                } else {
+                    connObj["password"] = "";
+                    connObj["password_encrypted"] = false;
+                }
+                
+                std::string storeKey = hostname + "@" + username;
+                conns[storeKey] = connObj;
+                
+                WriteUtf8ToFile(connPath, conns.dump(2));
+            }
+
             auto session = std::make_shared<SSHSession>(sessId);
             bool success = session->Connect(hostname, port, username, password);
             
@@ -3669,6 +4099,77 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 editMappings.erase(tempPath);
             }
             
+            nlohmann::json res;
+            res["success"] = true;
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "download_file" || action == "download_file_to_path") {
+            std::string sessId = args[0].get<std::string>();
+            std::string remotePath = args[1].get<std::string>();
+            std::string localPathUtf8 = args[2].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            
+            if (sshSess) {
+                std::wstring localPath = Utf8ToUtf16(localPathUtf8);
+                std::thread(AsyncDownloadFileThread, reqId, sshSess, remotePath, localPath).detach();
+            } else {
+                nlohmann::json response;
+                response["id"] = reqId;
+                response["status"] = "success";
+                nlohmann::json res;
+                res["success"] = false;
+                res["error"] = "Session not found";
+                response["result"] = res.dump();
+                
+                if (webviewWindow != nullptr) {
+                    std::wstring responseW = Utf8ToUtf16(response.dump());
+                    webviewWindow->PostWebMessageAsJson(responseW.c_str());
+                }
+            }
+            return;
+        }
+        else if (action == "upload_file") {
+            std::string sessId = args[0].get<std::string>();
+            std::string localPathUtf8 = args[1].get<std::string>();
+            std::string remotePath = args[2].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            
+            if (sshSess) {
+                std::wstring localPath = Utf8ToUtf16(localPathUtf8);
+                std::thread(AsyncUploadFileThread, reqId, sshSess, localPath, remotePath).detach();
+            } else {
+                nlohmann::json response;
+                response["id"] = reqId;
+                response["status"] = "success";
+                nlohmann::json res;
+                res["success"] = false;
+                res["error"] = "Session not found";
+                response["result"] = res.dump();
+                
+                if (webviewWindow != nullptr) {
+                    std::wstring responseW = Utf8ToUtf16(response.dump());
+                    webviewWindow->PostWebMessageAsJson(responseW.c_str());
+                }
+            }
+            return;
+        }
+        else if (action == "cancel_upload") {
+            std::string sessId = args[0].get<std::string>();
+            std::string uploadId = args[1].get<std::string>();
+            globalProgressManager.Cancel(uploadId);
+            nlohmann::json res;
+            res["success"] = true;
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "get_pending_host_verification") {
+            nlohmann::json res;
+            res["pending"] = false;
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "verify_host_key") {
             nlohmann::json res;
             res["success"] = true;
             response["status"] = "success";
