@@ -153,11 +153,16 @@ class SSHSession:
             self.logger.error(f"Error resizing terminal for session {self.id}: {e}")
     
     def get_output(self) -> str:
-        """Get all pending output."""
+        """Get pending output, limited to prevent WebView OOM."""
         output = []
-        while not self.output_queue.empty():
+        total_len = 0
+        MAX_BATCH_SIZE = 30000  # Max ~30KB per 50ms poll
+        
+        while not self.output_queue.empty() and total_len < MAX_BATCH_SIZE:
             try:
-                output.append(self.output_queue.get_nowait())
+                chunk = self.output_queue.get_nowait()
+                output.append(chunk)
+                total_len += len(chunk)
             except queue.Empty:
                 break
         return ''.join(output)

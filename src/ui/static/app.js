@@ -2408,7 +2408,18 @@ function createTerminalForSession(sessionId, hostname) {
         }
         
         // Open terminal
-        terminal.open(terminalElement);
+        terminal.open(terminalElement);
+        
+        // Load WebGL addon for hardware acceleration
+        if (typeof WebglAddon !== 'undefined') {
+            try {
+                const webgl = new WebglAddon.WebglAddon();
+                terminal.loadAddon(webgl);
+                console.log('WebGL renderer enabled for hardware acceleration.');
+            } catch (e) {
+                console.warn('WebGL renderer failed to load, falling back to Canvas/DOM:', e);
+            }
+        }
 
         // Set up copy/paste functionality
         setupTerminalClipboard(terminal, sessionId);
