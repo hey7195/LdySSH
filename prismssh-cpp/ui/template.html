@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>LdySSH - Modern SSH Client</title>
+    <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5.5.0/css/xterm.css">
+    <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+    <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+    <script src="https://unpkg.com/@xterm/addon-webgl@0.16.0/lib/addon-webgl.js"></script>
+    <script src="https://unpkg.com/@xterm/addon-search@0.15.0/lib/addon-search.js"></script>
+    <link rel="stylesheet" href="static/styles.css?v=5">
+</head>
+<body>
+    <div class="window-container">
+        <div class="home-ambient-glow">
+            <div class="glow-orb glow-orb-1"></div>
+            <div class="glow-orb glow-orb-2"></div>
+        </div>
+        <!-- Custom Frameless Title Bar -->
+        <div class="title-bar pywebview-drag-region">
+            <div class="title-bar-left">
+                <div class="app-logo"></div>
+                <div class="app-title">LdySSH</div>
+            </div>
+            <div class="title-bar-controls">
+                <button class="win-btn minimize-btn" onclick="windowMinimize()" title="Minimize">
+                    <svg viewBox="0 0 10 1" width="10" height="1"><rect width="10" height="1" fill="currentColor"/></svg>
+                </button>
+                <button class="win-btn maximize-btn" onclick="windowMaximize()" title="Maximize">
+                    <svg viewBox="0 0 10 10" width="10" height="10"><rect width="10" height="10" fill="transparent" stroke="currentColor" stroke-width="1"/></svg>
+                </button>
+                <button class="win-btn close-btn" onclick="windowClose()" title="Close">
+                    <svg viewBox="0 0 10 10" width="10" height="10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" stroke-width="1"/></svg>
+                </button>
+            </div>
+        </div>
+        
+        <div class="app command-library-collapsed" style="position: relative;">
+        <div class="activity-bar">
+            <button class="activity-item active" id="activitySsh" type="button" title="&#26032;&#24314; SSH &#20027;&#26426;" onclick="toggleSshSidebar()"><span>SSH</span></button>
+            <button class="activity-item" id="activityCommands" type="button" title="&#21629;&#20196;&#24211;" onclick="openTool('commands')"><span>CMD</span></button>
+            <button class="activity-item" id="sftpIcon" type="button" title="SFTP &#25991;&#20214;" onclick="openTool('sftp')"><span>SFTP</span></button>
+            <button class="activity-item" id="portForwardIcon" type="button" title="&#31471;&#21475;&#36716;&#21457;" onclick="openTool('portForward')"><span>PF</span></button>
+            <button class="activity-item" id="monitorIcon" type="button" title="&#31995;&#32479;&#30417;&#25511;" onclick="openTool('monitor')"><span>MON</span></button>
+            <button class="activity-item" id="activityLocalCmd" type="button" title="新建本地终端" onclick="createLocalSession()"><span>L-CMD</span></button>
+            <button class="activity-item openai-activity" id="activityOpenAi" type="button" title="OpenAI &#21161;&#25163;" onclick="toggleAiSplitMode()"><span>AI</span></button>
+            <button class="activity-item activity-settings" id="highlightIcon" type="button" title="&#39640;&#20142;" onclick="openTool('highlight')"><span>HL</span></button>
+        </div>
+
+        <div class="sidebar">
+            <div class="logo"><h1>LdySSH</h1></div>
+            <div class="sidebar-content">
+                <div class="collapsible-section">
+                    <div class="section-header" onclick="toggleSection('newConnection')"><span class="section-title">&#26032;&#24314;&#36830;&#25509;</span><svg class="section-chevron" id="newConnectionChevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
+                    <div class="section-content" id="newConnectionContent"><div class="connect-form">
+                        <div class="form-group"><label>&#20027;&#26426;&#21629;&#21517;</label><input type="text" id="connectionName" placeholder="&#20363;&#22914;&#65306;&#29983;&#20135;&#36339;&#26495;&#26426;" /></div>
+                        <div class="form-group"><label>&#20027;&#26426;&#22320;&#22336;</label><input type="text" id="hostname" placeholder="example.com" /></div>
+                        <div class="form-group"><label>&#31471;&#21475;</label><input type="number" id="port" placeholder="22" value="22" /></div>
+                        <div class="form-group"><label>&#29992;&#25143;&#21517;</label><input type="text" id="username" placeholder="root" /></div>
+                        <div class="form-group"><label>&#35748;&#35777;&#26041;&#24335;</label><select id="authType"><option value="password">&#23494;&#30721;</option><option value="key">&#31169;&#38053;</option></select></div>
+                        <div class="form-group" id="passwordGroup"><label>&#23494;&#30721;</label><input type="password" id="password" placeholder="&#35831;&#36755;&#20837;&#23494;&#30721;" /></div>
+                        <div class="form-group" id="keyGroup" style="display:none"><label>&#31169;&#38053;&#36335;&#24452;</label><input type="text" id="keyPath" placeholder="/path/to/key" /><label class="sub-label" for="keyPassphrase">&#31169;&#38053;&#21475;&#20196;&#65288;&#21487;&#36873;&#65289;</label><input type="password" id="keyPassphrase" placeholder="&#26377;&#21475;&#20196;&#26102;&#22635;&#20889;" /></div>
+                        <div class="checkbox-group"><input type="checkbox" id="saveConnection" /><label for="saveConnection">&#20445;&#23384;&#36830;&#25509;</label></div>
+                        <button class="connect-btn" onclick="connect()">&#36830;&#25509;</button>
+                        <button class="connect-btn" style="margin-top: 10px; background-color: var(--secondary-color);" onclick="createLocalSession()">💻 本地终端 (CMD)</button>
+                    </div></div>
+                </div>
+                <div class="collapsible-section">
+                    <div class="section-header" onclick="toggleSection('savedConnections')"><span class="section-title">&#26368;&#36817;&#20027;&#26426;</span><svg class="section-chevron open" id="savedConnectionsChevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
+                    <div class="section-content open" id="savedConnectionsContent"><div class="saved-connections"><input type="hidden" id="savedConnectionSearch" value="" /><div id="recentConnectionsList" class="recent-connections-list"></div><div id="savedConnectionsList" style="display:none"></div></div></div>
+                </div>
+                <div class="collapsible-section"><div class="section-header" onclick="toggleSection('activeSessions')"><span class="section-title">&#27963;&#21160;&#20250;&#35805;</span><svg class="section-chevron" id="activeSessionsChevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div><div class="section-content" id="activeSessionsContent"><div id="sessionsList"></div></div></div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="tabs-container" id="tabsContainer" style="display: none;"></div>
+            <div class="content-area">
+                <div class="terminal-section">
+                    <div class="terminal-container">
+                        <div id="welcomeScreen" class="welcome-screen connections-home">
+                            <div class="home-watermark">
+                                <div class="welcome-rocket" style="font-size: 72px; margin-bottom: 20px; user-select: none; animation: rocketHue 4s linear infinite;">
+                                    &#128640;
+                                </div>
+                                <div class="welcome-title">LdySSH</div>
+                                <div class="welcome-subtitle">&#24320;&#21551;&#26368;&#32431;&#30432;&#30340;&#32456;&#31471;&#20307;&#39564;</div>
+                            </div>
+                            <div id="connectionsHome" class="connections-home-content">
+                                <div class="connections-home-shell">
+                                    <div class="connections-home-header">
+                                        <div class="connections-home-heading"><div class="connections-home-kicker">SSH WORKBENCH</div><div class="connections-home-title">&#20027;&#26426;&#24037;&#20316;&#21488;</div><div class="connections-home-subtitle">&#36873;&#25321;&#24050;&#20445;&#23384;&#20027;&#26426;&#24555;&#36895;&#36830;&#25509;</div><div id="homeConnectionSummary" class="home-connection-summary">&#27491;&#22312;&#21152;&#36733;&#20027;&#26426;...</div></div>
+                                        <div class="connections-home-actions">
+                                            <div class="home-search"><span>&#9906;</span><input id="homeConnectionSearch" type="text" placeholder="搜索..." oninput="renderConnectionsHome()" /></div>
+                                            <button type="button" id="privacyModeBtn" class="privacy-mode-btn active" onclick="togglePrivacyMode()" title="隐私模式 (隐藏主机和IP)">🔒 隐私模式</button>
+                                            <button type="button" class="home-refresh" onclick="loadSavedConnections()" title="刷新">&#8635;</button>
+                                            <div class="home-view-switch">
+                                                <button type="button" data-view="grid" onclick="setConnectionsHomeView('grid')" title="网格视图">&#9638;</button>
+                                                <button type="button" data-view="list" onclick="setConnectionsHomeView('list')" title="列表视图">&#9776;</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div id="homeConnectionsList" class="home-connections-grid"></div>
+                                    <div id="homeConnectionsEmpty" class="home-connections-empty" style="display:none"><div class="home-empty-title">&#26242;&#26080;&#24050;&#20445;&#23384;&#20027;&#26426;</div><div>&#21487;&#20174;&#24038;&#20391;&#26032;&#24314;&#36830;&#25509;&#65292;&#25110;&#30452;&#25509;&#28155;&#21152;&#31532;&#19968;&#21488; SSH &#20027;&#26426;&#12290;</div><button type="button" onclick="openNewConnectionForm('hostname', true)">&#26032;&#24314;&#36830;&#25509;</button></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="terminalWrapper" class="terminal-wrapper" style="display: none;">
+                            <div id="terminal"></div>
+                            <!-- Terminal Search UI -->
+                            <div id="terminalSearchUI" class="terminal-search-ui" style="display:none;">
+                                <input type="text" id="terminalSearchInput" placeholder="查找 (Enter 查下一个)" onkeydown="handleTerminalSearch(event)">
+                                <span id="terminalSearchCount" class="search-count"></span>
+                                <button onclick="closeTerminalSearch()" class="search-close-btn">X</button>
+                            </div>
+
+                            <div id="terminalCommandSuggest" class="terminal-command-suggest" style="display:none"></div>
+                        </div>
+                        <div id="connectingScreen" class="connecting" style="display: none;">
+                            <div class="spinner"></div>
+                            <div>&#27491;&#22312;&#36830;&#25509;...</div>
+                        </div>
+                    </div>
+                    <div class="status-bar" id="statusBar" style="display:none"><div class="status-item"><span class="status-indicator"></span><span id="statusText">&#24050;&#36830;&#25509;</span></div><div class="status-item"><span id="statusHost">-</span></div></div>
+                </div>
+        <div class="right-sidebar" id="rightSidebar">
+
+            <div class="tool-panel" id="commandsPanel">
+                <div class="tool-header">
+                    <div class="tool-title" style="display:flex; align-items:center; gap:8px;">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--theme-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="4 17 10 11 4 5"></polyline>
+                            <line x1="12" y1="19" x2="20" y2="19"></line>
+                        </svg>
+                        <span class="cyber-text" style="font-weight: bold; font-size: 15px; letter-spacing: 1px;">快捷指令库</span>
+                        <span class="cyber-badge" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; color: #fff; font-weight: bold; letter-spacing: 1px;">SNIPPETS</span>
+                    </div>
+                    <svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </div>
+                <div class="tool-content" style="display: flex; flex-direction: column;">
+                    <div class="command-library-toolbar" style="margin-bottom: 10px; display: flex; flex-direction: column;">
+                        <div id="commandFolderTabs" class="command-folder-tabs" style="flex-wrap: wrap;"></div>
+                        <div class="command-library-primary-actions" style="margin-top: 10px;">
+                            <button type="button" class="command-folder-tab" onclick="addCommandFolder()">+ 文件夹</button>
+                            <button type="button" class="command-btn" onclick="addCommandToLibrary()">+ 新指令</button>
+                        </div>
+                    </div>
+                    <div id="commandGrid" class="command-grid" style="display: flex; flex-direction: row; flex-wrap: wrap; align-content: flex-start; justify-content: flex-start; gap: 6px; overflow-y: auto; width: 100%; box-sizing: border-box;"></div>
+                </div>
+            </div>
+
+            <div class="tool-panel" id="sftpPanel">
+                <div class="tool-header"><div class="tool-title"><span class="cyber-text">SFTP 文件浏览器</span></div><svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></div>
+                <div class="tool-content">
+                    <div class="file-browser">
+                        <div class="file-toolbar">
+                            <button class="file-action-btn" onclick="navigateUp()"><span class="btn-dot" style="background:#ff9f43; box-shadow:0 0 8px #ff9f43;"></span>&#19978;&#32423;</button>
+                            <button class="file-action-btn" onclick="refreshFiles()"><span class="btn-dot" style="background:#00d2ff; box-shadow:0 0 8px #00d2ff;"></span>&#21047;&#26032;</button>
+                            <button class="file-action-btn" onclick="createNewFolder()"><span class="btn-dot" style="background:#10ac84; box-shadow:0 0 8px #10ac84;"></span>&#26032;&#24314;&#25991;&#20214;&#22841;</button>
+                        </div>
+                        <input type="text" class="current-path" id="currentPath" value="/" onkeydown="if(event.key === 'Enter') navigateToPath(this.value)">
+                        <div class="file-list-container" id="fileListContainer">
+                            <div id="fileList" class="file-list"></div>
+                            <div class="file-browser-loading" id="fileBrowserLoading"><div class="file-browser-spinner"></div></div>
+                            <div id="sftpDragOverlay" class="sftp-drag-overlay">松开即可上传至当前目录</div>
+                        </div>
+                        <div class="upload-area" id="uploadArea">
+                            <button class="upload-button" onclick="selectFiles()"><span class="btn-dot" style="background:#ff4757; box-shadow:0 0 8px #ff4757;"></span>上传文件</button>
+                            <input type="file" id="fileInput" multiple style="display:none" onchange="handleFileSelect(event)" />
+                        </div>
+                        <div id="uploadProgress" style="display:none"><div id="uploadStatusText">&#27491;&#22312;&#19978;&#20256;...</div><div id="uploadBar"></div><span id="uploadBytes"></span><span id="uploadSpeed"></span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="tool-panel" id="portForwardPanel"><div class="tool-header"><div class="tool-title"><span class="cyber-text">端口转发</span></div><svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></div><div class="tool-content"><div class="forward-type-tabs"><button class="forward-tab active" onclick="selectForwardType('local')" id="localTab">&#26412;&#22320;</button><button class="forward-tab" onclick="selectForwardType('remote')" id="remoteTab">&#36828;&#31243;</button><button class="forward-tab" onclick="selectForwardType('dynamic')" id="dynamicTab">&#21160;&#24577;</button></div><div id="localForward" class="forward-form"><input id="localPort" class="modern-input" placeholder="本地端口"><input id="remoteHost" class="modern-input" placeholder="目标地址"><input id="remotePort" class="modern-input" placeholder="目标端口"><button class="modern-btn" onclick="createPortForward('local')">&#21019;&#24314;&#26412;&#22320;&#36716;&#21457;</button></div><div id="remoteForward" class="forward-form" style="display:none"><input id="remotePortR" class="modern-input" placeholder="远程端口"><input id="localHost" class="modern-input" placeholder="目标地址"><input id="localPortR" class="modern-input" placeholder="目标端口"><button class="modern-btn" onclick="createPortForward('remote')">&#21019;&#24314;&#36828;&#31243;&#36716;&#21457;</button></div><div id="dynamicForward" class="forward-form" style="display:none"><input id="socksPort" class="modern-input" placeholder="本地SOCKS端口"><button class="modern-btn" onclick="createPortForward('dynamic')">&#21019;&#24314; SOCKS &#20195;&#29702;</button></div><button class="modern-btn mt-2" onclick="refreshPortForwards()">&#21047;&#26032;</button><div id="forwardsList" class="forwards-list"></div></div></div>
+            <div class="tool-panel" id="monitorPanel">
+                <div class="tool-header">
+                    <div class="tool-title"><span class="cyber-text">系统监控</span></div>
+                    <div class="tool-header-actions"><button class="refresh-btn" onclick="refreshSystemMonitor()">刷新</button><svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></div>
+                </div>
+                <div class="tool-content monitor-content">
+                    <div class="monitor-section"><h3>&#31995;&#32479;&#20449;&#24687;</h3><div id="systemInfo" class="info-grid"></div></div>
+                    <div class="monitor-section"><h3>&#36164;&#28304;&#21344;&#29992;</h3><div id="systemStats" class="stats-grid"></div></div>
+                    <div class="monitor-section"><h3>&#36827;&#31243;&#21015;&#34920;</h3><div id="processList" class="process-list"></div></div>
+                    <div class="monitor-section"><h3>&#30913;&#30424;&#20351;&#29992;</h3><div id="diskUsage" class="disk-list"></div></div>
+                    <div class="monitor-section"><h3>&#32593;&#32476;&#25509;&#21475;</h3><div id="networkInfo" class="network-list"></div></div>
+                </div>
+            </div>
+            <div class="tool-panel" id="highlightPanel"><div class="tool-header"><div class="tool-title"><span class="cyber-text">终端高亮</span></div><svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></div><div class="tool-content highlight-content"><div class="highlight-summary" style="display: flex; justify-content: space-between; align-items: center;"><span>&#31867;&#20284; Xshell &#30340;&#20851;&#38190;&#35789;&#39640;&#20142;</span><button class="ai-msg-cmd-btn" onclick="resetHighlightRules()">&#24674;&#22797;&#40664;&#35748;</button></div><div id="highlightRulesList" class="highlight-rules-list"></div></div></div>
+        </div>
+
+            </div>
+        </div>
+
+
+    </div>
+
+    <div id="splashScreen" class="splash-screen" style="display:none;">
+        <div class="splash-content">
+            <div class="splash-logo">LdySSH</div>
+            <div class="splash-bar">
+                <div class="splash-progress"></div>
+            </div>
+            <div class="splash-text">ESTABLISHING SECURE CONNECTION...</div>
+        </div>
+    </div>
+
+    <div id="snippetContextMenu" class="context-menu" style="display:none; z-index: 2000;">
+       <div class="context-menu-item" id="snippetCtxPaste" onclick="handleSnippetContextPaste()">显示在终端</div>
+       <div class="context-menu-item" onclick="handleSnippetContextEdit()">编辑</div>
+       <div class="context-menu-item context-menu-delete" onclick="handleSnippetContextDelete()">删除</div>
+    </div>
+    
+    <div id="terminalContextMenu" class="context-menu" style="display:none; z-index: 2000;">
+       <div class="context-menu-item" onclick="terminalContextMenuAction('copy')">复制 (Copy)</div>
+       <div class="context-menu-item" onclick="terminalContextMenuAction('paste')">粘贴 (Paste)</div>
+       <div class="context-menu-divider"></div>
+       <div class="context-menu-item context-menu-delete" onclick="terminalContextMenuAction('clear')">清屏 (Clear)</div>
+    </div>
+
+    <div id="contextMenu" class="context-menu" style="display:none"><div class="context-menu-item" onclick="contextMenuAction('download')">&#19979;&#36733;</div><div class="context-menu-item" onclick="contextMenuAction('edit')">&#32534;&#36753;</div><div class="context-menu-item" onclick="contextMenuAction('rename')">&#37325;&#21629;&#21517;</div><div class="context-menu-item context-menu-delete" onclick="contextMenuAction('delete')">&#21024;&#38500;</div></div>
+    <div id="renameModal" class="modal" style="display:none"><div class="modal-content"><h3>&#37325;&#21629;&#21517;&#25991;&#20214;/&#25991;&#20214;&#22841;</h3><input type="text" id="renameInput"><button onclick="closeRenameModal()">&#21462;&#28040;</button><button onclick="confirmRename()">&#30830;&#23450;</button></div></div>
+    <div id="commandLibraryModal" class="modal-overlay command-modal-overlay" style="display:none"><div class="modal-content command-modal"><h3 id="commandLibraryModalTitle">&#28155;&#21152;&#21629;&#20196;</h3><label for="commandLibraryNameInput">&#21517;&#31216;</label><input type="text" id="commandLibraryNameInput"><label for="commandLibraryCommandInput" id="commandLibraryCommandLabel">&#21629;&#20196;&#20869;&#23481;</label><textarea id="commandLibraryCommandInput"></textarea><div class="form-group" id="commandAutoExecuteGroup" style="margin-top: 10px; margin-bottom: 10px;"><div class="checkbox-group" style="display: flex; align-items: center; gap: 8px;"><input type="checkbox" id="commandAutoExecute"><span>直接在终端执行（回车）</span></div></div><button type="button" onclick="closeCommandLibraryModal()" class="modal-btn modal-btn-cancel">&#21462;&#28040;</button><button type="button" onclick="confirmCommandLibraryModal()" class="modal-btn modal-btn-confirm">&#20445;&#23384;</button></div></div>
+
+    <!-- Code Editor Panel -->
+    <div id="editorPanel" class="editor-panel">
+        <div class="editor-header" id="editorHeader">
+            <div class="editor-title" id="editorFileName">...</div>
+            <div class="editor-actions">
+                <button id="editorSaveBtn" class="editor-btn"><span style="margin-right:4px;">&#128190;</span>保存</button>
+                <button id="editorCloseBtn" class="editor-btn editor-btn-danger"><span style="margin-right:4px;">&#10006;</span>关闭</button>
+            </div>
+        </div>
+        <div id="codeEditor"></div>
+    </div>
+
+    <!-- Load Ace Editor -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ace.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ext-modelist.js"></script>
+
+    <script src="static/app.js?v=14"></script>
+    </div>
+    
+    
+
+    <div id="toastContainer" class="toast-container"></div>
+</body>
+</html>

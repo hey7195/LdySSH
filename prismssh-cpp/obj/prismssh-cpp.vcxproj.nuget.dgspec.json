@@ -1,0 +1,58 @@
+{
+  "format": 1,
+  "restore": {
+    "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\prismssh-cpp.vcxproj": {}
+  },
+  "projects": {
+    "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\prismssh-cpp.vcxproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\prismssh-cpp.vcxproj",
+        "projectName": "prismssh-cpp",
+        "projectPath": "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\prismssh-cpp.vcxproj",
+        "packagesPath": "C:\\Users\\28391\\.nuget\\packages\\",
+        "outputPath": "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\obj\\",
+        "projectStyle": "PackageReference",
+        "skipContentFileWrite": true,
+        "UsingMicrosoftNETSdk": false,
+        "configFilePaths": [
+          "C:\\Users\\28391\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "native"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "native": {
+            "projectReferences": {}
+          }
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "native": {
+          "dependencies": {
+            "Microsoft.Web.WebView2": {
+              "target": "Package",
+              "version": "[1.0.2210.55, )"
+            },
+            "nlohmann.json": {
+              "target": "Package",
+              "version": "[3.11.2, )"
+            },
+            "rmt_libssh2_wincng": {
+              "target": "Package",
+              "version": "[1.8.0, )"
+            }
+          }
+        }
+      }
+    }
+  }
+}
