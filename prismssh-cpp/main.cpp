@@ -1,3 +1,4 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <winsock2.h>
@@ -35,6 +36,16 @@
 #pragma comment(lib, "ole32.lib")
 
 using namespace Microsoft::WRL;
+
+struct EditMapping {
+    std::string sessionId;
+    std::string remotePath;
+    FILETIME lastWriteTime;
+};
+std::unordered_map<std::wstring, EditMapping> editMappings;
+std::mutex editMappingMutex;
+
+bool SyncEditedFile(const std::wstring& tempPath);
 
 // Global Transfer Progress Tracker
 struct TransferProgress {
@@ -161,6 +172,34 @@ std::wstring Utf8ToUtf16(const std::string& str) {
     MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &wstr[0], size);
     if (!wstr.empty() && wstr.back() == L'\0') wstr.pop_back();
     return wstr;
+}
+
+std::string TrimString(const std::string& str) {
+    if (str.empty()) return "";
+    size_t first = str.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return "";
+    size_t last = str.find_last_not_of(" \t\r\n");
+    return str.substr(first, (last - first + 1));
+}
+
+std::vector<std::string> SplitString(const std::string& str, char delim) {
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream tokenStream(str);
+    while (std::getline(tokenStream, token, delim)) {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+
+std::vector<std::string> SplitStringWhitespace(const std::string& str) {
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream tokenStream(str);
+    while (tokenStream >> token) {
+        tokens.push_back(token);
+    }
+    return tokens;
 }
 
 // File Utility Helpers
@@ -570,10 +609,34 @@ private:
     }
 };
 
+struct PortForwardInfo {
+    std::string id;
+    std::string type; // "local", "remote", "dynamic"
+    int local_port = 0;
+    std::string remote_host;
+    int remote_port = 0;
+    std::string local_host;
+    int remote_port_remote = 0;
+    bool active = false;
+    int connections = 0;
+    std::string description;
+    SOCKET serverSocket = INVALID_SOCKET;
+    HANDLE hThread = NULL;
+};
+
 // SSH Remote Interactive Session Class
 class SSHSession : public Session {
 public:
     std::string sessionId;
+    std::unordered_map<std::string, std::shared_ptr<PortForwardInfo>> portForwards;
+    std::mutex forwardMutex;
+
+    std::string CreateLocalPortForward(std::shared_ptr<SSHSession> self, int localPort, const std::string& remoteHost, int remotePort);
+    std::string CreateRemotePortForward(std::shared_ptr<SSHSession> self, int remotePort, const std::string& localHost, int localPort);
+    std::string CreateDynamicPortForward(std::shared_ptr<SSHSession> self, int localPort);
+    bool StopPortForward(const std::string& forwardId);
+    std::string ListPortForwards();
+    void RelayData(SOCKET localSock, LIBSSH2_CHANNEL* channel, std::shared_ptr<SSHSession> session, std::shared_ptr<PortForwardInfo> pfInfo);
     SOCKET sock = INVALID_SOCKET;
     LIBSSH2_SESSION* sshSession = NULL;
     LIBSSH2_CHANNEL* sshChannel = NULL;
@@ -771,6 +834,36 @@ public:
         if (!running) return;
         running = false;
 
+        // 停止所有端口转发
+        {
+            std::lock_guard<std::mutex> lock(forwardMutex);
+            for (auto& pair : portForwards) {
+                auto pf = pair.second;
+                pf->active = false;
+                if (pf->serverSocket != INVALID_SOCKET) {
+                    closesocket(pf->serverSocket);
+                }
+            }
+        }
+        // 等待这些线程退出
+        {
+            std::vector<HANDLE> threadsToWait;
+            {
+                std::lock_guard<std::mutex> lock(forwardMutex);
+                for (auto& pair : portForwards) {
+                    if (pair.second->hThread) {
+                        threadsToWait.push_back(pair.second->hThread);
+                    }
+                }
+            }
+            for (HANDLE h : threadsToWait) {
+                WaitForSingleObject(h, 200);
+                CloseHandle(h);
+            }
+            std::lock_guard<std::mutex> lock(forwardMutex);
+            portForwards.clear();
+        }
+
         {
             std::lock_guard<std::mutex> lock(sshMutex);
             if (sftpSession) {
@@ -806,6 +899,524 @@ public:
 
     bool IsConnected() override {
         return running;
+    }
+
+    std::string osType = "";
+
+    std::string ExecuteCommand(const std::string& command) {
+        if (!running || !sshSession) return "";
+        
+        LIBSSH2_CHANNEL* channel = NULL;
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                channel = libssh2_channel_open_session(sshSession);
+                if (channel) break;
+                int err = libssh2_session_last_errno(sshSession);
+                if (err != LIBSSH2_ERROR_EAGAIN) {
+                    return "";
+                }
+            }
+            Sleep(5);
+        }
+        
+        while (true) {
+            int rc = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_channel_exec(channel, command.c_str());
+            }
+            if (rc == 0) break;
+            if (rc != LIBSSH2_ERROR_EAGAIN) {
+                while (true) {
+                    int c_rc = 0;
+                    {
+                        std::lock_guard<std::mutex> lock(sshMutex);
+                        c_rc = libssh2_channel_free(channel);
+                    }
+                    if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+                    Sleep(5);
+                }
+                return "";
+            }
+            Sleep(5);
+        }
+        
+        std::string output;
+        char buffer[2048];
+        while (true) {
+            int readBytes = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                readBytes = libssh2_channel_read(channel, buffer, sizeof(buffer) - 1);
+            }
+            if (readBytes > 0) {
+                output.append(buffer, readBytes);
+            } else if (readBytes < 0) {
+                if (readBytes == LIBSSH2_ERROR_EAGAIN) {
+                    Sleep(5);
+                    continue;
+                }
+                break;
+            } else {
+                break;
+            }
+        }
+        
+        while (true) {
+            int c_rc = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                c_rc = libssh2_channel_free(channel);
+            }
+            if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+            Sleep(5);
+        }
+        
+        return output;
+    }
+
+    std::string DetectOS() {
+        if (!osType.empty()) return osType;
+        std::string result = ExecuteCommand("echo %OS%");
+        if (result.find("Windows") != std::string::npos) {
+            osType = "windows";
+            return osType;
+        }
+        result = ExecuteCommand("uname -s");
+        if (!result.empty()) {
+            osType = "linux";
+            return osType;
+        }
+        osType = "unknown";
+        return osType;
+    }
+
+    std::string GetSystemInfo() {
+        std::string os = DetectOS();
+        nlohmann::json info = nlohmann::json::object();
+        if (os == "windows") {
+            std::string os_info = ExecuteCommand("systeminfo | findstr /B /C:\"OS Name\" /C:\"OS Version\" /C:\"System Type\"");
+            auto lines = SplitString(os_info, '\n');
+            for (auto& line : lines) {
+                line = TrimString(line);
+                if (line.find("OS Name") != std::string::npos) {
+                    size_t pos = line.find(':');
+                    if (pos != std::string::npos) info["os_name"] = TrimString(line.substr(pos + 1));
+                } else if (line.find("OS Version") != std::string::npos) {
+                    size_t pos = line.find(':');
+                    if (pos != std::string::npos) info["os_version"] = TrimString(line.substr(pos + 1));
+                } else if (line.find("System Type") != std::string::npos) {
+                    size_t pos = line.find(':');
+                    if (pos != std::string::npos) info["architecture"] = TrimString(line.substr(pos + 1));
+                }
+            }
+            std::string hostname = TrimString(ExecuteCommand("hostname"));
+            info["hostname"] = hostname;
+
+            std::string uptime = ExecuteCommand("systeminfo | findstr /B /C:\"System Boot Time\"");
+            if (!uptime.empty()) {
+                size_t pos = uptime.find(':');
+                if (pos != std::string::npos) info["uptime"] = TrimString(uptime.substr(pos + 1));
+            }
+
+            std::string cpu_info = ExecuteCommand("wmic cpu get name /value");
+            auto cpu_lines = SplitString(cpu_info, '\n');
+            for (auto& line : cpu_lines) {
+                line = TrimString(line);
+                if (line.rfind("Name=", 0) == 0) {
+                    info["cpu"] = TrimString(line.substr(5));
+                    break;
+                }
+            }
+
+            std::string mem_info = ExecuteCommand("systeminfo | findstr /B /C:\"Total Physical Memory\"");
+            if (!mem_info.empty()) {
+                size_t pos = mem_info.find(':');
+                if (pos != std::string::npos) info["total_memory"] = TrimString(mem_info.substr(pos + 1));
+            }
+        } else if (os == "linux") {
+            std::string os_release = ExecuteCommand("cat /etc/os-release");
+            if (!os_release.empty()) {
+                auto lines = SplitString(os_release, '\n');
+                for (auto& line : lines) {
+                    line = TrimString(line);
+                    if (line.rfind("PRETTY_NAME=", 0) == 0) {
+                        std::string val = line.substr(12);
+                        if (!val.empty() && val.front() == '"') val = val.substr(1, val.size() - 2);
+                        info["os_name"] = val;
+                    } else if (line.rfind("VERSION=", 0) == 0) {
+                        std::string val = line.substr(8);
+                        if (!val.empty() && val.front() == '"') val = val.substr(1, val.size() - 2);
+                        info["os_version"] = val;
+                    }
+                }
+            } else {
+                info["os_name"] = TrimString(ExecuteCommand("uname -s"));
+                info["os_version"] = TrimString(ExecuteCommand("uname -r"));
+            }
+
+            info["hostname"] = TrimString(ExecuteCommand("hostname"));
+            info["architecture"] = TrimString(ExecuteCommand("uname -m"));
+
+            std::string uptime = TrimString(ExecuteCommand("uptime -s"));
+            if (!uptime.empty()) {
+                info["uptime"] = "Since " + uptime;
+            }
+
+            std::string cpu_info = ExecuteCommand("cat /proc/cpuinfo | grep \"model name\" | head -1");
+            if (!cpu_info.empty()) {
+                size_t pos = cpu_info.find(':');
+                if (pos != std::string::npos) info["cpu"] = TrimString(cpu_info.substr(pos + 1));
+            }
+
+            std::string mem_info = ExecuteCommand("cat /proc/meminfo | grep MemTotal");
+            if (!mem_info.empty()) {
+                size_t pos = mem_info.find(':');
+                if (pos != std::string::npos) info["total_memory"] = TrimString(mem_info.substr(pos + 1));
+            }
+        } else {
+            info["error"] = "Unknown operating system";
+        }
+        return info.dump();
+    }
+
+    std::string GetSystemStats() {
+        std::string os = DetectOS();
+        nlohmann::json stats = nlohmann::json::object();
+        if (os == "windows") {
+            std::string cpu_usage = ExecuteCommand("wmic cpu get loadpercentage /value");
+            auto lines = SplitString(cpu_usage, '\n');
+            for (auto& line : lines) {
+                line = TrimString(line);
+                if (line.rfind("LoadPercentage=", 0) == 0) {
+                    stats["cpu_usage"] = TrimString(line.substr(15)) + "%";
+                    break;
+                }
+            }
+
+            std::string mem_total = ExecuteCommand("wmic OS get TotalVisibleMemorySize /value");
+            std::string mem_free = ExecuteCommand("wmic OS get FreePhysicalMemory /value");
+            long long total_kb = 0;
+            long long free_kb = 0;
+            auto total_lines = SplitString(mem_total, '\n');
+            for (auto& line : total_lines) {
+                line = TrimString(line);
+                if (line.rfind("TotalVisibleMemorySize=", 0) == 0) {
+                    try { total_kb = std::stoll(line.substr(23)); } catch (...) {}
+                    break;
+                }
+            }
+            auto free_lines = SplitString(mem_free, '\n');
+            for (auto& line : free_lines) {
+                line = TrimString(line);
+                if (line.rfind("FreePhysicalMemory=", 0) == 0) {
+                    try { free_kb = std::stoll(line.substr(19)); } catch (...) {}
+                    break;
+                }
+            }
+            if (total_kb > 0) {
+                long long used_kb = total_kb - free_kb;
+                double usage_percent = (double)used_kb / total_kb * 100.0;
+                char buf[64];
+                sprintf_s(buf, "%.1f%%", usage_percent);
+                stats["memory_usage"] = buf;
+                stats["memory_used"] = std::to_string(used_kb / 1024) + " MB";
+                stats["memory_total"] = std::to_string(total_kb / 1024) + " MB";
+            }
+
+            std::string disk_info = ExecuteCommand("wmic logicaldisk where size!=0 get size,freespace,caption");
+            auto disk_lines = SplitString(disk_info, '\n');
+            for (auto& line : disk_lines) {
+                line = TrimString(line);
+                auto parts = SplitStringWhitespace(line);
+                if (parts.size() >= 3 && parts[0].find("C:") != std::string::npos) {
+                    try {
+                        long long free_space = std::stoll(parts[1]);
+                        long long size = std::stoll(parts[2]);
+                        long long used_space = size - free_space;
+                        double usage_percent = (double)used_space / size * 100.0;
+                        char buf[64];
+                        sprintf_s(buf, "%.1f%%", usage_percent);
+                        stats["disk_usage"] = buf;
+                        
+                        sprintf_s(buf, "%.1f GB", (double)used_space / (1024.0 * 1024.0 * 1024.0));
+                        stats["disk_used"] = buf;
+                        sprintf_s(buf, "%.1f GB", (double)size / (1024.0 * 1024.0 * 1024.0));
+                        stats["disk_total"] = buf;
+                    } catch (...) {}
+                    break;
+                }
+            }
+        } else if (os == "linux") {
+            std::string cpu_info = ExecuteCommand("cat /proc/stat | grep \"cpu \" | head -1");
+            if (!cpu_info.empty()) {
+                auto parts = SplitStringWhitespace(cpu_info);
+                if (parts.size() >= 8) {
+                    try {
+                        long long idle = std::stoll(parts[4]);
+                        long long total = 0;
+                        for (size_t i = 1; i < 8 && i < parts.size(); ++i) {
+                            total += std::stoll(parts[i]);
+                        }
+                        double usage = total > 0 ? (double)(total - idle) / total * 100.0 : 0.0;
+                        char buf[64];
+                        sprintf_s(buf, "%.1f%%", usage);
+                        stats["cpu_usage"] = buf;
+                    } catch (...) {}
+                }
+            } else {
+                std::string top_output = ExecuteCommand("top -bn1 | grep \"Cpu(s)\" | head -1");
+                size_t id_pos = top_output.find("id,");
+                if (id_pos != std::string::npos) {
+                    auto left = top_output.substr(0, id_pos);
+                    auto parts = SplitStringWhitespace(left);
+                    if (!parts.empty()) {
+                        try {
+                            double idle = std::stod(parts.back());
+                            double usage = 100.0 - idle;
+                            char buf[64];
+                            sprintf_s(buf, "%.1f%%", usage);
+                            stats["cpu_usage"] = buf;
+                        } catch (...) {}
+                    }
+                }
+            }
+
+            std::string mem_info = ExecuteCommand("cat /proc/meminfo | grep -E \"MemTotal|MemAvailable\"");
+            long long mem_total = 0;
+            long long mem_available = 0;
+            auto mem_lines = SplitString(mem_info, '\n');
+            for (auto& line : mem_lines) {
+                line = TrimString(line);
+                auto parts = SplitStringWhitespace(line);
+                if (parts.size() >= 2) {
+                    if (parts[0] == "MemTotal:") {
+                        try { mem_total = std::stoll(parts[1]) * 1024; } catch (...) {}
+                    } else if (parts[0] == "MemAvailable:") {
+                        try { mem_available = std::stoll(parts[1]) * 1024; } catch (...) {}
+                    }
+                }
+            }
+            if (mem_total > 0) {
+                long long mem_used = mem_total - mem_available;
+                double usage_percent = (double)mem_used / mem_total * 100.0;
+                char buf[64];
+                sprintf_s(buf, "%.1f%%", usage_percent);
+                stats["memory_usage"] = buf;
+                stats["memory_used"] = std::to_string(mem_used / (1024 * 1024)) + " MB";
+                stats["memory_total"] = std::to_string(mem_total / (1024 * 1024)) + " MB";
+            }
+
+            std::string disk_info = ExecuteCommand("df -h / | tail -1");
+            if (!disk_info.empty()) {
+                auto parts = SplitStringWhitespace(disk_info);
+                if (parts.size() >= 6) {
+                    stats["disk_total"] = parts[1];
+                    stats["disk_used"] = parts[2];
+                    stats["disk_usage"] = parts[4];
+                }
+            }
+        } else {
+            stats["error"] = "Unknown operating system";
+        }
+        return stats.dump();
+    }
+
+    std::string GetProcessList() {
+        std::string os = DetectOS();
+        nlohmann::json process_array = nlohmann::json::array();
+        if (os == "windows") {
+            std::string output = ExecuteCommand("wmic process get Name,ProcessId,WorkingSetSize /format:csv | sort /r");
+            auto lines = SplitString(output, '\n');
+            int count = 0;
+            for (auto& line : lines) {
+                line = TrimString(line);
+                if (line.empty()) continue;
+                auto parts = SplitString(line, ',');
+                if (parts.size() >= 4) {
+                    if (parts[1] == "Name" || parts[1].empty()) continue;
+                    try {
+                        nlohmann::json proc;
+                        proc["name"] = parts[1];
+                        proc["pid"] = parts[2];
+                        long long ws = std::stoll(parts[3]);
+                        proc["memory"] = std::to_string(ws / 1024) + " KB";
+                        process_array.push_back(proc);
+                        if (++count >= 10) break;
+                    } catch (...) {}
+                }
+            }
+        } else if (os == "linux") {
+            std::string output = ExecuteCommand("ps aux --sort=-%cpu | head -11");
+            auto lines = SplitString(output, '\n');
+            int count = 0;
+            for (auto& line : lines) {
+                line = TrimString(line);
+                if (line.empty()) continue;
+                if (line.rfind("USER", 0) == 0) continue;
+                auto parts = SplitStringWhitespace(line);
+                if (parts.size() >= 11) {
+                    std::string cmd = parts[10];
+                    for (size_t i = 11; i < parts.size(); ++i) {
+                        cmd += " " + parts[i];
+                    }
+                    nlohmann::json proc;
+                    proc["name"] = cmd.size() > 30 ? cmd.substr(0, 30) + "..." : cmd;
+                    proc["pid"] = parts[1];
+                    proc["cpu"] = parts[2] + "%";
+                    proc["memory"] = parts[3] + "%";
+                    process_array.push_back(proc);
+                    if (++count >= 10) break;
+                }
+            }
+        }
+        return process_array.dump();
+    }
+
+    std::string GetDiskUsage() {
+        std::string os = DetectOS();
+        nlohmann::json disk_array = nlohmann::json::array();
+        if (os == "windows") {
+            std::string output = ExecuteCommand("wmic logicaldisk where size!=0 get size,freespace,caption");
+            auto lines = SplitString(output, '\n');
+            for (auto& line : lines) {
+                line = TrimString(line);
+                auto parts = SplitStringWhitespace(line);
+                if (parts.size() >= 3) {
+                    if (parts[0] == "Caption") continue;
+                    try {
+                        long long free_space = std::stoll(parts[1]);
+                        long long size = std::stoll(parts[2]);
+                        long long used_space = size - free_space;
+                        double usage_percent = (double)used_space / size * 100.0;
+                        char buf[64];
+                        
+                        nlohmann::json disk;
+                        disk["device"] = parts[0];
+                        sprintf_s(buf, "%.1f GB", (double)size / (1024.0 * 1024.0 * 1024.0));
+                        disk["total"] = buf;
+                        sprintf_s(buf, "%.1f GB", (double)used_space / (1024.0 * 1024.0 * 1024.0));
+                        disk["used"] = buf;
+                        sprintf_s(buf, "%.1f GB", (double)free_space / (1024.0 * 1024.0 * 1024.0));
+                        disk["free"] = buf;
+                        sprintf_s(buf, "%.1f%%", usage_percent);
+                        disk["usage"] = buf;
+                        disk_array.push_back(disk);
+                    } catch (...) {}
+                }
+            }
+        } else if (os == "linux") {
+            std::string output = ExecuteCommand("df -h | grep -E \"^/dev/\"");
+            auto lines = SplitString(output, '\n');
+            for (auto& line : lines) {
+                line = TrimString(line);
+                if (line.empty()) continue;
+                auto parts = SplitStringWhitespace(line);
+                if (parts.size() >= 6) {
+                    nlohmann::json disk;
+                    disk["device"] = parts[0];
+                    disk["total"] = parts[1];
+                    disk["used"] = parts[2];
+                    disk["free"] = parts[3];
+                    disk["usage"] = parts[4];
+                    disk["mount"] = parts[5];
+                    disk_array.push_back(disk);
+                }
+            }
+        }
+        return disk_array.dump();
+    }
+
+    std::string GetNetworkInfo() {
+        std::string os = DetectOS();
+        nlohmann::json net_array = nlohmann::json::array();
+        if (os == "windows") {
+            std::string output = ExecuteCommand("ipconfig");
+            auto lines = SplitString(output, '\n');
+            nlohmann::json current_interface = nlohmann::json::object();
+            for (auto& line : lines) {
+                std::string trimmed = TrimString(line);
+                if (trimmed.empty()) continue;
+                if (trimmed.find("adapter") != std::string::npos && trimmed.find(":") != std::string::npos) {
+                    if (current_interface.find("name") != current_interface.end()) {
+                        net_array.push_back(current_interface);
+                    }
+                    current_interface = nlohmann::json::object();
+                    current_interface["name"] = trimmed.substr(0, trimmed.find(":"));
+                } else if (current_interface.find("name") != current_interface.end() && trimmed.find("IPv4 Address") != std::string::npos) {
+                    size_t pos = trimmed.find(":");
+                    if (pos != std::string::npos) current_interface["ip"] = TrimString(trimmed.substr(pos + 1));
+                } else if (current_interface.find("name") != current_interface.end() && trimmed.find("Subnet Mask") != std::string::npos) {
+                    size_t pos = trimmed.find(":");
+                    if (pos != std::string::npos) current_interface["netmask"] = TrimString(trimmed.substr(pos + 1));
+                }
+            }
+            if (current_interface.find("name") != current_interface.end()) {
+                net_array.push_back(current_interface);
+            }
+        } else if (os == "linux") {
+            std::string output = ExecuteCommand("ip addr show");
+            bool parse_success = false;
+            if (!output.empty()) {
+                auto lines = SplitString(output, '\n');
+                nlohmann::json current_interface = nlohmann::json::object();
+                for (auto& line : lines) {
+                    std::string trimmed = TrimString(line);
+                    if (trimmed.empty()) continue;
+                    if (isdigit((unsigned char)trimmed[0]) && trimmed.find(":") != std::string::npos) {
+                        if (current_interface.find("name") != current_interface.end() && current_interface.find("ip") != current_interface.end()) {
+                            net_array.push_back(current_interface);
+                        }
+                        current_interface = nlohmann::json::object();
+                        auto parts = SplitString(trimmed, ':');
+                        if (parts.size() >= 2) {
+                            auto space_parts = SplitStringWhitespace(parts[1]);
+                            if (!space_parts.empty()) current_interface["name"] = space_parts[0];
+                        }
+                    } else if (current_interface.find("name") != current_interface.end() && trimmed.rfind("inet ", 0) == 0 && trimmed.find("scope global") != std::string::npos) {
+                        auto parts = SplitStringWhitespace(trimmed);
+                        if (parts.size() >= 2) {
+                            std::string ip_cidr = parts[1];
+                            current_interface["ip"] = ip_cidr.substr(0, ip_cidr.find("/"));
+                            current_interface["cidr"] = ip_cidr;
+                        }
+                    }
+                }
+                if (current_interface.find("name") != current_interface.end() && current_interface.find("ip") != current_interface.end()) {
+                    net_array.push_back(current_interface);
+                }
+                parse_success = !net_array.empty();
+            }
+
+            if (!parse_success) {
+                std::string ifconfig_out = ExecuteCommand("ifconfig");
+                auto lines = SplitString(ifconfig_out, '\n');
+                nlohmann::json current_interface = nlohmann::json::object();
+                for (auto& line : lines) {
+                    std::string raw_line = line;
+                    if (!raw_line.empty() && raw_line[0] != ' ' && raw_line[0] != '\t') {
+                        if (current_interface.find("name") != current_interface.end() && current_interface.find("ip") != current_interface.end()) {
+                            net_array.push_back(current_interface);
+                        }
+                        current_interface = nlohmann::json::object();
+                        current_interface["name"] = TrimString(raw_line.substr(0, raw_line.find(":")));
+                    } else if (current_interface.find("name") != current_interface.end() && raw_line.find("inet ") != std::string::npos) {
+                        auto parts = SplitStringWhitespace(raw_line);
+                        for (size_t i = 0; i < parts.size(); ++i) {
+                            if (parts[i] == "inet" && i + 1 < parts.size()) {
+                                current_interface["ip"] = parts[i + 1];
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (current_interface.find("name") != current_interface.end() && current_interface.find("ip") != current_interface.end()) {
+                    net_array.push_back(current_interface);
+                }
+            }
+        }
+        return net_array.dump();
     }
 
     // SFTP Operations
@@ -1186,6 +1797,841 @@ private:
         }
     }
 };
+
+struct LocalListenerArgs {
+    std::shared_ptr<SSHSession> session;
+    std::shared_ptr<PortForwardInfo> pfInfo;
+};
+
+struct RemoteListenerArgs {
+    std::shared_ptr<SSHSession> session;
+    std::shared_ptr<PortForwardInfo> pfInfo;
+};
+
+struct DynamicListenerArgs {
+    std::shared_ptr<SSHSession> session;
+    std::shared_ptr<PortForwardInfo> pfInfo;
+};
+
+static DWORD WINAPI LocalForwardListenerThread(LPVOID param) {
+    auto* args = static_cast<LocalListenerArgs*>(param);
+    auto session = args->session;
+    auto pfInfo = args->pfInfo;
+    delete args;
+
+    SOCKET serverSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (serverSock == INVALID_SOCKET) {
+        pfInfo->active = false;
+        return 0;
+    }
+    pfInfo->serverSocket = serverSock;
+
+    int optval = 1;
+    setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, (char*)&optval, sizeof(optval));
+
+    sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(pfInfo->local_port);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    if (bind(serverSock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        closesocket(serverSock);
+        pfInfo->serverSocket = INVALID_SOCKET;
+        pfInfo->active = false;
+        return 0;
+    }
+
+    if (listen(serverSock, SOMAXCONN) == SOCKET_ERROR) {
+        closesocket(serverSock);
+        pfInfo->serverSocket = INVALID_SOCKET;
+        pfInfo->active = false;
+        return 0;
+    }
+
+    u_long mode = 1;
+    ioctlsocket(serverSock, FIONBIO, &mode);
+
+    while (pfInfo->active && session->running) {
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(serverSock, &fds);
+        timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 200000;
+        int sel = select(0, &fds, NULL, NULL, &tv);
+
+        if (sel > 0) {
+            SOCKET clientSock = accept(serverSock, NULL, NULL);
+            if (clientSock != INVALID_SOCKET) {
+                struct LocalConnArgs {
+                    std::shared_ptr<SSHSession> session;
+                    std::shared_ptr<PortForwardInfo> pfInfo;
+                    SOCKET clientSock;
+                };
+                auto* connArgs = new LocalConnArgs{session, pfInfo, clientSock};
+                
+                {
+                    std::lock_guard<std::mutex> lock(session->forwardMutex);
+                    pfInfo->connections++;
+                }
+
+                HANDLE hConnThread = CreateThread(NULL, 0, [](LPVOID p) -> DWORD {
+                    auto* cArgs = static_cast<LocalConnArgs*>(p);
+                    auto sess = cArgs->session;
+                    auto pf = cArgs->pfInfo;
+                    SOCKET cSock = cArgs->clientSock;
+                    delete cArgs;
+
+                    sockaddr_in peerAddr;
+                    int peerLen = sizeof(peerAddr);
+                    std::string clientIp = "127.0.0.1";
+                    int clientPort = 0;
+                    if (getpeername(cSock, (sockaddr*)&peerAddr, &peerLen) == 0) {
+                        clientIp = inet_ntoa(peerAddr.sin_addr);
+                        clientPort = ntohs(peerAddr.sin_port);
+                    }
+
+                    LIBSSH2_CHANNEL* channel = NULL;
+                    while (pf->active && sess->running) {
+                        {
+                            std::lock_guard<std::mutex> lock(sess->sshMutex);
+                            channel = libssh2_channel_direct_tcpip_ex(
+                                sess->sshSession,
+                                pf->remote_host.c_str(),
+                                pf->remote_port,
+                                clientIp.c_str(),
+                                clientPort
+                            );
+                            if (channel) break;
+                            int err = libssh2_session_last_errno(sess->sshSession);
+                            if (err != LIBSSH2_ERROR_EAGAIN) {
+                                break;
+                            }
+                        }
+                        Sleep(5);
+                    }
+
+                    if (channel) {
+                        sess->RelayData(cSock, channel, sess, pf);
+                    } else {
+                        closesocket(cSock);
+                        std::lock_guard<std::mutex> lock(sess->forwardMutex);
+                        pf->connections = (std::max)(0, pf->connections - 1);
+                    }
+                    return 0;
+                }, connArgs, 0, NULL);
+                if (hConnThread) {
+                    CloseHandle(hConnThread);
+                } else {
+                    closesocket(clientSock);
+                    std::lock_guard<std::mutex> lock(session->forwardMutex);
+                    pfInfo->connections = (std::max)(0, pfInfo->connections - 1);
+                }
+            }
+        } else if (sel < 0) {
+            break;
+        }
+    }
+
+    closesocket(serverSock);
+    pfInfo->serverSocket = INVALID_SOCKET;
+    pfInfo->active = false;
+    return 0;
+}
+
+static DWORD WINAPI RemoteForwardListenerThread(LPVOID param) {
+    auto* args = static_cast<RemoteListenerArgs*>(param);
+    auto session = args->session;
+    auto pfInfo = args->pfInfo;
+    delete args;
+
+    LIBSSH2_LISTENER* listener = NULL;
+    while (pfInfo->active && session->running) {
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            int bound_port = 0;
+            listener = libssh2_channel_forward_listen_ex(
+                session->sshSession,
+                "0.0.0.0",
+                pfInfo->remote_port_remote,
+                &bound_port,
+                16
+            );
+            if (listener) break;
+            int err = libssh2_session_last_errno(session->sshSession);
+            if (err != LIBSSH2_ERROR_EAGAIN) {
+                pfInfo->active = false;
+                return 0;
+            }
+        }
+        Sleep(5);
+    }
+
+    if (!listener) {
+        pfInfo->active = false;
+        return 0;
+    }
+
+    while (pfInfo->active && session->running) {
+        LIBSSH2_CHANNEL* channel = NULL;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            channel = libssh2_channel_forward_accept(listener);
+        }
+
+        if (channel) {
+            struct RemoteConnArgs {
+                std::shared_ptr<SSHSession> session;
+                std::shared_ptr<PortForwardInfo> pfInfo;
+                LIBSSH2_CHANNEL* channel;
+            };
+            auto* connArgs = new RemoteConnArgs{session, pfInfo, channel};
+
+            {
+                std::lock_guard<std::mutex> lock(session->forwardMutex);
+                pfInfo->connections++;
+            }
+
+            HANDLE hConnThread = CreateThread(NULL, 0, [](LPVOID p) -> DWORD {
+                auto* cArgs = static_cast<RemoteConnArgs*>(p);
+                auto sess = cArgs->session;
+                auto pf = cArgs->pfInfo;
+                LIBSSH2_CHANNEL* chan = cArgs->channel;
+                delete cArgs;
+
+                SOCKET localSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                if (localSock == INVALID_SOCKET) {
+                    while (true) {
+                        int rc = 0;
+                        {
+                            std::lock_guard<std::mutex> lock(sess->sshMutex);
+                            rc = libssh2_channel_free(chan);
+                        }
+                        if (rc != LIBSSH2_ERROR_EAGAIN) break;
+                        Sleep(5);
+                    }
+                    std::lock_guard<std::mutex> lock(sess->forwardMutex);
+                    pf->connections = (std::max)(0, pf->connections - 1);
+                    return 0;
+                }
+
+                struct addrinfo hints = { 0 }, *addrs = NULL;
+                hints.ai_family = AF_INET;
+                hints.ai_socktype = SOCK_STREAM;
+                hints.ai_protocol = IPPROTO_TCP;
+
+                std::string portStr = std::to_string(pf->local_port);
+                int gai_res = getaddrinfo(pf->local_host.c_str(), portStr.c_str(), &hints, &addrs);
+                if (gai_res != 0) {
+                    closesocket(localSock);
+                    while (true) {
+                        int rc = 0;
+                        {
+                            std::lock_guard<std::mutex> lock(sess->sshMutex);
+                            rc = libssh2_channel_free(chan);
+                        }
+                        if (rc != LIBSSH2_ERROR_EAGAIN) break;
+                        Sleep(5);
+                    }
+                    std::lock_guard<std::mutex> lock(sess->forwardMutex);
+                    pf->connections = (std::max)(0, pf->connections - 1);
+                    return 0;
+                }
+
+                bool connected = false;
+                for (struct addrinfo* addr = addrs; addr != NULL; addr = addr->ai_next) {
+                    if (connect(localSock, addr->ai_addr, (int)addr->ai_addrlen) == 0) {
+                        connected = true;
+                        break;
+                    }
+                }
+                freeaddrinfo(addrs);
+
+                if (!connected) {
+                    closesocket(localSock);
+                    while (true) {
+                        int rc = 0;
+                        {
+                            std::lock_guard<std::mutex> lock(sess->sshMutex);
+                            rc = libssh2_channel_free(chan);
+                        }
+                        if (rc != LIBSSH2_ERROR_EAGAIN) break;
+                        Sleep(5);
+                    }
+                    std::lock_guard<std::mutex> lock(sess->forwardMutex);
+                    pf->connections = (std::max)(0, pf->connections - 1);
+                    return 0;
+                }
+
+                sess->RelayData(localSock, chan, sess, pf);
+                return 0;
+            }, connArgs, 0, NULL);
+            if (hConnThread) {
+                CloseHandle(hConnThread);
+            } else {
+                while (true) {
+                    int rc = 0;
+                    {
+                        std::lock_guard<std::mutex> lock(session->sshMutex);
+                        rc = libssh2_channel_free(channel);
+                    }
+                    if (rc != LIBSSH2_ERROR_EAGAIN) break;
+                    Sleep(5);
+                }
+                std::lock_guard<std::mutex> lock(session->forwardMutex);
+                pfInfo->connections = (std::max)(0, pfInfo->connections - 1);
+            }
+        } else {
+            int err = libssh2_session_last_errno(session->sshSession);
+            if (err != LIBSSH2_ERROR_EAGAIN) {
+                break;
+            }
+            Sleep(10);
+        }
+    }
+
+    while (true) {
+        int rc = 0;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            rc = libssh2_channel_forward_cancel(listener);
+        }
+        if (rc != LIBSSH2_ERROR_EAGAIN) break;
+        Sleep(5);
+    }
+    pfInfo->active = false;
+    return 0;
+}
+
+static DWORD WINAPI DynamicForwardListenerThread(LPVOID param) {
+    auto* args = static_cast<DynamicListenerArgs*>(param);
+    auto session = args->session;
+    auto pfInfo = args->pfInfo;
+    delete args;
+
+    SOCKET serverSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (serverSock == INVALID_SOCKET) {
+        pfInfo->active = false;
+        return 0;
+    }
+    pfInfo->serverSocket = serverSock;
+
+    int optval = 1;
+    setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, (char*)&optval, sizeof(optval));
+
+    sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(pfInfo->local_port);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    if (bind(serverSock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        closesocket(serverSock);
+        pfInfo->serverSocket = INVALID_SOCKET;
+        pfInfo->active = false;
+        return 0;
+    }
+
+    if (listen(serverSock, SOMAXCONN) == SOCKET_ERROR) {
+        closesocket(serverSock);
+        pfInfo->serverSocket = INVALID_SOCKET;
+        pfInfo->active = false;
+        return 0;
+    }
+
+    u_long mode = 1;
+    ioctlsocket(serverSock, FIONBIO, &mode);
+
+    while (pfInfo->active && session->running) {
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(serverSock, &fds);
+        timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 200000;
+        int sel = select(0, &fds, NULL, NULL, &tv);
+
+        if (sel > 0) {
+            SOCKET clientSock = accept(serverSock, NULL, NULL);
+            if (clientSock != INVALID_SOCKET) {
+                struct SocksConnArgs {
+                    std::shared_ptr<SSHSession> session;
+                    std::shared_ptr<PortForwardInfo> pfInfo;
+                    SOCKET clientSock;
+                };
+                auto* connArgs = new SocksConnArgs{session, pfInfo, clientSock};
+
+                {
+                    std::lock_guard<std::mutex> lock(session->forwardMutex);
+                    pfInfo->connections++;
+                }
+
+                HANDLE hConnThread = CreateThread(NULL, 0, [](LPVOID p) -> DWORD {
+                    auto* cArgs = static_cast<SocksConnArgs*>(p);
+                    auto sess = cArgs->session;
+                    auto pf = cArgs->pfInfo;
+                    SOCKET cSock = cArgs->clientSock;
+                    delete cArgs;
+
+                    int timeout = 5000;
+                    setsockopt(cSock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+                    u_long blocking_mode = 0;
+                    ioctlsocket(cSock, FIONBIO, &blocking_mode);
+
+                    unsigned char version = 0;
+                    if (recv(cSock, (char*)&version, 1, 0) <= 0) {
+                        closesocket(cSock);
+                        std::lock_guard<std::mutex> lock(sess->forwardMutex);
+                        pf->connections = (std::max)(0, pf->connections - 1);
+                        return 0;
+                    }
+
+                    std::string destHost = "";
+                    int destPort = 0;
+                    bool socksSuccess = false;
+
+                    if (version == 5) {
+                        unsigned char nmethods = 0;
+                        if (recv(cSock, (char*)&nmethods, 1, 0) > 0) {
+                            std::vector<unsigned char> methods(nmethods);
+                            recv(cSock, (char*)methods.data(), nmethods, 0);
+                            
+                            unsigned char resp[2] = { 0x05, 0x00 };
+                            send(cSock, (char*)resp, 2, 0);
+
+                            unsigned char reqHeader[4] = { 0 };
+                            if (recv(cSock, (char*)reqHeader, 4, 0) == 4) {
+                                if (reqHeader[0] == 0x05 && reqHeader[1] == 0x01) {
+                                    unsigned char atyp = reqHeader[3];
+                                    if (atyp == 1) {
+                                        unsigned char ip[4];
+                                        unsigned char portBytes[2];
+                                        if (recv(cSock, (char*)ip, 4, 0) == 4 && recv(cSock, (char*)portBytes, 2, 0) == 2) {
+                                            destHost = std::to_string(ip[0]) + "." + std::to_string(ip[1]) + "." + std::to_string(ip[2]) + "." + std::to_string(ip[3]);
+                                            destPort = (portBytes[0] << 8) | portBytes[1];
+                                            socksSuccess = true;
+                                        }
+                                    } else if (atyp == 3) {
+                                        unsigned char domainLen = 0;
+                                        if (recv(cSock, (char*)&domainLen, 1, 0) == 1) {
+                                            std::vector<char> domain(domainLen + 1, 0);
+                                            if (recv(cSock, domain.data(), domainLen, 0) == domainLen) {
+                                                destHost = domain.data();
+                                                unsigned char portBytes[2];
+                                                if (recv(cSock, (char*)portBytes, 2, 0) == 2) {
+                                                    destPort = (portBytes[0] << 8) | portBytes[1];
+                                                    socksSuccess = true;
+                                                }
+                                            }
+                                        }
+                                    } else if (atyp == 4) {
+                                        unsigned char ip[16];
+                                        unsigned char portBytes[2];
+                                        if (recv(cSock, (char*)ip, 16, 0) == 16 && recv(cSock, (char*)portBytes, 2, 0) == 2) {
+                                            char ipv6Str[128] = { 0 };
+                                            sprintf_s(ipv6Str, "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+                                                ip[0], ip[1], ip[2], ip[3], ip[4], ip[5], ip[6], ip[7],
+                                                ip[8], ip[9], ip[10], ip[11], ip[12], ip[13], ip[14], ip[15]);
+                                            destHost = ipv6Str;
+                                            destPort = (portBytes[0] << 8) | portBytes[1];
+                                            socksSuccess = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!socksSuccess) {
+                            unsigned char errResp[10] = { 0x05, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+                            send(cSock, (char*)errResp, 10, 0);
+                            closesocket(cSock);
+                            std::lock_guard<std::mutex> lock(sess->forwardMutex);
+                            pf->connections = (std::max)(0, pf->connections - 1);
+                            return 0;
+                        }
+                    } else if (version == 4) {
+                        unsigned char cmd = 0;
+                        unsigned char portBytes[2] = { 0 };
+                        unsigned char ip[4] = { 0 };
+                        if (recv(cSock, (char*)&cmd, 1, 0) == 1 &&
+                            recv(cSock, (char*)portBytes, 2, 0) == 2 &&
+                            recv(cSock, (char*)ip, 4, 0) == 4) {
+                            
+                            if (cmd == 1) {
+                                destPort = (portBytes[0] << 8) | portBytes[1];
+                                
+                                char dummy;
+                                while (recv(cSock, &dummy, 1, 0) == 1 && dummy != '\0');
+                                
+                                if (ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] != 0) {
+                                    std::string domain = "";
+                                    char c;
+                                    while (recv(cSock, &c, 1, 0) == 1 && c != '\0') {
+                                        domain += c;
+                                    }
+                                    destHost = domain;
+                                } else {
+                                    destHost = std::to_string(ip[0]) + "." + std::to_string(ip[1]) + "." + std::to_string(ip[2]) + "." + std::to_string(ip[3]);
+                                }
+                                socksSuccess = true;
+                            }
+                        }
+
+                        if (!socksSuccess) {
+                            unsigned char errResp[8] = { 0x00, 0x5b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+                            send(cSock, (char*)errResp, 8, 0);
+                            closesocket(cSock);
+                            std::lock_guard<std::mutex> lock(sess->forwardMutex);
+                            pf->connections = (std::max)(0, pf->connections - 1);
+                            return 0;
+                        }
+                    } else {
+                        closesocket(cSock);
+                        std::lock_guard<std::mutex> lock(sess->forwardMutex);
+                        pf->connections = (std::max)(0, pf->connections - 1);
+                        return 0;
+                    }
+
+                    LIBSSH2_CHANNEL* channel = NULL;
+                    while (pf->active && sess->running) {
+                        {
+                            std::lock_guard<std::mutex> lock(sess->sshMutex);
+                            channel = libssh2_channel_direct_tcpip_ex(
+                                sess->sshSession,
+                                destHost.c_str(),
+                                destPort,
+                                "127.0.0.1",
+                                0
+                            );
+                            if (channel) break;
+                            int err = libssh2_session_last_errno(sess->sshSession);
+                            if (err != LIBSSH2_ERROR_EAGAIN) {
+                                break;
+                            }
+                        }
+                        Sleep(5);
+                    }
+
+                    if (channel) {
+                        if (version == 5) {
+                            unsigned char okResp[10] = { 0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+                            send(cSock, (char*)okResp, 10, 0);
+                        } else {
+                            unsigned char okResp[8] = { 0x00, 0x5a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+                            send(cSock, (char*)okResp, 8, 0);
+                        }
+                        
+                        sess->RelayData(cSock, channel, sess, pf);
+                    } else {
+                        if (version == 5) {
+                            unsigned char errResp[10] = { 0x05, 0x05, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+                            send(cSock, (char*)errResp, 10, 0);
+                        } else {
+                            unsigned char errResp[8] = { 0x00, 0x5b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+                            send(cSock, (char*)errResp, 8, 0);
+                        }
+                        closesocket(cSock);
+                        std::lock_guard<std::mutex> lock(sess->forwardMutex);
+                        pf->connections = (std::max)(0, pf->connections - 1);
+                    }
+                    return 0;
+                }, connArgs, 0, NULL);
+                if (hConnThread) {
+                    CloseHandle(hConnThread);
+                } else {
+                    closesocket(clientSock);
+                    std::lock_guard<std::mutex> lock(session->forwardMutex);
+                    pfInfo->connections = (std::max)(0, pfInfo->connections - 1);
+                }
+            }
+        } else if (sel < 0) {
+            break;
+        }
+    }
+
+    closesocket(serverSock);
+    pfInfo->serverSocket = INVALID_SOCKET;
+    pfInfo->active = false;
+    return 0;
+}
+
+std::string SSHSession::CreateLocalPortForward(std::shared_ptr<SSHSession> self, int localPort, const std::string& remoteHost, int remotePort) {
+    std::string forwardId = "L_" + std::to_string(localPort) + "_" + remoteHost + "_" + std::to_string(remotePort);
+    {
+        std::lock_guard<std::mutex> lock(forwardMutex);
+        if (portForwards.find(forwardId) != portForwards.end()) {
+            return forwardId;
+        }
+    }
+
+    SOCKET testSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (testSock != INVALID_SOCKET) {
+        sockaddr_in addr = {0};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(localPort);
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        int rc = bind(testSock, (sockaddr*)&addr, sizeof(addr));
+        closesocket(testSock);
+        if (rc == SOCKET_ERROR) {
+            return ""; 
+        }
+    }
+
+    auto pfInfo = std::make_shared<PortForwardInfo>();
+    pfInfo->id = forwardId;
+    pfInfo->type = "local";
+    pfInfo->local_port = localPort;
+    pfInfo->remote_host = remoteHost;
+    pfInfo->remote_port = remotePort;
+    pfInfo->active = true;
+    pfInfo->connections = 0;
+    pfInfo->description = "Local " + std::to_string(localPort) + " -> " + remoteHost + ":" + std::to_string(remotePort);
+
+    auto* largs = new LocalListenerArgs{ self, pfInfo };
+    pfInfo->hThread = CreateThread(NULL, 0, LocalForwardListenerThread, largs, 0, NULL);
+    if (!pfInfo->hThread) {
+        delete largs;
+        return "";
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(forwardMutex);
+        portForwards[forwardId] = pfInfo;
+    }
+    return forwardId;
+}
+
+std::string SSHSession::CreateRemotePortForward(std::shared_ptr<SSHSession> self, int remotePort, const std::string& localHost, int localPort) {
+    std::string forwardId = "R_" + std::to_string(remotePort) + "_" + localHost + "_" + std::to_string(localPort);
+    {
+        std::lock_guard<std::mutex> lock(forwardMutex);
+        if (portForwards.find(forwardId) != portForwards.end()) {
+            return forwardId;
+        }
+    }
+
+    auto pfInfo = std::make_shared<PortForwardInfo>();
+    pfInfo->id = forwardId;
+    pfInfo->type = "remote";
+    pfInfo->local_port = localPort;
+    pfInfo->local_host = localHost;
+    pfInfo->remote_port_remote = remotePort;
+    pfInfo->active = true;
+    pfInfo->connections = 0;
+    pfInfo->description = "Remote " + std::to_string(remotePort) + " -> " + localHost + ":" + std::to_string(localPort);
+
+    auto* rargs = new RemoteListenerArgs{ self, pfInfo };
+    pfInfo->hThread = CreateThread(NULL, 0, RemoteForwardListenerThread, rargs, 0, NULL);
+    if (!pfInfo->hThread) {
+        delete rargs;
+        return "";
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(forwardMutex);
+        portForwards[forwardId] = pfInfo;
+    }
+    return forwardId;
+}
+
+std::string SSHSession::CreateDynamicPortForward(std::shared_ptr<SSHSession> self, int localPort) {
+    std::string forwardId = "D_" + std::to_string(localPort);
+    {
+        std::lock_guard<std::mutex> lock(forwardMutex);
+        if (portForwards.find(forwardId) != portForwards.end()) {
+            return forwardId;
+        }
+    }
+
+    SOCKET testSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (testSock != INVALID_SOCKET) {
+        sockaddr_in addr = {0};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(localPort);
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        int rc = bind(testSock, (sockaddr*)&addr, sizeof(addr));
+        closesocket(testSock);
+        if (rc == SOCKET_ERROR) {
+            return ""; 
+        }
+    }
+
+    auto pfInfo = std::make_shared<PortForwardInfo>();
+    pfInfo->id = forwardId;
+    pfInfo->type = "dynamic";
+    pfInfo->local_port = localPort;
+    pfInfo->active = true;
+    pfInfo->connections = 0;
+    pfInfo->description = "SOCKS proxy on port " + std::to_string(localPort);
+
+    auto* dargs = new DynamicListenerArgs{ self, pfInfo };
+    pfInfo->hThread = CreateThread(NULL, 0, DynamicForwardListenerThread, dargs, 0, NULL);
+    if (!pfInfo->hThread) {
+        delete dargs;
+        return "";
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(forwardMutex);
+        portForwards[forwardId] = pfInfo;
+    }
+    return forwardId;
+}
+
+bool SSHSession::StopPortForward(const std::string& forwardId) {
+    std::shared_ptr<PortForwardInfo> pf = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(forwardMutex);
+        auto it = portForwards.find(forwardId);
+        if (it != portForwards.end()) {
+            pf = it->second;
+            portForwards.erase(it);
+        }
+    }
+
+    if (!pf) return false;
+
+    pf->active = false;
+    if (pf->serverSocket != INVALID_SOCKET) {
+        closesocket(pf->serverSocket);
+    }
+
+    if (pf->hThread) {
+        WaitForSingleObject(pf->hThread, 500);
+        CloseHandle(pf->hThread);
+        pf->hThread = NULL;
+    }
+
+    return true;
+}
+
+std::string SSHSession::ListPortForwards() {
+    nlohmann::json arr = nlohmann::json::array();
+    std::lock_guard<std::mutex> lock(forwardMutex);
+    for (auto& pair : portForwards) {
+        auto pf = pair.second;
+        nlohmann::json obj;
+        obj["id"] = pf->id;
+        obj["type"] = pf->type;
+        obj["active"] = pf->active;
+        obj["connections"] = pf->connections;
+        obj["description"] = pf->description;
+        if (pf->type == "local") {
+            obj["local_port"] = pf->local_port;
+            obj["remote_host"] = pf->remote_host;
+            obj["remote_port"] = pf->remote_port;
+        } else if (pf->type == "remote") {
+            obj["remote_port"] = pf->remote_port_remote;
+            obj["local_host"] = pf->local_host;
+            obj["local_port"] = pf->local_port;
+        } else if (pf->type == "dynamic") {
+            obj["local_port"] = pf->local_port;
+        }
+        arr.push_back(obj);
+    }
+    return arr.dump();
+}
+
+void SSHSession::RelayData(SOCKET localSock, LIBSSH2_CHANNEL* channel, std::shared_ptr<SSHSession> session, std::shared_ptr<PortForwardInfo> pfInfo) {
+    u_long mode = 1;
+    ioctlsocket(localSock, FIONBIO, &mode);
+
+    char localBuf[16384];
+    char sshBuf[16384];
+    
+    int localLen = 0;
+    int sshLen = 0;
+    
+    bool localClosed = false;
+    bool sshClosed = false;
+    
+    while (pfInfo->active && session->running && !localClosed && !sshClosed) {
+        if (localLen == 0) {
+            int rc = recv(localSock, localBuf, sizeof(localBuf), 0);
+            if (rc > 0) {
+                localLen = rc;
+            } else if (rc == 0) {
+                localClosed = true;
+            } else {
+                int err = WSAGetLastError();
+                if (err != WSAEWOULDBLOCK) {
+                    localClosed = true;
+                }
+            }
+        }
+        
+        if (localLen > 0) {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            int written = libssh2_channel_write(channel, localBuf, localLen);
+            if (written > 0) {
+                if (written < localLen) {
+                    memmove(localBuf, localBuf + written, localLen - written);
+                }
+                localLen -= written;
+            } else if (written < 0) {
+                if (written != LIBSSH2_ERROR_EAGAIN) {
+                    sshClosed = true;
+                }
+            }
+        }
+        
+        if (sshLen == 0) {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            int readBytes = libssh2_channel_read(channel, sshBuf, sizeof(sshBuf));
+            if (readBytes > 0) {
+                sshLen = readBytes;
+            } else if (readBytes < 0) {
+                if (readBytes != LIBSSH2_ERROR_EAGAIN) {
+                    sshClosed = true;
+                }
+            } else {
+                sshClosed = true;
+            }
+        }
+        
+        if (sshLen > 0) {
+            int sent = send(localSock, sshBuf, sshLen, 0);
+            if (sent > 0) {
+                if (sent < sshLen) {
+                    memmove(sshBuf, sshBuf + sent, sshLen - sent);
+                }
+                sshLen -= sent;
+            } else if (sent < 0) {
+                int err = WSAGetLastError();
+                if (err != WSAEWOULDBLOCK) {
+                    localClosed = true;
+                }
+            }
+        }
+        
+        if (localLen == 0 && sshLen == 0) {
+            Sleep(1);
+        }
+    }
+    
+    closesocket(localSock);
+    
+    while (true) {
+        int rc = 0;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            rc = libssh2_channel_close(channel);
+        }
+        if (rc != LIBSSH2_ERROR_EAGAIN) break;
+        Sleep(5);
+    }
+    while (true) {
+        int rc = 0;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            rc = libssh2_channel_free(channel);
+        }
+        if (rc != LIBSSH2_ERROR_EAGAIN) break;
+        Sleep(5);
+    }
+    
+    std::lock_guard<std::mutex> lock(session->forwardMutex);
+    pfInfo->connections = (std::max)(0, pfInfo->connections - 1);
+}
 
 // 异步文件上传线程
 void UploadThread(std::shared_ptr<SSHSession> session, std::string fileData, std::string remotePath, std::string uploadId) {
@@ -1687,6 +3133,87 @@ public:
 
 SessionManager globalSessionManager;
 
+FILETIME GetLastWriteTime(const std::wstring& filePath) {
+    FILETIME ftWrite = { 0 };
+    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        GetFileTime(hFile, NULL, NULL, &ftWrite);
+        CloseHandle(hFile);
+    }
+    return ftWrite;
+}
+
+bool IsFileTimeNewer(const FILETIME& ft1, const FILETIME& ft2) {
+    ULARGE_INTEGER u1, u2;
+    u1.LowPart = ft1.dwLowDateTime;
+    u1.HighPart = ft1.dwHighDateTime;
+    u2.LowPart = ft2.dwLowDateTime;
+    u2.HighPart = ft2.dwHighDateTime;
+    return u1.QuadPart > u2.QuadPart;
+}
+
+bool SyncEditedFile(const std::wstring& tempPath) {
+    std::string sessId;
+    std::string remotePath;
+    FILETIME originalMtime;
+    
+    {
+        std::lock_guard<std::mutex> lock(editMappingMutex);
+        auto it = editMappings.find(tempPath);
+        if (it == editMappings.end()) return false;
+        sessId = it->second.sessionId;
+        remotePath = it->second.remotePath;
+        originalMtime = it->second.lastWriteTime;
+    }
+
+    FILETIME currentMtime = GetLastWriteTime(tempPath);
+    if (!IsFileTimeNewer(currentMtime, originalMtime)) {
+        return true; 
+    }
+
+    std::ifstream file(tempPath, std::ios::binary);
+    if (!file.is_open()) return false;
+    std::string fileData((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+
+    auto session = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+    if (!session) return false;
+
+    std::string base64Content = Base64Encode(fileData);
+    std::string uploadRes = session->UploadFileContent(base64Content, remotePath);
+    
+    try {
+        auto j = nlohmann::json::parse(uploadRes);
+        if (j.value("success", false)) {
+            {
+                std::lock_guard<std::mutex> lock(editMappingMutex);
+                if (editMappings.find(tempPath) != editMappings.end()) {
+                    editMappings[tempPath].lastWriteTime = currentMtime;
+                }
+            }
+            
+            size_t pos = remotePath.find_last_of("/\\");
+            std::string filename = (pos == std::string::npos) ? remotePath : remotePath.substr(pos + 1);
+            std::wstring filenameW = Utf8ToUtf16(filename);
+            
+            if (webviewWindow != nullptr) {
+                webviewWindow->ExecuteScript((L"if (typeof showSyncNotification === 'function') { showSyncNotification(\"" + filenameW + L"\"); }").c_str(), nullptr);
+            }
+            return true;
+        }
+    } catch (...) {}
+    
+    return false;
+}
+
+void CleanupEditMappings() {
+    std::lock_guard<std::mutex> lock(editMappingMutex);
+    for (auto& pair : editMappings) {
+        DeleteFileW(pair.first.c_str());
+    }
+    editMappings.clear();
+}
+
 // API router and handler
 void HandleApiCall(const std::string& reqId, const std::string& action, const nlohmann::json& args) {
     nlohmann::json response;
@@ -1904,6 +3431,248 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string sessionId = "ssh_" + std::to_string(GetTickCount64()) + "_" + std::to_string(rand() % 1000);
             response["status"] = "success";
             response["result"] = sessionId;
+        }
+        else if (action == "get_system_info") {
+            std::string sessId = args[0].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->GetSystemInfo();
+            } else {
+                res = "{\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "get_system_stats") {
+            std::string sessId = args[0].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->GetSystemStats();
+            } else {
+                res = "{\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "get_process_list") {
+            std::string sessId = args[0].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->GetProcessList();
+            } else {
+                res = "{\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "get_disk_usage") {
+            std::string sessId = args[0].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->GetDiskUsage();
+            } else {
+                res = "{\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "get_network_info") {
+            std::string sessId = args[0].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->GetNetworkInfo();
+            } else {
+                res = "{\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "create_local_port_forward") {
+            std::string sessId = args[0].get<std::string>();
+            int localPort = 0;
+            if (args[1].is_number()) localPort = args[1].get<int>();
+            else if (args[1].is_string()) localPort = std::stoi(args[1].get<std::string>());
+            
+            std::string remoteHost = args[2].get<std::string>();
+            
+            int remotePort = 0;
+            if (args[3].is_number()) remotePort = args[3].get<int>();
+            else if (args[3].is_string()) remotePort = std::stoi(args[3].get<std::string>());
+            
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string resId = "";
+            if (sshSess) {
+                resId = sshSess->CreateLocalPortForward(sshSess, localPort, remoteHost, remotePort);
+            }
+            response["status"] = "success";
+            response["result"] = resId;
+        }
+        else if (action == "create_remote_port_forward") {
+            std::string sessId = args[0].get<std::string>();
+            int remotePort = 0;
+            if (args[1].is_number()) remotePort = args[1].get<int>();
+            else if (args[1].is_string()) remotePort = std::stoi(args[1].get<std::string>());
+            
+            std::string localHost = args[2].get<std::string>();
+            
+            int localPort = 0;
+            if (args[3].is_number()) localPort = args[3].get<int>();
+            else if (args[3].is_string()) localPort = std::stoi(args[3].get<std::string>());
+            
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string resId = "";
+            if (sshSess) {
+                resId = sshSess->CreateRemotePortForward(sshSess, remotePort, localHost, localPort);
+            }
+            response["status"] = "success";
+            response["result"] = resId;
+        }
+        else if (action == "create_dynamic_port_forward") {
+            std::string sessId = args[0].get<std::string>();
+            int localPort = 0;
+            if (args[1].is_number()) localPort = args[1].get<int>();
+            else if (args[1].is_string()) localPort = std::stoi(args[1].get<std::string>());
+            
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string resId = "";
+            if (sshSess) {
+                resId = sshSess->CreateDynamicPortForward(sshSess, localPort);
+            }
+            response["status"] = "success";
+            response["result"] = resId;
+        }
+        else if (action == "stop_port_forward") {
+            std::string sessId = args[0].get<std::string>();
+            std::string forwardId = args[1].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            bool ok = false;
+            if (sshSess) {
+                ok = sshSess->StopPortForward(forwardId);
+            }
+            response["status"] = "success";
+            response["result"] = ok;
+        }
+        else if (action == "list_port_forwards") {
+            std::string sessId = args[0].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string resList = "[]";
+            if (sshSess) {
+                resList = sshSess->ListPortForwards();
+            }
+            response["status"] = "success";
+            response["result"] = resList;
+        }
+        else if (action == "edit_file") {
+            std::string sessId = args[0].get<std::string>();
+            std::string remotePath = args[1].get<std::string>();
+            
+            nlohmann::json res;
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            if (sshSess) {
+                std::string downloadRes = sshSess->DownloadFileContent(remotePath);
+                try {
+                    auto j = nlohmann::json::parse(downloadRes);
+                    if (j.value("success", false)) {
+                        std::string base64Content = j.value("content", "");
+                        std::string fileData = Base64Decode(base64Content);
+                        
+                        wchar_t tempDir[MAX_PATH];
+                        GetTempPathW(MAX_PATH, tempDir);
+                        
+                        size_t slashPos = remotePath.find_last_of("/\\");
+                        std::string rawFilename = (slashPos == std::string::npos) ? remotePath : remotePath.substr(slashPos + 1);
+                        std::wstring wFilename = Utf8ToUtf16(rawFilename);
+                        
+                        std::wstring fullTempPath = std::wstring(tempDir) + L"prism_edit_" + std::to_wstring(GetTickCount64()) + L"_" + wFilename;
+                        
+                        std::ofstream f(fullTempPath, std::ios::binary);
+                        if (f.is_open()) {
+                            f.write(fileData.data(), fileData.size());
+                            f.close();
+                            
+                            FILETIME ft = GetLastWriteTime(fullTempPath);
+                            {
+                                std::lock_guard<std::mutex> lock(editMappingMutex);
+                                editMappings[fullTempPath] = { sessId, remotePath, ft };
+                            }
+                            
+                            ShellExecuteW(NULL, L"open", fullTempPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+                            
+                            std::thread([fullTempPath]() {
+                                while (true) {
+                                    Sleep(500);
+                                    
+                                    bool mappingExists = false;
+                                    {
+                                        std::lock_guard<std::mutex> lock(editMappingMutex);
+                                        if (editMappings.find(fullTempPath) != editMappings.end()) {
+                                            mappingExists = true;
+                                        }
+                                    }
+                                    
+                                    if (!mappingExists) {
+                                        DeleteFileW(fullTempPath.c_str());
+                                        break;
+                                    }
+                                    
+                                    SyncEditedFile(fullTempPath);
+                                }
+                            }).detach();
+                            
+                            res["success"] = true;
+                            res["temp_path"] = Utf16ToUtf8(fullTempPath);
+                            res["file_name"] = rawFilename;
+                        } else {
+                            res["success"] = false;
+                            res["error"] = "Failed to write local temp file";
+                        }
+                    } else {
+                        res["success"] = false;
+                        res["error"] = j.value("error", "Failed to download file content");
+                    }
+                } catch (const std::exception& e) {
+                    res["success"] = false;
+                    res["error"] = e.what();
+                }
+            } else {
+                res["success"] = false;
+                res["error"] = "Session not found";
+            }
+            
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "sync_edited_file") {
+            std::string tempPathUtf8 = args[0].get<std::string>();
+            std::wstring tempPath = Utf8ToUtf16(tempPathUtf8);
+            
+            bool ok = SyncEditedFile(tempPath);
+            nlohmann::json res;
+            res["success"] = ok;
+            if (ok) res["message"] = "File synced successfully";
+            else res["error"] = "Failed to sync file";
+            
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "cleanup_temp_file") {
+            std::string tempPathUtf8 = args[0].get<std::string>();
+            std::wstring tempPath = Utf8ToUtf16(tempPathUtf8);
+            
+            {
+                std::lock_guard<std::mutex> lock(editMappingMutex);
+                editMappings.erase(tempPath);
+            }
+            
+            nlohmann::json res;
+            res["success"] = true;
+            response["status"] = "success";
+            response["result"] = res.dump();
         }
         else if (action == "list_directory") {
             std::string sessId = args[0].get<std::string>();
@@ -2430,6 +4199,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     }
 
     globalSessionManager.Cleanup();
+    CleanupEditMappings();
     libssh2_exit();
 
     return (int)msg.wParam;
@@ -2446,6 +4216,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         break;
     case WM_DESTROY:
         globalSessionManager.Cleanup();
+        CleanupEditMappings();
         PostQuitMessage(0);
         break;
     default:
