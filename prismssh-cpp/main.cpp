@@ -456,6 +456,7 @@ public:
     std::mutex bufferMutex;
     bool running = false;
     HANDLE hReadThread = NULL;
+    std::string lastError;
 
     SSHSession(const std::string& id) : sessionId(id) {}
 
@@ -464,8 +465,12 @@ public:
     }
 
     bool Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, int cols = 80, int rows = 24) {
+        lastError = "";
         WSADATA wsaData;
-        WSAStartup(MAKEWORD(2, 2), &wsaData);
+        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+            lastError = "WSAStartup failed";
+            return false;
+        }
 
         struct addrinfo hints = { 0 }, *addrs = NULL;
         hints.ai_family = AF_UNSPEC;
@@ -473,10 +478,13 @@ public:
         hints.ai_protocol = IPPROTO_TCP;
 
         std::string portStr = std::to_string(port);
-        if (getaddrinfo(hostname.c_str(), portStr.c_str(), &hints, &addrs) != 0) {
+        int gai_res = getaddrinfo(hostname.c_str(), portStr.c_str(), &hints, &addrs);
+        if (gai_res != 0) {
+            lastError = "getaddrinfo failed for " + hostname + ":" + portStr + " (error: " + std::to_string(gai_res) + ")";
             return false;
         }
 
+        int connect_err = 0;
         for (struct addrinfo* addr = addrs; addr != NULL; addr = addr->ai_next) {
             sock = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
             if (sock == INVALID_SOCKET) continue;
@@ -484,12 +492,16 @@ public:
             if (connect(sock, addr->ai_addr, (int)addr->ai_addrlen) == 0) {
                 break;
             }
+            connect_err = WSAGetLastError();
             closesocket(sock);
             sock = INVALID_SOCKET;
         }
         freeaddrinfo(addrs);
 
-        if (sock == INVALID_SOCKET) return false;
+        if (sock == INVALID_SOCKET) {
+            lastError = "socket connect failed (WSAGetLastError: " + std::to_string(connect_err) + ")";
+            return false;
+        }
 
         int bufSize = 256 * 1024;
         setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (char*)&bufSize, sizeof(bufSize));
@@ -501,10 +513,17 @@ public:
         if (!sshSession) {
             closesocket(sock);
             sock = INVALID_SOCKET;
+            lastError = "libssh2_session_init failed";
             return false;
         }
 
-        if (libssh2_session_handshake(sshSession, sock) != 0) {
+        int handshake_res = libssh2_session_handshake(sshSession, sock);
+        if (handshake_res != 0) {
+            char *err_msg = NULL;
+            int err_msg_len = 0;
+            libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+            std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+            lastError = "libssh2 handshake failed (code: " + std::to_string(handshake_res) + ", detail: " + detail + ")";
             libssh2_session_free(sshSession);
             sshSession = NULL;
             closesocket(sock);
@@ -512,7 +531,13 @@ public:
             return false;
         }
 
-        if (libssh2_userauth_password(sshSession, username.c_str(), password.c_str()) != 0) {
+        int auth_res = libssh2_userauth_password(sshSession, username.c_str(), password.c_str());
+        if (auth_res != 0) {
+            char *err_msg = NULL;
+            int err_msg_len = 0;
+            libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+            std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+            lastError = "SSH auth failed (code: " + std::to_string(auth_res) + ", detail: " + detail + ")";
             libssh2_session_free(sshSession);
             sshSession = NULL;
             closesocket(sock);
@@ -522,6 +547,11 @@ public:
 
         sshChannel = libssh2_channel_open_session(sshSession);
         if (!sshChannel) {
+            char *err_msg = NULL;
+            int err_msg_len = 0;
+            libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+            std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+            lastError = "libssh2 open session channel failed (detail: " + detail + ")";
             libssh2_session_free(sshSession);
             sshSession = NULL;
             closesocket(sock);
@@ -529,7 +559,13 @@ public:
             return false;
         }
 
-        if (libssh2_channel_request_pty(sshChannel, "xterm-256color") != 0) {
+        int pty_res = libssh2_channel_request_pty(sshChannel, "xterm-256color");
+        if (pty_res != 0) {
+            char *err_msg = NULL;
+            int err_msg_len = 0;
+            libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+            std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+            lastError = "libssh2 request pty failed (code: " + std::to_string(pty_res) + ", detail: " + detail + ")";
             libssh2_channel_free(sshChannel);
             sshChannel = NULL;
             libssh2_session_free(sshSession);
@@ -539,7 +575,13 @@ public:
             return false;
         }
 
-        if (libssh2_channel_shell(sshChannel) != 0) {
+        int shell_res = libssh2_channel_shell(sshChannel);
+        if (shell_res != 0) {
+            char *err_msg = NULL;
+            int err_msg_len = 0;
+            libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+            std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+            lastError = "libssh2 shell request failed (code: " + std::to_string(shell_res) + ", detail: " + detail + ")";
             libssh2_channel_free(sshChannel);
             sshChannel = NULL;
             libssh2_session_free(sshSession);
@@ -819,7 +861,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 retObj["success"] = true;
             } else {
                 retObj["success"] = false;
-                retObj["error"] = "SSH connection failed before opening a shell";
+                retObj["error"] = session->lastError.empty() ? "SSH connection failed before opening a shell" : session->lastError;
             }
             
             response["status"] = "success";
