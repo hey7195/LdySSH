@@ -1071,52 +1071,63 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                         webviewWindow->AddScriptToExecuteOnDocumentCreated(polyfillScript.c_str(), nullptr);
 
                         std::wstring exeDir = GetExeDirectory();
-                        std::wstring html = ReadFileToString(exeDir + L"\\ui\\template.html");
-                        std::wstring css = ReadFileToString(exeDir + L"\\ui\\static\\styles.css");
-                        std::wstring js = ReadFileToString(exeDir + L"\\ui\\static\\app.js");
                         std::wstring commandsJson = ReadFileToString(exeDir + L"\\ui\\static\\commands.json");
                         if (commandsJson.empty()) {
                             commandsJson = L"[]";
                         }
+                        std::wstring suggestionsScript = L"window.LINUX_COMMAND_SUGGESTIONS = " + commandsJson + L";";
+                        webviewWindow->AddScriptToExecuteOnDocumentCreated(suggestionsScript.c_str(), nullptr);
 
-                        // Inject commands.json into app.js
-                        size_t injectPos = js.find(L"/* INJECT_COMMANDS_JSON */");
-                        if (injectPos != std::wstring::npos) {
-                            js.replace(injectPos, 26, commandsJson);
-                        }
-
-                        // Precise CSS injection
-                        size_t cssPos = html.find(L"static/styles.css");
-                        if (cssPos != std::wstring::npos) {
-                            size_t tagStart = html.rfind(L"<link", cssPos);
-                            size_t tagEnd = html.find(L">", cssPos);
-                            if (tagStart != std::wstring::npos && tagEnd != std::wstring::npos) {
-                                html.replace(tagStart, tagEnd - tagStart + 1, L"<style>\n" + css + L"\n</style>");
-                            }
+                        // Try to map virtual host name to enable localStorage
+                        ComPtr<ICoreWebView2_3> webviewWindow3;
+                        if (SUCCEEDED(webviewWindow.As(&webviewWindow3))) {
+                            std::wstring uiPath = exeDir + L"\\ui";
+                            webviewWindow3->SetVirtualHostNameToFolderMapping(
+                                L"prismssh.local",
+                                uiPath.c_str(),
+                                COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW
+                            );
+                            webviewWindow->OpenDevToolsWindow();
+                            webviewWindow->Navigate(L"https://prismssh.local/template.html");
                         } else {
-                            size_t headPos = html.find(L"</head>");
-                            if (headPos != std::wstring::npos) {
-                                html.insert(headPos, L"<style>\n" + css + L"\n</style>\n");
-                            }
-                        }
+                            // Fallback to NavigateToString
+                            std::wstring html = ReadFileToString(exeDir + L"\\ui\\template.html");
+                            std::wstring css = ReadFileToString(exeDir + L"\\ui\\static\\styles.css");
+                            std::wstring js = ReadFileToString(exeDir + L"\\ui\\static\\app.js");
 
-                        // Precise JS injection
-                        size_t jsPos = html.find(L"static/app.js");
-                        if (jsPos != std::wstring::npos) {
-                            size_t tagStart = html.rfind(L"<script", jsPos);
-                            size_t tagEnd = html.find(L"</script>", jsPos);
-                            if (tagStart != std::wstring::npos && tagEnd != std::wstring::npos) {
-                                html.replace(tagStart, tagEnd - tagStart + 9, L"<script>\n" + js + L"\n</script>");
+                            // Precise CSS injection
+                            size_t cssPos = html.find(L"static/styles.css");
+                            if (cssPos != std::wstring::npos) {
+                                size_t tagStart = html.rfind(L"<link", cssPos);
+                                size_t tagEnd = html.find(L">", cssPos);
+                                if (tagStart != std::wstring::npos && tagEnd != std::wstring::npos) {
+                                    html.replace(tagStart, tagEnd - tagStart + 1, L"<style>\n" + css + L"\n</style>");
+                                }
+                            } else {
+                                size_t headPos = html.find(L"</head>");
+                                if (headPos != std::wstring::npos) {
+                                    html.insert(headPos, L"<style>\n" + css + L"\n</style>\n");
+                                }
                             }
-                        } else {
-                            size_t bodyPos = html.find(L"</body>");
-                            if (bodyPos != std::wstring::npos) {
-                                html.insert(bodyPos, L"<script>\n" + js + L"\n</script>\n");
-                            }
-                        }
 
-                        webviewWindow->OpenDevToolsWindow();
-                        webviewWindow->NavigateToString(html.c_str());
+                            // Precise JS injection
+                            size_t jsPos = html.find(L"static/app.js");
+                            if (jsPos != std::wstring::npos) {
+                                size_t tagStart = html.rfind(L"<script", jsPos);
+                                size_t tagEnd = html.find(L"</script>", jsPos);
+                                if (tagStart != std::wstring::npos && tagEnd != std::wstring::npos) {
+                                    html.replace(tagStart, tagEnd - tagStart + 9, L"<script>\n" + js + L"\n</script>");
+                                }
+                            } else {
+                                size_t bodyPos = html.find(L"</body>");
+                                if (bodyPos != std::wstring::npos) {
+                                    html.insert(bodyPos, L"<script>\n" + js + L"\n</script>\n");
+                                }
+                            }
+
+                            webviewWindow->OpenDevToolsWindow();
+                            webviewWindow->NavigateToString(html.c_str());
+                        }
                         return S_OK;
                     }).Get());
                 return S_OK;
