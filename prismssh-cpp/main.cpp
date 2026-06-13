@@ -1,4 +1,5 @@
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -18,13 +19,122 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <libssh2.h>
+#include <libssh2_sftp.h>
+#include <thread>
+#include <algorithm>
+#include <commdlg.h>
+#include <shlobj.h>
+#include <shellapi.h>
 
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
 
 using namespace Microsoft::WRL;
+
+// Global Transfer Progress Tracker
+struct TransferProgress {
+    std::string id;
+    long long transferredBytes = 0;
+    long long totalBytes = 0;
+    int percentage = 0;
+    bool completed = false;
+    bool cancelled = false;
+    std::string error;
+    std::string content;
+};
+
+class ProgressManager {
+private:
+    std::unordered_map<std::string, TransferProgress> progresses;
+    std::mutex mtx;
+
+public:
+    void SetProgress(const std::string& id, long long transferred, long long total, bool completed = false, const std::string& error = "") {
+        std::lock_guard<std::mutex> lock(mtx);
+        TransferProgress& p = progresses[id];
+        p.id = id;
+        p.transferredBytes = transferred;
+        p.totalBytes = total;
+        p.completed = completed;
+        p.error = error;
+        if (total > 0) {
+            p.percentage = (int)((transferred * 100) / total);
+        } else {
+            p.percentage = completed ? 100 : 0;
+        }
+    }
+
+    void SetCompletedWithContent(const std::string& id, long long transferred, long long total, const std::string& content) {
+        std::lock_guard<std::mutex> lock(mtx);
+        TransferProgress& p = progresses[id];
+        p.id = id;
+        p.transferredBytes = transferred;
+        p.totalBytes = total;
+        p.completed = true;
+        p.content = content;
+        p.percentage = 100;
+    }
+
+    void Cancel(const std::string& id) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (progresses.find(id) != progresses.end()) {
+            progresses[id].cancelled = true;
+        }
+    }
+
+    bool IsCancelled(const std::string& id) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (progresses.find(id) != progresses.end()) {
+            return progresses[id].cancelled;
+        }
+        return false;
+    }
+
+    std::string GetProgressJson(const std::string& id) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (progresses.find(id) == progresses.end()) {
+            return "{\"success\":false,\"error\":\"Not found\"}";
+        }
+        const TransferProgress& p = progresses[id];
+        nlohmann::json res;
+        res["success"] = true;
+        res["id"] = p.id;
+        res["transferred"] = p.transferredBytes;
+        res["downloaded"] = p.transferredBytes;
+        res["total"] = p.totalBytes;
+        res["percentage"] = p.percentage;
+        res["completed"] = p.completed;
+        res["cancelled"] = p.cancelled;
+        
+        if (p.cancelled) {
+            res["status"] = "cancelled";
+        } else if (!p.error.empty()) {
+            res["status"] = "error";
+            res["error"] = p.error;
+        } else if (p.completed) {
+            res["status"] = "completed";
+        } else {
+            res["status"] = "downloading";
+        }
+
+        if (p.completed && !p.content.empty()) {
+            res["content"] = p.content;
+        }
+        return res.dump();
+    }
+
+    void Clear(const std::string& id) {
+        std::lock_guard<std::mutex> lock(mtx);
+        progresses.erase(id);
+    }
+};
+
+ProgressManager globalProgressManager;
 
 // Global variables
 HINSTANCE hInst;
@@ -101,6 +211,22 @@ static const std::string base64_chars =
 
 inline bool is_base64(unsigned char c) {
   return (isalnum(c) || (c == '+') || (c == '/'));
+}
+
+std::string Base64Encode(const std::string& data) {
+    std::string out;
+    int val = 0, valb = -6;
+    for (unsigned char c : data) {
+        val = (val << 8) + c;
+        valb += 8;
+        while (valb >= 0) {
+            out.push_back(base64_chars[(val >> valb) & 0x3F]);
+            valb -= 6;
+        }
+    }
+    if (valb > -6) out.push_back(base64_chars[((val << 8) >> (valb + 8)) & 0x3F]);
+    while (out.size() % 4) out.push_back('=');
+    return out;
 }
 
 std::string Base64Decode(std::string const& encoded_string) {
@@ -451,9 +577,11 @@ public:
     SOCKET sock = INVALID_SOCKET;
     LIBSSH2_SESSION* sshSession = NULL;
     LIBSSH2_CHANNEL* sshChannel = NULL;
+    LIBSSH2_SFTP* sftpSession = NULL;
     
     std::string outputBuffer;
     std::mutex bufferMutex;
+    std::mutex sshMutex;
     bool running = false;
     HANDLE hReadThread = NULL;
     std::string lastError;
@@ -593,6 +721,12 @@ public:
 
         libssh2_channel_request_pty_size(sshChannel, cols, rows);
 
+        // 初始化 SFTP
+        sftpSession = libssh2_sftp_init(sshSession);
+
+        // 设置为非阻塞模式
+        libssh2_session_set_blocking(sshSession, 0);
+
         running = true;
         hReadThread = CreateThread(NULL, 0, StaticReadThread, this, 0, NULL);
 
@@ -601,6 +735,7 @@ public:
 
     bool SendInput(const std::string& data) override {
         if (!running || !sshChannel) return false;
+        std::lock_guard<std::mutex> lock(sshMutex);
         int written = 0;
         int totalWritten = 0;
         int size = (int)data.size();
@@ -627,6 +762,7 @@ public:
 
     void Resize(int cols, int rows) override {
         if (running && sshChannel) {
+            std::lock_guard<std::mutex> lock(sshMutex);
             libssh2_channel_request_pty_size(sshChannel, cols, rows);
         }
     }
@@ -635,17 +771,25 @@ public:
         if (!running) return;
         running = false;
 
-        if (sshChannel) {
-            libssh2_channel_send_eof(sshChannel);
-            libssh2_channel_close(sshChannel);
-            libssh2_channel_free(sshChannel);
-            sshChannel = NULL;
-        }
+        {
+            std::lock_guard<std::mutex> lock(sshMutex);
+            if (sftpSession) {
+                libssh2_sftp_shutdown(sftpSession);
+                sftpSession = NULL;
+            }
 
-        if (sshSession) {
-            libssh2_session_disconnect(sshSession, "Normal Shutdown");
-            libssh2_session_free(sshSession);
-            sshSession = NULL;
+            if (sshChannel) {
+                libssh2_channel_send_eof(sshChannel);
+                libssh2_channel_close(sshChannel);
+                libssh2_channel_free(sshChannel);
+                sshChannel = NULL;
+            }
+
+            if (sshSession) {
+                libssh2_session_disconnect(sshSession, "Normal Shutdown");
+                libssh2_session_free(sshSession);
+                sshSession = NULL;
+            }
         }
 
         if (sock != INVALID_SOCKET) {
@@ -664,6 +808,348 @@ public:
         return running;
     }
 
+    // SFTP Operations
+    std::string ListDirectory(const std::string& path) {
+        if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+        LIBSSH2_SFTP_HANDLE* handle = NULL;
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                handle = libssh2_sftp_opendir(sftpSession, path.c_str());
+                if (handle) break;
+                int err = libssh2_session_last_errno(sshSession);
+                if (err != LIBSSH2_ERROR_EAGAIN) {
+                    char *err_msg = NULL;
+                    int err_msg_len = 0;
+                    libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+                    std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+                    return "{\"success\":false,\"error\":\"opendir failed: " + detail + "\"}";
+                }
+            }
+            Sleep(5);
+        }
+
+        nlohmann::json filesList = nlohmann::json::array();
+        char mem[512];
+        LIBSSH2_SFTP_ATTRIBUTES attrs;
+        while (true) {
+            int rc = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_sftp_readdir(handle, mem, sizeof(mem) - 1, &attrs);
+            }
+            if (rc == LIBSSH2_ERROR_EAGAIN) {
+                Sleep(5);
+                continue;
+            }
+            if (rc <= 0) break;
+
+            mem[rc] = '\0';
+            std::string name(mem);
+            if (name == "." || name == "..") continue;
+
+            nlohmann::json item;
+            item["name"] = name;
+            if (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE) {
+                item["size"] = attrs.filesize;
+                item["raw_size"] = attrs.filesize;
+                double sz = (double)attrs.filesize;
+                char szBuf[64];
+                if (sz < 1024) sprintf_s(szBuf, "%.0f B", sz);
+                else if (sz < 1024 * 1024) sprintf_s(szBuf, "%.1f KB", sz / 1024);
+                else if (sz < 1024 * 1024 * 1024) sprintf_s(szBuf, "%.1f MB", sz / (1024 * 1024));
+                else sprintf_s(szBuf, "%.1f GB", sz / (1024 * 1024 * 1024));
+                item["size"] = std::string(szBuf);
+            } else {
+                item["size"] = "0 B";
+                item["raw_size"] = 0;
+            }
+
+            bool isDir = false;
+            if (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) {
+                item["permissions"] = attrs.permissions;
+                if (LIBSSH2_SFTP_S_ISDIR(attrs.permissions)) {
+                    isDir = true;
+                }
+            }
+            item["type"] = isDir ? "directory" : "file";
+
+            if (attrs.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) {
+                item["mtime"] = attrs.mtime;
+                time_t t = attrs.mtime;
+                struct tm tm_info;
+                if (localtime_s(&tm_info, &t) == 0) {
+                    char timeBuf[64];
+                    strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", &tm_info);
+                    item["date"] = std::string(timeBuf);
+                } else {
+                    item["date"] = "";
+                }
+            } else {
+                item["mtime"] = 0;
+                item["date"] = "";
+            }
+            filesList.push_back(item);
+        }
+
+        while (true) {
+            int rc = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_sftp_closedir(handle);
+            }
+            if (rc == LIBSSH2_ERROR_EAGAIN) {
+                Sleep(5);
+                continue;
+            }
+            break;
+        }
+
+        nlohmann::json response;
+        response["success"] = true;
+        response["files"] = filesList;
+        return response.dump();
+    }
+
+    std::string CreateDirectory(const std::string& path) {
+        if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+        int rc = 0;
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_sftp_mkdir(sftpSession, path.c_str(), LIBSSH2_SFTP_S_IRWXU | LIBSSH2_SFTP_S_IRGRP | LIBSSH2_SFTP_S_IXGRP | LIBSSH2_SFTP_S_IROTH | LIBSSH2_SFTP_S_IXOTH);
+                if (rc != LIBSSH2_ERROR_EAGAIN) break;
+            }
+            Sleep(5);
+        }
+        if (rc != 0) {
+            char *err_msg = NULL;
+            int err_msg_len = 0;
+            libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+            std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+            return "{\"success\":false,\"error\":\"mkdir failed: " + detail + "\"}";
+        }
+        return "{\"success\":true}";
+    }
+
+    std::string DeleteFile(const std::string& path) {
+        if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+        int rc = 0;
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_sftp_unlink(sftpSession, path.c_str());
+                if (rc != LIBSSH2_ERROR_EAGAIN) break;
+            }
+            Sleep(5);
+        }
+        if (rc != 0) {
+            char *err_msg = NULL;
+            int err_msg_len = 0;
+            libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+            std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+            return "{\"success\":false,\"error\":\"unlink failed: " + detail + "\"}";
+        }
+        return "{\"success\":true}";
+    }
+
+    std::string DeleteDirectory(const std::string& path) {
+        if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+        int rc = 0;
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_sftp_rmdir(sftpSession, path.c_str());
+                if (rc != LIBSSH2_ERROR_EAGAIN) break;
+            }
+            Sleep(5);
+        }
+        if (rc != 0) {
+            char *err_msg = NULL;
+            int err_msg_len = 0;
+            libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+            std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+            return "{\"success\":false,\"error\":\"rmdir failed: " + detail + "\"}";
+        }
+        return "{\"success\":true}";
+    }
+
+    std::string RenameFile(const std::string& oldPath, const std::string& newPath) {
+        if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+        int rc = 0;
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_sftp_rename(sftpSession, oldPath.c_str(), newPath.c_str());
+                if (rc != LIBSSH2_ERROR_EAGAIN) break;
+            }
+            Sleep(5);
+        }
+        if (rc != 0) {
+            char *err_msg = NULL;
+            int err_msg_len = 0;
+            libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+            std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+            return "{\"success\":false,\"error\":\"rename failed: " + detail + "\"}";
+        }
+        return "{\"success\":true}";
+    }
+
+    std::string GetFileInfo(const std::string& path) {
+        if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+        LIBSSH2_SFTP_ATTRIBUTES attrs;
+        int rc = 0;
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_sftp_stat(sftpSession, path.c_str(), &attrs);
+                if (rc != LIBSSH2_ERROR_EAGAIN) break;
+            }
+            Sleep(5);
+        }
+        if (rc != 0) {
+            char *err_msg = NULL;
+            int err_msg_len = 0;
+            libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+            std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+            return "{\"success\":false,\"error\":\"stat failed: " + detail + "\"}";
+        }
+        nlohmann::json info;
+        info["size"] = (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE) ? attrs.filesize : 0;
+        info["permissions"] = (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) ? attrs.permissions : 0;
+        info["mtime"] = (attrs.flags & LIBSSH2_SFTP_ATTR_ACMODTIME) ? attrs.mtime : 0;
+        info["is_dir"] = (attrs.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) ? LIBSSH2_SFTP_S_ISDIR(attrs.permissions) : false;
+
+        nlohmann::json response;
+        response["success"] = true;
+        response["info"] = info;
+        return response.dump();
+    }
+
+    std::string DownloadFileContent(const std::string& path) {
+        if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+        LIBSSH2_SFTP_HANDLE* handle = NULL;
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                handle = libssh2_sftp_open(sftpSession, path.c_str(), LIBSSH2_FXF_READ, 0);
+                if (handle) break;
+                int err = libssh2_session_last_errno(sshSession);
+                if (err != LIBSSH2_ERROR_EAGAIN) {
+                    char *err_msg = NULL;
+                    int err_msg_len = 0;
+                    libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+                    std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+                    return "{\"success\":false,\"error\":\"open failed: " + detail + "\"}";
+                }
+            }
+            Sleep(5);
+        }
+
+        std::string fileData;
+        char buffer[16384];
+        while (true) {
+            int rc = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_sftp_read(handle, buffer, sizeof(buffer));
+            }
+            if (rc < 0) {
+                if (rc == LIBSSH2_ERROR_EAGAIN) {
+                    Sleep(5);
+                    continue;
+                }
+                while (true) {
+                    int c_rc = 0;
+                    {
+                        std::lock_guard<std::mutex> lock(sshMutex);
+                        c_rc = libssh2_sftp_close(handle);
+                    }
+                    if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+                    Sleep(5);
+                }
+                return "{\"success\":false,\"error\":\"read failed\"}";
+            }
+            if (rc == 0) break;
+            fileData.append(buffer, rc);
+        }
+        
+        while (true) {
+            int c_rc = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                c_rc = libssh2_sftp_close(handle);
+            }
+            if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+            Sleep(5);
+        }
+
+        nlohmann::json response;
+        response["success"] = true;
+        response["content"] = Base64Encode(fileData);
+        return response.dump();
+    }
+
+    std::string UploadFileContent(const std::string& base64Content, const std::string& path) {
+        if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+        LIBSSH2_SFTP_HANDLE* handle = NULL;
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                handle = libssh2_sftp_open(sftpSession, path.c_str(), LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC, 0644);
+                if (handle) break;
+                int err = libssh2_session_last_errno(sshSession);
+                if (err != LIBSSH2_ERROR_EAGAIN) {
+                    char *err_msg = NULL;
+                    int err_msg_len = 0;
+                    libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+                    std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+                    return "{\"success\":false,\"error\":\"open failed: " + detail + "\"}";
+                }
+            }
+            Sleep(5);
+        }
+
+        std::string fileData = Base64Decode(base64Content);
+        int size = (int)fileData.size();
+        int totalWritten = 0;
+        while (totalWritten < size) {
+            int rc = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                rc = libssh2_sftp_write(handle, fileData.data() + totalWritten, size - totalWritten);
+            }
+            if (rc < 0) {
+                if (rc == LIBSSH2_ERROR_EAGAIN) {
+                    Sleep(5);
+                    continue;
+                }
+                while (true) {
+                    int c_rc = 0;
+                    {
+                        std::lock_guard<std::mutex> lock(sshMutex);
+                        c_rc = libssh2_sftp_close(handle);
+                    }
+                    if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+                    Sleep(5);
+                }
+                return "{\"success\":false,\"error\":\"write failed\"}";
+            }
+            totalWritten += rc;
+        }
+        
+        while (true) {
+            int c_rc = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                c_rc = libssh2_sftp_close(handle);
+            }
+            if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+            Sleep(5);
+        }
+        return "{\"success\":true}";
+    }
+
 private:
     static DWORD WINAPI StaticReadThread(LPVOID param) {
         SSHSession* self = (SSHSession*)param;
@@ -674,21 +1160,481 @@ private:
     void ReadLoop() {
         char buffer[16384];
         while (running && sshChannel) {
-            int readBytes = libssh2_channel_read(sshChannel, buffer, sizeof(buffer) - 1);
-            if (readBytes > 0) {
-                std::lock_guard<std::mutex> lock(bufferMutex);
-                outputBuffer.append(buffer, readBytes);
-            } else if (readBytes == LIBSSH2_ERROR_EAGAIN) {
-                Sleep(5);
-            } else {
-                std::lock_guard<std::mutex> lock(bufferMutex);
-                outputBuffer.append("\r\n[SSH Connection closed]\r\n");
+            fd_set fd;
+            FD_ZERO(&fd);
+            FD_SET(sock, &fd);
+            timeval tv;
+            tv.tv_sec = 0;
+            tv.tv_usec = 50000;
+            int select_res = select(0, &fd, NULL, NULL, &tv);
+            if (select_res > 0) {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                int readBytes = libssh2_channel_read(sshChannel, buffer, sizeof(buffer) - 1);
+                if (readBytes > 0) {
+                    std::lock_guard<std::mutex> lock(bufferMutex);
+                    outputBuffer.append(buffer, readBytes);
+                } else if (readBytes < 0 && readBytes != LIBSSH2_ERROR_EAGAIN) {
+                    std::lock_guard<std::mutex> lock(bufferMutex);
+                    outputBuffer.append("\r\n[SSH Connection closed]\r\n");
+                    running = false;
+                    break;
+                }
+            } else if (select_res < 0) {
                 running = false;
                 break;
             }
         }
     }
 };
+
+// 异步文件上传线程
+void UploadThread(std::shared_ptr<SSHSession> session, std::string fileData, std::string remotePath, std::string uploadId) {
+    long long totalBytes = fileData.size();
+    long long transferred = 0;
+    
+    LIBSSH2_SFTP_HANDLE* handle = NULL;
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            handle = libssh2_sftp_open(session->sftpSession, remotePath.c_str(), LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC, 0644);
+            if (handle) break;
+            int err = libssh2_session_last_errno(session->sshSession);
+            if (err != LIBSSH2_ERROR_EAGAIN) {
+                globalProgressManager.SetProgress(uploadId, 0, totalBytes, true, "Failed to open remote file");
+                return;
+            }
+        }
+        Sleep(5);
+    }
+    
+    const int chunkSize = 32768; // 32KB
+    while (transferred < totalBytes) {
+        if (globalProgressManager.IsCancelled(uploadId)) {
+            break;
+        }
+        
+        int toWrite = (int)std::min((long long)chunkSize, totalBytes - transferred);
+        int written = 0;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            written = libssh2_sftp_write(handle, fileData.data() + transferred, toWrite);
+        }
+        
+        if (written < 0) {
+            if (written == LIBSSH2_ERROR_EAGAIN) {
+                Sleep(5);
+                continue;
+            }
+            while (true) {
+                int c_rc = 0;
+                {
+                    std::lock_guard<std::mutex> lock(session->sshMutex);
+                    c_rc = libssh2_sftp_close(handle);
+                }
+                if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+                Sleep(5);
+            }
+            globalProgressManager.SetProgress(uploadId, transferred, totalBytes, true, "Write failed");
+            return;
+        }
+        
+        transferred += written;
+        globalProgressManager.SetProgress(uploadId, transferred, totalBytes);
+        Sleep(1);
+    }
+    
+    while (true) {
+        int c_rc = 0;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            c_rc = libssh2_sftp_close(handle);
+        }
+        if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+        Sleep(5);
+    }
+    
+    if (globalProgressManager.IsCancelled(uploadId)) {
+        globalProgressManager.SetProgress(uploadId, transferred, totalBytes, true, "Cancelled");
+    } else {
+        globalProgressManager.SetProgress(uploadId, totalBytes, totalBytes, true);
+    }
+}
+
+// 异步本地路径上传线程
+void UploadFromPathThread(std::shared_ptr<SSHSession> session, std::wstring localPath, std::string remotePath, std::string uploadId) {
+    std::ifstream localFile(localPath, std::ios::binary);
+    if (!localFile.is_open()) {
+        globalProgressManager.SetProgress(uploadId, 0, 0, true, "Failed to open local file");
+        return;
+    }
+    
+    localFile.seekg(0, std::ios::end);
+    long long totalBytes = localFile.tellg();
+    localFile.seekg(0, std::ios::beg);
+    
+    globalProgressManager.SetProgress(uploadId, 0, totalBytes);
+    
+    LIBSSH2_SFTP_HANDLE* handle = NULL;
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            handle = libssh2_sftp_open(session->sftpSession, remotePath.c_str(), LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC, 0644);
+            if (handle) break;
+            int err = libssh2_session_last_errno(session->sshSession);
+            if (err != LIBSSH2_ERROR_EAGAIN) {
+                localFile.close();
+                globalProgressManager.SetProgress(uploadId, 0, totalBytes, true, "Failed to open remote file");
+                return;
+            }
+        }
+        Sleep(5);
+    }
+    
+    const int chunkSize = 32768;
+    std::vector<char> buffer(chunkSize);
+    long long transferred = 0;
+    
+    while (transferred < totalBytes) {
+        if (globalProgressManager.IsCancelled(uploadId)) {
+            break;
+        }
+        
+        localFile.read(buffer.data(), chunkSize);
+        int toWrite = (int)localFile.gcount();
+        if (toWrite <= 0) break;
+        
+        int writtenTotal = 0;
+        while (writtenTotal < toWrite) {
+            if (globalProgressManager.IsCancelled(uploadId)) {
+                break;
+            }
+            int written = 0;
+            {
+                std::lock_guard<std::mutex> lock(session->sshMutex);
+                written = libssh2_sftp_write(handle, buffer.data() + writtenTotal, toWrite - writtenTotal);
+            }
+            if (written < 0) {
+                if (written == LIBSSH2_ERROR_EAGAIN) {
+                    Sleep(5);
+                    continue;
+                }
+                while (true) {
+                    int c_rc = 0;
+                    {
+                        std::lock_guard<std::mutex> lock(session->sshMutex);
+                        c_rc = libssh2_sftp_close(handle);
+                    }
+                    if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+                    Sleep(5);
+                }
+                localFile.close();
+                globalProgressManager.SetProgress(uploadId, transferred, totalBytes, true, "Write failed");
+                return;
+            }
+            writtenTotal += written;
+        }
+        
+        transferred += toWrite;
+        globalProgressManager.SetProgress(uploadId, transferred, totalBytes);
+        Sleep(1);
+    }
+    
+    while (true) {
+        int c_rc = 0;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            c_rc = libssh2_sftp_close(handle);
+        }
+        if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+        Sleep(5);
+    }
+    localFile.close();
+    
+    if (globalProgressManager.IsCancelled(uploadId)) {
+        globalProgressManager.SetProgress(uploadId, transferred, totalBytes, true, "Cancelled");
+    } else {
+        globalProgressManager.SetProgress(uploadId, totalBytes, totalBytes, true);
+    }
+}
+
+// 异步内存下载线程
+void DownloadThread(std::shared_ptr<SSHSession> session, std::string remotePath, std::string downloadId) {
+    LIBSSH2_SFTP_HANDLE* handle = NULL;
+    LIBSSH2_SFTP_ATTRIBUTES attrs;
+    long long totalBytes = 0;
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            handle = libssh2_sftp_open(session->sftpSession, remotePath.c_str(), LIBSSH2_FXF_READ, 0);
+            if (handle) {
+                if (libssh2_sftp_stat(session->sftpSession, remotePath.c_str(), &attrs) == 0) {
+                    totalBytes = (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE) ? attrs.filesize : 0;
+                }
+                break;
+            }
+            int err = libssh2_session_last_errno(session->sshSession);
+            if (err != LIBSSH2_ERROR_EAGAIN) {
+                globalProgressManager.SetProgress(downloadId, 0, 0, true, "Failed to open remote file");
+                return;
+            }
+        }
+        Sleep(5);
+    }
+    
+    globalProgressManager.SetProgress(downloadId, 0, totalBytes);
+    
+    std::string fileData;
+    if (totalBytes > 0) fileData.reserve(totalBytes);
+    
+    const int chunkSize = 32768;
+    char buffer[chunkSize];
+    long long transferred = 0;
+    
+    while (true) {
+        if (globalProgressManager.IsCancelled(downloadId)) {
+            break;
+        }
+        
+        int readBytes = 0;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            readBytes = libssh2_sftp_read(handle, buffer, chunkSize);
+        }
+        
+        if (readBytes < 0) {
+            if (readBytes == LIBSSH2_ERROR_EAGAIN) {
+                Sleep(5);
+                continue;
+            }
+            while (true) {
+                int c_rc = 0;
+                {
+                    std::lock_guard<std::mutex> lock(session->sshMutex);
+                    c_rc = libssh2_sftp_close(handle);
+                }
+                if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+                Sleep(5);
+            }
+            globalProgressManager.SetProgress(downloadId, transferred, totalBytes, true, "Read failed");
+            return;
+        }
+        if (readBytes == 0) break;
+        
+        fileData.append(buffer, readBytes);
+        transferred += readBytes;
+        globalProgressManager.SetProgress(downloadId, transferred, totalBytes);
+        Sleep(1);
+    }
+    
+    while (true) {
+        int c_rc = 0;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            c_rc = libssh2_sftp_close(handle);
+        }
+        if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+        Sleep(5);
+    }
+    
+    if (globalProgressManager.IsCancelled(downloadId)) {
+        globalProgressManager.SetProgress(downloadId, transferred, totalBytes, true, "Cancelled");
+    } else {
+        std::string b64 = Base64Encode(fileData);
+        globalProgressManager.SetCompletedWithContent(downloadId, transferred, totalBytes, b64);
+    }
+}
+
+// 异步直接下载到本地路径线程
+void DownloadToPathThread(std::shared_ptr<SSHSession> session, std::string remotePath, std::wstring localPath, std::string downloadId) {
+    std::ofstream localFile(localPath, std::ios::binary);
+    if (!localFile.is_open()) {
+        globalProgressManager.SetProgress(downloadId, 0, 0, true, "Failed to open local file for writing");
+        return;
+    }
+    
+    LIBSSH2_SFTP_HANDLE* handle = NULL;
+    LIBSSH2_SFTP_ATTRIBUTES attrs;
+    long long totalBytes = 0;
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            handle = libssh2_sftp_open(session->sftpSession, remotePath.c_str(), LIBSSH2_FXF_READ, 0);
+            if (handle) {
+                if (libssh2_sftp_stat(session->sftpSession, remotePath.c_str(), &attrs) == 0) {
+                    totalBytes = (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE) ? attrs.filesize : 0;
+                }
+                break;
+            }
+            int err = libssh2_session_last_errno(session->sshSession);
+            if (err != LIBSSH2_ERROR_EAGAIN) {
+                localFile.close();
+                globalProgressManager.SetProgress(downloadId, 0, 0, true, "Failed to open remote file");
+                return;
+            }
+        }
+        Sleep(5);
+    }
+    
+    globalProgressManager.SetProgress(downloadId, 0, totalBytes);
+    
+    const int chunkSize = 32768;
+    char buffer[chunkSize];
+    long long transferred = 0;
+    
+    while (true) {
+        if (globalProgressManager.IsCancelled(downloadId)) {
+            break;
+        }
+        
+        int readBytes = 0;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            readBytes = libssh2_sftp_read(handle, buffer, chunkSize);
+        }
+        
+        if (readBytes < 0) {
+            if (readBytes == LIBSSH2_ERROR_EAGAIN) {
+                Sleep(5);
+                continue;
+            }
+            while (true) {
+                int c_rc = 0;
+                {
+                    std::lock_guard<std::mutex> lock(session->sshMutex);
+                    c_rc = libssh2_sftp_close(handle);
+                }
+                if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+                Sleep(5);
+            }
+            localFile.close();
+            globalProgressManager.SetProgress(downloadId, transferred, totalBytes, true, "Read failed");
+            return;
+        }
+        if (readBytes == 0) break;
+        
+        localFile.write(buffer, readBytes);
+        transferred += readBytes;
+        globalProgressManager.SetProgress(downloadId, transferred, totalBytes);
+        Sleep(1);
+    }
+    
+    while (true) {
+        int c_rc = 0;
+        {
+            std::lock_guard<std::mutex> lock(session->sshMutex);
+            c_rc = libssh2_sftp_close(handle);
+        }
+        if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
+        Sleep(5);
+    }
+    localFile.close();
+    
+    if (globalProgressManager.IsCancelled(downloadId)) {
+        globalProgressManager.SetProgress(downloadId, transferred, totalBytes, true, "Cancelled");
+    } else {
+        globalProgressManager.SetProgress(downloadId, transferred, totalBytes, true);
+    }
+}
+
+// Win32 Helpers
+bool CopyToClipboard(const std::wstring& wtext) {
+    if (!OpenClipboard(NULL)) return false;
+    EmptyClipboard();
+    size_t size = (wtext.size() + 1) * sizeof(wchar_t);
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (!hMem) {
+        CloseClipboard();
+        return false;
+    }
+    memcpy(GlobalLock(hMem), wtext.c_str(), size);
+    GlobalUnlock(hMem);
+    SetClipboardData(CF_UNICODETEXT, hMem);
+    CloseClipboard();
+    return true;
+}
+
+std::wstring GetClipboardText() {
+    if (!OpenClipboard(NULL)) return L"";
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (!hData) {
+        CloseClipboard();
+        return L"";
+    }
+    wchar_t* pText = static_cast<wchar_t*>(GlobalLock(hData));
+    std::wstring text(pText);
+    GlobalUnlock(hData);
+    CloseClipboard();
+    return text;
+}
+
+std::wstring GetDownloadsDirectory() {
+    wchar_t* pPath = NULL;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, 0, NULL, &pPath))) {
+        std::wstring path(pPath);
+        CoTaskMemFree(pPath);
+        return path;
+    }
+    wchar_t* userProfile = nullptr;
+    size_t len = 0;
+    if (_wdupenv_s(&userProfile, &len, L"USERPROFILE") == 0 && userProfile != nullptr) {
+        std::wstring path = std::wstring(userProfile) + L"\\Downloads";
+        free(userProfile);
+        return path;
+    }
+    return L"";
+}
+
+std::wstring GetCollisionFreePath(const std::wstring& filename) {
+    std::wstring dir = GetDownloadsDirectory();
+    if (dir.empty()) return filename;
+    
+    std::wstring fullPath = dir + L"\\" + filename;
+    if (!PathFileExistsW(fullPath.c_str())) {
+        return fullPath;
+    }
+    
+    size_t dot = filename.find_last_of(L'.');
+    std::wstring base = (dot == std::wstring::npos) ? filename : filename.substr(0, dot);
+    std::wstring ext = (dot == std::wstring::npos) ? L"" : filename.substr(dot);
+    
+    int counter = 1;
+    while (true) {
+        std::wstring newName = base + L" (" + std::to_wstring(counter) + L")" + ext;
+        std::wstring newFullPath = dir + L"\\" + newName;
+        if (!PathFileExistsW(newFullPath.c_str())) {
+            return newFullPath;
+        }
+        counter++;
+    }
+}
+
+std::wstring ShowSaveFileDialog(const std::wstring& defaultName) {
+    wchar_t szFile[MAX_PATH] = { 0 };
+    wcscpy_s(szFile, defaultName.c_str());
+    
+    OPENFILENAMEW ofn = { 0 };
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hWnd;
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = sizeof(szFile) / sizeof(wchar_t);
+    ofn.lpstrFilter = L"All Files\0*.*\0";
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFileTitle = NULL;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = NULL;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_OVERWRITEPROMPT;
+    
+    if (GetSaveFileNameW(&ofn)) {
+        return std::wstring(szFile);
+    }
+    return L"";
+}
+
+bool OpenLocalFile(const std::wstring& filePath) {
+    // 强制转换为 HINSTANCE，并核对其值
+    HINSTANCE res = ShellExecuteW(NULL, L"open", filePath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+    return ((INT_PTR)res > 32);
+}
 
 // Global Session Manager supporting both local and remote SSH sessions
 class SessionManager {
@@ -951,6 +1897,292 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
         }
         else if (action == "window_close") {
             DestroyWindow(hWnd);
+            response["status"] = "success";
+            response["result"] = "null";
+        }
+        else if (action == "create_session") {
+            std::string sessionId = "ssh_" + std::to_string(GetTickCount64()) + "_" + std::to_string(rand() % 1000);
+            response["status"] = "success";
+            response["result"] = sessionId;
+        }
+        else if (action == "list_directory") {
+            std::string sessId = args[0].get<std::string>();
+            std::string path = args[1].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->ListDirectory(path);
+            } else {
+                res = "{\"success\":false,\"error\":\"Session not found or not an SSH session\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "create_directory") {
+            std::string sessId = args[0].get<std::string>();
+            std::string path = args[1].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->CreateDirectory(path);
+            } else {
+                res = "{\"success\":false,\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "delete_file") {
+            std::string sessId = args[0].get<std::string>();
+            std::string path = args[1].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->DeleteFile(path);
+            } else {
+                res = "{\"success\":false,\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "delete_directory") {
+            std::string sessId = args[0].get<std::string>();
+            std::string path = args[1].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->DeleteDirectory(path);
+            } else {
+                res = "{\"success\":false,\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "rename_file") {
+            std::string sessId = args[0].get<std::string>();
+            std::string oldPath = args[1].get<std::string>();
+            std::string newPath = args[2].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->RenameFile(oldPath, newPath);
+            } else {
+                res = "{\"success\":false,\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "get_file_info") {
+            std::string sessId = args[0].get<std::string>();
+            std::string path = args[1].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->GetFileInfo(path);
+            } else {
+                res = "{\"success\":false,\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "download_file_content") {
+            std::string sessId = args[0].get<std::string>();
+            std::string path = args[1].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->DownloadFileContent(path);
+            } else {
+                res = "{\"success\":false,\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "upload_file_content") {
+            std::string sessId = args[0].get<std::string>();
+            std::string content = args[1].get<std::string>();
+            std::string path = args[2].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            std::string res;
+            if (sshSess) {
+                res = sshSess->UploadFileContent(content, path);
+            } else {
+                res = "{\"success\":false,\"error\":\"Session not found\"}";
+            }
+            response["status"] = "success";
+            response["result"] = res;
+        }
+        else if (action == "start_upload_with_progress") {
+            std::string sessId = args[0].get<std::string>();
+            std::string base64Content = args[1].get<std::string>();
+            std::string remotePath = args[2].get<std::string>();
+            std::string uploadId = args[3].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            
+            nlohmann::json res;
+            if (sshSess) {
+                std::thread(UploadThread, sshSess, base64Content, remotePath, uploadId).detach();
+                res["success"] = true;
+            } else {
+                res["success"] = false;
+                res["error"] = "Session not found";
+            }
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "upload_from_path_with_progress") {
+            std::string sessId = args[0].get<std::string>();
+            std::string localPathUtf8 = args[1].get<std::string>();
+            std::string remotePath = args[2].get<std::string>();
+            std::string uploadId = args[3].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            
+            nlohmann::json res;
+            if (sshSess) {
+                std::wstring localPath = Utf8ToUtf16(localPathUtf8);
+                std::thread(UploadFromPathThread, sshSess, localPath, remotePath, uploadId).detach();
+                res["success"] = true;
+            } else {
+                res["success"] = false;
+                res["error"] = "Session not found";
+            }
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "get_upload_progress") {
+            std::string sessId = args[0].get<std::string>();
+            std::string uploadId = args[1].get<std::string>();
+            std::string progressJson = globalProgressManager.GetProgressJson(uploadId);
+            response["status"] = "success";
+            response["result"] = progressJson;
+        }
+        else if (action == "clear_upload_progress") {
+            std::string sessId = args[0].get<std::string>();
+            std::string uploadId = args[1].get<std::string>();
+            globalProgressManager.Clear(uploadId);
+            nlohmann::json res;
+            res["success"] = true;
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "start_download_with_progress") {
+            std::string sessId = args[0].get<std::string>();
+            std::string remotePath = args[1].get<std::string>();
+            std::string downloadId = args[2].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            
+            nlohmann::json res;
+            if (sshSess) {
+                std::thread(DownloadThread, sshSess, remotePath, downloadId).detach();
+                res["success"] = true;
+            } else {
+                res["success"] = false;
+                res["error"] = "Session not found";
+            }
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "start_direct_download_with_progress") {
+            std::string sessId = args[0].get<std::string>();
+            std::string remotePath = args[1].get<std::string>();
+            std::string localPathUtf8 = args[2].get<std::string>();
+            std::string downloadId = args[3].get<std::string>();
+            auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
+            
+            nlohmann::json res;
+            if (sshSess) {
+                std::wstring localPath = Utf8ToUtf16(localPathUtf8);
+                std::thread(DownloadToPathThread, sshSess, remotePath, localPath, downloadId).detach();
+                res["success"] = true;
+            } else {
+                res["success"] = false;
+                res["error"] = "Session not found";
+            }
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "get_download_progress") {
+            std::string sessId = args[0].get<std::string>();
+            std::string downloadId = args[1].get<std::string>();
+            std::string progressJson = globalProgressManager.GetProgressJson(downloadId);
+            response["status"] = "success";
+            response["result"] = progressJson;
+        }
+        else if (action == "cancel_download") {
+            std::string sessId = args[0].get<std::string>();
+            std::string downloadId = args[1].get<std::string>();
+            globalProgressManager.Cancel(downloadId);
+            nlohmann::json res;
+            res["success"] = true;
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "clipboard_copy") {
+            std::string text = args[0].get<std::string>();
+            bool ok = CopyToClipboard(Utf8ToUtf16(text));
+            nlohmann::json res;
+            res["success"] = ok;
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "clipboard_paste") {
+            std::wstring wtext = GetClipboardText();
+            nlohmann::json res;
+            res["success"] = true;
+            res["text"] = Utf16ToUtf8(wtext);
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "get_quick_download_path") {
+            std::string fileName = args[0].get<std::string>();
+            std::wstring freePath = GetCollisionFreePath(Utf8ToUtf16(fileName));
+            nlohmann::json res;
+            res["success"] = true;
+            res["path"] = Utf16ToUtf8(freePath);
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "show_save_file_dialog") {
+            std::string defaultName = args[0].get<std::string>();
+            std::wstring savePath = ShowSaveFileDialog(Utf8ToUtf16(defaultName));
+            nlohmann::json res;
+            if (!savePath.empty()) {
+                res["success"] = true;
+                res["path"] = Utf16ToUtf8(savePath);
+            } else {
+                res["success"] = false;
+                res["cancelled"] = true;
+            }
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "open_local_file") {
+            std::string filePath = args[0].get<std::string>();
+            bool ok = OpenLocalFile(Utf8ToUtf16(filePath));
+            nlohmann::json res;
+            res["success"] = ok;
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "get_encryption_status") {
+            nlohmann::json res;
+            res["available"] = true;
+            res["warning_needed"] = false;
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "mark_encryption_warning_shown") {
+            response["status"] = "success";
+            response["result"] = "null";
+        }
+        else if (action == "get_openai_settings") {
+            nlohmann::json res;
+            res["api_key"] = "";
+            res["base_url"] = "";
+            res["model"] = "";
+            response["status"] = "success";
+            response["result"] = res.dump();
+        }
+        else if (action == "open_chatgpt_window") {
             response["status"] = "success";
             response["result"] = "null";
         }
