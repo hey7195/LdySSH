@@ -1045,18 +1045,129 @@ function uploadFilesFromPaths(filePaths) {
 
 
 // Process upload queue
+let currentUploadId = null;
 async function processUploadQueue() {
     if (isProcessingUploads || uploadQueue.length === 0) return;
 
     isProcessingUploads = true;
 
-    const progressDiv = document.getElementById('uploadProgress');
+    // 动态获取或创建进度卡片
+    let progressDiv = document.getElementById('uploadProgress');
+    if (!progressDiv) {
+        progressDiv = document.createElement('div');
+        progressDiv.id = 'uploadProgress';
+        progressDiv.style.cssText = `
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: linear-gradient(135deg, rgba(10, 10, 25, 0.92) 0%, rgba(20, 15, 35, 0.92) 100%);
+            border: 1px solid rgba(0, 242, 254, 0.35);
+            border-radius: 12px;
+            padding: 18px;
+            min-width: 320px;
+            max-width: 400px;
+            z-index: 10002;
+            box-shadow: 0 12px 40px rgba(0, 242, 254, 0.25), inset 0 0 15px rgba(0, 242, 254, 0.08);
+            backdrop-filter: blur(16px);
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        `;
+        progressDiv.innerHTML = `
+            <style>
+                @keyframes uploadShimmer {
+                    0% { transform: translateX(-100%); }
+                    100% { transform: translateX(100%); }
+                }
+                @keyframes uploadPulse {
+                    0% { opacity: 0.5; transform: scale(0.92); }
+                    100% { opacity: 1; transform: scale(1.08); }
+                }
+                .upload-progress-fill-shimmer {
+                    position: absolute;
+                    top: 0; left: 0; right: 0; bottom: 0;
+                    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+                    animation: uploadShimmer 2s infinite;
+                }
+                .upload-pulse-dot {
+                    width: 8px;
+                    height: 8px;
+                    background-color: #00f2fe;
+                    border-radius: 50%;
+                    box-shadow: 0 0 8px #00f2fe;
+                    animation: uploadPulse 1s ease-in-out infinite alternate;
+                }
+            </style>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div class="upload-pulse-dot"></div>
+                    <div style="font-weight: 600; font-size: 14px; color: #00f2fe; letter-spacing: 0.5px;" id="uploadStatusText">正在上传...</div>
+                </div>
+                <button id="cancelUploadBtn" style="
+                    background: transparent;
+                    border: none;
+                    color: rgba(255,255,255,0.5);
+                    font-size: 16px;
+                    cursor: pointer;
+                    padding: 0 4px;
+                    line-height: 1;
+                    transition: color 0.2s;
+                " onmouseover="this.style.color='#ff4d4f'" onmouseout="this.style.color='rgba(255,255,255,0.5)'">✕</button>
+            </div>
+            <div style="margin-bottom: 8px;">
+                <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; position: relative;">
+                    <div id="uploadBar" style="
+                        width: 0%;
+                        height: 100%;
+                        background: linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%);
+                        border-radius: 3px;
+                        box-shadow: 0 0 10px rgba(0, 242, 254, 0.7);
+                        transition: width 0.1s linear;
+                        position: relative;
+                    ">
+                        <div class="upload-progress-fill-shimmer"></div>
+                    </div>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: rgba(255,255,255,0.6);">
+                <span id="uploadBytes">0 B / 0 B</span>
+                <span id="uploadSpeed">0 KB/s</span>
+            </div>
+        `;
+        document.body.appendChild(progressDiv);
+        
+        // 绑定取消按钮事件
+        const cancelBtn = progressDiv.querySelector('#cancelUploadBtn');
+        cancelBtn.addEventListener('click', async () => {
+            if (confirm('确定要取消上传当前任务吗？')) {
+                if (currentUploadId) {
+                    await window.pywebview.api.cancel_upload(currentUploadId);
+                }
+                uploadQueue = [];
+                isProcessingUploads = false;
+                progressDiv.style.display = 'none';
+            }
+        });
+    } else {
+        progressDiv.style.opacity = '1';
+        progressDiv.style.display = 'block';
+    }
+
     const statusText = document.getElementById('uploadStatusText');
     const uploadBar = document.getElementById('uploadBar');
     const uploadBytes = document.getElementById('uploadBytes');
     const uploadSpeed = document.getElementById('uploadSpeed');
-
-    progressDiv.style.display = 'block';
+    const dot = progressDiv.querySelector('.upload-pulse-dot');
+    
+    // 初始化样式
+    statusText.style.color = '#00f2fe';
+    uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
+    uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
+    if (dot) {
+        dot.style.backgroundColor = '#00f2fe';
+        dot.style.boxShadow = '0 0 8px #00f2fe';
+        dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
+    }
 
     let uploadedCount = 0;
     let failedCount = 0;
@@ -1071,6 +1182,7 @@ async function processUploadQueue() {
             : `Uploading ${fileName}...`;
 
         const uploadId = generateUploadId();
+        currentUploadId = uploadId;
 
         try {
             let startResult;
@@ -1138,7 +1250,6 @@ async function processUploadQueue() {
                     uploadSpeed.textContent = '';
                     uploadedCount++;
                     completed = true;
-                    // console.log('Successfully uploaded:', fileName);
                 } else if (progress.status === 'error' || progress.status === 'cancelled') {
                     completed = true;
                     failedCount++;
@@ -1158,23 +1269,66 @@ async function processUploadQueue() {
         }
     }
 
-    // console.log(`Upload complete: ${uploadedCount} succeeded, ${failedCount} failed`);
-    statusText.textContent = failedCount > 0
-        ? `Done: ${uploadedCount} uploaded, ${failedCount} failed`
-        : `Uploaded ${uploadedCount} file${uploadedCount !== 1 ? 's' : ''}`;
+    isProcessingUploads = false;
+    currentUploadId = null;
+
+    if (failedCount === 0) {
+        statusText.textContent = `上传完成 (${uploadedCount} 个文件)`;
+        statusText.style.color = '#52c41a';
+        uploadBar.style.background = 'linear-gradient(90deg, #52c41a 0%, #b7eb8f 100%)';
+        uploadBar.style.boxShadow = '0 0 10px rgba(82, 196, 26, 0.7)';
+        if (dot) {
+            dot.style.backgroundColor = '#52c41a';
+            dot.style.boxShadow = '0 0 8px #52c41a';
+            dot.style.animation = 'none';
+        }
+        setTimeout(() => {
+            if (!isProcessingUploads) {
+                progressDiv.style.opacity = '0';
+                setTimeout(() => {
+                    if (!isProcessingUploads && progressDiv.style.opacity === '0') {
+                        progressDiv.style.display = 'none';
+                        progressDiv.style.opacity = '1';
+                        // 还原成初始样式
+                        statusText.style.color = '#00f2fe';
+                        uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
+                        uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
+                        if (dot) {
+                            dot.style.backgroundColor = '#00f2fe';
+                            dot.style.boxShadow = '0 0 8px #00f2fe';
+                            dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
+                        }
+                    }
+                }, 300);
+            }
+        }, 1500);
+    } else {
+        statusText.textContent = `上传结束 (成功 ${uploadedCount}, 失败 ${failedCount})`;
+        statusText.style.color = '#ff4d4f';
+        uploadBar.style.background = 'linear-gradient(90deg, #ff4d4f 0%, #ffccc7 100%)';
+        uploadBar.style.boxShadow = '0 0 10px rgba(255, 77, 79, 0.7)';
+        if (dot) {
+            dot.style.backgroundColor = '#ff4d4f';
+            dot.style.boxShadow = '0 0 8px #ff4d4f';
+            dot.style.animation = 'none';
+        }
+        setTimeout(() => {
+            if (!isProcessingUploads) {
+                progressDiv.style.display = 'none';
+                // 还原样式
+                statusText.style.color = '#00f2fe';
+                uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
+                uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
+                if (dot) {
+                    dot.style.backgroundColor = '#00f2fe';
+                    dot.style.boxShadow = '0 0 8px #00f2fe';
+                    dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
+                }
+            }
+        }, 3000);
+    }
 
     await listFiles(currentPath);
-
-    isProcessingUploads = false;
-
-    setTimeout(() => {
-        if (!isProcessingUploads && uploadQueue.length === 0) {
-            progressDiv.style.display = 'none';
-            uploadBar.style.width = '0%';
-            uploadBytes.textContent = '';
-            uploadSpeed.textContent = '';
-        }
-    }, 2000);
 }
 
 // Handle native file drop from pywebview (receives full file paths)
@@ -3808,21 +3962,19 @@ function createTerminalForSession(sessionId, hostname) {
         // Set up copy/paste functionality
         setupTerminalClipboard(terminal, sessionId);
 
+        // 点击终端容器，瞬间激活对应的分屏会话与高亮
+        terminalElement.addEventListener('mousedown', () => {
+            if (currentSessionId !== sessionId) {
+                switchToSession(sessionId);
+                updateSplitScreenHighlight();
+            }
+        });
+
         if (terminal.textarea) {
             terminal.textarea.addEventListener('focus', () => {
                 if (currentSessionId !== sessionId) {
-                    currentSessionId = sessionId;
-                    currentTerminal = terminal;
-                    
-                    // 同步当前 SFTP 路径
-                    if (sessions[sessionId] && sessions[sessionId].currentPath) {
-                        currentPath = sessions[sessionId].currentPath;
-                        document.getElementById('currentPath').value = currentPath;
-                    }
-                    
+                    switchToSession(sessionId);
                     updateSplitScreenHighlight();
-                    updateSessionsList();
-                    updateSessionTabs();
                 }
             });
         }
@@ -3881,128 +4033,131 @@ function createTerminalForSession(sessionId, hostname) {
 
         // Handle input - ensure input goes to the correct session
         terminal.onData((data) => {
-            if (currentSessionId === sessionId) {
-                const state = getCommandInputState(sessionId);
+            if (currentSessionId !== sessionId) {
+                switchToSession(sessionId);
+                updateSplitScreenHighlight();
+            }
+            
+            const state = getCommandInputState(sessionId);
+            
+            // --- Start Dangerous Command Interceptor ---
+            // Only run on small data chunks to prevent OOM on massive log files (e.g. cat huge.log)
+            if ((data.includes('\r') || data.includes('\n')) && data.length < 5000) {
+                let cmd = '';
+                // Extract the actual rendered line from the screen to catch commands retrieved via Up Arrow
+                if (terminal.buffer && terminal.buffer.active) {
+                    const bufferY = terminal.buffer.active.baseY + terminal.buffer.active.cursorY;
+                    const lineObj = terminal.buffer.active.getLine(bufferY);
+                    if (lineObj) {
+                        cmd = lineObj.translateToString(true);
+                    }
+                }
                 
-                // --- Start Dangerous Command Interceptor ---
-                // Only run on small data chunks to prevent OOM on massive log files (e.g. cat huge.log)
-                if ((data.includes('\r') || data.includes('\n')) && data.length < 5000) {
-                    let cmd = '';
-                    // Extract the actual rendered line from the screen to catch commands retrieved via Up Arrow
-                    if (terminal.buffer && terminal.buffer.active) {
-                        const bufferY = terminal.buffer.active.baseY + terminal.buffer.active.cursorY;
-                        const lineObj = terminal.buffer.active.getLine(bufferY);
-                        if (lineObj) {
-                            cmd = lineObj.translateToString(true);
+                // Combine with keystroke buffer and incoming paste data for absolute safety
+                const checkCmd = cmd + " " + ((state && state.buffer) ? state.buffer : "") + " " + data;
+                
+                if (checkCmd.length < 10000) {
+                    let isDangerous = false;
+                    const subCmds = checkCmd.split(/;|&&|\|\||\||\r|\n/);
+                    for (let subCmd of subCmds) {
+                        const tokens = subCmd.trim().split(/\s+/);
+                        let rmFound = false;
+                        let hasTarget = false;
+
+                        for (let i = 0; i < tokens.length; i++) {
+                            const token = tokens[i];
+                            if (token === 'rm') rmFound = true;
+                            else if (rmFound && (token === '*' || token === '/*' || token === '/')) {
+                                hasTarget = true;
+                            }
+                        }
+                        // Block rm targeting *, /*, or / 
+                        if (rmFound && hasTarget) {
+                            isDangerous = true;
+                            break;
                         }
                     }
                     
-                    // Combine with keystroke buffer and incoming paste data for absolute safety
-                    const checkCmd = cmd + " " + ((state && state.buffer) ? state.buffer : "") + " " + data;
-                    
-                    if (checkCmd.length < 10000) {
-                        let isDangerous = false;
-                        const subCmds = checkCmd.split(/;|&&|\|\||\||\r|\n/);
-                        for (let subCmd of subCmds) {
-                            const tokens = subCmd.trim().split(/\s+/);
-                            let rmFound = false;
-                            let hasTarget = false;
+                    if (isDangerous) {
+                        terminal.write('\r\n\x1b[41;37;1m [拦截机制] 高危操作警告 \x1b[0m\r\n');
+                        terminal.write(`\x1b[31mLdySSH 已阻止执行潜在的毁灭性命令。\x1b[0m\r\n`);
+                        terminal.write('\x1b[33m系统提示: 请避免使用 rm -rf /* 或 rm -rf *，这可能导致整个系统或当前目录数据被永久删除且无法恢复。\x1b[0m\r\n');
+                        
+                        // Send Ctrl+C to cancel the prompt on the remote server
+                        window.pywebview.api.send_input(sessionId, '\x03');
+                        
+                        // Reset local state
+                        if (state) {
+                            state.buffer = '';
+                            state.suggestions = [];
+                        }
+                        hideCommandSuggestion();
+                        return; // Stop processing to prevent the \r from executing the command
+                    } else if (state && state.buffer && state.buffer.trim().length >= 2) {
+                        saveCommandToHistory(state.buffer.trim());
+                    }
+                }
+            }
+            // --- End Dangerous Command Interceptor ---
+            
+            // If suggestion box is open, capture Up/Down/Enter/RightArrow
+            if (commandSuggestIsVisible() && state && state.suggestions && state.suggestions.length > 0) {
+                if (data === '\x1b[C' || data === '\t') {
+                    // Right Arrow or Tab accepts suggestion
+                    if (acceptCommandSuggestion(sessionId)) return;
+                } else if (data === '\r' || data === '\n') {
+                    // Enter accepts only if explicitly navigated
+                    if (state.suggestionExplicitlySelected && acceptCommandSuggestion(sessionId)) {
+                        window.pywebview.api.send_input(sessionId, '\r');
+                        state.buffer = '';
+                        return;
+                    } else {
+                        // Otherwise pass through to terminal
+                        hideCommandSuggestion();
+                        state.suggestions = [];
+                        state.buffer = '';
+                    }
+                } else if (data === '\x1b[A') { // Up Arrow
+                    state.suggestionIndex = Math.max(0, state.suggestionIndex - 1);
+                    state.suggestionExplicitlySelected = true;
+                    renderCommandSuggestion(sessionId);
+                    return; // prevent history backward
+                } else if (data === '\x1b[B') { // Down Arrow
+                    state.suggestionIndex = Math.min(state.suggestions.length - 1, state.suggestionIndex + 1);
+                    state.suggestionExplicitlySelected = true;
+                    renderCommandSuggestion(sessionId);
+                    return; // prevent history forward
+                }
+            } else {
+                if (data === '\x1b[C' && acceptCommandSuggestion(sessionId)) {
+                    return;
+                }
+            }
 
-                            for (let i = 0; i < tokens.length; i++) {
-                                const token = tokens[i];
-                                if (token === 'rm') rmFound = true;
-                                else if (rmFound && (token === '*' || token === '/*' || token === '/')) {
-                                    hasTarget = true;
-                                }
-                            }
-                            // Block rm targeting *, /*, or / 
-                            if (rmFound && hasTarget) {
-                                isDangerous = true;
+            updateCommandSuggestion(sessionId, data);
+
+            if (isOptimisticChar(data)) {
+                if (data.charCodeAt(0) === 127) {
+                    const hasPendingChar = pendingEchoBuffer.some(e => e.char);
+                    if (hasPendingChar) {
+                        for (let i = pendingEchoBuffer.length - 1; i >= 0; i--) {
+                            if (pendingEchoBuffer[i].char) {
+                                pendingEchoBuffer.splice(i, 1);
                                 break;
                             }
                         }
-                        
-                        if (isDangerous) {
-                            terminal.write('\r\n\x1b[41;37;1m [拦截机制] 高危操作警告 \x1b[0m\r\n');
-                            terminal.write(`\x1b[31mLdySSH 已阻止执行潜在的毁灭性命令。\x1b[0m\r\n`);
-                            terminal.write('\x1b[33m系统提示: 请避免使用 rm -rf /* 或 rm -rf *，这可能导致整个系统或当前目录数据被永久删除且无法恢复。\x1b[0m\r\n');
-                            
-                            // Send Ctrl+C to cancel the prompt on the remote server
-                            window.pywebview.api.send_input(sessionId, '\x03');
-                            
-                            // Reset local state
-                            if (state) {
-                                state.buffer = '';
-                                state.suggestions = [];
-                            }
-                            hideCommandSuggestion();
-                            return; // Stop processing to prevent the \r from executing the command
-                        } else if (state && state.buffer && state.buffer.trim().length >= 2) {
-                            saveCommandToHistory(state.buffer.trim());
-                        }
-                    }
-                }
-                // --- End Dangerous Command Interceptor ---
-                
-                // If suggestion box is open, capture Up/Down/Enter/RightArrow
-                if (commandSuggestIsVisible() && state && state.suggestions && state.suggestions.length > 0) {
-                    if (data === '\x1b[C' || data === '\t') {
-                        // Right Arrow or Tab accepts suggestion
-                        if (acceptCommandSuggestion(sessionId)) return;
-                    } else if (data === '\r' || data === '\n') {
-                        // Enter accepts only if explicitly navigated
-                        if (state.suggestionExplicitlySelected && acceptCommandSuggestion(sessionId)) {
-                            window.pywebview.api.send_input(sessionId, '\r');
-                            state.buffer = '';
-                            return;
-                        } else {
-                            // Otherwise pass through to terminal
-                            hideCommandSuggestion();
-                            state.suggestions = [];
-                            state.buffer = '';
-                        }
-                    } else if (data === '\x1b[A') { // Up Arrow
-                        state.suggestionIndex = Math.max(0, state.suggestionIndex - 1);
-                        state.suggestionExplicitlySelected = true;
-                        renderCommandSuggestion(sessionId);
-                        return; // prevent history backward
-                    } else if (data === '\x1b[B') { // Down Arrow
-                        state.suggestionIndex = Math.min(state.suggestions.length - 1, state.suggestionIndex + 1);
-                        state.suggestionExplicitlySelected = true;
-                        renderCommandSuggestion(sessionId);
-                        return; // prevent history forward
+                        terminal.write('\b \b');
                     }
                 } else {
-                    if (data === '\x1b[C' && acceptCommandSuggestion(sessionId)) {
-                        return;
-                    }
+                    terminal.write(data);
+                    pendingEchoBuffer.push({ char: data, time: Date.now() });
                 }
-
-                updateCommandSuggestion(sessionId, data);
-
-                if (isOptimisticChar(data)) {
-                    if (data.charCodeAt(0) === 127) {
-                        const hasPendingChar = pendingEchoBuffer.some(e => e.char);
-                        if (hasPendingChar) {
-                            for (let i = pendingEchoBuffer.length - 1; i >= 0; i--) {
-                                if (pendingEchoBuffer[i].char) {
-                                    pendingEchoBuffer.splice(i, 1);
-                                    break;
-                                }
-                            }
-                            terminal.write('\b \b');
-                        }
-                    } else {
-                        terminal.write(data);
-                        pendingEchoBuffer.push({ char: data, time: Date.now() });
-                    }
-                }
-                
-                if (currentSessionId && sessions[currentSessionId]?.connected) {
-                    window.pywebview.api.send_input(currentSessionId, data).catch(console.error);
-                    // Extreme Responsiveness: Immediately trigger an output poll to instantly see the echoed character
-                    scheduleOutputPoll(currentSessionId, 0);
-                }
+            }
+            
+            if (sessionId && sessions[sessionId]?.connected) {
+                window.pywebview.api.send_input(sessionId, data).catch(console.error);
+                // Extreme Responsiveness: Immediately trigger an output poll to instantly see the echoed character
+                scheduleOutputPoll(sessionId, 0);
             }
         });
 
