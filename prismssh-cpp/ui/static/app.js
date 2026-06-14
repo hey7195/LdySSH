@@ -1,6 +1,56 @@
+// --- Global Console Logging Redirection to Local Log File ---
+(function() {
+    let isLogForwarding = false;
+    
+    function safeForward(level, args) {
+        if (isLogForwarding) return;
+        isLogForwarding = true;
+        try {
+            const msg = args.map(arg => {
+                if (arg instanceof Error) {
+                    return arg.message + "\n" + arg.stack;
+                }
+                if (typeof arg === 'object') {
+                    try { return JSON.stringify(arg); } catch(e) { return "[Object]"; }
+                }
+                return String(arg);
+            }).join(' ');
+            
+            if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.write_log === 'function') {
+                window.pywebview.api.write_log(level, msg).catch(() => {});
+            }
+        } catch (e) {
+            // prevent infinite loops
+        } finally {
+            isLogForwarding = false;
+        }
+    }
+
+    const orgLog = console.log;
+    console.log = function(...args) {
+        orgLog.apply(console, args);
+        safeForward("JS_INFO", args);
+    };
+
+    const orgWarn = console.warn;
+    console.warn = function(...args) {
+        orgWarn.apply(console, args);
+        safeForward("JS_WARN", args);
+    };
+
+    const orgError = console.error;
+    console.error = function(...args) {
+        orgError.apply(console, args);
+        safeForward("JS_ERROR", args);
+    };
+})();
+
 let currentSessionId = null;
 let currentTerminal = null;
 let sessions = {};
+let isSplitMode = false;
+let splitLeftSessionId = null;
+let splitRightSessionId = null;
 let outputPollingInterval = null;
 let outputPollFailureCount = 0;
 let fitAddon = null;
@@ -195,7 +245,7 @@ function renderCommandSuggestion(sessionId) {
     state.suggestions.forEach((item, idx) => {
         const isSelected = idx === state.suggestionIndex;
         const className = isSelected ? 'terminal-command-item selected' : 'terminal-command-item';
-        html += `<div class="${className}" style="${isSelected ? 'background: rgba(255,255,255,0.1); border-left: 2px solid var(--accent-color); padding-left: 8px;' : 'padding-left: 10px; border-left: 2px solid transparent;'} display: flex; justify-content: space-between; padding-top: 4px; padding-bottom: 4px; padding-right: 10px; font-size: 13px;">
+        html += `<div class="${className}" style="${isSelected ? 'background: rgba(255,255,255,0.1); border-left: 2px solid var(--accent-color); padding-left: 8px;' : 'padding-left: 10px; border-left: 2px solid transparent;'} display: flex; justify-content: space-between; padding-top: 4px; padding-bottom: 4px; padding-right: 10px; font-size: 13px; cursor: pointer;" onclick="selectCommandSuggestionAndAccept('${escapeJs(item.command)}', '${escapeJs(sessionId)}'); event.stopPropagation();">
                     <span class="terminal-command-main" style="${isSelected ? 'color: var(--accent-color); font-weight: bold;' : ''}">${escapeHtml(item.command)}</span>
                     <span class="terminal-command-desc" style="color: #aaa; margin-left: 15px; opacity: 0.8; font-size: 12px; white-space: nowrap;">${escapeHtml(item.description)}</span>
                  </div>`;
@@ -337,6 +387,31 @@ function acceptCommandSuggestion(sessionId) {
     return true;
 }
 
+function selectCommandSuggestionAndAccept(commandText, sessionId) {
+    const state = getCommandInputState(sessionId);
+    if (!state) return;
+    
+    saveCommandToHistory(commandText);
+
+    const typed = state.buffer;
+    let sequence = '';
+    // 发送与已输入字符等量的退格符，让远程 Shell 自动擦除提示内容
+    for (let i = 0; i < typed.length; i++) {
+        sequence += '\x7f';
+    }
+    // 发送完整的预测命令
+    sequence += commandText;
+
+    if (currentSessionId && sessions[currentSessionId]?.connected) {
+        window.pywebview.api.send_input(sessionId, sequence).catch(console.error);
+    }
+    
+    // 清除状态，收起提示框
+    state.buffer = '';
+    state.suggestions = [];
+    hideCommandSuggestion();
+}
+
 function appendSessionOutputContext(sessionId, output) {
     if (!sessions[sessionId] || !output) return;
     const previous = sessions[sessionId].recentOutput || '';
@@ -409,7 +484,12 @@ function compileHighlightRegex() {
     try {
         const ansiRegex = '\\x1b\\[[0-9;?]*[a-zA-Z]|\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)';
         const combinedPattern = `(?<ansi>${ansiRegex})|` + activeHighlightRules.map((r, i) => {
-            return `(?<rule${i}>${r.pattern})`;
+            let pattern = r.pattern;
+            // 智能边界保护：若是纯字母/数字/下划线单词，自动增加 \b 边界限制以防误伤
+            if (/^[a-zA-Z0-9_-]+$/.test(pattern)) {
+                pattern = `\\b${pattern}\\b`;
+            }
+            return `(?<rule${i}>${pattern})`;
         }).join('|');
         cachedHighlightRegex = new RegExp(combinedPattern, 'gi');
     } catch (error) {
@@ -451,7 +531,7 @@ function normalizeHighlightColor(color) {
     return ansiColorToCss(color);
 }
 
-function getHighlightAnsiStart(color) {
+function getHighlightAnsiStart(color, useBg) {
     const value = String(color || '').trim();
     const match = value.match(/^#([0-9a-fA-F]{6})$/);
     if (!match) {
@@ -462,31 +542,40 @@ function getHighlightAnsiStart(color) {
     const red = parseInt(hex.slice(0, 2), 16);
     const green = parseInt(hex.slice(2, 4), 16);
     const blue = parseInt(hex.slice(4, 6), 16);
-    return `\x1b[1;38;2;${red};${green};${blue}m`;
+    
+    if (useBg) {
+        // 计算同色系、暗色调的背景色（透明底色质感，降噪）
+        const bgR = Math.round(red * 0.22);
+        const bgG = Math.round(green * 0.22);
+        const bgB = Math.round(blue * 0.22);
+        // 38;2 是前景色，48;2 是背景色，1 是加粗
+        return `\x1b[1;38;2;${red};${green};${blue};48;2;${bgR};${bgG};${bgB}m`;
+    } else {
+        // 只使用高对比度前景色，不带背景底色，避免背景块泛滥导致“不真实”
+        return `\x1b[1;38;2;${red};${green};${blue}m`;
+    }
 }
 
 function applyTerminalHighlights(output) {
     if (!output || !cachedHighlightRegex || activeHighlightRules.length === 0) return output;
 
-    // We don't need a try/catch here because it's guaranteed to be valid if cachedHighlightRegex is set
-    // Reset lastIndex just in case
     cachedHighlightRegex.lastIndex = 0;
     
     return String(output).replace(cachedHighlightRegex, (match, ...args) => {
         const groups = args[args.length - 1];
         
-        // If it's an ANSI escape sequence, leave it completely untouched
         if (groups.ansi) return match;
 
-        // Find which rule matched using the pre-filtered activeHighlightRules array
         for (let i = 0; i < activeHighlightRules.length; i++) {
             if (groups[`rule${i}`] !== undefined) {
                 const rule = activeHighlightRules[i];
-                const start = getHighlightAnsiStart(rule.color);
+                // 只有高危警告、错误、异常、敏感词、根提示符等核心严重性词汇才获得微光背景高亮
+                const useBg = ['error', 'warning', 'permission', 'network', 'python_exc', 'java_exc', 'secrets', 'root'].includes(rule.id);
+                const start = getHighlightAnsiStart(rule.color, useBg);
                 return `${start}${match}\x1b[0m`;
             }
         }
-        return match; // Fallback
+        return match;
     });
 }
 
@@ -551,11 +640,13 @@ function ansiColorToCss(code) {
 
 // Tool panel functions
 function openTool(toolName) {
-    // Check if we have an active session
-    if (!currentSessionId || !sessions[currentSessionId]) {
-        closeToolPanel();
-        alert('请先连接服务器');
-        return;
+    // Check if we have an active session (AI tool is exempt from this check)
+    if (toolName !== 'ai') {
+        if (!currentSessionId || !sessions[currentSessionId]) {
+            closeToolPanel();
+            alert('请先连接服务器');
+            return;
+        }
     }
 
     // Close current tool if clicking the same icon
@@ -564,12 +655,18 @@ function openTool(toolName) {
         return;
     }
 
+    if (currentTool === 'ai' && toolName !== 'ai') {
+        if (window.pywebview && window.pywebview.api) {
+            window.pywebview.api.hide_chatgpt_subwindow();
+        }
+    }
+
     if (currentTool === 'monitor') {
         clearSystemMonitorRefresh();
     }
 
     // Reset tool activity buttons
-    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands').forEach(icon => {
+    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands, #aiIcon').forEach(icon => {
         icon.classList.remove('active', 'tool-active');
     });
 
@@ -606,6 +703,37 @@ function openTool(toolName) {
         initializePortForwarding();
     } else if (toolName === 'highlight') {
         renderHighlightRules();
+    } else if (toolName === 'ai') {
+        document.getElementById('aiPanel').classList.add('active');
+        document.getElementById('aiIcon').classList.add('active', 'tool-active');
+        
+        // 智能提取屏幕上下文并传给 C++！
+        try {
+            const getTerminalContext = (linesCount = 40) => {
+                const session = sessions[currentSessionId];
+                if (!session || !session.terminal) return "";
+                const term = session.terminal;
+                const buffer = term.buffer.active;
+                let lines = [];
+                const end = buffer.length - 1;
+                const start = Math.max(0, end - linesCount + 1);
+                for (let i = start; i <= end; i++) {
+                    const line = buffer.getLine(i);
+                    if (line) {
+                        lines.push(line.translateToString(true));
+                    }
+                }
+                return lines.join('\n');
+            };
+            const context = getTerminalContext(40);
+            if (context && window.pywebview && window.pywebview.api && window.pywebview.api.send_ai_context) {
+                window.pywebview.api.send_ai_context(context);
+            }
+        } catch(e) {
+            console.error("Failed to send terminal AI context", e);
+        }
+
+        startSyncAiSubWindow();
     }
 
     // Resize terminal after sidebar opens
@@ -617,10 +745,16 @@ function openTool(toolName) {
 }
 
 function closeToolPanel() {
+    if (currentTool === 'ai') {
+        if (window.pywebview && window.pywebview.api) {
+            window.pywebview.api.hide_chatgpt_subwindow();
+        }
+    }
+
     clearSystemMonitorRefresh();
     currentTool = null;
     document.getElementById('rightSidebar')?.classList.remove('open');
-    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands').forEach(icon => {
+    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands, #aiIcon').forEach(icon => {
         icon.classList.remove('active', 'tool-active');
     });
     document.querySelectorAll('.tool-panel').forEach(panel => {
@@ -641,6 +775,12 @@ async function initializeSFTP() {
     currentPath = username === 'root' ? '/root' : '/home/' + username;
     document.getElementById('currentPath').value = currentPath;
     await listFiles(currentPath);
+
+    // 初始化本地文件浏览器
+    localCurrentPath = 'C:\\';
+    document.getElementById('localCurrentPath').value = localCurrentPath;
+    await listLocalFiles(localCurrentPath);
+    setupSftpDragAndDrop();
 }
 
 function navigateToPath(path) {
@@ -1054,6 +1194,27 @@ const setupDragDrop = () => {
     }
     // console.log('Setting up drag and drop on uploadArea');
 
+    const terminalEl = document.getElementById('terminal');
+    if (terminalEl) {
+        terminalEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+        terminalEl.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                if (currentSessionId && sessions[currentSessionId]) {
+                    const file = e.dataTransfer.files[0];
+                    sessions[currentSessionId].pendingDropFile = file;
+                    const base64Rz = bytesToBase64(new TextEncoder().encode("rz -be\r"));
+                    window.pywebview.api.send_input_base64(currentSessionId, base64Rz).catch(console.error);
+                }
+            }
+        });
+    }
+
     // Prevent browser from opening files when dropped anywhere on the page
     document.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -1115,14 +1276,16 @@ const setupDragDrop = () => {
 // Context Menu Functions
 let contextMenuTarget = null;
 
-function showContextMenu(event, fileItem) {
+function showContextMenu(event, fileItem, isLocal = false) {
     const contextMenu = document.getElementById('contextMenu');
 
     // Hide any existing context menu
     contextMenu.style.display = 'none';
 
-    // Remove previous selection
-    document.querySelectorAll('.file-item').forEach(item => {
+    isContextMenuLocal = isLocal;
+
+    // Remove previous selection from both lists to be safe
+    document.querySelectorAll('#localFileList .file-item, #fileList .file-item').forEach(item => {
         item.classList.remove('context-selected');
     });
 
@@ -1139,10 +1302,17 @@ function showContextMenu(event, fileItem) {
     const downloadMenuItem = contextMenu.querySelector('[onclick*="download"]');
 
     if (editMenuItem) {
-        editMenuItem.style.display = isDirectory ? 'none' : 'flex';
+        // 本地文件右键没有编辑选项
+        editMenuItem.style.display = (isLocal || isDirectory) ? 'none' : 'flex';
     }
     if (downloadMenuItem) {
-        downloadMenuItem.style.display = isDirectory ? 'none' : 'flex';
+        if (isLocal) {
+            downloadMenuItem.textContent = '上传 (Upload)';
+            downloadMenuItem.style.display = isDirectory ? 'none' : 'flex';
+        } else {
+            downloadMenuItem.textContent = '下载 (Download)';
+            downloadMenuItem.style.display = isDirectory ? 'none' : 'flex';
+        }
     }
 
     // Position the context menu
@@ -1173,25 +1343,56 @@ async function contextMenuAction(action) {
 
     const fileName = contextMenuTarget.getAttribute('data-filename');
     const fileType = contextMenuTarget.getAttribute('data-filetype');
-    const filePath = currentPath.endsWith('/') ?
-        currentPath + fileName :
-        currentPath + '/' + fileName;
 
-    hideContextMenu();
+    if (isContextMenuLocal) {
+        const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+        const filePath = localCurrentPath + sep + fileName;
+        
+        hideContextMenu();
+        
+        switch (action) {
+            case 'download': // 本地上传
+                await uploadFileFromPath(filePath, fileName);
+                break;
+            case 'rename':
+                showLocalRenameModal(fileName, filePath);
+                break;
+            case 'delete':
+                if (confirm(`确定要删除本地 ${fileType === 'directory' ? '文件夹' : '文件'} ${fileName} 吗？`)) {
+                    try {
+                        const result = JSON.parse(await window.pywebview.api.delete_local_file(filePath));
+                        if (result.success) {
+                            refreshLocalFiles();
+                        } else {
+                            alert("删除失败: " + result.error);
+                        }
+                    } catch(e) {
+                        alert("删除失败: " + e.message);
+                    }
+                }
+                break;
+        }
+    } else {
+        const filePath = currentPath.endsWith('/') ?
+            currentPath + fileName :
+            currentPath + '/' + fileName;
 
-    switch (action) {
-        case 'download':
-            await downloadFile(fileName);
-            break;
-        case 'edit':
-            await editFile(fileName);
-            break;
-        case 'rename':
-            showRenameModal(fileName);
-            break;
-        case 'delete':
-            await deleteFileOrFolder(fileName, fileType, filePath);
-            break;
+        hideContextMenu();
+
+        switch (action) {
+            case 'download':
+                await downloadFile(fileName);
+                break;
+            case 'edit':
+                await editFile(fileName);
+                break;
+            case 'rename':
+                showRenameModal(fileName);
+                break;
+            case 'delete':
+                await deleteFileOrFolder(fileName, fileType, filePath);
+                break;
+        }
     }
 }
 
@@ -2093,13 +2294,14 @@ function closeRenameModal() {
     const modal = document.getElementById('renameModal');
     modal.style.display = 'none';
     renameTarget = null;
+    isRenameLocal = false;
 }
 
 async function confirmRename() {
     const newName = document.getElementById('renameInput').value.trim();
 
     if (!newName) {
-        alert('Please enter a valid name');
+        alert('请输入有效名称');
         return;
     }
 
@@ -2108,29 +2310,43 @@ async function confirmRename() {
         return;
     }
 
-    const oldPath = currentPath.endsWith('/') ?
-        currentPath + renameTarget :
-        currentPath + '/' + renameTarget;
-
-    const newPath = currentPath.endsWith('/') ?
-        currentPath + newName :
-        currentPath + '/' + newName;
-
-    try {
-        const result = await window.pywebview.api.rename_file(currentSessionId, oldPath, newPath);
-        const response = JSON.parse(result);
-
-        if (response.success) {
-            // console.log('Successfully renamed:', renameTarget, 'to', newName);
-            closeRenameModal();
-            // Refresh file list
-            await listFiles(currentPath);
-        } else {
-            alert(`Failed to rename: ${response.error}`);
+    if (isRenameLocal) {
+        const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+        const newPath = localCurrentPath + sep + newName;
+        try {
+            const result = JSON.parse(await window.pywebview.api.rename_local_file(localRenameOldPath, newPath));
+            if (result.success) {
+                closeRenameModal();
+                refreshLocalFiles();
+            } else {
+                alert("重命名失败: " + result.error);
+            }
+        } catch(e) {
+            alert("重命名失败: " + e.message);
         }
-    } catch (error) {
-        console.error('Rename error:', error);
-        alert('Rename failed: ' + error.message);
+    } else {
+        const oldPath = currentPath.endsWith('/') ?
+            currentPath + renameTarget :
+            currentPath + '/' + renameTarget;
+
+        const newPath = currentPath.endsWith('/') ?
+            currentPath + newName :
+            currentPath + '/' + newName;
+
+        try {
+            const result = await window.pywebview.api.rename_file(currentSessionId, oldPath, newPath);
+            const response = JSON.parse(result);
+
+            if (response.success) {
+                closeRenameModal();
+                await listFiles(currentPath);
+            } else {
+                alert(`重命名失败: ${response.error}`);
+            }
+        } catch (error) {
+            console.error('Rename error:', error);
+            alert('Rename failed: ' + error.message);
+        }
     }
 }
 
@@ -2241,8 +2457,8 @@ function renderRecentConnections() {
         item.innerHTML = `
             <span class="recent-connection-dot"></span>
             <span class="recent-connection-copy">
-                <span class="recent-connection-name">${escapeHtml(parts.name)}</span>
-                <span class="recent-connection-address">${escapeHtml(isPrivacyMode ? '******@***.***' : parts.target)}</span>
+                <span class="recent-connection-name" title="${escapeHtml(parts.name)}">${escapeHtml(parts.name)}</span>
+                <span class="recent-connection-address" title="${escapeHtml(parts.target)}">${escapeHtml(isPrivacyMode ? '******@***.***' : parts.target)}</span>
             </span>
             <button type="button" class="recent-connection-action" onclick="event.stopPropagation(); quickConnectSavedConnection('${escapeJs(conn.key)}');">连接</button>
         `;
@@ -2426,6 +2642,24 @@ async function loadConnection(key) {
     document.getElementById('port').value = conn.port || 22;
     document.getElementById('username').value = conn.username;
     document.getElementById('saveConnection').checked = true;
+
+    // 填入堡垒机高级参数
+    document.getElementById('jumpHost').value = conn.jumpHost || '';
+    document.getElementById('jumpPort').value = conn.jumpPort || 22;
+    document.getElementById('jumpUser').value = conn.jumpUser || '';
+    document.getElementById('jumpPass').value = conn.jumpPass || '';
+    document.getElementById('jumpKey').value = conn.jumpKey || '';
+    document.getElementById('jumpKeyPassphrase').value = conn.jumpKeyPassphrase || '';
+
+    const jumpHostFields = document.getElementById('jumpHostFields');
+    const jumpHostChevron = document.getElementById('jumpHostChevron');
+    if (conn.jumpHost) {
+        jumpHostFields.style.display = 'block';
+        jumpHostChevron.textContent = '▼';
+    } else {
+        jumpHostFields.style.display = 'none';
+        jumpHostChevron.textContent = '▶';
+    }
 
     if (conn.password_unavailable) {
         document.getElementById('authType').value = 'password';
@@ -3172,6 +3406,20 @@ async function connect() {
     const keyPassphrase = authType === 'key' ? document.getElementById('keyPassphrase').value : null;
     const saveConnection = document.getElementById('saveConnection').checked;
 
+    // 获取堡垒机参数
+    const jumpHost = document.getElementById('jumpHost').value.trim();
+    const jumpPort = parseInt(document.getElementById('jumpPort').value || 22);
+    const jumpUser = document.getElementById('jumpUser').value.trim();
+    const jumpPass = document.getElementById('jumpPass').value;
+    const jumpKey = document.getElementById('jumpKey').value.trim();
+    const jumpKeyPassphrase = document.getElementById('jumpKeyPassphrase').value;
+
+    if (jumpHost && !jumpUser) {
+        alert('请填入堡垒机用户名');
+        document.getElementById('jumpUser').focus();
+        return;
+    }
+
     if (authType === 'password' && !password) {
         alert('请输入 SSH 密码');
         document.getElementById('password').focus();
@@ -3185,7 +3433,7 @@ async function connect() {
     }
 
     if (!hostname || !username) {
-        alert('璇峰～鍐欎富鏈哄湴鍧€鍜岀敤鎴峰悕');
+        alert('请填写主机地址和用户名');
         return;
     }
 
@@ -3197,8 +3445,7 @@ async function connect() {
         // Create new session
         const sessionId = await window.pywebview.api.create_session();
 
-        // Connect (with host verification if needed)
-        const result = await connectWithHostVerification(sessionId, {
+        const connectionParams = {
             hostname,
             port: parseInt(port),
             username,
@@ -3207,21 +3454,28 @@ async function connect() {
             keyPath,
             keyPassphrase,
             save: saveConnection,
-            name: connectionName
-        });
+            name: connectionName,
+            // 传入堡垒机参数
+            jumpHost,
+            jumpPort,
+            jumpUser,
+            jumpPass,
+            jumpKey,
+            jumpKeyPassphrase
+        };
 
-        // console.log('Connection result:', result);
+        // Connect (with host verification if needed)
+        const result = await connectWithHostVerification(sessionId, connectionParams);
 
         if (result.success) {
-            // console.log('Connection successful, creating terminal...');
-
             // Add basic session info first
             sessions[sessionId] = {
                 id: sessionId,
                 hostname,
                 username,
                 name: connectionName,
-                connected: true
+                connected: true,
+                connectionParams: connectionParams
             };
 
             // Create terminal (this will update the sessions object)
@@ -3275,7 +3529,8 @@ async function createLocalSession() {
             hostname: 'Local CMD',
             username: 'localhost',
             name: 'Local CMD',
-            connected: true
+            connected: true,
+            isLocal: true
         };
 
         createTerminalForSession(sessionId, 'Local CMD');
@@ -3360,9 +3615,18 @@ function showSessionTabMenu(event, sessionId) {
     const session = sessions[sessionId];
     const canReconnect = session && session.connected === false;
     const canDisconnect = session && session.connected !== false;
+    
+    let splitMenuItem = '';
+    if (isSplitMode) {
+        splitMenuItem = `<div class="context-menu-item" data-action="unsplit">退出分屏</div>`;
+    } else {
+        splitMenuItem = `<div class="context-menu-item" data-action="split">垂直分屏 (右侧)</div>`;
+    }
+
     menu.innerHTML = `
         <div class="context-menu-item ${canReconnect ? '' : 'disabled'}" data-action="reconnect">连接</div>
         <div class="context-menu-item ${canDisconnect ? '' : 'disabled'}" data-action="disconnect">断开连接</div>
+        ${splitMenuItem}
         <div class="context-menu-item" data-action="close">关闭终端</div>
         <div class="context-menu-item" data-action="reconnectAll">连接全部</div>
         <div class="context-menu-item context-menu-delete" data-action="closeAll">关闭全部终端</div>
@@ -3377,6 +3641,15 @@ function showSessionTabMenu(event, sessionId) {
         if (action === 'close') await closeSessionTab(sessionId);
         if (action === 'reconnectAll') await reconnectAllSessions();
         if (action === 'closeAll') await closeAllSessions();
+        if (action === 'unsplit') disableSplitScreen();
+        if (action === 'split') {
+            const otherActiveIds = Object.keys(sessions).filter(id => id !== sessionId && sessions[id].connected !== false);
+            if (otherActiveIds.length > 0) {
+                enableSplitScreen(sessionId, otherActiveIds[0]);
+            } else {
+                await cloneAndSplitSession(sessionId);
+            }
+        }
     };
 
     document.body.appendChild(menu);
@@ -3490,8 +3763,67 @@ function createTerminalForSession(sessionId, hostname) {
         // Open terminal
         terminal.open(terminalElement);
 
+        // Register OSC 7 directory synchronization
+        if (sessionId.startsWith('ssh_')) {
+            try {
+                terminal.parser.registerOscHandler(7, data => {
+                    try {
+                        if (currentSessionId !== sessionId) {
+                            return true; // Skip background session path syncs to prevent tab conflicts
+                        }
+                        let path = null;
+                        if (data.startsWith("file://")) {
+                            let rawUrl = data.substring(7);
+                            let firstSlash = rawUrl.indexOf('/');
+                            if (firstSlash !== -1) {
+                                path = rawUrl.substring(firstSlash);
+                            } else {
+                                path = "/";
+                            }
+                            try {
+                                path = decodeURIComponent(path);
+                            } catch(err) {}
+                        }
+                        if (path) {
+                            if (/^\/[A-Za-z]:/.test(path)) {
+                                path = path.substring(1);
+                            }
+                            if (path && typeof navigateToPath === 'function') {
+                                if (path !== currentPath) {
+                                    console.log(`[PrismSSH OSC 7] Auto syncing folder to: ${path}`);
+                                    navigateToPath(path);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error("OSC 7 path extraction error:", e);
+                    }
+                    return true;
+                });
+            } catch (e) {
+                console.error("Failed to register OSC 7 handler:", e);
+            }
+        }
+
         // Set up copy/paste functionality
         setupTerminalClipboard(terminal, sessionId);
+
+        terminal.onFocus(() => {
+            if (currentSessionId !== sessionId) {
+                currentSessionId = sessionId;
+                currentTerminal = terminal;
+                
+                // 同步当前 SFTP 路径
+                if (sessions[sessionId] && sessions[sessionId].currentPath) {
+                    currentPath = sessions[sessionId].currentPath;
+                    document.getElementById('currentPath').value = currentPath;
+                }
+                
+                updateSplitScreenHighlight();
+                updateSessionsList();
+                updateSessionTabs();
+            }
+        });
 
         // Feature REMOVED: addTimestampToLine. 
         // This was a massive CPU drain during high-throughput output (like 'cat' large files) 
@@ -3530,6 +3862,8 @@ function createTerminalForSession(sessionId, hostname) {
                 }
             }
         };
+
+        sessions[sessionId].calculateTerminalSize = calculateTerminalSize;
 
         // Calculate size after delays
         setTimeout(calculateTerminalSize, 50);
@@ -3610,8 +3944,8 @@ function createTerminalForSession(sessionId, hostname) {
                 
                 // If suggestion box is open, capture Up/Down/Enter/RightArrow
                 if (commandSuggestIsVisible() && state && state.suggestions && state.suggestions.length > 0) {
-                    if (data === '\x1b[C') {
-                        // Right Arrow accepts
+                    if (data === '\x1b[C' || data === '\t') {
+                        // Right Arrow or Tab accepts suggestion
                         if (acceptCommandSuggestion(sessionId)) return;
                     } else if (data === '\r' || data === '\n') {
                         // Enter accepts only if explicitly navigated
@@ -3724,20 +4058,100 @@ async function pollSessionOutput(sessionId) {
         const result = JSON.parse(await window.pywebview.api.get_output(sessionId));
         hasOutput = Boolean(result.output);
         if (result.output) {
-            const filtered = stripPredictedEchoes(result.output);
-            if (filtered.length > 0 && currentTerminal) {
-                // Prevent V8 OOM by skipping heavy regex highlighting on massive bursts (e.g. from cat huge.log)
-                if (filtered.length > 50000) {
-                    currentTerminal.write(filtered);
-                } else {
-                    currentTerminal.write(applyTerminalHighlights(filtered));
+            console.log("[PrismSSH Debug] base64 output: ", result.output);
+            const rawBytes = base64ToBytes(result.output);
+            console.log("[PrismSSH Debug] rawBytes len: ", rawBytes.length);
+            if (rawBytes.length > 0) {
+                const sentinel = sessionId.startsWith('ssh_') ? getZmodemSentinel(sessionId) : null;
+                
+                if (activeZsession) {
+                    try {
+                        activeZsession.consume(Array.from(rawBytes));
+                    } catch (zerr) {
+                        console.warn("Zmodem session consume error:", zerr);
+                    }
+                } else if (sentinel) {
+                    try {
+                        sentinel.consume(Array.from(rawBytes));
+                    } catch (zerr) {
+                        console.warn("Zmodem sentinel consume error:", zerr);
+                    }
                 }
-                appendSessionOutputContext(sessionId, filtered);
+
+                // Normal terminal rendering - active only when not in Zmodem file transfer session
+                if (!activeZsession && currentTerminal) {
+                    const filtered = stripPredictedEchoes(bytesToUtf8(sessionId, rawBytes));
+                    if (filtered.length > 0) {
+                        if (filtered.length > 50000) {
+                            currentTerminal.write(filtered);
+                        } else {
+                            currentTerminal.write(applyTerminalHighlights(filtered));
+                        }
+                        appendSessionOutputContext(sessionId, filtered);
+
+                        // Adaptive Reflow: If the terminal was opened hidden and size collapsed to <= 5, trigger layout calculation
+                        if (currentTerminal.cols <= 5 || currentTerminal.rows <= 5) {
+                            console.log(`[PrismSSH Fit] Collapsed layout detected (${currentTerminal.cols}x${currentTerminal.rows}). Refitting...`);
+                            const session = sessions[sessionId];
+                            if (session) {
+                                if (typeof session.calculateTerminalSize === 'function') {
+                                    session.calculateTerminalSize();
+                                } else if (session.fitAddon) {
+                                    try { session.fitAddon.fit(); } catch(e) {}
+                                }
+                            }
+                        }
+                        
+                        // Real-time SFTP Sync from Terminal Screen Prompt (delayed to allow Xterm render)
+                        setTimeout(() => {
+                            syncSftpFromTerminalPrompt(sessionId);
+                        }, 80);
+                        
+                        // Smart cd command detection fallback to sync SFTP when OSC 7 is not configured on remote host
+                        if (sessionId.startsWith('ssh_') && filtered) {
+                            const cdRegex = /(?:^|\r?\n|;)\s*cd\s+([^\r\n;&\s]+)/g;
+                            let match;
+                            while ((match = cdRegex.exec(filtered)) !== null) {
+                                let target = match[1].trim();
+                                target = target.replace(/^['"]|['"]$/g, '');
+                                if (target) {
+                                    let targetPath = '';
+                                    if (target.startsWith('/')) {
+                                        targetPath = target;
+                                    } else if (target === '~') {
+                                        targetPath = '/';
+                                    } else if (target === '..') {
+                                        const parts = currentPath.split('/').filter(Boolean);
+                                        parts.pop();
+                                        targetPath = '/' + parts.join('/');
+                                    } else if (target === '.') {
+                                        continue;
+                                    } else {
+                                        const base = currentPath.endsWith('/') ? currentPath : currentPath + '/';
+                                        targetPath = base + target;
+                                    }
+                                    
+                                    targetPath = targetPath.replace(/\/+/g, '/');
+                                    if (targetPath.endsWith('/') && targetPath.length > 1) {
+                                        targetPath = targetPath.slice(0, -1);
+                                    }
+                                    
+                                    console.log("[PrismSSH Sync] Sniffed 'cd' command to: " + targetPath);
+                                    if (typeof navigateToPath === 'function') {
+                                        setTimeout(() => {
+                                            navigateToPath(targetPath);
+                                        }, 400);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     } catch (error) {
         console.error('Error polling output:', error);
-        // We will just let the loop continue and rely on the status check to disconnect if needed
+        alert('Poll Error: ' + error.message + '\n' + error.stack);
     }
 
     if (hasOutput) {
@@ -3774,15 +4188,100 @@ async function pollSessionOutput(sessionId) {
     scheduleOutputPoll(sessionId, currentPollDelay);
 }
 
-async function startOutputPolling(sessionId) {
-    if (outputPollingInterval) {
-        clearTimeout(outputPollingInterval);
-        outputPollingInterval = null;
+window.handlePushOutput = function(sessionId, base64Output) {
+    if (!sessions[sessionId] || sessions[sessionId].connected === false) {
+        return;
     }
-    outputPollFailureCount = 0;
-    currentPollDelay = OUTPUT_POLL_DELAY_MS;
-    lastStatusCheckTime = Date.now();
-    scheduleOutputPoll(sessionId);
+    if (!base64Output) return;
+
+    const rawBytes = base64ToBytes(base64Output);
+    if (rawBytes.length > 0) {
+        const sentinel = sessionId.startsWith('ssh_') ? getZmodemSentinel(sessionId) : null;
+        if (activeZsession && currentSessionId === sessionId) {
+            try {
+                activeZsession.consume(Array.from(rawBytes));
+            } catch (zerr) {
+                console.warn("Zmodem session consume error:", zerr);
+            }
+        } else if (sentinel && currentSessionId === sessionId) {
+            try {
+                sentinel.consume(Array.from(rawBytes));
+            } catch (zerr) {
+                console.warn("Zmodem sentinel consume error:", zerr);
+            }
+        }
+
+        const targetTerminal = sessions[sessionId].terminal;
+        if (!activeZsession && targetTerminal) {
+            const filtered = stripPredictedEchoes(bytesToUtf8(sessionId, rawBytes));
+            if (filtered.length > 0) {
+                if (filtered.length > 50000) {
+                    targetTerminal.write(filtered);
+                } else {
+                    targetTerminal.write(applyTerminalHighlights(filtered));
+                }
+                appendSessionOutputContext(sessionId, filtered);
+
+                if (targetTerminal.cols <= 5 || targetTerminal.rows <= 5) {
+                    const session = sessions[sessionId];
+                    if (session) {
+                        if (typeof session.calculateTerminalSize === 'function') {
+                            session.calculateTerminalSize();
+                        } else if (session.fitAddon) {
+                            try { session.fitAddon.fit(); } catch(e) {}
+                        }
+                    }
+                }
+                
+                setTimeout(() => {
+                    syncSftpFromTerminalPrompt(sessionId);
+                }, 80);
+                
+                if (sessionId.startsWith('ssh_') && filtered) {
+                    const cdRegex = /(?:^|\r?\n|;)\s*cd\s+([^\r\n;&\s]+)/g;
+                    let match;
+                    while ((match = cdRegex.exec(filtered)) !== null) {
+                        let target = match[1].trim();
+                        target = target.replace(/^['"]|['"]$/g, '');
+                        if (target) {
+                            let targetPath = '';
+                            if (target.startsWith('/')) {
+                                targetPath = target;
+                            } else if (target === '~') {
+                                targetPath = '/';
+                            } else if (target === '..') {
+                                const parts = currentPath.split('/').filter(Boolean);
+                                parts.pop();
+                                targetPath = '/' + parts.join('/');
+                            } else if (target === '.') {
+                                continue;
+                            } else {
+                                const base = currentPath.endsWith('/') ? currentPath : currentPath + '/';
+                                targetPath = base + target;
+                            }
+                            
+                            targetPath = targetPath.replace(/\/+/g, '/');
+                            if (targetPath.endsWith('/') && targetPath.length > 1) {
+                                targetPath = targetPath.slice(0, -1);
+                            }
+                            
+                            console.log("[PrismSSH Sync] Sniffed 'cd' command to: " + targetPath);
+                            if (typeof navigateToPath === 'function') {
+                                setTimeout(() => {
+                                    navigateToPath(targetPath);
+                                }, 400);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+};
+
+async function startOutputPolling(sessionId) {
+    // Polling has been completely replaced by high-performance PostMessage push notifications (0% Idle CPU)
+    return;
 }
 
 function handleSessionDisconnect(sessionId, wasLogout, promptReconnect = true) {
@@ -3936,10 +4435,14 @@ function switchToSession(sessionId) {
     pendingEchoBuffer = [];
     if (typeof hideCommandSuggestion === 'function') hideCommandSuggestion();
 
-    // Hide all terminal elements from previous sessions
+    // Hide all terminal elements from previous sessions, respecting split mode visibility
     Object.keys(sessions).forEach(id => {
         if (sessions[id].terminalElement) {
-            sessions[id].terminalElement.style.display = 'none';
+            if (isSplitMode && (id === splitLeftSessionId || id === splitRightSessionId)) {
+                sessions[id].terminalElement.style.display = 'block';
+            } else {
+                sessions[id].terminalElement.style.display = 'none';
+            }
         }
     });
 
@@ -3989,6 +4492,204 @@ function switchToSession(sessionId) {
 
     updateSessionsList();
     updateSessionTabs();
+}
+
+function enableSplitScreen(leftId, rightId, direction = 'row') {
+    if (!sessions[leftId] || !sessions[rightId]) return;
+    
+    isSplitMode = true;
+    splitLeftSessionId = leftId;
+    splitRightSessionId = rightId;
+    
+    const wrapper = document.getElementById('terminalWrapper');
+    if (!wrapper) return;
+
+    // 配置容器为 flex 弹性布局
+    wrapper.style.position = 'relative';
+    wrapper.style.display = 'flex';
+    wrapper.style.flexDirection = direction === 'row' ? 'row' : 'column';
+    wrapper.style.gap = '8px';
+    wrapper.style.padding = '4px';
+    wrapper.style.boxSizing = 'border-box';
+    
+    // 遍历所有会话
+    Object.keys(sessions).forEach(id => {
+        const el = sessions[id].terminalElement;
+        if (el) {
+            if (id === leftId || id === rightId) {
+                // 显示分屏元素，设为弹性占据
+                el.style.display = 'block';
+                el.style.position = 'relative';
+                el.style.left = 'auto';
+                el.style.top = 'auto';
+                el.style.right = 'auto';
+                el.style.bottom = 'auto';
+                el.style.width = '100%';
+                el.style.height = '100%';
+                el.style.flex = '1';
+                el.style.boxSizing = 'border-box';
+                el.style.borderRadius = '6px';
+                el.style.overflow = 'hidden';
+                el.style.border = '1px solid rgba(255, 255, 255, 0.05)';
+            } else {
+                el.style.display = 'none';
+            }
+        }
+    });
+    
+    document.getElementById('welcomeScreen').style.display = 'none';
+    
+    // 切换当前聚焦会话
+    if (currentSessionId !== leftId && currentSessionId !== rightId) {
+        currentSessionId = leftId;
+    }
+    
+    updateSplitScreenHighlight();
+    
+    // 触发尺寸自适应
+    setTimeout(() => {
+        [leftId, rightId].forEach(id => {
+            if (sessions[id]) {
+                if (typeof sessions[id].calculateTerminalSize === 'function') {
+                    sessions[id].calculateTerminalSize();
+                } else if (sessions[id].fitAddon) {
+                    try { sessions[id].fitAddon.fit(); } catch(e) {}
+                }
+            }
+        });
+    }, 150);
+    
+    updateSessionsList();
+    updateSessionTabs();
+    
+    if (sessions[currentSessionId] && sessions[currentSessionId].terminal) {
+        sessions[currentSessionId].terminal.focus();
+    }
+}
+
+function disableSplitScreen() {
+    isSplitMode = false;
+    splitLeftSessionId = null;
+    splitRightSessionId = null;
+    
+    const wrapper = document.getElementById('terminalWrapper');
+    if (wrapper) {
+        wrapper.style.display = 'block';
+        wrapper.style.padding = '0';
+    }
+    
+    // 恢复原来的绝对定位样式
+    Object.keys(sessions).forEach(id => {
+        const el = sessions[id].terminalElement;
+        if (el) {
+            el.style.position = 'absolute';
+            el.style.left = '0';
+            el.style.top = '0';
+            el.style.right = '0';
+            el.style.bottom = '0';
+            el.style.width = '100%';
+            el.style.height = '100%';
+            el.style.flex = 'none';
+            el.style.border = 'none';
+            el.classList.remove('active-split');
+            
+            if (id === currentSessionId) {
+                el.style.display = 'block';
+            } else {
+                el.style.display = 'none';
+            }
+        }
+    });
+    
+    setTimeout(() => {
+        if (currentSessionId && sessions[currentSessionId]) {
+            if (typeof sessions[currentSessionId].calculateTerminalSize === 'function') {
+                sessions[currentSessionId].calculateTerminalSize();
+            } else if (sessions[currentSessionId].fitAddon) {
+                try { sessions[currentSessionId].fitAddon.fit(); } catch(e) {}
+            }
+            if (sessions[currentSessionId].terminal) {
+                sessions[currentSessionId].terminal.focus();
+            }
+        }
+    }, 150);
+    
+    updateSessionsList();
+    updateSessionTabs();
+}
+
+async function cloneAndSplitSession(sessionId) {
+    const srcSession = sessions[sessionId];
+    if (!srcSession) return;
+    
+    document.getElementById('welcomeScreen').style.display = 'none';
+    const connectingScreen = document.getElementById('connectingScreen');
+    connectingScreen.style.display = 'block';
+    
+    const textNode = connectingScreen.querySelector('div:last-child');
+    const originalText = textNode ? textNode.textContent : '正在连接...';
+    if (textNode) {
+        textNode.textContent = '正在克隆会话并配置双分屏...';
+    }
+    
+    try {
+        if (srcSession.isLocal) {
+            const newSessionId = await window.pywebview.api.create_local_session();
+            sessions[newSessionId] = {
+                id: newSessionId,
+                hostname: 'Local CMD',
+                username: 'localhost',
+                name: 'Local CMD (2)',
+                connected: true,
+                isLocal: true
+            };
+            
+            createTerminalForSession(newSessionId, 'Local CMD');
+            startOutputPolling(newSessionId);
+            enableSplitScreen(sessionId, newSessionId);
+        } else {
+            if (!srcSession.connectionParams) {
+                alert('克隆失败：未找到原始连接的认证参数');
+                connectingScreen.style.display = 'none';
+                if (textNode) textNode.textContent = originalText;
+                return;
+            }
+            
+            const newParams = { ...srcSession.connectionParams };
+            newParams.name = (newParams.name || 'SSH') + ' (分屏)';
+            
+            const newSessionId = await window.pywebview.api.create_session();
+            const result = await connectWithHostVerification(newSessionId, newParams);
+            
+            if (result.success) {
+                sessions[newSessionId] = {
+                    id: newSessionId,
+                    hostname: newParams.hostname,
+                    username: newParams.username,
+                    name: newParams.name,
+                    connected: true,
+                    connectionParams: newParams
+                };
+                
+                createTerminalForSession(newSessionId, newParams.hostname);
+                startOutputPolling(newSessionId);
+                enableSplitScreen(sessionId, newSessionId);
+            } else {
+                alert('克隆分屏失败：' + (result.error || '未知连接错误'));
+            }
+        }
+    } catch (error) {
+        console.error('Error cloning session for split screen:', error);
+        alert('克隆分屏发生异常：' + error.message);
+    } finally {
+        connectingScreen.style.display = 'none';
+        if (textNode) textNode.textContent = originalText;
+        
+        const appNode = document.querySelector('.app');
+        if (appNode) {
+            appNode.classList.add('ssh-sidebar-collapsed');
+        }
+    }
 }
 
 let lastSessionsListFingerprint = '';
@@ -4449,7 +5150,7 @@ function displayProcessList(processes) {
     html += '<div>进程</div>';
     html += '<div>PID</div>';
     html += '<div>CPU</div>';
-    html += '<div>进程</div>';
+    html += '<div>内存</div>';
     html += '</div>';
 
     processes.slice(0, 20).forEach(process => {
@@ -4745,23 +5446,130 @@ function resizeTerminalAfterLayout(delay = 180) {
     }, delay);
 }
 
-// --- OpenAI split mode UI shell ---
+// --- OpenAI integrated sidebar panels ---
 
-async function toggleAiSplitMode() {
-    if (window.pywebview && window.pywebview.api) {
-        try {
-            const result = JSON.parse(await window.pywebview.api.open_chatgpt_window());
-            if (!result.success) {
-                console.error("Failed to open ChatGPT window:", result.error);
-                alert("无法打开 ChatGPT 窗口：" + result.error);
-            }
-        } catch (e) {
-            console.error("Error calling open_chatgpt_window:", e);
-        }
-    } else {
-        alert("API 未就绪");
+let aiSubWindowResizeInterval = null;
+
+function updateAiSubWindowBounds() {
+    const placeholder = document.getElementById('aiSubWindowPlaceholder');
+    if (!placeholder || currentTool !== 'ai') return;
+
+    const rect = placeholder.getBoundingClientRect();
+    const dpi = window.devicePixelRatio || 1;
+    
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    const bounds = {
+        left: Math.round(rect.left * dpi),
+        top: Math.round(rect.top * dpi),
+        width: Math.round(rect.width * dpi),
+        height: Math.round(rect.height * dpi)
+    };
+
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.resize_chatgpt_subwindow) {
+        window.pywebview.api.resize_chatgpt_subwindow(JSON.stringify(bounds));
     }
 }
+
+function startSyncAiSubWindow() {
+    if (aiSubWindowResizeInterval) clearInterval(aiSubWindowResizeInterval);
+
+    const startTime = Date.now();
+    aiSubWindowResizeInterval = setInterval(() => {
+        updateAiSubWindowBounds();
+        if (Date.now() - startTime > 350) {
+            clearInterval(aiSubWindowResizeInterval);
+            aiSubWindowResizeInterval = null;
+        }
+    }, 16);
+}
+
+window.addEventListener('resize', () => {
+    if (currentTool === 'ai') {
+        updateAiSubWindowBounds();
+    }
+});
+
+// --- Right Sidebar Resizable drag logic ---
+
+let isResizingSidebar = false;
+let startSidebarWidth = 380;
+let startMouseX = 0;
+
+function initSidebarResizer() {
+    const resizer = document.getElementById('sidebarResizer');
+    const sidebar = document.getElementById('rightSidebar');
+    if (!resizer || !sidebar) return;
+
+    resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        isResizingSidebar = true;
+        startSidebarWidth = sidebar.getBoundingClientRect().width;
+        startMouseX = e.clientX;
+
+        resizer.classList.add('dragging');
+        sidebar.classList.add('no-transition');
+
+        let dragOverlay = document.getElementById('sidebarDragOverlay');
+        if (!dragOverlay) {
+            dragOverlay = document.createElement('div');
+            dragOverlay.id = 'sidebarDragOverlay';
+            dragOverlay.style.position = 'fixed';
+            dragOverlay.style.left = '0';
+            dragOverlay.style.top = '0';
+            dragOverlay.style.width = '100vw';
+            dragOverlay.style.height = '100vh';
+            dragOverlay.style.zIndex = '99999';
+            dragOverlay.style.cursor = 'col-resize';
+            dragOverlay.style.background = 'transparent';
+            document.body.appendChild(dragOverlay);
+        }
+    });
+}
+
+window.addEventListener('mousemove', (e) => {
+    if (!isResizingSidebar) return;
+
+    const sidebar = document.getElementById('rightSidebar');
+    if (!sidebar) return;
+
+    const dx = startMouseX - e.clientX;
+    let newWidth = startSidebarWidth + dx;
+
+    const minWidth = 260;
+    const maxWidth = Math.round(window.innerWidth * 0.8);
+    if (newWidth < minWidth) newWidth = minWidth;
+    if (newWidth > maxWidth) newWidth = maxWidth;
+
+    sidebar.style.setProperty('--sidebar-width', newWidth + 'px');
+
+    if (currentTool === 'ai') {
+        updateAiSubWindowBounds();
+    }
+});
+
+window.addEventListener('mouseup', () => {
+    if (!isResizingSidebar) return;
+
+    isResizingSidebar = false;
+
+    const resizer = document.getElementById('sidebarResizer');
+    const sidebar = document.getElementById('rightSidebar');
+    if (resizer) resizer.classList.remove('dragging');
+    if (sidebar) sidebar.classList.remove('no-transition');
+
+    const dragOverlay = document.getElementById('sidebarDragOverlay');
+    if (dragOverlay) dragOverlay.remove();
+
+    if (sessions[currentSessionId]?.calculateSize) {
+        sessions[currentSessionId].calculateSize();
+    } else if (typeof fitAddon !== 'undefined' && fitAddon) {
+        fitAddon.fit();
+    }
+});
+
+// 在初始化中调用
+initSidebarResizer();
 
 // --- Workbench side panels ---
 function setSshSidebarVisible(visible) {
@@ -4789,6 +5597,16 @@ function clearConnectionForm() {
     document.getElementById('saveConnection').checked = false;
     document.getElementById('passwordGroup').style.display = 'block';
     document.getElementById('keyGroup').style.display = 'none';
+
+    // 重置堡垒机相关
+    document.getElementById('jumpHost').value = '';
+    document.getElementById('jumpPort').value = '22';
+    document.getElementById('jumpUser').value = '';
+    document.getElementById('jumpPass').value = '';
+    document.getElementById('jumpKey').value = '';
+    document.getElementById('jumpKeyPassphrase').value = '';
+    document.getElementById('jumpHostFields').style.display = 'none';
+    document.getElementById('jumpHostChevron').textContent = '▶';
 }
 
 function openNewConnectionForm(focusField = 'hostname', clearForm = false) {
@@ -4860,9 +5678,9 @@ function getDefaultCommandLibrary() {
         {
             name: 'ADB',
             commands: [
-                { name: 'Logcat 错误', command: 'adb logcat *:E\n' },
-                { name: '当前 Activity', command: 'adb shell dumpsys activity top\n' },
-                { name: '包列表', command: 'adb shell pm list packages\n' }
+                { name: 'Logcat 错误', command: 'logcat *:E\n' },
+                { name: '当前 Activity', command: 'dumpsys activity top\n' },
+                { name: '包列表', command: 'pm list packages\n' }
             ]
         }
     ];
@@ -4891,6 +5709,30 @@ async function loadCommandLibrary() {
             commandLibraryFolders = parsed;
         } else {
             commandLibraryFolders = getDefaultCommandLibrary();
+        }
+
+        // Clean up legacy ADB commands with 'adb shell' or 'adb' prefix if present
+        let migrationPerformed = false;
+        commandLibraryFolders.forEach(folder => {
+            if (folder.name === 'ADB' && Array.isArray(folder.commands)) {
+                folder.commands.forEach(cmd => {
+                    if (cmd.name === 'Logcat 错误' && (cmd.command.startsWith('adb ') || cmd.command.startsWith('adb.exe '))) {
+                        cmd.command = 'logcat *:E\n';
+                        migrationPerformed = true;
+                    }
+                    if (cmd.name === '当前 Activity' && cmd.command.startsWith('adb shell ')) {
+                        cmd.command = 'dumpsys activity top\n';
+                        migrationPerformed = true;
+                    }
+                    if (cmd.name === '包列表' && cmd.command.startsWith('adb shell ')) {
+                        cmd.command = 'pm list packages\n';
+                        migrationPerformed = true;
+                    }
+                });
+            }
+        });
+        if (migrationPerformed) {
+            saveCommandLibrary().catch(err => console.error('Failed to auto-save migrated command library:', err));
         }
     } catch (error) {
         console.error('加载保存连接失败', error);
@@ -4966,24 +5808,97 @@ function renderCommandLibrary() {
     }
 
     commands.forEach((item, index) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        
-        button.className = 'command-btn';
         const isAuto = item.auto_execute !== false;
-        if (!isAuto) {
-            button.style.borderLeft = '3px solid var(--theme-secondary)';
-            button.title = item.command + ' (只输入不执行)';
+        
+        // Detect parameters, e.g. [p#1 Parameter Name]
+        const paramRegex = /\[p#(\d+)\s+([^\]]+)\]/;
+        const hasParams = paramRegex.test(item.command);
+        
+        let clickTimeout = null;
+        
+        if (!hasParams) {
+            // No parameters, render standard command button but with custom glow style
+            const button = document.createElement('div');
+            button.className = 'glow-btn';
+            
+            if (!isAuto) {
+                button.title = item.command + ' (只输入不执行)';
+            } else {
+                button.title = item.command + ' (直接执行)';
+            }
+            
+            const borderLeftStyle = !isAuto ? 'border-left: 3px solid var(--theme-secondary) !important;' : '';
+            
+            // Inner container with narrow padding, no gear icon
+            button.innerHTML = `<div class="glow-btn-inner" style="${borderLeftStyle}">${escapeHtml(item.name)}</div>`;
+            
+            button.onclick = (event) => {
+                if (clickTimeout) {
+                    clearTimeout(clickTimeout);
+                    clickTimeout = null;
+                }
+                clickTimeout = setTimeout(() => {
+                    sendCommandLibraryCommand(item.command, isAuto);
+                    clickTimeout = null;
+                }, 250);
+            };
+            
+            button.ondblclick = (event) => {
+                if (clickTimeout) {
+                    clearTimeout(clickTimeout);
+                    clickTimeout = null;
+                }
+                event.stopPropagation();
+                openCommandLibraryModal('edit-command', '', index);
+            };
+            
+            button.oncontextmenu = (event) => {
+                event.preventDefault();
+                showSnippetContextMenu(event, 'command', index);
+            };
+            grid.appendChild(button);
         } else {
-            button.title = item.command + ' (直接执行)';
+            // Contains parameters, render as custom glow-btn with compact inline layout
+            const button = document.createElement('div');
+            button.className = 'glow-btn';
+            
+            if (!isAuto) {
+                button.title = item.command + ' (只输入不执行)';
+            } else {
+                button.title = item.command + ' (直接执行)';
+            }
+            
+            const borderLeftStyle = !isAuto ? 'border-left: 3px solid var(--theme-secondary) !important;' : '';
+            
+            // Inner container with narrow padding and inline gear icon
+            button.innerHTML = `<div class="glow-btn-inner" style="${borderLeftStyle}">${escapeHtml(item.name)}<span style="font-size: 9px; color: var(--theme-primary, #38bdf8); margin-left: 2px;">⚙️</span></div>`;
+            
+            button.onclick = (event) => {
+                if (clickTimeout) {
+                    clearTimeout(clickTimeout);
+                    clickTimeout = null;
+                }
+                clickTimeout = setTimeout(() => {
+                    toggleDynamicConsole(event, index);
+                    clickTimeout = null;
+                }, 250);
+            };
+            
+            button.ondblclick = (event) => {
+                if (clickTimeout) {
+                    clearTimeout(clickTimeout);
+                    clickTimeout = null;
+                }
+                event.stopPropagation();
+                openCommandLibraryModal('edit-command', '', index);
+            };
+            
+            button.oncontextmenu = (event) => {
+                event.preventDefault();
+                showSnippetContextMenu(event, 'command', index);
+            };
+            grid.appendChild(button);
         }
-        button.textContent = item.name;
-        button.onclick = () => sendCommandLibraryCommand(item.command, isAuto);
-        button.oncontextmenu = (event) => {
-            event.preventDefault();
-            showSnippetContextMenu(event, 'command', index);
-        };
-        grid.appendChild(button);
     });
 }
 
@@ -4992,6 +5907,19 @@ function sendCommandLibraryCommand(command, autoExecute = true) {
         alert('请先连接服务器。');
         return;
     }
+    
+    // Detect placeholders like [p#1 Parameter Name]
+    const paramRegex = /\[p#(\d+)\s+([^\]]+)\]/;
+    if (paramRegex.test(command)) {
+        const activeFolder = commandLibraryFolders[activeCommandFolderIndex];
+        const commands = activeFolder?.commands || [];
+        const index = commands.findIndex(c => c.command === command);
+        if (index !== -1) {
+            toggleDynamicConsole(null, index);
+            return;
+        }
+    }
+    
     const finalCommand = autoExecute ? (command.endsWith('\n') ? command : `${command}\n`) : (command.endsWith('\n') ? command.slice(0, -1) : command);
     window.pywebview.api.send_input(currentSessionId, finalCommand);
 }
@@ -5641,3 +6569,952 @@ function handleTerminalSearch(e) {
         closeTerminalSearch();
     }
 }
+
+// Real-time SFTP Sync from Terminal Screen Prompt
+function syncSftpFromTerminalPrompt(sessionId) {
+    if (!sessionId.startsWith('ssh_') || !currentTerminal) return;
+    try {
+        const term = currentTerminal;
+        const buffer = term.buffer.active;
+        if (!buffer) return;
+        
+        const cursorLineIndex = buffer.baseY + buffer.cursorY;
+        const startLine = Math.max(0, cursorLineIndex - 2);
+        const endLine = Math.min(buffer.length - 1, cursorLineIndex);
+        
+        console.log(`[PrismSSH Sync Debug] Session: ${sessionId}, CursorY: ${buffer.cursorY}, BaseY: ${buffer.baseY}, ScanLines: [${startLine} to ${endLine}]`);
+        
+        let targetPath = null;
+        let matchedLineText = "";
+        
+        // Regexp to match path after colon E.g.: root@host:/var/log$ or user@host:~$
+        const promptRegex = /:([\/~][^\s$#>\(\)]*)/;
+        
+        // Regexp to extract username E.g.: root@f6b95c8493b114d9
+        const userRegex = /(?:^|\s)([a-zA-Z0-9_\-\.]+)(?:@[a-zA-Z0-9_\-\.]+):/;
+        
+        // Scan bottom-up to capture the absolute LATEST prompt path
+        for (let i = endLine; i >= startLine; i--) {
+            const line = buffer.getLine(i);
+            if (line) {
+                const lineText = line.translateToString(true);
+                console.log(`[PrismSSH Sync Debug] Line ${i} content: ${JSON.stringify(lineText)}`);
+                
+                const match = promptRegex.exec(lineText);
+                if (match) {
+                    targetPath = match[1].trim();
+                    matchedLineText = lineText;
+                    console.log(`[PrismSSH Sync Debug] Hit prompt on Line ${i}: ${targetPath}`);
+                    break; // Found the latest prompt, break out immediately
+                }
+            }
+        }
+        
+        if (targetPath) {
+            // Intelligent home directory (~) path mapping
+            if (targetPath.startsWith('~')) {
+                const userMatch = userRegex.exec(matchedLineText);
+                const username = userMatch ? userMatch[1].trim() : 'root';
+                
+                const relativeRemainder = targetPath.slice(1); // everything after '~'
+                let homePrefix = (username === 'root') ? '/root' : '/home/' + username;
+                targetPath = homePrefix + relativeRemainder;
+                console.log(`[PrismSSH Sync Debug] Mapped home symbol ~ to absolute path: ${targetPath} (user: ${username})`);
+            }
+            
+            // Normalize path separators
+            targetPath = targetPath.replace(/\/+/g, '/');
+            if (targetPath.endsWith('/') && targetPath.length > 1) {
+                targetPath = targetPath.slice(0, -1);
+            }
+            
+            if (targetPath && targetPath !== currentPath) {
+                console.log(`[PrismSSH Sync] Synced folder to: ${targetPath} (Sniffed from terminal)`);
+                if (typeof navigateToPath === 'function') {
+                    navigateToPath(targetPath);
+                }
+            } else {
+                console.log(`[PrismSSH Sync Debug] Target path is already active: targetPath=${targetPath}, currentPath=${currentPath}`);
+            }
+        } else {
+            console.log("[PrismSSH Sync Debug] No prompt pattern matched in scanning range.");
+        }
+    } catch (e) {
+        console.warn("[PrismSSH Sync] Prompt path extraction error:", e);
+    }
+}
+
+// --- Base64 / Binary conversion helpers ---
+function base64ToBytes(base64) {
+    const raw = atob(base64);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) {
+        bytes[i] = raw.charCodeAt(i);
+    }
+    return bytes;
+}
+
+function bytesToBase64(bytes) {
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+function bytesToUtf8(sessionId, bytes) {
+    if (typeof TextDecoder !== 'undefined') {
+        const session = sessions[sessionId];
+        if (session) {
+            if (!session.textDecoder) {
+                session.textDecoder = new TextDecoder('utf-8');
+            }
+            return session.textDecoder.decode(bytes, { stream: true });
+        }
+        return new TextDecoder('utf-8').decode(bytes);
+    }
+    let utf8 = '';
+    for (let i = 0; i < bytes.length; i++) {
+        utf8 += String.fromCharCode(bytes[i]);
+    }
+    return utf8;
+}
+
+// --- Zmodem (sz/rz) Integration ---
+let activeZsession = null;
+let zsentinels = {}; // Mapping from sessionId to its Zmodem.Sentinel instance
+
+// Zmodem 进度更新与界面控制函数
+function updateZmodemProgress(title, offset, total) {
+    const panel = document.getElementById("zmodemProgressPanel");
+    const titleEl = document.getElementById("zmodemProgressTitle");
+    const percentEl = document.getElementById("zmodemProgressPercent");
+    const barEl = document.getElementById("zmodemProgressBar");
+    const sizeEl = document.getElementById("zmodemProgressSize");
+    
+    if (panel) panel.style.display = "block";
+    if (titleEl) titleEl.innerText = title;
+    
+    const pct = total > 0 ? Math.min(100, Math.floor((offset / total) * 100)) : 0;
+    if (percentEl) percentEl.innerText = `${pct}%`;
+    if (barEl) barEl.style.width = `${pct}%`;
+    
+    const formattedOffset = (offset / 1024).toFixed(1);
+    const formattedTotal = (total / 1024).toFixed(1);
+    if (sizeEl) sizeEl.innerText = `${formattedOffset} KB / ${formattedTotal} KB`;
+}
+
+function hideZmodemProgress() {
+    const panel = document.getElementById("zmodemProgressPanel");
+    if (panel) panel.style.display = "none";
+}
+
+function cancelActiveZmodem() {
+    if (activeZsession) {
+        try {
+            activeZsession.abort();
+        } catch(e) {}
+    }
+    const currentSess = currentSessionId;
+    const term = currentSess ? sessions[currentSess]?.terminal : null;
+    cleanupZmodem(term);
+}
+
+function getZmodemSentinel(sessionId) {
+    let zmodemLib = null;
+    if (typeof zmodem !== 'undefined') {
+        zmodemLib = zmodem;
+    } else if (typeof Zmodem !== 'undefined') {
+        zmodemLib = Zmodem;
+    }
+    
+    if (!zmodemLib) {
+        console.warn('zmodem.js is not loaded.');
+        return null;
+    }
+    
+    const SentinelConstructor = zmodemLib.Sentry || zmodemLib.Sentinel || (zmodemLib.Browser && zmodemLib.Browser.Sentinel) || (zmodemLib.Browser && zmodemLib.Browser.Sentry);
+    if (!SentinelConstructor || typeof SentinelConstructor !== 'function') {
+        console.warn('Zmodem Sentry/Sentinel constructor is not available in the library.');
+        return null;
+    }
+    
+    if (!zsentinels[sessionId]) {
+        try {
+            zsentinels[sessionId] = new SentinelConstructor({
+                on_detect: function(detection) {
+                    startZmodemSession(sessionId, detection);
+                },
+                on_retract: function() {
+                    // Cancelled
+                },
+                sender: function(octets) {
+                    const base64Data = bytesToBase64(new Uint8Array(octets));
+                    window.pywebview.api.send_input_base64(sessionId, base64Data).catch(console.error);
+                }
+            });
+        } catch (instError) {
+            console.error("Zmodem Sentinel instantiation failed:", instError);
+            return null;
+        }
+    }
+    return zsentinels[sessionId];
+}
+
+function startZmodemSession(sessionId, detection) {
+    const term = sessions[sessionId]?.terminal;
+    if (!term) return;
+
+    term.write("\r\n[PrismSSH] 检测到 Zmodem 传输启动...\r\n");
+    const zsession = detection.confirm();
+    activeZsession = zsession;
+
+    if (zsession.type === "receive") {
+        zsession.on("offer", function(offer) {
+            const details = offer.get_details();
+            const fileName = details.name;
+            const fileSize = details.size;
+
+            window.pywebview.api.show_save_file_dialog(fileName).then(res => {
+                const response = JSON.parse(res);
+                const savePath = response.filePath;
+                if (!savePath) {
+                    offer.skip();
+                    cleanupZmodem(term);
+                    return;
+                }
+
+                term.write(`[PrismSSH] 正在下载: ${fileName} (${(fileSize / 1024).toFixed(2)} KB) -> ${savePath}\r\n`);
+                updateZmodemProgress(`下载: ${fileName}`, 0, fileSize || 1);
+                
+                offer.accept().then(function() {
+                    let receivedChunks = [];
+                    offer.on("chunk", function(chunk) {
+                        receivedChunks.push(new Uint8Array(chunk));
+                        const currentOffset = offer.get_offset();
+                        updateZmodemProgress(`下载: ${fileName}`, currentOffset, fileSize || 1);
+                    });
+
+                    offer.on("close", function() {
+                        const totalLen = receivedChunks.reduce((acc, val) => acc + val.length, 0);
+                        const fileData = new Uint8Array(totalLen);
+                        let offset = 0;
+                        for (let chunk of receivedChunks) {
+                            fileData.set(chunk, offset);
+                            offset += chunk.length;
+                        }
+                        const base64Content = bytesToBase64(fileData);
+                        window.pywebview.api.write_base64_file(savePath, base64Content).then(res => {
+                            const response = JSON.parse(res);
+                            if (response.success) {
+                                term.write(`\r\n[PrismSSH] 下载成功: ${fileName}\r\n`);
+                            } else {
+                                term.write(`\r\n[PrismSSH] 写入文件失败: ${response.error || '未知错误'}\r\n`);
+                            }
+                            cleanupZmodem(term);
+                        });
+                    });
+                });
+            });
+        });
+    } else {
+        // 如果有拖入的待发送文件，直接处理
+        const pendingFile = sessions[sessionId]?.pendingDropFile;
+        if (pendingFile) {
+            sessions[sessionId].pendingDropFile = null;
+            
+            const reader = new FileReader();
+            reader.onerror = function(err) {
+                term.write(`\r\n[PrismSSH] 读取拖拽文件失败: ${err}\r\n`);
+                zsession.close();
+                cleanupZmodem(term);
+            };
+            reader.onload = function(evt) {
+                const fileBytes = new Uint8Array(evt.target.result);
+                const fileName = pendingFile.name;
+                
+                term.write(`[PrismSSH] 正在上传拖拽文件: ${fileName} (${(fileBytes.length / 1024).toFixed(2)} KB)\r\n`);
+                updateZmodemProgress(`上传: ${fileName}`, 0, fileBytes.length);
+                
+                zsession.send_offer({
+                    name: fileName,
+                    size: fileBytes.length
+                }).then(function(xfer) {
+                    if (!xfer) {
+                        term.write(`\r\n[PrismSSH] 上传被远程跳过或拒绝\r\n`);
+                        cleanupZmodem(term);
+                        return;
+                    }
+                    
+                    const chunkSize = 64 * 1024;
+                    let sentOffset = 0;
+                    function sendNextChunk() {
+                        if (!activeZsession) return; // 被中途取消
+                        if (sentOffset >= fileBytes.length) {
+                            xfer.close().then(function() {
+                                term.write(`\r\n[PrismSSH] 上传成功: ${fileName}\r\n`);
+                                cleanupZmodem(term);
+                            });
+                            return;
+                        }
+                        const slice = fileBytes.slice(sentOffset, sentOffset + chunkSize);
+                        xfer.send(slice);
+                        sentOffset += slice.length;
+                        updateZmodemProgress(`上传: ${fileName}`, sentOffset, fileBytes.length);
+                        setTimeout(sendNextChunk, 2);
+                    }
+                    sendNextChunk();
+                });
+            };
+            reader.readAsArrayBuffer(pendingFile);
+            return;
+        }
+
+        // 正常的系统文件对话框触发
+        window.pywebview.api.show_open_file_dialog().then(res => {
+            const response = JSON.parse(res);
+            const localPath = response.filePath;
+            if (!localPath) {
+                zsession.close();
+                cleanupZmodem(term);
+                return;
+            }
+
+            window.pywebview.api.read_base64_file(localPath).then(readRes => {
+                const readResult = JSON.parse(readRes);
+                const base64Content = readResult.content;
+                if (!base64Content) {
+                    term.write(`\r\n[PrismSSH] 读取本地文件失败\r\n`);
+                    zsession.close();
+                    cleanupZmodem(term);
+                    return;
+                }
+
+                const fileBytes = base64ToBytes(base64Content);
+                const fileName = localPath.split(/[\\/]/).pop();
+                
+                term.write(`[PrismSSH] 正在上传: ${fileName} (${(fileBytes.length / 1024).toFixed(2)} KB) 从 ${localPath}\r\n`);
+                updateZmodemProgress(`上传: ${fileName}`, 0, fileBytes.length);
+
+                zsession.send_offer({
+                    name: fileName,
+                    size: fileBytes.length
+                }).then(function(xfer) {
+                    if (!xfer) {
+                        term.write(`\r\n[PrismSSH] 上传被远程跳过或拒绝\r\n`);
+                        cleanupZmodem(term);
+                        return;
+                    }
+
+                    const chunkSize = 64 * 1024;
+                    let sentOffset = 0;
+                    function sendNextChunk() {
+                        if (!activeZsession) return;
+                        if (sentOffset >= fileBytes.length) {
+                            xfer.close().then(function() {
+                                term.write(`\r\n[PrismSSH] 上传成功: ${fileName}\r\n`);
+                                cleanupZmodem(term);
+                            });
+                            return;
+                        }
+                        const slice = fileBytes.slice(sentOffset, sentOffset + chunkSize);
+                        xfer.send(slice);
+                        sentOffset += slice.length;
+                        updateZmodemProgress(`上传: ${fileName}`, sentOffset, fileBytes.length);
+                        setTimeout(sendNextChunk, 2);
+                    }
+                    sendNextChunk();
+                });
+            });
+        });
+    }
+}
+
+function cleanupZmodem(term) {
+    activeZsession = null;
+    hideZmodemProgress();
+    if (term) {
+        term.focus();
+        term.write("\r\n[PrismSSH] Zmodem 会话已结束。\r\n");
+    }
+}
+
+// --- Parameter Interpolation Helpers for Shortcuts ---
+function getParamHistory(paramName) {
+    const raw = localStorage.getItem('prismssh_param_hist_' + paramName);
+    try {
+        return raw ? JSON.parse(raw) : [];
+    } catch(e) {
+        return [];
+    }
+}
+
+function saveParamValueToHistory(paramName, value) {
+    if (!value || !value.trim()) return;
+    let history = getParamHistory(paramName);
+    history = history.filter(h => h !== value);
+    history.unshift(value);
+    if (history.length > 15) history = history.slice(0, 15);
+    localStorage.setItem('prismssh_param_hist_' + paramName, JSON.stringify(history));
+}
+
+function showParamHistoryDropdown(event, buttonEl, paramName, inputEl) {
+    if (event) event.stopPropagation();
+    
+    const old = document.getElementById('param-history-popover');
+    if (old) old.remove();
+    
+    const history = getParamHistory(paramName);
+    if (history.length === 0) {
+        alert('暂无该参数的历史记录');
+        return;
+    }
+    
+    const popover = document.createElement('div');
+    popover.id = 'param-history-popover';
+    
+    const rect = buttonEl.getBoundingClientRect();
+    
+    popover.style = `
+        position: fixed; z-index: 11000; background: #1f202e;
+        border: 1px solid rgba(255,255,255,0.18); border-radius: 6px;
+        padding: 4px 0; width: 200px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        left: ${rect.left + rect.width - 200}px; top: ${rect.bottom + 4}px;
+        font-family: inherit;
+    `;
+    
+    history.forEach(val => {
+        const item = document.createElement('div');
+        item.style = 'padding: 8px 12px; font-size: 12px; color: #e2e8f0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: background 0.15s;';
+        item.textContent = val;
+        item.onmouseover = () => item.style.background = 'var(--theme-primary, #38bdf8)';
+        item.onmouseout = () => item.style.background = 'transparent';
+        item.onclick = () => {
+            inputEl.value = val;
+            popover.remove();
+            inputEl.focus();
+        };
+        popover.appendChild(item);
+    });
+    
+    document.body.appendChild(popover);
+    
+    const outsideClick = (e) => {
+        if (!popover.contains(e.target) && e.target !== buttonEl) {
+            popover.remove();
+            document.removeEventListener('mousedown', outsideClick);
+        }
+    };
+    setTimeout(() => {
+        document.addEventListener('mousedown', outsideClick);
+    }, 50);
+}
+
+function insertParamPlaceholder(num) {
+    const input = document.getElementById('commandLibraryCommandInput');
+    if (!input) return;
+    const val = input.value;
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const textToInsert = `[p#${num} 参数${num}]`;
+    input.value = val.slice(0, start) + textToInsert + val.slice(end);
+    // Move cursor and select the parameter name "参数X" for easy renaming
+    input.selectionStart = start + 5; // right after "[p#X "
+    input.selectionEnd = start + textToInsert.length - 1; // right before "]"
+    input.focus();
+}
+
+let currentActiveConsoleIndex = -1;
+
+function escapeHtml(string) {
+    const r = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+        "/": "&#x2F;"
+    };
+    return String(string).replace(/[&<>"'/]/g, (s) => r[s]);
+}
+
+function toggleDynamicConsole(event, index) {
+    if (event) event.stopPropagation();
+    
+    const consoleEl = document.getElementById('dynamicCommandConsole');
+    if (!consoleEl) return;
+    
+    // 折叠/收起控制台时的排版优化：清空内容并彻底移除外边距、内边距、边框占位，解决白边残留
+    if (currentActiveConsoleIndex === index && consoleEl.style.display !== 'none') {
+        consoleEl.style.display = 'none';
+        consoleEl.style.marginTop = '0px';
+        consoleEl.style.borderTop = 'none';
+        consoleEl.style.paddingTop = '0px';
+        consoleEl.innerHTML = '';
+        currentActiveConsoleIndex = -1;
+        return;
+    }
+    
+    currentActiveConsoleIndex = index;
+    const item = commandLibraryFolders[activeCommandFolderIndex].commands[index];
+    const isAuto = item.auto_execute !== false;
+    
+    // Parse parameters like [p#1 PID游戏]
+    const paramRegexLocal = /\[p#(\d+)\s+([^\]]+)\]/g;
+    const paramsFound = [];
+    let match;
+    while ((match = paramRegexLocal.exec(item.command)) !== null) {
+        paramsFound.push({
+            num: parseInt(match[1]),
+            name: match[2].trim(),
+            rawMatch: match[0]
+        });
+    }
+    
+    let inputsHtml = '';
+    paramsFound.forEach(p => {
+        const history = getParamHistory(p.name);
+        const latestVal = history.length > 0 ? history[0] : '';
+        
+        let labelHtml = '';
+        if (/^\d+$/.test(p.name)) {
+            labelHtml = `<span class="glow-console-param-label" title="参数 ${p.name}"># ${p.name.padStart(2, '0')}</span>`;
+        } else {
+            labelHtml = `<span class="glow-console-param-label" style="min-width: 50px !important; color: #38bdf8 !important; background: rgba(56,189,248,0.08) !important; border-color: rgba(56,189,248,0.22) !important;" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>`;
+        }
+        
+        inputsHtml += `
+            <div style="display: flex; align-items: center; margin-top: 8px; gap: 8px; width: 100%;">
+                <div style="width: 70px; display: flex; align-items: center; justify-content: flex-start; flex-shrink: 0;">
+                    ${labelHtml}
+                </div>
+                <input type="text" class="glow-console-input param-console-input" data-raw="${escapeHtml(p.rawMatch)}" data-name="${escapeHtml(p.name)}" value="${escapeHtml(latestVal)}">
+                <button type="button" class="glow-console-action-btn" onclick="showParamHistoryDropdown(event, this, '${p.name.replace(/'/g, "\\'")}', this.previousElementSibling)">历史</button>
+            </div>
+        `;
+    });
+    
+    consoleEl.innerHTML = `
+        <div class="glow-console">
+            <div class="glow-console-inner">
+                <!-- Top Line: Send Button + Command Preview + Edit button -->
+                <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
+                    <button type="button" id="console-btn-send" class="glow-console-send-btn">🚀 执行: ${escapeHtml(item.name)}</button>
+                    
+                    <div class="glow-console-preview" title="${escapeHtml(item.command)}">
+                        ${escapeHtml(item.command)}
+                    </div>
+                    
+                    <button type="button" class="glow-console-action-btn" onclick="openCommandLibraryModal('edit-command', '', ${index})">编辑</button>
+                </div>
+                
+                <!-- Parameters Inputs -->
+                <div style="margin-top: 4px;">
+                    ${inputsHtml}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 展开时恢复边框和内边距，确保布局正常
+    consoleEl.style.display = 'block';
+    consoleEl.style.marginTop = '10px';
+    consoleEl.style.borderTop = 'none';
+    consoleEl.style.paddingTop = '0px';
+    
+    // Bind Execute Action
+    const executeAction = () => {
+        if (!currentSessionId || !sessions[currentSessionId]) {
+            alert('请先连接服务器。');
+            return;
+        }
+        
+        let finalCmd = item.command;
+        const inputs = consoleEl.querySelectorAll('.param-console-input');
+        inputs.forEach(input => {
+            const raw = input.getAttribute('data-raw');
+            const name = input.getAttribute('data-name');
+            const val = input.value.trim();
+            finalCmd = finalCmd.replaceAll(raw, val);
+            saveParamValueToHistory(name, val);
+        });
+        
+        const executed = isAuto ? (finalCmd.endsWith('\n') ? finalCmd : `${finalCmd}\n`) : (finalCmd.endsWith('\n') ? finalCmd.slice(0, -1) : finalCmd);
+        window.pywebview.api.send_input(currentSessionId, executed);
+    };
+    
+    consoleEl.querySelector('#console-btn-send').onclick = executeAction;
+    
+    // Bind Enter key on inputs
+    const inputs = consoleEl.querySelectorAll('.param-console-input');
+    inputs.forEach(input => {
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                executeAction();
+            }
+        });
+    });
+}
+
+// --- 本地文件浏览器状态与函数 ---
+let localCurrentPath = 'C:\\';
+let isLoadingLocalFiles = false;
+let selectedLocalFileElement = null;
+let isRenameLocal = false;
+let localRenameOldPath = '';
+let isContextMenuLocal = false;
+
+function getLocalParentPath(path) {
+    let tempPath = path;
+    if (tempPath.endsWith('\\') && tempPath.length > 3) {
+        tempPath = tempPath.slice(0, -1);
+    }
+    const idx = tempPath.lastIndexOf('\\');
+    if (idx !== -1) {
+        let parent = tempPath.substring(0, idx);
+        if (parent.endsWith(':')) {
+            parent += '\\';
+        }
+        return parent;
+    }
+    return 'C:\\';
+}
+
+async function listLocalFiles(path) {
+    if (isLoadingLocalFiles) return;
+    isLoadingLocalFiles = true;
+    const fileList = document.getElementById('localFileList');
+    if (!fileList) return;
+    fileList.classList.add('loading');
+    
+    try {
+        const result = JSON.parse(
+            await window.pywebview.api.list_local_directory(path)
+        );
+        if (!result.success) {
+            console.error('Failed to list local directory:', result.error);
+            fileList.innerHTML = '<div class="empty-message">文件加载失败</div>';
+            return;
+        }
+        
+        fileList.innerHTML = '';
+        
+        // 判断是否是根目录
+        const isRoot = /^[a-zA-Z]:\\?$/.test(path);
+        if (!isRoot) {
+            const parentItem = document.createElement('div');
+            parentItem.className = 'file-item';
+            parentItem.innerHTML = `
+                <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+                <span class="file-name">..</span>
+                <span class="file-size">-</span>
+                <span class="file-date">-</span>
+            `;
+            parentItem.ondblclick = () => {
+                if (!isLoadingLocalFiles) navigateLocalUp();
+            };
+            parentItem.onclick = () => selectLocalFile(parentItem);
+            fileList.appendChild(parentItem);
+        }
+        
+        result.files.forEach(file => {
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            item.setAttribute('data-filename', file.name);
+            item.setAttribute('data-filetype', file.is_dir ? 'directory' : 'file');
+            
+            // 支持拖拽上传
+            item.draggable = true;
+            item.ondragstart = (e) => {
+                const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+                const fullLocalPath = localCurrentPath + sep + file.name;
+                e.dataTransfer.setData('text/plain', JSON.stringify({
+                    source: 'local',
+                    name: file.name,
+                    path: fullLocalPath,
+                    isDir: file.is_dir
+                }));
+            };
+            
+            const sizeStr = file.is_dir ? '-' : formatBytes(file.size);
+            
+            item.innerHTML = `
+                <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    ${file.is_dir ?
+                        '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>' :
+                        '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>'
+                    }
+                </svg>
+                <span class="file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+                <span class="file-size">${escapeHtml(sizeStr)}</span>
+                <span class="file-date">${escapeHtml(file.date)}</span>
+            `;
+            
+            if (file.is_dir) {
+                item.ondblclick = () => {
+                    if (!isLoadingLocalFiles) navigateLocalToFolder(file.name);
+                };
+            }
+            
+            item.onclick = () => selectLocalFile(item);
+            item.oncontextmenu = (e) => {
+                e.preventDefault();
+                showContextMenu(e, item, true);
+            };
+            
+            fileList.appendChild(item);
+        });
+        fileList.scrollTop = 0;
+    } catch (e) {
+        console.error('Error listing local files:', e);
+        fileList.innerHTML = '<div class="empty-message">文件加载失败</div>';
+    } finally {
+        isLoadingLocalFiles = false;
+        fileList.classList.remove('loading');
+    }
+}
+
+function selectLocalFile(element) {
+    document.querySelectorAll('#localFileList .file-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+    element.classList.add('selected');
+    selectedLocalFileElement = element;
+}
+
+function navigateLocalToFolder(folderName) {
+    if (isLoadingLocalFiles) return;
+    const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+    localCurrentPath = localCurrentPath + sep + folderName;
+    document.getElementById('localCurrentPath').value = localCurrentPath;
+    listLocalFiles(localCurrentPath);
+}
+
+function navigateLocalToPath(path) {
+    if (!path || isLoadingLocalFiles) return;
+    localCurrentPath = path;
+    document.getElementById('localCurrentPath').value = localCurrentPath;
+    listLocalFiles(localCurrentPath);
+}
+
+function navigateLocalUp() {
+    if (isLoadingLocalFiles) return;
+    const parent = getLocalParentPath(localCurrentPath);
+    localCurrentPath = parent;
+    document.getElementById('localCurrentPath').value = localCurrentPath;
+    listLocalFiles(localCurrentPath);
+}
+
+function refreshLocalFiles() {
+    listLocalFiles(localCurrentPath);
+}
+
+async function createLocalFolderPrompt() {
+    const folderName = prompt("请输入新建本地文件夹的名称：");
+    if (!folderName) return;
+    const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+    const fullPath = localCurrentPath + sep + folderName;
+    try {
+        const result = JSON.parse(await window.pywebview.api.create_local_directory(fullPath));
+        if (result.success) {
+            refreshLocalFiles();
+        } else {
+            alert("创建文件夹失败: " + result.error);
+        }
+    } catch(e) {
+        alert("发生错误: " + e.message);
+    }
+}
+
+function showLocalRenameModal(fileName, filePath) {
+    isRenameLocal = true;
+    localRenameOldPath = filePath;
+    renameTarget = fileName;
+    const modal = document.getElementById('renameModal');
+    const input = document.getElementById('renameInput');
+
+    input.value = fileName;
+    modal.style.display = 'flex';
+
+    setTimeout(() => {
+        input.focus();
+        if (fileName.includes('.')) {
+            const dotIndex = fileName.lastIndexOf('.');
+            input.setSelectionRange(0, dotIndex);
+        } else {
+            input.select();
+        }
+    }, 100);
+
+    input.onkeyup = (e) => {
+        if (e.key === 'Enter') {
+            confirmRename();
+        } else if (e.key === 'Escape') {
+            closeRenameModal();
+        }
+    };
+}
+
+async function downloadFileToLocalPath(remotePath, fileName) {
+    const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+    const savePath = localCurrentPath + sep + fileName;
+    
+    try {
+        const infoResult = await window.pywebview.api.get_file_info(currentSessionId, remotePath);
+        const infoResponse = JSON.parse(infoResult);
+        const fileSize = infoResponse.success ? infoResponse.info.size : 0;
+
+        const progressNotification = showDownloadProgressWithCancel(fileName, fileSize);
+        const downloadId = 'drag_dl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+        const startResult = await window.pywebview.api.start_direct_download_with_progress(currentSessionId, remotePath, savePath, downloadId);
+        const startResponse = JSON.parse(startResult);
+
+        if (!startResponse.success) {
+            if (progressNotification && progressNotification.parentNode) {
+                progressNotification.parentNode.removeChild(progressNotification);
+            }
+            alert(`下载启动失败: ${startResponse.error}`);
+            return;
+        }
+
+        const progressInterval = setInterval(async () => {
+            try {
+                const progressResult = await window.pywebview.api.get_download_progress(currentSessionId, downloadId);
+                const progress = JSON.parse(progressResult);
+
+                if (progress.status === 'downloading' && progress.total > 0) {
+                    updateDownloadProgress(progress.downloaded, progress.total);
+                } else if (progress.status === 'completed') {
+                    clearInterval(progressInterval);
+                    updateDownloadProgress(progress.downloaded || fileSize, progress.total || fileSize);
+
+                    setTimeout(() => {
+                        if (progressNotification && progressNotification.parentNode) {
+                            progressNotification.parentNode.removeChild(progressNotification);
+                        }
+                    }, 1500);
+
+                    showSuccessNotification(`已下载至 ${savePath}`);
+                    refreshLocalFiles();
+                } else if (progress.status === 'error') {
+                    clearInterval(progressInterval);
+                    if (progressNotification.parentNode) {
+                        progressNotification.parentNode.removeChild(progressNotification);
+                    }
+                    alert(`下载失败: ${progress.error || '未知错误'}`);
+                } else if (progress.status === 'cancelled') {
+                    clearInterval(progressInterval);
+                    if (progressNotification.parentNode) {
+                        progressNotification.parentNode.removeChild(progressNotification);
+                    }
+                }
+            } catch (error) {
+                console.error('轮询下载进度出错:', error);
+                clearInterval(progressInterval);
+                if (progressNotification.parentNode) {
+                    progressNotification.parentNode.removeChild(progressNotification);
+                }
+            }
+        }, 100);
+
+    } catch (error) {
+        console.error('下载出错:', error);
+        alert('下载失败: ' + error.message);
+    }
+}
+
+async function uploadFileFromPath(localPath, fileName) {
+    if (!currentSessionId || !sessions[currentSessionId]) {
+        alert('请先连接服务器');
+        return;
+    }
+    const remotePath = currentPath.endsWith('/') ?
+        currentPath + fileName :
+        currentPath + '/' + fileName;
+    
+    uploadQueue.push({ localPath, remotePath, fileName });
+
+    if (!isProcessingUploads) {
+        processUploadQueue();
+    }
+}
+
+function setupSftpDragAndDrop() {
+    const localContainer = document.getElementById('localFileListContainer');
+    const remoteContainer = document.getElementById('fileListContainer');
+    if (!localContainer || !remoteContainer) return;
+
+    remoteContainer.ondragover = (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    };
+    
+    remoteContainer.ondrop = async (e) => {
+        e.preventDefault();
+        try {
+            const dataStr = e.dataTransfer.getData('text/plain');
+            if (dataStr) {
+                const dragData = JSON.parse(dataStr);
+                if (dragData && dragData.source === 'local') {
+                    await uploadFileFromPath(dragData.path, dragData.name);
+                    return;
+                }
+            }
+        } catch(err) {}
+        
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleFileSelect({ target: { files: e.dataTransfer.files } });
+        }
+    };
+    
+    localContainer.ondragover = (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    };
+    
+    localContainer.ondrop = async (e) => {
+        e.preventDefault();
+        try {
+            const dataStr = e.dataTransfer.getData('text/plain');
+            if (dataStr) {
+                const dragData = JSON.parse(dataStr);
+                if (dragData && dragData.source === 'remote') {
+                    await downloadFileToLocalPath(dragData.path, dragData.name);
+                    return;
+                }
+            }
+        } catch(err) {
+            console.error("Local container drop error:", err);
+        }
+    };
+}
+
+function toggleJumpHostFields() {
+    const fields = document.getElementById('jumpHostFields');
+    const chevron = document.getElementById('jumpHostChevron');
+    if (fields.style.display === 'none') {
+        fields.style.display = 'block';
+        chevron.textContent = '▼';
+    } else {
+        fields.style.display = 'none';
+        chevron.textContent = '▶';
+    }
+}
+
+function updateSplitScreenHighlight() {
+    Object.keys(sessions).forEach(id => {
+        const el = sessions[id].terminalElement;
+        if (el) {
+            if (isSplitMode && id === currentSessionId) {
+                el.classList.add('active-split');
+            } else {
+                el.classList.remove('active-split');
+            }
+        }
+    });
+}
+

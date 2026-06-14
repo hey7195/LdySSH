@@ -988,6 +988,7 @@ input[type="checkbox"] {
 
 .right-sidebar {
     width: 0;
+    --sidebar-width: 380px;
     background: rgba(15, 23, 42, 0.75);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
@@ -996,11 +997,33 @@ input[type="checkbox"] {
     transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
     overflow: hidden;
     z-index: 10;
+    position: relative;
+}
+
+.right-sidebar.no-transition {
+    transition: none !important;
 }
 
 .right-sidebar.open {
-    width: clamp(340px, 28vw, 460px);
+    width: var(--sidebar-width);
     box-shadow: -15px 0 40px rgba(0, 0, 0, 0.6);
+}
+
+.sidebar-resizer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 1000;
+    background: transparent;
+    transition: background-color 0.2s ease;
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer.dragging {
+    background-color: rgba(0, 242, 254, 0.2); /* 赛博霓虹蓝荧光 */
 }
 
 .tool-panel {
@@ -2214,15 +2237,11 @@ input[type="checkbox"] {
 
 
 .recent-connection-name,
-
 .recent-connection-address {
-
+    display: block !important;
     overflow: hidden;
-
     text-overflow: ellipsis;
-
     white-space: nowrap;
-
 }
 
 
@@ -5026,13 +5045,48 @@ input[type="checkbox"] {
 
 /* --- Frameless Window Title Bar --- */
 .window-container {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    width: 100vw;
-    overflow: hidden;
-    position: relative;
-    background: linear-gradient(135deg, var(--theme-bg-gradient-start) 0%, var(--theme-bg-gradient-end) 100%);
+    position: relative !important;
+    border: none !important;
+    background: transparent !important;
+    padding: 1px !important;
+    border-radius: 8px !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    display: block !important;
+}
+
+.window-container::before {
+    content: '' !important;
+    position: absolute !important;
+    width: 250% !important;
+    height: 250% !important;
+    background: conic-gradient(from 0deg, transparent 35%, #00f2fe 42%, #4facfe 47%, #a855f7 52%, #ff0844 57%, transparent 65%) !important;
+    animation: flowRotateConsole 18s linear infinite !important;
+    filter: blur(3px) !important;
+    z-index: 0 !important;
+    top: -75% !important;
+    left: -75% !important;
+    pointer-events: none !important;
+}
+
+.window-inner {
+    position: relative !important;
+    z-index: 1 !important;
+    background: linear-gradient(135deg, var(--theme-bg-gradient-start) 0%, var(--theme-bg-gradient-end) 100%) !important;
+    border-radius: 7px !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+
+@keyframes flowRotateConsole {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
 .title-bar {
@@ -5148,8 +5202,44 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
 
 /* Panels and Dividers */
 .sftp-panel, .terminal-container, .pf-card, .monitor-card {
-    border: var(--neon-border) ;
-    background: linear-gradient(145deg, rgba(20, 24, 30, 0.7), rgba(15, 18, 24, 0.8)) ;
+    border: none !important;
+    background: transparent !important;
+    position: relative !important;
+    overflow: hidden !important;
+    border-radius: 6px !important;
+    box-sizing: border-box !important;
+}
+
+.sftp-panel::before, .terminal-container::before, .pf-card::before, .monitor-card::before {
+    content: '' !important;
+    position: absolute !important;
+    width: 250% !important;
+    height: 250% !important;
+    background: conic-gradient(from 0deg, transparent 35%, #00f2fe 42%, #4facfe 47%, #a855f7 52%, #ff0844 57%, transparent 65%) !important;
+    animation: flowRotateConsole 14s linear infinite !important;
+    filter: blur(2px) !important;
+    z-index: 1 !important;
+    top: -75% !important;
+    left: -75% !important;
+    pointer-events: none !important;
+}
+
+.sftp-panel::after, .terminal-container::after, .pf-card::after, .monitor-card::after {
+    content: '' !important;
+    position: absolute !important;
+    top: 1px !important;
+    left: 1px !important;
+    right: 1px !important;
+    bottom: 1px !important;
+    background: linear-gradient(145deg, #0f141c, #0a0c12) !important;
+    border-radius: 5px !important;
+    z-index: 2 !important;
+    pointer-events: none !important;
+}
+
+.sftp-panel > *, .terminal-container > *, .pf-card > *, .monitor-card > * {
+    position: relative !important;
+    z-index: 3 !important;
 }
 .sftp-header, .pf-header {
     border-bottom: var(--neon-border) ;
@@ -5273,9 +5363,16 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
 
 #commandsPanel .command-folder-tabs {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     gap: 6px;
     justify-content: flex-start;
+}
+
+#commandsPanel .command-folder-tabs::-webkit-scrollbar {
+    display: none !important;
 }
 
 #commandsPanel .command-library-primary-actions {
@@ -5339,40 +5436,31 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     width: auto ;
 }
 #commandsPanel .command-grid {
-    align-items: stretch ;
-}
-#commandsPanel .command-btn {
-    width: auto ;
-    margin: 0 ;
-    display: block ;
-    box-sizing: border-box ;
-}
-
-/* Fix Snippet Command Grid layout */
-#commandsPanel .command-grid {
-    display: flex ;
-    flex-direction: row ;
-    flex-wrap: wrap ;
-    align-items: flex-start ;
-    justify-content: flex-start ;
-    gap: 10px ;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    gap: 6px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
 }
 
-#commandsPanel .command-btn {
-    width: auto ;
-    flex: 0 0 auto ;
-    display: inline-flex ;
-    padding: 6px 14px ;
-    text-align: center ;
-}
-
-/* Make Snippet buttons more compact */
-#commandsPanel .command-btn {
-    padding: 4px 8px ;
+#commandsPanel #commandGrid .command-btn {
+    width: auto !important;
+    min-width: 60px !important;
+    flex: 1 1 auto !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 5px 10px !important;
+    text-align: center !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
 }
 
 #commandsPanel .command-library-primary-actions button {
-    padding: 4px 8px ;
+    padding: 4px 8px !important;
 }
 
 /* Reduce command modal width */
@@ -5797,4 +5885,29 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
 .search-close-btn:hover {
     text-shadow: 0 0 8px #ff4757;
     transform: scale(1.1);
+}
+
+.action-btn:hover {
+    border-color: rgba(52, 211, 153, 0.8) !important;
+    background: rgba(4, 120, 87, 0.4) !important;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+/* Terminal Split Screen Styles */
+.split-pane {
+    transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1), left 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.split-pane-left {
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.25);
+}
+.split-pane-right {
+    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.25);
+}
+
+/* Active Split Pane styling */
+#terminalWrapper > div.active-split {
+    outline: 2px solid rgba(var(--theme-primary), 0.8) !important;
+    box-shadow: 0 0 15px rgba(var(--theme-primary), 0.35) !important;
+    border-color: rgba(var(--theme-primary), 0.5) !important;
+    z-index: 5;
 }

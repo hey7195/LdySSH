@@ -10,10 +10,208 @@
     <script src="https://unpkg.com/@xterm/addon-webgl@0.16.0/lib/addon-webgl.js"></script>
     <script src="https://unpkg.com/@xterm/addon-search@0.15.0/lib/addon-search.js"></script>
     <link rel="stylesheet" href="static/styles.css?v=5">
+    <style>
+    /* 流光边框按钮容器 */
+    .glow-btn {
+        position: relative !important;
+        border: none !important;
+        background: transparent !important;
+        padding: 1px !important;
+        border-radius: 12px !important;
+        overflow: hidden !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        cursor: pointer !important;
+        box-sizing: border-box !important;
+        flex: none !important;
+        height: 24px !important; /* 让带参数的按钮也高度紧致 */
+    }
+    
+    /* 旋转彩虹流光层 */
+    .glow-btn::before {
+        content: '' !important;
+        position: absolute !important;
+        width: 250% !important;
+        height: 250% !important;
+        background: linear-gradient(0deg, #38bdf8, #a855f7, #f43f5e, #38bdf8, #a855f7) !important;
+        animation: flowRotate 3s linear infinite !important;
+        z-index: 1 !important;
+        top: -75% !important;
+        left: -75% !important;
+    }
+    
+    /* 遮罩内衬层：颜色深度贴合暗黑主题 */
+    .glow-btn-inner {
+        position: relative !important;
+        z-index: 2 !important;
+        background: #0f141c !important;
+        border-radius: 11px !important;
+        padding: 2px 6px !important; /* 极窄内边距，去除空余空间 */
+        color: #e2e8f0 !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 3px !important;
+        width: 100% !important;
+        height: 100% !important;
+        box-sizing: border-box !important;
+        font-size: 11px !important;
+        font-weight: 500 !important;
+        transition: background 0.2s !important;
+        border: none !important;
+        outline: none !important;
+        white-space: nowrap !important;
+    }
+    
+    .glow-btn:hover .glow-btn-inner {
+        background: #161d29 !important;
+        color: #fff !important;
+    }
+    
+    /* 控制台大框框流光边框容器 */
+    .glow-console {
+        position: relative !important;
+        border: none !important;
+        background: transparent !important;
+        padding: 1px !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+        display: block !important;
+    }
+    
+    /* 旋转彩虹流光层（大框框推荐速度慢点，比如 8s 显得非常高级舒缓） */
+    .glow-console::before {
+        content: '' !important;
+        position: absolute !important;
+        width: 250% !important;
+        height: 250% !important;
+        background: linear-gradient(135deg, #38bdf8, #a855f7, #f43f5e, #38bdf8) !important;
+        animation: flowRotateConsole 8s linear infinite !important;
+        z-index: 1 !important;
+        top: -75% !important;
+        left: -75% !important;
+    }
+    
+    /* 遮罩内衬层：纯黑色，略带微透明 */
+    .glow-console-inner {
+        position: relative !important;
+        z-index: 2 !important;
+        background: #0f141c !important;
+        border-radius: 7px !important;
+        padding: 12px !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        height: 100% !important;
+        display: block !important;
+    }
+    
+    @keyframes flowRotateConsole {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    /* 1. 执行命令按钮 */
+    .glow-console-send-btn {
+        background: linear-gradient(135deg, #10b981, #059669) !important;
+        color: #fff !important;
+        border: none !important;
+        border-radius: 6px !important;
+        padding: 4px 10px !important;
+        font-size: 11px !important;
+        font-weight: bold !important;
+        cursor: pointer !important;
+        white-space: nowrap !important;
+        transition: all 0.2s !important;
+        box-shadow: 0 2px 6px rgba(16, 185, 129, 0.2) !important;
+    }
+    .glow-console-send-btn:hover {
+        background: linear-gradient(135deg, #34d399, #059669) !important;
+        box-shadow: 0 0 10px rgba(52, 211, 153, 0.5) !important;
+        transform: translateY(-1px) !important;
+    }
+    
+    /* 2. 控制台按钮 (编辑, 历史) */
+    .glow-console-action-btn {
+        padding: 4px 8px !important;
+        background: rgba(56, 189, 248, 0.04) !important;
+        border: 1px solid rgba(56, 189, 248, 0.2) !important;
+        border-radius: 6px !important;
+        color: #38bdf8 !important;
+        font-size: 11px !important;
+        font-weight: 500 !important;
+        cursor: pointer !important;
+        transition: all 0.2s !important;
+        outline: none !important;
+        white-space: nowrap !important;
+    }
+    .glow-console-action-btn:hover {
+        background: rgba(56, 189, 248, 0.15) !important;
+        border-color: #38bdf8 !important;
+        box-shadow: 0 0 8px rgba(56, 189, 248, 0.3) !important;
+        color: #fff !important;
+    }
+    
+    /* 3. 参数名晶体微标 */
+    .glow-console-param-label {
+        font-family: Consolas, monospace !important;
+        font-size: 10px !important;
+        color: #a855f7 !important;
+        background: rgba(168, 85, 247, 0.08) !important;
+        border: 1px solid rgba(168, 85, 247, 0.22) !important;
+        border-radius: 4px !important;
+        padding: 2px 6px !important;
+        min-width: 32px !important;
+        text-align: center !important;
+        font-weight: bold !important;
+        box-shadow: 0 0 4px rgba(168, 85, 247, 0.15) !important;
+        display: inline-block !important;
+    }
+    
+    /* 4. 动态预览命令行样式 */
+    .glow-console-preview {
+        flex: 1 !important;
+        font-family: ui-monospace, Consolas, monospace !important;
+        font-size: 11px !important;
+        color: #38bdf8 !important;
+        background: rgba(0, 0, 0, 0.35) !important;
+        padding: 4px 8px !important;
+        border-radius: 6px !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+        border: 1px solid rgba(56, 189, 248, 0.15) !important;
+        text-shadow: 0 0 4px rgba(56, 189, 248, 0.3) !important;
+        box-sizing: border-box !important;
+    }
+    
+    /* 5. 输入框 */
+    .glow-console-input {
+        flex: 1 !important;
+        padding: 4px 8px !important;
+        background: rgba(0, 0, 0, 0.45) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 6px !important;
+        color: #fff !important;
+        font-size: 12px !important;
+        outline: none !important;
+        transition: all 0.2s !important;
+        box-sizing: border-box !important;
+    }
+    .glow-console-input:focus {
+        border-color: #00d2ff !important;
+        background: rgba(0, 0, 0, 0.55) !important;
+        box-shadow: 0 0 8px rgba(0, 210, 255, 0.25) !important;
+    }
+    </style>
 </head>
 <body>
     <div class="window-container">
-        <div class="home-ambient-glow">
+        <div class="window-inner">
+            <div class="home-ambient-glow">
             <div class="glow-orb glow-orb-1"></div>
             <div class="glow-orb glow-orb-2"></div>
         </div>
@@ -44,7 +242,7 @@
             <button class="activity-item" id="portForwardIcon" type="button" title="&#31471;&#21475;&#36716;&#21457;" onclick="openTool('portForward')"><span>PF</span></button>
             <button class="activity-item" id="monitorIcon" type="button" title="&#31995;&#32479;&#30417;&#25511;" onclick="openTool('monitor')"><span>MON</span></button>
             <button class="activity-item" id="activityLocalCmd" type="button" title="新建本地终端" onclick="createLocalSession()"><span>L-CMD</span></button>
-            <button class="activity-item openai-activity" id="activityOpenAi" type="button" title="OpenAI &#21161;&#25163;" onclick="toggleAiSplitMode()"><span>AI</span></button>
+            <button class="activity-item openai-activity" id="aiIcon" type="button" title="OpenAI 助手" onclick="openTool('ai')"><span>AI</span></button>
             <button class="activity-item activity-settings" id="highlightIcon" type="button" title="&#39640;&#20142;" onclick="openTool('highlight')"><span>HL</span></button>
         </div>
 
@@ -61,6 +259,20 @@
                         <div class="form-group"><label>&#35748;&#35777;&#26041;&#24335;</label><select id="authType"><option value="password">&#23494;&#30721;</option><option value="key">&#31169;&#38053;</option></select></div>
                         <div class="form-group" id="passwordGroup"><label>&#23494;&#30721;</label><input type="password" id="password" placeholder="&#35831;&#36755;&#20837;&#23494;&#30721;" /></div>
                         <div class="form-group" id="keyGroup" style="display:none"><label>&#31169;&#38053;&#36335;&#24452;</label><input type="text" id="keyPath" placeholder="/path/to/key" /><label class="sub-label" for="keyPassphrase">&#31169;&#38053;&#21475;&#20196;&#65288;&#21487;&#36873;&#65289;</label><input type="password" id="keyPassphrase" placeholder="&#26377;&#21475;&#20196;&#26102;&#22635;&#20889;" /></div>
+                        <div class="advanced-section" style="margin-top: 10px; margin-bottom: 10px;">
+                            <div style="font-size: 11px; color: #a855f7; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px;" onclick="toggleJumpHostFields()">
+                                <span>⚙️ 堡垒机代理配置 (可选)</span>
+                                <span id="jumpHostChevron" style="font-size: 8px;">▶</span>
+                            </div>
+                            <div id="jumpHostFields" style="display: none; padding: 6px; border: 1px dashed rgba(168, 85, 247, 0.2); border-radius: 4px; background: rgba(168, 85, 247, 0.03); margin-top: 6px;">
+                                <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">堡垒机IP/主机</label><input type="text" id="jumpHost" placeholder="jump.example.com" style="height: 24px; font-size: 11px;" /></div>
+                                <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">堡垒机端口</label><input type="number" id="jumpPort" placeholder="22" value="22" style="height: 24px; font-size: 11px;" /></div>
+                                <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">堡垒机用户名</label><input type="text" id="jumpUser" placeholder="jump_user" style="height: 24px; font-size: 11px;" /></div>
+                                <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">堡垒机密码</label><input type="password" id="jumpPass" placeholder="留空若使用密钥" style="height: 24px; font-size: 11px;" /></div>
+                                <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">堡垒机私钥路径</label><input type="text" id="jumpKey" placeholder="/path/to/jump_key" style="height: 24px; font-size: 11px;" /></div>
+                                <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">私钥口令（可选）</label><input type="password" id="jumpKeyPassphrase" placeholder="有口令时填写" style="height: 24px; font-size: 11px;" /></div>
+                            </div>
+                        </div>
                         <div class="checkbox-group"><input type="checkbox" id="saveConnection" /><label for="saveConnection">&#20445;&#23384;&#36830;&#25509;</label></div>
                         <button class="connect-btn" onclick="connect()">&#36830;&#25509;</button>
                         <button class="connect-btn" style="margin-top: 10px; background-color: var(--secondary-color);" onclick="createLocalSession()">💻 本地终端 (CMD)</button>
@@ -125,51 +337,83 @@
                     <div class="status-bar" id="statusBar" style="display:none"><div class="status-item"><span class="status-indicator"></span><span id="statusText">&#24050;&#36830;&#25509;</span></div><div class="status-item"><span id="statusHost">-</span></div></div>
                 </div>
         <div class="right-sidebar" id="rightSidebar">
+            <div class="sidebar-resizer" id="sidebarResizer"></div>
 
             <div class="tool-panel" id="commandsPanel">
-                <div class="tool-header">
+                <div class="tool-header" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px;">
                     <div class="tool-title" style="display:flex; align-items:center; gap:8px;">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--theme-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="4 17 10 11 4 5"></polyline>
                             <line x1="12" y1="19" x2="20" y2="19"></line>
                         </svg>
-                        <span class="cyber-text" style="font-weight: bold; font-size: 15px; letter-spacing: 1px;">快捷指令库</span>
-                        <span class="cyber-badge" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; color: #fff; font-weight: bold; letter-spacing: 1px;">SNIPPETS</span>
+                        <span class="cyber-text" style="font-weight: bold; font-size: 14px; letter-spacing: 1px;">快捷指令库</span>
+                        <span class="cyber-badge" style="font-size: 9px; padding: 1px 4px; border-radius: 4px; color: #fff; font-weight: bold; letter-spacing: 1px;">SNIPPETS</span>
                     </div>
-                    <svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    <svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="cursor: pointer; width: 18px; height: 18px; margin-left: auto;"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </div>
-                <div class="tool-content" style="display: flex; flex-direction: column;">
-                    <div class="command-library-toolbar" style="margin-bottom: 10px; display: flex; flex-direction: column;">
-                        <div id="commandFolderTabs" class="command-folder-tabs" style="flex-wrap: wrap;"></div>
-                        <div class="command-library-primary-actions" style="margin-top: 10px;">
-                            <button type="button" class="command-folder-tab" onclick="addCommandFolder()">+ 文件夹</button>
-                            <button type="button" class="command-btn" onclick="addCommandToLibrary()">+ 新指令</button>
+                <div class="tool-content" style="display: flex; flex-direction: column; padding: 12px 16px;">
+                    <div class="command-library-toolbar" style="margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
+                            <div id="commandFolderTabs" class="command-folder-tabs" style="flex: 1; min-width: 0; display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px; scrollbar-width: none; -ms-overflow-style: none;"></div>
+                            <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                                <button type="button" class="action-btn" onclick="addCommandFolder()" style="padding: 3px 6px; font-size: 11px; border-radius: 4px; cursor: pointer; border: 1px solid rgba(16, 185, 129, 0.3); background: rgba(6, 78, 59, 0.2); color: #6ee7b7; transition: all 0.2s;" title="新建文件夹">+ 文件夹</button>
+                                <button type="button" class="action-btn" onclick="addCommandToLibrary()" style="padding: 3px 6px; font-size: 11px; border-radius: 4px; cursor: pointer; border: 1px solid rgba(16, 185, 129, 0.3); background: rgba(6, 78, 59, 0.2); color: #6ee7b7; transition: all 0.2s;" title="新建指令">+ 指令</button>
+                            </div>
+                        </div>
+                        <div class="command-search-wrapper" style="position: relative; display: flex; align-items: center; width: 100%;">
+                            <span style="position: absolute; left: 10px; color: #64748b; font-size: 12px; pointer-events: none;">🔍</span>
+                            <input type="text" id="commandSearchInput" placeholder="搜索指令名称或内容..." oninput="handleCommandSearch(this.value)" style="width: 100%; height: 28px; padding: 2px 10px 2px 28px; background: rgba(15, 20, 28, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 6px; color: #fff; font-size: 11px; outline: none; transition: border-color 0.2s; box-sizing: border-box;">
                         </div>
                     </div>
-                    <div id="commandGrid" class="command-grid" style="display: flex; flex-direction: row; flex-wrap: wrap; align-content: flex-start; justify-content: flex-start; gap: 6px; overflow-y: auto; width: 100%; box-sizing: border-box;"></div>
+                    <div id="commandGrid" class="command-grid" style="flex: 1; display: flex; flex-direction: row; flex-wrap: wrap; align-content: flex-start; justify-content: flex-start; gap: 6px; overflow-y: auto; width: 100%; box-sizing: border-box;"></div>
+                    <div id="dynamicCommandConsole" style="display: none; margin-top: 0px; border-top: none; padding-top: 0px; flex-shrink: 0; box-sizing: border-box; width: 100%;"></div>
                 </div>
             </div>
 
-            <div class="tool-panel" id="sftpPanel">
-                <div class="tool-header"><div class="tool-title"><span class="cyber-text">SFTP 文件浏览器</span></div><svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></div>
-                <div class="tool-content">
-                    <div class="file-browser">
-                        <div class="file-toolbar">
-                            <button class="file-action-btn" onclick="navigateUp()"><span class="btn-dot" style="background:#ff9f43; box-shadow:0 0 8px #ff9f43;"></span>&#19978;&#32423;</button>
-                            <button class="file-action-btn" onclick="refreshFiles()"><span class="btn-dot" style="background:#00d2ff; box-shadow:0 0 8px #00d2ff;"></span>&#21047;&#26032;</button>
-                            <button class="file-action-btn" onclick="createNewFolder()"><span class="btn-dot" style="background:#10ac84; box-shadow:0 0 8px #10ac84;"></span>&#26032;&#24314;&#25991;&#20214;&#22841;</button>
+            <div class="tool-panel" id="sftpPanel" style="width: 700px; max-width: 90vw;">
+                <div class="tool-header">
+                    <div class="tool-title"><span class="cyber-text">双栏文件管理器 (左: 本地 | 右: 远程)</span></div>
+                    <svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </div>
+                <div class="tool-content" style="padding: 10px; height: calc(100% - 40px); box-sizing: border-box;">
+                    <div class="dual-file-browser" style="display: flex; gap: 12px; height: 100%; width: 100%;">
+                        
+                        <!-- 左栏：本地电脑 -->
+                        <div class="file-panel local-side" style="flex: 1; display: flex; flex-direction: column; background: rgba(10, 15, 24, 0.7); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 8px; padding: 8px; box-sizing: border-box; height: 100%;">
+                            <div style="font-size: 12px; color: #38bdf8; font-weight: bold; margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
+                                <span>💻 本地电脑</span>
+                            </div>
+                            <div class="file-toolbar" style="display: flex; gap: 6px; margin-bottom: 6px;">
+                                <button class="file-action-btn" onclick="navigateLocalUp()"><span class="btn-dot" style="background:#ff9f43; box-shadow:0 0 8px #ff9f43;"></span>上级</button>
+                                <button class="file-action-btn" onclick="refreshLocalFiles()"><span class="btn-dot" style="background:#00d2ff; box-shadow:0 0 8px #00d2ff;"></span>刷新</button>
+                                <button class="file-action-btn" onclick="createLocalFolderPrompt()"><span class="btn-dot" style="background:#10ac84; box-shadow:0 0 8px #10ac84;"></span>新建文件夹</button>
+                            </div>
+                            <input type="text" class="current-path" id="localCurrentPath" value="C:\" onkeydown="if(event.key === 'Enter') navigateLocalToPath(this.value)" style="width: 100%; height: 28px; background: rgba(15, 20, 28, 0.8); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 4px; color: #fff; padding: 2px 8px; font-size: 11px; margin-bottom: 6px; box-sizing: border-box;">
+                            <div class="file-list-container" id="localFileListContainer" style="flex: 1; overflow-y: auto; position: relative; border: 1px solid rgba(255,255,255,0.05); border-radius: 4px; background: rgba(5,5,10,0.5);">
+                                <div id="localFileList" class="file-list"></div>
+                            </div>
                         </div>
-                        <input type="text" class="current-path" id="currentPath" value="/" onkeydown="if(event.key === 'Enter') navigateToPath(this.value)">
-                        <div class="file-list-container" id="fileListContainer">
-                            <div id="fileList" class="file-list"></div>
-                            <div class="file-browser-loading" id="fileBrowserLoading"><div class="file-browser-spinner"></div></div>
-                            <div id="sftpDragOverlay" class="sftp-drag-overlay">松开即可上传至当前目录</div>
+
+                        <!-- 右栏：远程服务器 -->
+                        <div class="file-panel remote-side" style="flex: 1; display: flex; flex-direction: column; background: rgba(10, 15, 24, 0.7); border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 8px; padding: 8px; box-sizing: border-box; height: 100%;">
+                            <div style="font-size: 12px; color: #a855f7; font-weight: bold; margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
+                                <span>🌐 远程服务器</span>
+                            </div>
+                            <div class="file-toolbar" style="display: flex; gap: 6px; margin-bottom: 6px;">
+                                <button class="file-action-btn" onclick="navigateUp()"><span class="btn-dot" style="background:#ff9f43; box-shadow:0 0 8px #ff9f43;"></span>上级</button>
+                                <button class="file-action-btn" onclick="refreshFiles()"><span class="btn-dot" style="background:#00d2ff; box-shadow:0 0 8px #00d2ff;"></span>刷新</button>
+                                <button class="file-action-btn" onclick="createNewFolder()"><span class="btn-dot" style="background:#10ac84; box-shadow:0 0 8px #10ac84;"></span>新建文件夹</button>
+                            </div>
+                            <input type="text" class="current-path" id="currentPath" value="/" onkeydown="if(event.key === 'Enter') navigateToPath(this.value)" style="width: 100%; height: 28px; background: rgba(15, 20, 28, 0.8); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 4px; color: #fff; padding: 2px 8px; font-size: 11px; margin-bottom: 6px; box-sizing: border-box;">
+                            <div class="file-list-container" id="fileListContainer" style="flex: 1; overflow-y: auto; position: relative; border: 1px solid rgba(255,255,255,0.05); border-radius: 4px; background: rgba(5,5,10,0.5);">
+                                <div id="fileList" class="file-list"></div>
+                                <div class="file-browser-loading" id="fileBrowserLoading"><div class="file-browser-spinner"></div></div>
+                                <div id="sftpDragOverlay" class="sftp-drag-overlay" style="display:none; position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(var(--theme-primary), 0.8); border:2px dashed var(--theme-primary); display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; font-weight:bold; z-index:100; border-radius:4px; pointer-events:none;">松开即可上传至当前目录</div>
+                            </div>
                         </div>
-                        <div class="upload-area" id="uploadArea">
-                            <button class="upload-button" onclick="selectFiles()"><span class="btn-dot" style="background:#ff4757; box-shadow:0 0 8px #ff4757;"></span>上传文件</button>
-                            <input type="file" id="fileInput" multiple style="display:none" onchange="handleFileSelect(event)" />
-                        </div>
-                        <div id="uploadProgress" style="display:none"><div id="uploadStatusText">&#27491;&#22312;&#19978;&#20256;...</div><div id="uploadBar"></div><span id="uploadBytes"></span><span id="uploadSpeed"></span></div>
+
                     </div>
                 </div>
             </div>
@@ -188,6 +432,15 @@
                 </div>
             </div>
             <div class="tool-panel" id="highlightPanel"><div class="tool-header"><div class="tool-title"><span class="cyber-text">终端高亮</span></div><svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></div><div class="tool-content highlight-content"><div class="highlight-summary" style="display: flex; justify-content: space-between; align-items: center;"><span>&#31867;&#20284; Xshell &#30340;&#20851;&#38190;&#35789;&#39640;&#20142;</span><button class="ai-msg-cmd-btn" onclick="resetHighlightRules()">&#24674;&#22797;&#40664;&#35748;</button></div><div id="highlightRulesList" class="highlight-rules-list"></div></div></div>
+            
+            <div class="tool-panel" id="aiPanel" style="height: 100%;">
+                <div class="tool-header">
+                    <div class="tool-title"><span class="cyber-text">ChatGPT 助手</span></div>
+                    <svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </div>
+                <div class="tool-content" id="aiSubWindowPlaceholder" style="flex: 1; position: relative; width: 100%; height: 100%; background: transparent; padding: 0; margin: 0; overflow: hidden;">
+                </div>
+            </div>
         </div>
 
             </div>
@@ -221,7 +474,7 @@
 
     <div id="contextMenu" class="context-menu" style="display:none"><div class="context-menu-item" onclick="contextMenuAction('download')">&#19979;&#36733;</div><div class="context-menu-item" onclick="contextMenuAction('edit')">&#32534;&#36753;</div><div class="context-menu-item" onclick="contextMenuAction('rename')">&#37325;&#21629;&#21517;</div><div class="context-menu-item context-menu-delete" onclick="contextMenuAction('delete')">&#21024;&#38500;</div></div>
     <div id="renameModal" class="modal" style="display:none"><div class="modal-content"><h3>&#37325;&#21629;&#21517;&#25991;&#20214;/&#25991;&#20214;&#22841;</h3><input type="text" id="renameInput"><button onclick="closeRenameModal()">&#21462;&#28040;</button><button onclick="confirmRename()">&#30830;&#23450;</button></div></div>
-    <div id="commandLibraryModal" class="modal-overlay command-modal-overlay" style="display:none"><div class="modal-content command-modal"><h3 id="commandLibraryModalTitle">&#28155;&#21152;&#21629;&#20196;</h3><label for="commandLibraryNameInput">&#21517;&#31216;</label><input type="text" id="commandLibraryNameInput"><label for="commandLibraryCommandInput" id="commandLibraryCommandLabel">&#21629;&#20196;&#20869;&#23481;</label><textarea id="commandLibraryCommandInput"></textarea><div class="form-group" id="commandAutoExecuteGroup" style="margin-top: 10px; margin-bottom: 10px;"><div class="checkbox-group" style="display: flex; align-items: center; gap: 8px;"><input type="checkbox" id="commandAutoExecute"><span>直接在终端执行（回车）</span></div></div><button type="button" onclick="closeCommandLibraryModal()" class="modal-btn modal-btn-cancel">&#21462;&#28040;</button><button type="button" onclick="confirmCommandLibraryModal()" class="modal-btn modal-btn-confirm">&#20445;&#23384;</button></div></div>
+    <div id="commandLibraryModal" class="modal-overlay command-modal-overlay" style="display:none"><div class="modal-content command-modal"><h3 id="commandLibraryModalTitle">添加命令</h3><label for="commandLibraryNameInput">名称</label><input type="text" id="commandLibraryNameInput"><label for="commandLibraryCommandInput" id="commandLibraryCommandLabel">命令内容</label><textarea id="commandLibraryCommandInput"></textarea><div style="margin-top: 6px; display: flex; gap: 6px; align-items: center;"><span style="font-size: 11px; opacity: 0.6;">插入参数占位符:</span><button type="button" onclick="insertParamPlaceholder(1)" style="padding: 2px 6px; font-size: 11px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; cursor: pointer; border-radius: 3px;">参数1</button><button type="button" onclick="insertParamPlaceholder(2)" style="padding: 2px 6px; font-size: 11px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; cursor: pointer; border-radius: 3px;">参数2</button><button type="button" onclick="insertParamPlaceholder(3)" style="padding: 2px 6px; font-size: 11px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; cursor: pointer; border-radius: 3px;">参数3</button></div><div class="form-group" id="commandAutoExecuteGroup" style="margin-top: 10px; margin-bottom: 10px;"><div class="checkbox-group" style="display: flex; align-items: center; gap: 8px;"><input type="checkbox" id="commandAutoExecute"><span>直接在终端执行（回车）</span></div></div><button type="button" onclick="closeCommandLibraryModal()" class="modal-btn modal-btn-cancel">取消</button><button type="button" onclick="confirmCommandLibraryModal()" class="modal-btn modal-btn-confirm">保存</button></div></div>
 
     <!-- Code Editor Panel -->
     <div id="editorPanel" class="editor-panel">
@@ -239,10 +492,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ace.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ext-modelist.js"></script>
 
-    <script src="static/app.js?v=14"></script>
+    <script src="static/app.js?v=16"></script>
+        </div>
     </div>
-    
-    
 
     <div id="toastContainer" class="toast-container"></div>
 </body>
