@@ -3808,22 +3808,24 @@ function createTerminalForSession(sessionId, hostname) {
         // Set up copy/paste functionality
         setupTerminalClipboard(terminal, sessionId);
 
-        terminal.onFocus(() => {
-            if (currentSessionId !== sessionId) {
-                currentSessionId = sessionId;
-                currentTerminal = terminal;
-                
-                // 同步当前 SFTP 路径
-                if (sessions[sessionId] && sessions[sessionId].currentPath) {
-                    currentPath = sessions[sessionId].currentPath;
-                    document.getElementById('currentPath').value = currentPath;
+        if (terminal.textarea) {
+            terminal.textarea.addEventListener('focus', () => {
+                if (currentSessionId !== sessionId) {
+                    currentSessionId = sessionId;
+                    currentTerminal = terminal;
+                    
+                    // 同步当前 SFTP 路径
+                    if (sessions[sessionId] && sessions[sessionId].currentPath) {
+                        currentPath = sessions[sessionId].currentPath;
+                        document.getElementById('currentPath').value = currentPath;
+                    }
+                    
+                    updateSplitScreenHighlight();
+                    updateSessionsList();
+                    updateSessionTabs();
                 }
-                
-                updateSplitScreenHighlight();
-                updateSessionsList();
-                updateSessionTabs();
-            }
-        });
+            });
+        }
 
         // Feature REMOVED: addTimestampToLine. 
         // This was a massive CPU drain during high-throughput output (like 'cat' large files) 
