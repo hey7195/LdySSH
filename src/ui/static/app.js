@@ -9521,6 +9521,35 @@ class TopologyViewer {
                 const pulse = 1.0 + 0.012 * Math.sin(Date.now() * 0.0008 + idx);
                 n.mesh.scale.set(pulse, pulse, pulse);
 
+                // 3D 节点状态呼吸灯特效
+                if (n.mesh.material) {
+                    let speed = 0.002;
+                    let minIntensity = 0.15;
+                    let maxIntensity = 1.0;
+                    
+                    if (n.status === 'disconnected') {
+                        speed = 0.001; // 离线状态，极为缓慢且微弱的呼吸
+                        minIntensity = 0.05;
+                        maxIntensity = 0.25;
+                    } else if (n.delay > 150) {
+                        speed = 0.008; // 高延迟，急促闪烁警告
+                        minIntensity = 0.3;
+                        maxIntensity = 1.6;
+                    } else if (n.delay > 50) {
+                        speed = 0.004; // 中等延迟
+                        minIntensity = 0.15;
+                        maxIntensity = 1.0;
+                    } else {
+                        speed = 0.0025; // 优秀延迟，健康柔和缓慢呼吸
+                        minIntensity = 0.2;
+                        maxIntensity = 1.3;
+                    }
+                    
+                    const timeFactor = Date.now() * speed + idx * 1.5;
+                    const emissiveIntensity = minIntensity + (Math.sin(timeFactor) + 1.0) * 0.5 * (maxIntensity - minIntensity);
+                    n.mesh.material.emissiveIntensity = emissiveIntensity;
+                }
+
                 // 4. 更新动态连接光轨
                 if (n.line) {
                     const positions = n.line.geometry.attributes.position.array;
@@ -9614,6 +9643,8 @@ window.updateNodeDelay = function(ip, delay, status) {
     if (!topoViewer || !topoViewer.nodes) return;
     const node = topoViewer.nodes.find(n => n.ip === ip);
     if (node && node.mesh) {
+        node.delay = delay;
+        node.status = status;
         let color = node.originalColor;
         let emissive = node.originalEmissive;
         let lineOpacity = 0.24;
