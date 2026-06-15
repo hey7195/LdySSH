@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Connection storage and encryption management for PrismSSH."""
 
 import json

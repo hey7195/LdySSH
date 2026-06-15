@@ -44,7 +44,7 @@ def load_html_template() -> str:
         <!DOCTYPE html>
         <html>
         <head>
-            <title>PrismSSH - Template Not Found</title>
+            <title>LdySSH - Template Not Found</title>
             <style>
                 body { 
                     font-family: Arial, sans-serif; 
@@ -56,7 +56,7 @@ def load_html_template() -> str:
             </style>
         </head>
         <body>
-            <h1>PrismSSH</h1>
+            <h1>LdySSH</h1>
             <p>Template file not found. Please ensure the UI template is available.</p>
         </body>
         </html>
@@ -107,7 +107,7 @@ def main():
     logger_instance = Logger(config.log_file)
     logger = Logger.get_logger(__name__)
     
-    logger.info("=== PrismSSH Starting ===")
+    logger.info("=== LdySSH Starting ===")
     logger.info(f"Config directory: {config.config_dir}")
     logger.info(f"Encryption available: {os.path.exists(config.key_file) if hasattr(config, 'key_file') else 'Unknown'}")
     
@@ -173,7 +173,7 @@ def main():
             api.cleanup()
         except:
             pass
-        logger.info("=== PrismSSH Shutdown ===")
+        logger.info("=== LdySSH Shutdown ===")
 
 
 if __name__ == '__main__':

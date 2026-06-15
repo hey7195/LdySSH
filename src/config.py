@@ -50,4 +50,4 @@ class Config:
     
     def get_app_title(self) -> str:
         """Get application title."""
-        return "PrismSSH - Modern SSH Client"
+        return "LdySSH - Modern SSH Client"
