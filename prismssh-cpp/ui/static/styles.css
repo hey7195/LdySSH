@@ -5074,7 +5074,7 @@ input[type="checkbox"] {
 .window-inner {
     position: relative !important;
     z-index: 1 !important;
-    background: linear-gradient(135deg, var(--theme-bg-gradient-start) 0%, var(--theme-bg-gradient-end) 100%) !important;
+    background: transparent !important;
     border-radius: 7px !important;
     box-sizing: border-box !important;
     width: 100% !important;
@@ -5910,4 +5910,32 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     box-shadow: 0 0 15px rgba(var(--theme-primary), 0.35) !important;
     border-color: rgba(var(--theme-primary), 0.5) !important;
     z-index: 5;
+}
+
+/* ==========================================================================
+   3D Topology Full-Screen Background and Labels (LdySSH v2.0)
+   ========================================================================== */
+.threejs-background {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: -1;
+    pointer-events: auto;
+    background: radial-gradient(circle at center, #0b0c16 0%, #030406 100%);
+}
+.node-label {
+    position: absolute;
+    color: #e0e0e0;
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    pointer-events: none;
+    background: rgba(10, 10, 12, 0.85);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 242, 254, 0.3);
+    white-space: nowrap;
+    transform: translate(-50%, -100%);
+    transition: opacity 0.2s;
 }
