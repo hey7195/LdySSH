@@ -8466,6 +8466,33 @@ class TopologyViewer {
         this.onClickHandler = this.onDocumentClick.bind(this);
         window.addEventListener('resize', this.onResizeHandler);
         this.renderer.domElement.addEventListener('click', this.onClickHandler);
+
+        // 8. Global event forwarding for terminal drag backdrop rotation
+        this.onTerminalPointerDown = (e) => {
+            if (e.isTriggeredByAntigravity) return;
+            const term = e.target.closest('#terminalWrapper') || e.target.closest('.terminal-container');
+            if (term) {
+                const cloneEvent = new PointerEvent('pointerdown', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: e.clientX,
+                    clientY: e.clientY,
+                    screenX: e.screenX,
+                    screenY: e.screenY,
+                    button: e.button,
+                    buttons: e.buttons,
+                    pointerId: e.pointerId,
+                    pointerType: e.pointerType,
+                    isPrimary: e.isPrimary,
+                    view: window
+                });
+                cloneEvent.isTriggeredByAntigravity = true;
+                if (this.renderer && this.renderer.domElement) {
+                    this.renderer.domElement.dispatchEvent(cloneEvent);
+                }
+            }
+        };
+        document.addEventListener('pointerdown', this.onTerminalPointerDown, { capture: true });
     }
 
     buildTopology() {
@@ -8838,6 +8865,9 @@ class TopologyViewer {
         window.removeEventListener('resize', this.onResizeHandler);
         if (this.renderer && this.renderer.domElement) {
             this.renderer.domElement.removeEventListener('click', this.onClickHandler);
+        }
+        if (this.onTerminalPointerDown) {
+            document.removeEventListener('pointerdown', this.onTerminalPointerDown, { capture: true });
         }
     }
 
