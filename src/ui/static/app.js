@@ -2842,10 +2842,37 @@ function renderConnectionsHome() {
         ? filtered.filter(conn => getConnectionSearchHaystack(conn).includes(query))
         : filtered;
 
+    // 动态更新 welcomeScreen 的视图类以实现隐藏或显示控制
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    if (welcomeScreen) {
+        if (connectionsHomeView === 'hide') {
+            welcomeScreen.classList.add('view-hide');
+            welcomeScreen.classList.remove('view-list', 'view-grid');
+        } else if (connectionsHomeView === 'list') {
+            welcomeScreen.classList.add('view-list');
+            welcomeScreen.classList.remove('view-hide', 'view-grid');
+        } else {
+            welcomeScreen.classList.add('view-grid');
+            welcomeScreen.classList.remove('view-hide', 'view-list');
+        }
+    }
+
     container.classList.toggle('list-view', connectionsHomeView === 'list');
-    document.querySelectorAll('.home-view-switch button').forEach(button => {
-        button.classList.toggle('active', button.dataset.view === connectionsHomeView);
-    });
+
+    // 更新单一切换按钮的图标与状态提示
+    const toggleBtn = document.getElementById('viewToggleBtn');
+    if (toggleBtn) {
+        if (connectionsHomeView === 'hide') {
+            toggleBtn.innerHTML = '🌌';
+            toggleBtn.title = '星空模式 (已隐藏面板，点击切换至列表)';
+        } else if (connectionsHomeView === 'list') {
+            toggleBtn.innerHTML = '☰';
+            toggleBtn.title = '列表视图 (点击切换至网格)';
+        } else {
+            toggleBtn.innerHTML = '⊞';
+            toggleBtn.title = '网格视图 (点击切换至星空)';
+        }
+    }
     container.innerHTML = '';
     empty.style.display = connections.length === 0 ? 'block' : 'none';
     updateHomeConnectionSummary(connections.length);
@@ -3460,7 +3487,7 @@ function showCustomConfirm(message) {
 }
 
 function setConnectionsHomeView(view) {
-    connectionsHomeView = view === 'list' ? 'list' : 'grid';
+    connectionsHomeView = (view === 'list' || view === 'grid' || view === 'hide') ? view : 'hide';
     try {
         localStorage.setItem('ldysshConnectionsHomeView', connectionsHomeView);
         localStorage.setItem('prismsshConnectionsHomeView', connectionsHomeView);
@@ -3472,11 +3499,23 @@ function setConnectionsHomeView(view) {
 
 function restoreConnectionsHomeView() {
     try {
-        connectionsHomeView = localStorage.getItem('ldysshConnectionsHomeView') || localStorage.getItem('prismsshConnectionsHomeView') || 'grid';
+        connectionsHomeView = localStorage.getItem('ldysshConnectionsHomeView') || localStorage.getItem('prismsshConnectionsHomeView') || 'hide';
     } catch (error) {
-        connectionsHomeView = 'grid';
+        connectionsHomeView = 'hide';
     }
 }
+
+window.toggleConnectionsHomeView = function() {
+    let nextView = 'hide';
+    if (connectionsHomeView === 'hide') {
+        nextView = 'list';
+    } else if (connectionsHomeView === 'list') {
+        nextView = 'grid';
+    } else {
+        nextView = 'hide';
+    }
+    setConnectionsHomeView(nextView);
+};
 
 async function quickConnectSavedConnection(key) {
     await quickConnect(key);
@@ -9152,11 +9191,47 @@ class TopologyViewer {
         // 6. Build Grid and Connections
         this.buildTopology();
 
+        // 6.1 初始化 Hover 引力环
+        const ringGeo = new THREE.RingGeometry(1.4, 1.55, 64);
+        this.hoverRingMaterial = new THREE.MeshBasicMaterial({
+            color: 0x38bdf8,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        this.hoverRing = new THREE.Mesh(ringGeo, this.hoverRingMaterial);
+        this.hoverRing.rotateX(Math.PI / 2); // 扁平铺开
+        this.scene.add(this.hoverRing);
+
+        // 6.2 初始化悬浮菜单相关属性
+        this.hoveredNode = null;
+        this.menuHideTimeout = null;
+
+        // 6.3 绑定菜单自身的 Mouse 事件以防止闪烁消失
+        const hoverMenu = document.getElementById('topoHoverMenu');
+        if (hoverMenu) {
+            hoverMenu.addEventListener('mouseenter', () => {
+                if (this.menuHideTimeout) {
+                    clearTimeout(this.menuHideTimeout);
+                    this.menuHideTimeout = null;
+                }
+            });
+            hoverMenu.addEventListener('mouseleave', () => {
+                this.menuHideTimeout = setTimeout(() => {
+                    this.hideHoverMenu();
+                }, 350);
+            });
+        }
+
         // 7. Event listeners
         this.onResizeHandler = this.onWindowResize.bind(this);
         this.onClickHandler = this.onDocumentClick.bind(this);
+        this.onMouseMoveHandler = this.onDocumentMouseMove.bind(this);
         window.addEventListener('resize', this.onResizeHandler);
         this.renderer.domElement.addEventListener('click', this.onClickHandler);
+        this.renderer.domElement.addEventListener('pointermove', this.onMouseMoveHandler);
 
         // 8. Global event forwarding for terminal drag backdrop rotation
         this.onTerminalPointerDown = (e) => {
@@ -9567,6 +9642,22 @@ class TopologyViewer {
             this.controls.update();
         }
 
+        // 0. 更新自转引力环状态及 HTML 菜单定位
+        if (this.hoverRing) {
+            if (this.hoveredNode && this.hoveredNode.mesh) {
+                this.hoverRing.position.copy(this.hoveredNode.mesh.position);
+                const r = this.hoveredNode.mesh.geometry.parameters.radius || 1.6;
+                this.hoverRing.scale.set(r, r, r);
+                this.hoverRing.rotation.z += 0.025; // 平面内自旋
+                this.hoverRingMaterial.opacity += (0.75 - this.hoverRingMaterial.opacity) * 0.15;
+                
+                // 定位同步
+                this.updateHoverMenuPosition();
+            } else {
+                this.hoverRingMaterial.opacity += (0.0 - this.hoverRingMaterial.opacity) * 0.18;
+            }
+        }
+
         // 1. 太阳表面流动与自转 (利用 UV 移动创造不断喷涌流出的岩浆效果)
         if (this.gateway) {
             this.gateway.rotation.y += 0.0006;
@@ -9670,9 +9761,22 @@ class TopologyViewer {
         window.removeEventListener('resize', this.onResizeHandler);
         if (this.renderer && this.renderer.domElement) {
             this.renderer.domElement.removeEventListener('click', this.onClickHandler);
+            if (this.onMouseMoveHandler) {
+                this.renderer.domElement.removeEventListener('pointermove', this.onMouseMoveHandler);
+            }
         }
         if (this.onTerminalPointerDown) {
             document.removeEventListener('pointerdown', this.onTerminalPointerDown, { capture: true });
+        }
+        if (this.menuHideTimeout) {
+            clearTimeout(this.menuHideTimeout);
+            this.menuHideTimeout = null;
+        }
+        if (this.hoverRing) {
+            this.scene.remove(this.hoverRing);
+            if (this.hoverRing.geometry) this.hoverRing.geometry.dispose();
+            if (this.hoverRing.material) this.hoverRing.material.dispose();
+            this.hoverRing = null;
         }
     }
 
@@ -9733,7 +9837,151 @@ class TopologyViewer {
             }
         }
     }
+
+    onDocumentMouseMove(event) {
+        if (!this.renderer || !this.renderer.domElement) return;
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+        
+        // 匹配行星及其子组件
+        const targetObjects = [];
+        this.nodes.forEach(n => {
+            if (n.mesh) {
+                targetObjects.push(n.mesh);
+                n.mesh.traverse(child => {
+                    if (child !== n.mesh) {
+                        targetObjects.push(child);
+                    }
+                });
+            }
+        });
+
+        const intersects = this.raycaster.intersectObjects(targetObjects);
+
+        if (intersects.length > 0) {
+            const selectedMesh = intersects[0].object;
+            let targetMesh = selectedMesh;
+            if (!selectedMesh.userData || selectedMesh.userData.key === undefined) {
+                if (selectedMesh.parent && selectedMesh.parent.userData && selectedMesh.parent.userData.key !== undefined) {
+                    targetMesh = selectedMesh.parent;
+                }
+            }
+            
+            if (targetMesh.userData && targetMesh.userData.key !== undefined) {
+                const node = this.nodes.find(n => n.mesh === targetMesh);
+                if (node) {
+                    if (this.menuHideTimeout) {
+                        clearTimeout(this.menuHideTimeout);
+                        this.menuHideTimeout = null;
+                    }
+                    this.showHoverMenu(node);
+                    return;
+                }
+            }
+        }
+
+        // 移出星体时触发延时隐藏
+        if (!this.menuHideTimeout) {
+            this.menuHideTimeout = setTimeout(() => {
+                this.hideHoverMenu();
+            }, 350);
+        }
+    }
+
+    showHoverMenu(node) {
+        if (this.hoveredNode === node) return; // 已经在当前节点上
+        this.hoveredNode = node;
+        const hoverMenu = document.getElementById('topoHoverMenu');
+        if (hoverMenu) {
+            if (node.isVirtual) {
+                hoverMenu.classList.add('is-virtual-planet');
+            } else {
+                hoverMenu.classList.remove('is-virtual-planet');
+            }
+            hoverMenu.style.display = 'block';
+            hoverMenu.offsetHeight; // 强制回流以让 CSS 动画正常执行
+            hoverMenu.classList.add('active');
+        }
+    }
+
+    hideHoverMenu() {
+        this.hoveredNode = null;
+        const hoverMenu = document.getElementById('topoHoverMenu');
+        if (hoverMenu) {
+            hoverMenu.classList.remove('active');
+            // 延时与 CSS transition 的 0.2s 保持一致，随后 display: none
+            setTimeout(() => {
+                if (!this.hoveredNode && !hoverMenu.classList.contains('active')) {
+                    hoverMenu.style.display = 'none';
+                }
+            }, 220);
+        }
+    }
+
+    updateHoverMenuPosition() {
+        if (!this.hoveredNode || !this.hoveredNode.mesh || !this.camera || !this.renderer) return;
+        const hoverMenu = document.getElementById('topoHoverMenu');
+        if (!hoverMenu) return;
+
+        const vector = new THREE.Vector3();
+        this.hoveredNode.mesh.getWorldPosition(vector);
+        
+        // 投影到屏幕 NDC 坐标
+        vector.project(this.camera);
+        
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        
+        // 映射到 viewport 像素坐标
+        const x = rect.left + (vector.x * 0.5 + 0.5) * rect.width;
+        const y = rect.top + (-vector.y * 0.5 + 0.5) * rect.height;
+        
+        hoverMenu.style.left = `${x}px`;
+        hoverMenu.style.top = `${y}px`;
+    }
 }
+
+// 全局回调处理拓扑环形悬浮菜单操作
+window.handleTopoMenu = function(action) {
+    if (!topoViewer || !topoViewer.hoveredNode) return;
+    const node = topoViewer.hoveredNode;
+    const connKey = node.key;
+    
+    // 立即隐藏菜单
+    topoViewer.hideHoverMenu();
+    
+    if (action === 'create') {
+        if (typeof showConnectionsHome === 'function') {
+            showConnectionsHome();
+        }
+        if (typeof setSshSidebarVisible === 'function') {
+            setSshSidebarVisible(true);
+        }
+        const content = document.getElementById('newConnectionContent');
+        if (content && content.style.display === 'none') {
+            if (typeof toggleSection === 'function') {
+                toggleSection('newConnection');
+            }
+        }
+        return;
+    }
+    
+    if (!connKey) return;
+    
+    if (action === 'connect') {
+        quickConnect(connKey);
+    } else if (action === 'edit') {
+        if (typeof editSavedConnection === 'function') {
+            editSavedConnection(connKey);
+        }
+    } else if (action === 'remove') {
+        if (typeof deleteConnection === 'function') {
+            deleteConnection(connKey);
+        }
+    }
+};
 
 window.updateNodeDelay = function(ip, delay, status) {
     if (!topoViewer || !topoViewer.nodes) return;

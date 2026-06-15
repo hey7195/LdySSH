@@ -237,9 +237,9 @@
             </div>
         </div>
         
-        <div class="app command-library-collapsed" style="position: relative;">
+        <div class="app command-library-collapsed ssh-sidebar-collapsed" style="position: relative;">
         <div class="activity-bar">
-            <button class="activity-item active" id="activitySsh" type="button" title="&#26032;&#24314; SSH &#20027;&#26426;" onclick="toggleSshSidebar()"><span>SSH</span></button>
+            <button class="activity-item" id="activitySsh" type="button" title="&#26032;&#24314; SSH &#20027;&#26426;" onclick="toggleSshSidebar()"><span>SSH</span></button>
             <button class="activity-item" id="activityCommands" type="button" title="&#21629;&#20196;&#24211;" onclick="openTool('commands')"><span>CMD</span></button>
             <button class="activity-item" id="sftpIcon" type="button" title="SFTP &#25991;&#20214;" onclick="openTool('sftp')"><span>SFTP</span></button>
             <button class="activity-item" id="portForwardIcon" type="button" title="&#31471;&#21475;&#36716;&#21457;" onclick="openTool('portForward')"><span>PF</span></button>
@@ -346,8 +346,7 @@
                                                 <button type="button" id="privacyModeBtn" class="privacy-mode-btn active" onclick="togglePrivacyMode()" title="隐私模式 (隐藏主机和IP)">🔒 隐私模式</button>
                                                 <button type="button" class="home-refresh" onclick="loadSavedConnections()" title="刷新">&#8635;</button>
                                                 <div class="home-view-switch">
-                                                    <button type="button" data-view="grid" onclick="setConnectionsHomeView('grid')" title="网格视图">&#9638;</button>
-                                                    <button type="button" data-view="list" onclick="setConnectionsHomeView('list')" title="列表视图">&#9776;</button>
+                                                    <button type="button" id="viewToggleBtn" onclick="toggleConnectionsHomeView()" title="星空模式 (已隐藏面板，点击切换至列表)">🌌</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -595,6 +594,16 @@
             <div class="modal-footer" style="display:flex; justify-content:flex-end;">
                 <button id="customAlertConfirmBtn" style="padding:6px 14px; background:linear-gradient(135deg, #00f2fe, #4facfe); border:none; border-radius:6px; color:#0f172a; font-weight:bold; font-size:12px; cursor:pointer; transition:all 0.2s;">确定</button>
             </div>
+        </div>
+    </div>
+
+    <!-- 3D行星引力环悬浮交互菜单 -->
+    <div id="topoHoverMenu" class="topo-hover-menu" style="display:none; position:fixed; z-index: 10010; pointer-events: auto;">
+        <div class="topo-hover-menu-inner">
+            <button class="topo-menu-btn connect" onclick="handleTopoMenu('connect')" title="立即连接">🚀</button>
+            <button class="topo-menu-btn edit" onclick="handleTopoMenu('edit')" title="编辑主机">⚙️</button>
+            <button class="topo-menu-btn remove" onclick="handleTopoMenu('remove')" title="移除主机">🗑️</button>
+            <button class="topo-menu-btn create" onclick="handleTopoMenu('create')" title="新建主机">➕</button>
         </div>
     </div>
 
