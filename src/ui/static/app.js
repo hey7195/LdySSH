@@ -3852,6 +3852,12 @@ class TopologyViewer {
 
     buildTopology() {
         // 清除原有物体
+        if (this.gateway) {
+            this.scene.remove(this.gateway);
+            if (this.gateway.geometry) this.gateway.geometry.dispose();
+            if (this.gateway.material) this.gateway.material.dispose();
+            this.gateway = null;
+        }
         this.nodes.forEach(n => this.scene.remove(n.mesh));
         this.lines.forEach(l => this.scene.remove(l));
         this.nodes = [];
@@ -3865,9 +3871,9 @@ class TopologyViewer {
             shininess: 50,
             wireframe: true
         });
-        const gateway = new THREE.Mesh(gatewayGeo, gatewayMat);
-        gateway.position.set(0, 0, 0);
-        this.scene.add(gateway);
+        this.gateway = new THREE.Mesh(gatewayGeo, gatewayMat);
+        this.gateway.position.set(0, 0, 0);
+        this.scene.add(this.gateway);
 
         // 读取已缓存的连接
         const connections = globalSavedConnections || [];

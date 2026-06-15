@@ -114,27 +114,42 @@ class ConnectionStore:
             self.logger.error(f"Error setting up encryption: {e}")
             raise EncryptionError(f"Failed to setup encryption: {e}")
     
+    def _load_raw_connections(self) -> Dict[str, Any]:
+        """Load connections from disk without decrypting passwords."""
+        with self._lock:
+            if not Path(self.config.connections_file).exists():
+                return {}
+            try:
+                with open(self.config.connections_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                self.logger.error(f"Error loading raw connections: {e}")
+                return {}
+
     def save_connection(self, connection: Dict[str, Any]) -> bool:
         """Save a connection profile."""
         with self._lock:
             try:
-                connections = self.load_connections()
+                connections = self._load_raw_connections()
+                
+                # Clone the connection object to avoid side effects on caller memory
+                conn_to_save = connection.copy()
                 
                 # Encrypt password if encryption is available and password exists
-                if self.cipher and connection.get('password'):
+                if self.cipher and conn_to_save.get('password'):
                     try:
-                        connection['password'] = self.cipher.encrypt(
-                            connection['password'].encode()
+                        conn_to_save['password'] = self.cipher.encrypt(
+                            conn_to_save['password'].encode()
                         ).decode()
-                        connection['password_encrypted'] = True
+                        conn_to_save['password_encrypted'] = True
                     except Exception as e:
                         self.logger.error(f"Error encrypting password: {e}")
                         # Store in plain text if encryption fails
-                        connection['password_encrypted'] = False
+                        conn_to_save['password_encrypted'] = False
                 
                 # Use hostname@username as key
-                key = f"{connection['hostname']}@{connection['username']}"
-                connections[key] = connection
+                key = f"{conn_to_save['hostname']}@{conn_to_save['username']}"
+                connections[key] = conn_to_save
                 
                 # Ensure directory exists before writing
                 self._ensure_config_dir()
@@ -165,7 +180,7 @@ class ConnectionStore:
                         try:
                             conn['password'] = self.cipher.decrypt(
                                 conn['password'].encode()
-                            ).decode()
+                              ).decode()
                         except Exception as e:
                             self.logger.error(f"Error decrypting password for {key}: {e}")
                             # If decryption fails, remove the password
@@ -188,7 +203,7 @@ class ConnectionStore:
         """Delete a saved connection."""
         with self._lock:
             try:
-                connections = self.load_connections()
+                connections = self._load_raw_connections()
                 if key in connections:
                     del connections[key]
                     with open(self.config.connections_file, 'w') as f:
