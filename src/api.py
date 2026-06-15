@@ -1,6 +1,10 @@
 """API layer for PrismSSH web interface."""
 
 import json
+import socket
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any
 
 # Handle imports - try relative first, then absolute
@@ -57,6 +61,60 @@ class PrismSSHAPI:
     def set_window(self, window):
         """Set the webview window reference for JS calls."""
         self._window = window
+        self._start_topology_heartbeat()
+
+    def _start_topology_heartbeat(self):
+        """Start background thread to ping connections and update WebGL topology."""
+        if hasattr(self, '_heartbeat_thread') and self._heartbeat_thread.is_alive():
+            return
+        self._heartbeat_stop_event = threading.Event()
+        self._heartbeat_thread = threading.Thread(target=self._topology_heartbeat_loop, daemon=True)
+        self._heartbeat_thread.start()
+        self.logger.info("3D Topology Heartbeat thread started")
+
+    def _topology_heartbeat_loop(self):
+        while not self._heartbeat_stop_event.is_set():
+            if not self._window:
+                time.sleep(2)
+                continue
+                
+            try:
+                connections = self.connection_store.load_connections()
+                hosts = []
+                for conn in connections.values():
+                    if 'hostname' in conn:
+                        hosts.append((conn['hostname'], int(conn.get('port', 22))))
+                
+                if hosts:
+                    with ThreadPoolExecutor(max_workers=5) as executor:
+                        results = executor.map(self._ping_host, hosts)
+                        for host, (delay, status) in zip(hosts, results):
+                            hostname, _ = host
+                            try:
+                                # 广播给 WebGL 前端
+                                self._window.evaluate_js(
+                                    f'if (typeof window.updateNodeDelay === "function") {{ '
+                                    f'window.updateNodeDelay("{hostname}", {delay}, "{status}"); }}'
+                                )
+                            except Exception:
+                                pass
+            except Exception as e:
+                self.logger.error(f"Error in topology heartbeat loop: {e}")
+                
+            time.sleep(8) # 每 8 秒扫描一次
+
+    def _ping_host(self, host_info) -> tuple:
+        hostname, port = host_info
+        start_time = time.perf_counter()
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1.5)
+            s.connect((hostname, port))
+            s.close()
+            delay = int((time.perf_counter() - start_time) * 1000)
+            return (delay, 'connected')
+        except Exception:
+            return (-1, 'disconnected')
     
     def create_session(self) -> str:
         """Create a new SSH session."""

@@ -3994,4 +3994,28 @@ class TopologyViewer {
             }
         }
     }
-}
+}
+
+window.updateNodeDelay = function(ip, delay, status) {
+    if (!topoViewer || !topoViewer.nodes) return;
+    const node = topoViewer.nodes.find(n => n.ip === ip);
+    if (node && node.mesh) {
+        let color = 0x00ff88; // 默认绿色
+        let emissive = 0x002211;
+        
+        if (status === 'disconnected') {
+            color = 0xff3333; // 红色代表断开
+            emissive = 0x440000;
+        } else if (delay > 150) {
+            color = 0xffaa00; // 橙色代表高延迟
+            emissive = 0x332200;
+        } else if (delay > 50) {
+            color = 0xffff33; // 黄色代表中度延迟
+            emissive = 0x222200;
+        }
+        
+        node.mesh.material.color.setHex(color);
+        node.mesh.material.emissive.setHex(emissive);
+        console.log(`Updated 3D node ${ip} latency: ${delay}ms, status: ${status}`);
+    }
+};
