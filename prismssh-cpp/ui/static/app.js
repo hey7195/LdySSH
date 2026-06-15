@@ -4766,7 +4766,7 @@ window.showWorkbench = function() {
         }
     });
 
-    document.getElementById('welcomeScreen').style.display = 'flex';
+    document.getElementById('welcomeScreen').style.display = 'block';
     document.getElementById('splashScreen').style.display = 'none'; document.getElementById('splashScreen').style.display = 'none'; document.getElementById('connectingScreen').style.display = 'none';
     document.getElementById('terminalWrapper').style.display = 'none';
 
