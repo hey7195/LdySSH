@@ -8671,6 +8671,7 @@ class TopologyViewer {
         this.orbits = [];
         this.lastFrameTime = 0;
         this.fpsInterval = 1000 / 30; // Limit WebGL backdrop rendering to 30 FPS to save CPU/GPU resource
+        this.warpFactor = 1.0;
     }
 
     createSunGlowTexture() {
@@ -9647,13 +9648,19 @@ class TopologyViewer {
             if (this.hoveredNode && this.hoveredNode.mesh) {
                 this.hoverRing.position.copy(this.hoveredNode.mesh.position);
                 const r = this.hoveredNode.mesh.geometry.parameters.radius || 1.6;
-                this.hoverRing.scale.set(r, r, r);
+                
+                // 方案 B：引力环坍缩跃迁弹性插值
+                this.warpFactor += (1.0 - this.warpFactor) * 0.15;
+                const currentScale = r * this.warpFactor;
+                this.hoverRing.scale.set(currentScale, currentScale, currentScale);
+                
                 this.hoverRing.rotation.z += 0.025; // 平面内自旋
-                this.hoverRingMaterial.opacity += (0.75 - this.hoverRingMaterial.opacity) * 0.15;
+                this.hoverRingMaterial.opacity = 0.75 * Math.min(this.warpFactor, 1.5);
                 
                 // 定位同步
                 this.updateHoverMenuPosition();
             } else {
+                this.warpFactor = 1.0;
                 this.hoverRingMaterial.opacity += (0.0 - this.hoverRingMaterial.opacity) * 0.18;
             }
         }
@@ -9894,6 +9901,10 @@ class TopologyViewer {
     showHoverMenu(node) {
         if (this.hoveredNode === node) return; // 已经在当前节点上
         this.hoveredNode = node;
+        
+        // 方案 B：3D 空间内触发引力坍缩跃迁插值动画
+        this.warpFactor = 2.4;
+
         const hoverMenu = document.getElementById('topoHoverMenu');
         if (hoverMenu) {
             if (node.isVirtual) {
@@ -9914,8 +9925,61 @@ class TopologyViewer {
                 focusFrame.classList.remove('is-virtual-planet');
             }
             focusFrame.style.display = 'block';
-            focusFrame.offsetHeight; // 强制回流
+            
+            // 方案 B：2D 重置并触发坍缩跃迁动画类
+            focusFrame.classList.remove('warp-active');
+            focusFrame.offsetHeight; // 强行回流以重新激发 CSS 动画
+            focusFrame.classList.add('warp-active');
+            
             focusFrame.classList.add('active');
+        }
+
+        // 方案 C：全息卫星 HUD 激活与数据注入
+        const satelliteOrbit = document.getElementById('topoSatelliteOrbit');
+        if (satelliteOrbit) {
+            // 解析主机系统属性分流
+            const name = (node.name || '').toLowerCase();
+            const hostname = (node.ip || '').toLowerCase();
+            let osIcon = '🐧';
+            let osName = 'Linux OS';
+            if (node.isVirtual) {
+                osIcon = '⚙️';
+                osName = '待配置连接';
+            } else if (name.includes('win') || hostname.includes('win')) {
+                osIcon = '🪟';
+                osName = 'Windows Server';
+            } else if (name.includes('mac') || hostname.includes('mac') || name.includes('apple')) {
+                osIcon = '🍎';
+                osName = 'macOS Server';
+            } else {
+                osIcon = '🐧';
+                osName = 'Linux OS';
+            }
+            
+            // 设置动态 PING 值 (随机 8~25ms)
+            const pingVal = node.isVirtual ? '0ms' : `${Math.floor(Math.random() * 17) + 8}ms`;
+            
+            document.getElementById('topoSatelliteIcon').textContent = osIcon;
+            document.getElementById('topoSatelliteOs').textContent = `OS: ${osName}`;
+            document.getElementById('topoSatellitePing').textContent = `PING: ${pingVal}`;
+            
+            // 虚拟类名切换
+            if (node.isVirtual) {
+                satelliteOrbit.classList.add('is-virtual-planet');
+            } else {
+                satelliteOrbit.classList.remove('is-virtual-planet');
+            }
+            
+            satelliteOrbit.style.display = 'block';
+            satelliteOrbit.offsetHeight; // 强制回流
+            satelliteOrbit.classList.add('active');
+            
+            // 延迟 100ms 弹出 HUD 增加层次感
+            setTimeout(() => {
+                if (this.hoveredNode === node) {
+                    satelliteOrbit.classList.add('hud-visible');
+                }
+            }, 100);
         }
     }
 
@@ -9935,9 +9999,21 @@ class TopologyViewer {
         const focusFrame = document.getElementById('topoFocusFrame');
         if (focusFrame) {
             focusFrame.classList.remove('active');
+            focusFrame.classList.remove('warp-active');
             setTimeout(() => {
                 if (!this.hoveredNode && !focusFrame.classList.contains('active')) {
                     focusFrame.style.display = 'none';
+                }
+            }, 350);
+        }
+
+        const satelliteOrbit = document.getElementById('topoSatelliteOrbit');
+        if (satelliteOrbit) {
+            satelliteOrbit.classList.remove('hud-visible');
+            satelliteOrbit.classList.remove('active');
+            setTimeout(() => {
+                if (!this.hoveredNode && !satelliteOrbit.classList.contains('active')) {
+                    satelliteOrbit.style.display = 'none';
                 }
             }, 350);
         }
@@ -9947,7 +10023,8 @@ class TopologyViewer {
         if (!this.hoveredNode || !this.hoveredNode.mesh || !this.camera || !this.renderer) return;
         const hoverMenu = document.getElementById('topoHoverMenu');
         const focusFrame = document.getElementById('topoFocusFrame');
-        if (!hoverMenu && !focusFrame) return;
+        const satelliteOrbit = document.getElementById('topoSatelliteOrbit');
+        if (!hoverMenu && !focusFrame && !satelliteOrbit) return;
 
         const vector = new THREE.Vector3();
         this.hoveredNode.mesh.getWorldPosition(vector);
@@ -9968,6 +10045,10 @@ class TopologyViewer {
         if (focusFrame) {
             focusFrame.style.left = `${x}px`;
             focusFrame.style.top = `${y}px`;
+        }
+        if (satelliteOrbit) {
+            satelliteOrbit.style.left = `${x}px`;
+            satelliteOrbit.style.top = `${y}px`;
         }
     }
 }

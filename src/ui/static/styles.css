@@ -6652,6 +6652,142 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     100% { transform: rotate(360deg); }
 }
 
+/* ==========================================================================
+   LdySSH v2.1 - 方案 B & 方案 C 真实客户端样式
+   ========================================================================== */
+.topo-satellite-orbit {
+    width: 160px;
+    height: 160px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.35s ease, border-color 0.35s ease;
+}
+
+.topo-satellite-orbit.active {
+    opacity: 1;
+    border: 1px dashed rgba(56, 189, 248, 0.12);
+    animation: satelliteRotate 16s linear infinite;
+}
+
+/* 虚拟占位行星状态配色切换为粉红/红色 */
+.topo-satellite-orbit.is-virtual-planet.active {
+    border-color: rgba(244, 63, 94, 0.12);
+}
+
+.satellite-node {
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    top: -12px;
+    left: calc(50% - 12px);
+    pointer-events: auto;
+}
+
+.satellite-body {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid #00f2fe;
+    box-shadow: 0 0 8px rgba(0, 242, 254, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    animation: satelliteCounterRotate 16s linear infinite;
+}
+
+.topo-satellite-orbit.is-virtual-planet .satellite-body {
+    border-color: #f43f5e;
+    box-shadow: 0 0 8px rgba(244, 63, 94, 0.6);
+}
+
+@keyframes satelliteRotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes satelliteCounterRotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(-360deg); }
+}
+
+.satellite-hud {
+    position: absolute;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) scale(0);
+    transform-origin: bottom center;
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    opacity: 0;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.topo-satellite-orbit.active.hud-visible .satellite-hud {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+    transition-delay: 0.25s;
+}
+
+.hud-line {
+    width: 1px;
+    height: 12px;
+    background: linear-gradient(to top, #00f2fe, transparent);
+    margin-top: 2px;
+}
+
+.topo-satellite-orbit.is-virtual-planet .hud-line {
+    background: linear-gradient(to top, #f43f5e, transparent);
+}
+
+.hud-card {
+    background: rgba(10, 15, 24, 0.88);
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(0, 242, 254, 0.35);
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    white-space: nowrap;
+    color: #fff;
+    font-family: monospace;
+    font-size: 9px;
+    text-align: center;
+}
+
+.topo-satellite-orbit.is-virtual-planet .hud-card {
+    border-color: rgba(244, 63, 94, 0.35);
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.2);
+}
+
+.hud-title {
+    color: #38bdf8;
+    font-weight: bold;
+}
+
+.topo-satellite-orbit.is-virtual-planet .hud-title {
+    color: #f43f5e;
+}
+
+.hud-status {
+    color: #00ff88;
+    margin-top: 1px;
+}
+
+/* 方案 B：2D 霓虹焦点框时空坍缩激活动画 (Warp) */
+.topo-focus-frame.active.warp-active {
+    animation: warpFocusGlow 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes warpFocusGlow {
+    0% { transform: translate(-50%, -50%) scale(0); filter: brightness(3.5); opacity: 0; }
+    60% { transform: translate(-50%, -50%) scale(1.15); filter: brightness(2.2); opacity: 1; }
+    100% { transform: translate(-50%, -50%) scale(1); filter: brightness(1); opacity: 1; }
+}
+
 
 
 
