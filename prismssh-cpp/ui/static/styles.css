@@ -5943,7 +5943,7 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
 /* ==========================================================================
    LdySSH v2.0 - 3D Background Click-Through and UI Pointer Event Isolation
    ========================================================================== */
-/* 默认大外壳全部穿透，以便能穿透鼠标手势到底层 #threejsBackground 旋转 3D 星云 */
+/* 默认大布局容器全部穿透，允许空白处直接捕获并操作底层的 3D WebGL Canvas 视角 */
 .window-container,
 .window-inner,
 .app,
@@ -5951,11 +5951,15 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
 .content-area,
 .terminal-section,
 .terminal-container,
-.welcome-screen {
+.welcome-screen,
+.connections-home-content,
+.connections-home-shell,
+.connections-home-header,
+.home-connections-grid {
     pointer-events: none !important;
 }
 
-/* 保护所有交互式核心 UI 面板不被穿透 */
+/* 仅允许核心功能面板响应鼠标事件 */
 .title-bar,
 .activity-bar,
 .sidebar,
@@ -5963,7 +5967,6 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
 .tabs-container,
 .status-bar,
 .terminal-wrapper,
-.connections-home-content,
 .modal-overlay,
 .modal,
 .context-menu,
@@ -5972,10 +5975,20 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     pointer-events: auto !important;
 }
 
-/* 欢迎界面（工作台）本身处于激活显示状态时，屏蔽 terminal-container 的流光与不透明黑底罩，露出纯净 3D 星空 */
-.terminal-container:has(.welcome-screen:not([style*="display: none"]))::before {
+/* 仅工作台的具体交互小组件恢复鼠标事件，使它们之间的广阔黑色背景可直接穿透旋转 3D 场景 */
+.home-search input,
+.privacy-mode-btn,
+.home-refresh,
+.home-view-switch button,
+.home-connections-grid .home-connection-card,
+.home-connections-empty button {
+    pointer-events: auto !important;
+}
+
+/* 欢迎界面（工作台）激活时，使用精准的 .in-workbench 类彻底隐藏 terminal-container 的小流光与黑色遮罩，露出纯净 3D 星尘 */
+.terminal-container.in-workbench::before {
     display: none !important;
 }
-.terminal-container:has(.welcome-screen:not([style*="display: none"]))::after {
+.terminal-container.in-workbench::after {
     background: transparent !important;
 }

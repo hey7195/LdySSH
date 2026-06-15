@@ -7862,7 +7862,8 @@ let topoViewer = null;
 function initBackgroundTopology() {
     if (topoViewer) return;
     const container = document.getElementById('threejsBackground');
-    if (!container || typeof THREE === 'undefined' || typeof THREE.OrbitControls === 'undefined') {
+    const termContainer = document.querySelector('.terminal-container');
+    if (!container || !termContainer || typeof THREE === 'undefined' || typeof THREE.OrbitControls === 'undefined') {
         setTimeout(initBackgroundTopology, 100);
         return;
     }
@@ -8067,16 +8068,7 @@ class TopologyViewer {
         this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
         if (this.controls) this.controls.update();
         
-        // Rotating dual-color nebula starfield Y-axis
-        if (this.starfields) {
-            this.starfields.forEach(sf => {
-                if (sf.points) sf.points.rotation.y += sf.speed;
-            });
-        }
-        
-        if (this.gateway) {
-            this.gateway.rotation.y += 0.005;
-        }
+        // Starfield and gateway auto-rotations removed to respect user drag-only control
         
         // Slowly rotate whole node structure slightly
         this.nodes.forEach((n, idx) => {
