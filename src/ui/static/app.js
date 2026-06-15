@@ -3746,13 +3746,20 @@ function showCustomModal(title, isConfirm = false) {
 let topoViewer = null;
 
 function openTopologyDrawer() {
+    if (typeof THREE === 'undefined') {
+        alert('3D 绘制引擎 (Three.js) 未加载，请检查网络连接！');
+        return;
+    }
     const drawer = document.getElementById('topologyDrawer');
     if (!drawer) return;
     drawer.classList.add('open');
-    if (!topoViewer) {
-        topoViewer = new TopologyViewer('threejsContainer');
-        topoViewer.init();
+    
+    // 每次打开都创建新实例并 init 挂载，确保加载最新连接列表并绑定事件
+    if (topoViewer) {
+        topoViewer.destroy();
     }
+    topoViewer = new TopologyViewer('threejsContainer');
+    topoViewer.init();
     topoViewer.animate();
 }
 
@@ -3761,7 +3768,8 @@ function closeTopologyDrawer() {
     if (!drawer) return;
     drawer.classList.remove('open');
     if (topoViewer) {
-        topoViewer.stop();
+        topoViewer.destroy();
+        topoViewer = null; // 置空，方便下次重新创建
     }
 }
 
@@ -3778,6 +3786,7 @@ class TopologyViewer {
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
         this.starfield = null;
+        this.mouseDownPos = null;
     }
 
     init() {
@@ -3831,8 +3840,14 @@ class TopologyViewer {
         // 7. Event listeners
         this.onResizeHandler = this.onWindowResize.bind(this);
         this.onClickHandler = this.onDocumentClick.bind(this);
+        this.onMouseDownHandler = this.onMouseDown.bind(this);
         window.addEventListener('resize', this.onResizeHandler);
         this.renderer.domElement.addEventListener('click', this.onClickHandler);
+        this.renderer.domElement.addEventListener('mousedown', this.onMouseDownHandler);
+    }
+
+    onMouseDown(event) {
+        this.mouseDownPos = { x: event.clientX, y: event.clientY };
     }
 
     buildTopology() {
@@ -3910,7 +3925,37 @@ class TopologyViewer {
         window.removeEventListener('resize', this.onResizeHandler);
         if (this.renderer && this.renderer.domElement) {
             this.renderer.domElement.removeEventListener('click', this.onClickHandler);
+            this.renderer.domElement.removeEventListener('mousedown', this.onMouseDownHandler);
         }
+    }
+
+    destroy() {
+        this.stop();
+        if (this.scene) {
+            this.scene.traverse((obj) => {
+                if (obj.geometry) obj.geometry.dispose();
+                if (obj.material) {
+                    if (Array.isArray(obj.material)) {
+                        obj.material.forEach(m => m.dispose());
+                    } else {
+                        obj.material.dispose();
+                    }
+                }
+            });
+        }
+        if (this.controls && this.controls.dispose) {
+            this.controls.dispose();
+        }
+        if (this.renderer) {
+            this.renderer.dispose();
+            if (this.renderer.domElement && this.renderer.domElement.parentNode) {
+                this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
+            }
+        }
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.controls = null;
     }
 
     onWindowResize() {
@@ -3923,6 +3968,13 @@ class TopologyViewer {
     }
 
     onDocumentClick(event) {
+        if (this.mouseDownPos) {
+            const dx = event.clientX - this.mouseDownPos.x;
+            const dy = event.clientY - this.mouseDownPos.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 5) return; // 判定为旋转，拦截点击
+        }
+
         const rect = this.renderer.domElement.getBoundingClientRect();
         this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -3938,6 +3990,7 @@ class TopologyViewer {
             // 点击节点触发高亮并连接
             if (connKey) {
                 quickConnect(connKey);
+                closeTopologyDrawer(); // 连接后自动收起
             }
         }
     }
