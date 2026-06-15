@@ -45,6 +45,16 @@
     };
 })();
 
+// 每个工具独立的侧边栏宽度缓存，避免宽度相互影响
+let sidebarWidths = {
+    commands: '380px',
+    sftp: '700px',
+    monitor: '380px',
+    portForward: '380px',
+    highlight: '380px',
+    ai: '400px'
+};
+
 let currentSessionId = null;
 let currentTerminal = null;
 let sessions = {};
@@ -689,6 +699,10 @@ function openTool(toolName) {
         console.error('工具面板不存在：', toolName);
         return;
     }
+    // 动态应用该工具独享的侧边栏宽度，防止不同功能间宽度相互污染
+    const targetWidth = sidebarWidths[toolName] || '380px';
+    rightSidebar.style.setProperty('--sidebar-width', targetWidth);
+
     toolPanel.classList.add('active');
     rightSidebar.classList.add('open');
 
@@ -4748,6 +4762,9 @@ async function reconnectSession(oldSessionId) {
 }
 
 window.showWorkbench = function() {
+    // 回到主机工作台时，自动关闭右侧栏面板，释放被占用的屏幕空间，防止布局错乱
+    closeToolPanel();
+
     const termContainer = document.querySelector('.terminal-container');
     if (termContainer) {
         termContainer.classList.add('in-workbench');
@@ -5911,7 +5928,13 @@ window.addEventListener('mousemove', (e) => {
     if (newWidth < minWidth) newWidth = minWidth;
     if (newWidth > maxWidth) newWidth = maxWidth;
 
-    sidebar.style.setProperty('--sidebar-width', newWidth + 'px');
+    const widthStr = newWidth + 'px';
+    sidebar.style.setProperty('--sidebar-width', widthStr);
+
+    // 拖拽宽度时，动态更新当前激活工具所独享的宽度缓存
+    if (currentTool && sidebarWidths[currentTool] !== undefined) {
+        sidebarWidths[currentTool] = widthStr;
+    }
 
     if (currentTool === 'ai') {
         updateAiSubWindowBounds();
