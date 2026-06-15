@@ -13,6 +13,8 @@
         body { font-family: 'Inter', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; }
         .app { display: flex; height: 100vh; }
     </style>
+    <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
     <div class="app">
@@ -22,6 +24,11 @@
             </div>
             
             <div class="sidebar-content">
+                <div class="3d-topo-entry" style="padding: 10px 15px;">
+                    <button class="connect-btn" style="background: linear-gradient(135deg, #00f2fe, #4facfe); width: 100%;" onclick="openTopologyDrawer()">
+                        🌐 3D 集群拓扑看板
+                    </button>
+                </div>
                 <!-- 新建连接 Section -->
                 <div class="collapsible-section">
                     <div class="section-header" onclick="toggleSection('newConnection')">
@@ -436,6 +443,14 @@
                 <button class="modal-btn ok" id="customModalOk">确定</button>
             </div>
         </div>
+    </div>
+
+    <div id="topologyDrawer" class="topology-drawer">
+        <div class="drawer-header">
+            <h2>🌐 3D 集群网络拓扑看板</h2>
+            <button class="close-drawer-btn" onclick="closeTopologyDrawer()">×</button>
+        </div>
+        <div id="threejsContainer" class="threejs-container"></div>
     </div>
 
 </body>
