@@ -2326,14 +2326,6 @@ input[type="checkbox"] {
 
 
 
-    .connections-home-actions {
-        position: static;
-        min-width: 0;
-        justify-content: flex-start;
-    }
-
-
-
     .home-search {
 
     flex: 1 1 260px;
@@ -4964,14 +4956,22 @@ input[type="checkbox"] {
 
 /* Ensure privacy mode layout stays fixed and align to top-right corner */
 .connections-home-actions {
-    position: absolute;
-    top: 34px;
-    right: 46px;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    position: absolute !important;
+    top: 20px !important;
+    right: 24px !important;
+    z-index: 100 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
     pointer-events: auto !important;
+}
+
+@media (max-width: 768px) {
+    .connections-home-actions {
+        position: static !important;
+        margin-top: 16px !important;
+        justify-content: flex-start !important;
+    }
 }
 
 .home-search {
