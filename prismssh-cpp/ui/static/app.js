@@ -2893,6 +2893,7 @@ function showConnectionsHome() {
     const home = document.getElementById('welcomeScreen');
     if (home) home.style.display = 'block';
     renderConnectionsHome();
+    toggleWorkbenchActive(true);
 }
 
 function filterSavedConnections() {
@@ -4742,6 +4743,7 @@ window.showWorkbench = function() {
 };
 
 function switchToSession(sessionId) {
+    toggleWorkbenchActive(false);
     const termContainer = document.querySelector('.terminal-container');
     if (termContainer) {
         termContainer.classList.remove('in-workbench');
@@ -7879,6 +7881,28 @@ function updateSplitScreenHighlight() {
 // ==========================================================================
 let topoViewer = null;
 
+function toggleWorkbenchActive(active) {
+    if (active) {
+        document.body.classList.add('workbench-active');
+        const bg = document.getElementById('threejsBackground');
+        if (bg) {
+            bg.style.pointerEvents = 'auto';
+        }
+        if (topoViewer && topoViewer.controls) {
+            topoViewer.controls.enabled = true;
+        }
+    } else {
+        document.body.classList.remove('workbench-active');
+        const bg = document.getElementById('threejsBackground');
+        if (bg) {
+            bg.style.pointerEvents = 'none';
+        }
+        if (topoViewer && topoViewer.controls) {
+            topoViewer.controls.enabled = false;
+        }
+    }
+}
+
 function initBackgroundTopology() {
     if (topoViewer) return;
     const container = document.getElementById('threejsBackground');
@@ -7892,6 +7916,11 @@ function initBackgroundTopology() {
         topoViewer.init();
         topoViewer.animate();
         console.log("3D Background Topology successfully initialized.");
+        if (!currentSessionId) {
+            toggleWorkbenchActive(true);
+        } else {
+            toggleWorkbenchActive(false);
+        }
     } catch (e) {
         console.error("Failed to initialize 3D topology:", e);
         topoViewer = null;

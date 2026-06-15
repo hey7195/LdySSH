@@ -542,6 +542,9 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
     sftpSession = libssh2_sftp_init(sshSession);
     libssh2_session_set_blocking(sshSession, 0);
 
+    // Configure keepalive: send keepalive every 10 seconds, timeout after 3 failed attempts
+    libssh2_keepalive_config(sshSession, 1, 10);
+
     running = true;
     hReadThread = CreateThread(NULL, 0, StaticReadThread, this, 0, NULL);
 
@@ -703,6 +706,7 @@ DWORD WINAPI SSHSession::StaticReadThread(LPVOID param) {
 
 void SSHSession::ReadLoop() {
     char buffer[16384];
+    auto lastKeepalive = std::chrono::steady_clock::now();
     while (running && sshChannel) {
         fd_set fd;
         FD_ZERO(&fd);
@@ -740,7 +744,7 @@ void SSHSession::ReadLoop() {
                         delete pStr;
                     }
                 }
-            } else if (readBytes < 0 && readBytes != LIBSSH2_ERROR_EAGAIN) {
+            } else if (readBytes <= 0 && readBytes != LIBSSH2_ERROR_EAGAIN) {
                 nlohmann::json pushMsg;
                 pushMsg["action"] = "push_output";
                 pushMsg["sessionId"] = sessionId;
@@ -758,6 +762,17 @@ void SSHSession::ReadLoop() {
         } else if (select_res < 0) {
             running = false;
             break;
+        }
+
+        // Periodically send keepalive every 10 seconds
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastKeepalive).count() >= 10) {
+            std::lock_guard<std::mutex> lock(sshMutex);
+            if (sshSession && running) {
+                int seconds_to_next = 0;
+                libssh2_keepalive_send(sshSession, &seconds_to_next);
+            }
+            lastKeepalive = now;
         }
     }
 }

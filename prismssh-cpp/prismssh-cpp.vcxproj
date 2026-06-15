@@ -17,6 +17,8 @@
     <RootNamespace>prismsshcpp</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <RestoreProjectStyle>PackageReference</RestoreProjectStyle>
+    <TargetFramework>native</TargetFramework>
+    <ResolveNuGetPackageAssets>false</ResolveNuGetPackageAssets>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
@@ -77,6 +79,21 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="session.cpp" />
+    <ClCompile Include="ssh_session.cpp" />
+    <ClCompile Include="crypto_utils.cpp" />
+    <ClCompile Include="sftp_worker.cpp" />
+    <ClCompile Include="chatgpt_subwindow.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="session.h" />
+    <ClInclude Include="ssh_session.h" />
+    <ClInclude Include="crypto_utils.h" />
+    <ClInclude Include="sftp_worker.h" />
+    <ClInclude Include="chatgpt_subwindow.h" />
+    <ClInclude Include="common_utils.h" />
+    <ClInclude Include="sftp_pipeline.hpp" />
+    <ClInclude Include="ui_assets.hpp" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2210.55" />
@@ -85,4 +102,5 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
+  <Target Name="ResolveNuGetPackageAssets" />
 </Project>

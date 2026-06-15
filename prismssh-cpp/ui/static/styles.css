@@ -5954,18 +5954,18 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
    LdySSH v2.0 - 3D Background Click-Through and UI Pointer Event Isolation
    ========================================================================== */
 /* 默认大布局容器全部穿透，允许空白处直接捕获并操作底层的 3D WebGL Canvas 视角 */
-.window-container,
-.window-inner,
-.app,
-.main-content,
-.content-area,
-.terminal-section,
-.terminal-container,
-.welcome-screen,
-.connections-home-content,
-.connections-home-shell,
-.connections-home-header,
-.home-connections-grid {
+body.workbench-active .window-container,
+body.workbench-active .window-inner,
+body.workbench-active .app,
+body.workbench-active .main-content,
+body.workbench-active .content-area,
+body.workbench-active .terminal-section,
+body.workbench-active .terminal-container,
+body.workbench-active .welcome-screen,
+body.workbench-active .connections-home-content,
+body.workbench-active .connections-home-shell,
+body.workbench-active .connections-home-header,
+body.workbench-active .home-connections-grid {
     pointer-events: none !important;
 }
 
