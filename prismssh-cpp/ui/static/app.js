@@ -7908,9 +7908,9 @@ class TopologyViewer {
         this.container.innerHTML = ''; // Clear container
         this.container.appendChild(this.renderer.domElement);
 
-        // 3. Orbit Controls (Bound to document.body for global dragging)
+        // 3. Orbit Controls (Bound to WebGL canvas for safe dragging)
         if (typeof THREE.OrbitControls !== 'undefined') {
-            this.controls = new THREE.OrbitControls(this.camera, document.body);
+            this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
             this.controls.enableDamping = true;
             this.controls.dampingFactor = 0.05;
             this.controls.enableZoom = false; // Disable zoom to prevent scroll issues

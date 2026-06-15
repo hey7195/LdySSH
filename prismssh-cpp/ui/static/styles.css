@@ -5939,3 +5939,43 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     transform: translate(-50%, -100%);
     transition: opacity 0.2s;
 }
+
+/* ==========================================================================
+   LdySSH v2.0 - 3D Background Click-Through and UI Pointer Event Isolation
+   ========================================================================== */
+/* 默认大外壳全部穿透，以便能穿透鼠标手势到底层 #threejsBackground 旋转 3D 星云 */
+.window-container,
+.window-inner,
+.app,
+.main-content,
+.content-area,
+.terminal-section,
+.terminal-container,
+.welcome-screen {
+    pointer-events: none !important;
+}
+
+/* 保护所有交互式核心 UI 面板不被穿透 */
+.title-bar,
+.activity-bar,
+.sidebar,
+.right-sidebar,
+.tabs-container,
+.status-bar,
+.terminal-wrapper,
+.connections-home-content,
+.modal-overlay,
+.modal,
+.context-menu,
+.toast-notification,
+.dialog {
+    pointer-events: auto !important;
+}
+
+/* 欢迎界面（工作台）本身处于激活显示状态时，屏蔽 terminal-container 的流光与不透明黑底罩，露出纯净 3D 星空 */
+.terminal-container:has(.welcome-screen:not([style*="display: none"]))::before {
+    display: none !important;
+}
+.terminal-container:has(.welcome-screen:not([style*="display: none"]))::after {
+    background: transparent !important;
+}
