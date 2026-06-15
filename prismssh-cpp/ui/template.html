@@ -10,6 +10,8 @@
     <script src="https://unpkg.com/@xterm/addon-webgl@0.16.0/lib/addon-webgl.js"></script>
     <script src="https://unpkg.com/@xterm/addon-search@0.15.0/lib/addon-search.js"></script>
     <link rel="stylesheet" href="static/styles.css?v=5">
+    <script src="static/lib/three.min.js"></script>
+    <script src="static/lib/OrbitControls.js"></script>
     <style>
     /* 流光边框按钮容器 */
     .glow-btn {
@@ -209,6 +211,7 @@
     </style>
 </head>
 <body>
+    <div id="threejsBackground" class="threejs-background"></div>
     <div class="window-container">
         <div class="window-inner">
             <div class="home-ambient-glow">

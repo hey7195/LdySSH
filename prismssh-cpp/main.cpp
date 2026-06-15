@@ -45,6 +45,7 @@ using Microsoft::WRL::ComPtr;
 using Microsoft::WRL::Callback;
 
 #define WM_POST_WEB_MESSAGE (WM_USER + 101)
+#define WM_TOPOLOGY_HEARTBEAT_UPDATE (WM_USER + 102)
 
 // Global variables
 HINSTANCE hInst;
@@ -52,6 +53,114 @@ HWND hWnd;
 ComPtr<ICoreWebView2Controller> webviewController;
 ComPtr<ICoreWebView2> webviewWindow;
 ComPtr<ICoreWebView2Environment> webviewEnv;
+
+struct HeartbeatUpdate {
+    std::string hostname;
+    int delay;
+    std::string status;
+};
+
+// Forward declaration
+std::wstring Utf8ToUtf16(const std::string& utf8);
+
+// Non-blocking socket ping thread
+void PingHostThread(std::string hostname, int port) {
+    SOCKET connSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (connSocket == INVALID_SOCKET) {
+        HeartbeatUpdate* update = new HeartbeatUpdate{hostname, -1, "disconnected"};
+        PostMessage(hWnd, WM_TOPOLOGY_HEARTBEAT_UPDATE, 0, (LPARAM)update);
+        return;
+    }
+
+    u_long mode = 1;
+    ioctlsocket(connSocket, FIONBIO, &mode);
+
+    sockaddr_in clientService;
+    clientService.sin_family = AF_INET;
+    
+    hostent* host = gethostbyname(hostname.c_str());
+    if (host == nullptr) {
+        clientService.sin_addr.s_addr = inet_addr(hostname.c_str());
+        if (clientService.sin_addr.s_addr == INADDR_NONE) {
+            closesocket(connSocket);
+            HeartbeatUpdate* update = new HeartbeatUpdate{hostname, -1, "disconnected"};
+            PostMessage(hWnd, WM_TOPOLOGY_HEARTBEAT_UPDATE, 0, (LPARAM)update);
+            return;
+        }
+    } else {
+        clientService.sin_addr.s_addr = *(u_long*)host->h_addr_list[0];
+    }
+    clientService.sin_port = htons(port);
+
+    LARGE_INTEGER frequency;
+    LARGE_INTEGER start;
+    LARGE_INTEGER end;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&start);
+
+    connect(connSocket, (SOCKADDR*)&clientService, sizeof(clientService));
+
+    fd_set writeSet;
+    FD_ZERO(&writeSet);
+    FD_SET(connSocket, &writeSet);
+    
+    timeval timeout;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 500000;
+
+    int selectRet = select(0, nullptr, &writeSet, nullptr, &timeout);
+    int delay = -1;
+    std::string status = "disconnected";
+
+    if (selectRet > 0 && FD_ISSET(connSocket, &writeSet)) {
+        QueryPerformanceCounter(&end);
+        delay = (int)((end.QuadPart - start.QuadPart) * 1000 / frequency.QuadPart);
+        status = "connected";
+    }
+
+    closesocket(connSocket);
+
+    HeartbeatUpdate* update = new HeartbeatUpdate{hostname, delay, status};
+    PostMessage(hWnd, WM_TOPOLOGY_HEARTBEAT_UPDATE, 0, (LPARAM)update);
+}
+
+// Heartbeat Loop Thread
+void TopologyHeartbeatLoop() {
+    // Wait for the window and WebView to be fully initialized first
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+
+    while (true) {
+        std::wstring configDir = GetConfigDirectory();
+        std::wstring connPath = configDir + L"\\connections.json";
+        std::string connData = ReadFileToUtf8(connPath);
+
+        if (!connData.empty()) {
+            try {
+                nlohmann::json conns = nlohmann::json::parse(connData);
+                std::vector<std::thread> pingThreads;
+                
+                for (auto it = conns.begin(); it != conns.end(); ++it) {
+                    nlohmann::json conn = it.value();
+                    if (conn.contains("hostname")) {
+                        std::string hostname = conn["hostname"].get<std::string>();
+                        int port = conn.contains("port") ? conn["port"].get<int>() : 22;
+                        pingThreads.push_back(std::thread(PingHostThread, hostname, port));
+                    }
+                }
+
+                for (auto& t : pingThreads) {
+                    if (t.joinable()) {
+                        t.join();
+                    }
+                }
+            }
+            catch (...) {
+            }
+        }
+        
+        std::this_thread::sleep_for(std::chrono::seconds(8));
+    }
+}
 
 // Clipboard Helpers
 bool CopyToClipboard(const std::wstring& wtext) {
@@ -191,11 +300,11 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 ComPtr<ICoreWebView2_3> webviewWindow3;
                 if (SUCCEEDED(webviewWindow.As(&webviewWindow3))) {
                     webviewWindow3->SetVirtualHostNameToFolderMapping(
-                        L"prismssh.local",
+                        L"ldyssh.local",
                         uiPath.c_str(),
                         COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW
                     );
-                    webviewWindow->Navigate(L"https://prismssh.local/template.html");
+                    webviewWindow->Navigate(L"https://ldyssh.local/template.html");
                 }
             } else {
                 std::wstring wFallbackHtml = Utf8ToUtf16(EMBEDDED_FALLBACK_HTML);
@@ -205,7 +314,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
         }
 
         if (action == "get_saved_connections") {
-            NamedMutexLock lock(L"Global\\PrismSSHConfigMutex");
+            NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
             std::wstring configDir = GetConfigDirectory();
             std::wstring connPath = configDir + L"\\connections.json";
             std::wstring keyPath = configDir + L"\\.key";
@@ -259,7 +368,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["result"] = result.dump();
         }
         else if (action == "delete_saved_connection") {
-            NamedMutexLock lock(L"Global\\PrismSSHConfigMutex");
+            NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
             std::string keyToDelete = args[0].get<std::string>();
             std::wstring configDir = GetConfigDirectory();
             std::wstring connPath = configDir + L"\\connections.json";
@@ -281,7 +390,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["result"] = retObj.dump();
         }
         else if (action == "get_command_library") {
-            NamedMutexLock lock(L"Global\\PrismSSHConfigMutex");
+            NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
             std::wstring configDir = GetConfigDirectory();
             std::wstring cmdPath = configDir + L"\\command_library.json";
             std::string cmdData = ReadFileToUtf8(cmdPath);
@@ -302,7 +411,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["result"] = retObj.dump();
         }
         else if (action == "save_command_library") {
-            NamedMutexLock lock(L"Global\\PrismSSHConfigMutex");
+            NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
             std::string cmdData = args[0].get<std::string>();
             std::wstring configDir = GetConfigDirectory();
             std::wstring cmdPath = configDir + L"\\command_library.json";
@@ -341,7 +450,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string storeKey = hostname + "@" + username;
             
             if (SafeGetJsonBool(params, "save", false)) {
-                NamedMutexLock lock(L"Global\\PrismSSHConfigMutex");
+                NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
                 std::wstring configDir = GetConfigDirectory();
                 std::wstring connPath = configDir + L"\\connections.json";
                 std::string connData = ReadFileToUtf8(connPath);
@@ -1421,16 +1530,16 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
     wcex.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wcex.lpszMenuName = NULL;
-    wcex.lpszClassName = _T("PrismSSHCppWindowClass");
+    wcex.lpszClassName = _T("LdySSHCppWindowClass");
     wcex.hIconSm = LoadIcon(wcex.hInstance, IDI_APPLICATION);
 
     if (!RegisterClassEx(&wcex)) {
-        MessageBox(NULL, _T("Call to RegisterClassEx failed!"), _T("PrismSSH C++"), 0);
+        MessageBox(NULL, _T("Call to RegisterClassEx failed!"), _T("LdySSH C++"), 0);
         return 1;
     }
 
     hWnd = CreateWindow(
-        _T("PrismSSHCppWindowClass"),
+        _T("LdySSHCppWindowClass"),
         _T("LdySSH"),
         WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT,
@@ -1442,7 +1551,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     );
 
     if (!hWnd) {
-        MessageBox(NULL, _T("Call to CreateWindow failed!"), _T("PrismSSH C++"), 0);
+        MessageBox(NULL, _T("Call to CreateWindow failed!"), _T("LdySSH C++"), 0);
         return 1;
     }
 
@@ -1582,12 +1691,13 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                             
                             if (uiFolderExists) {
                                 webviewWindow3->SetVirtualHostNameToFolderMapping(
-                                    L"prismssh.local",
+                                    L"ldyssh.local",
                                     uiPath.c_str(),
                                     COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW
                                 );
                                 webviewWindow->OpenDevToolsWindow();
-                                webviewWindow->Navigate(L"https://prismssh.local/template.html");
+                                webviewWindow->Navigate(L"https://ldyssh.local/template.html");
+                                std::thread(TopologyHeartbeatLoop).detach();
                             } else {
                                 std::wstring wFallbackHtml = Utf8ToUtf16(EMBEDDED_FALLBACK_HTML);
                                 webviewWindow->NavigateToString(wFallbackHtml.c_str());
@@ -1597,6 +1707,28 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                             std::wstring html = ReadFileToString(exeDir + L"\\ui\\template.html");
                             std::wstring css = ReadFileToString(exeDir + L"\\ui\\static\\styles.css");
                             std::wstring js = ReadFileToString(exeDir + L"\\ui\\static\\app.js");
+                            std::wstring threeJs = ReadFileToString(exeDir + L"\\ui\\static\\lib\\three.min.js");
+                            std::wstring orbitControls = ReadFileToString(exeDir + L"\\ui\\static\\lib\\OrbitControls.js");
+
+                            // Precise Three.js injection
+                            size_t threePos = html.find(L"static/lib/three.min.js");
+                            if (threePos != std::wstring::npos) {
+                                size_t tagStart = html.rfind(L"<script", threePos);
+                                size_t tagEnd = html.find(L"</script>", threePos);
+                                if (tagStart != std::wstring::npos && tagEnd != std::wstring::npos) {
+                                    html.replace(tagStart, tagEnd - tagStart + 9, L"<script>\n" + threeJs + L"\n</script>");
+                                }
+                            }
+
+                            // Precise OrbitControls injection
+                            size_t orbitPos = html.find(L"static/lib/OrbitControls.js");
+                            if (orbitPos != std::wstring::npos) {
+                                size_t tagStart = html.rfind(L"<script", orbitPos);
+                                size_t tagEnd = html.find(L"</script>", orbitPos);
+                                if (tagStart != std::wstring::npos && tagEnd != std::wstring::npos) {
+                                    html.replace(tagStart, tagEnd - tagStart + 9, L"<script>\n" + orbitControls + L"\n</script>");
+                                }
+                            }
 
                             // Precise CSS injection
                             size_t cssPos = html.find(L"static/styles.css");
@@ -1630,6 +1762,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
                             webviewWindow->OpenDevToolsWindow();
                             webviewWindow->NavigateToString(html.c_str());
+                            std::thread(TopologyHeartbeatLoop).detach();
                         }
                         return S_OK;
                     }).Get());
@@ -1637,7 +1770,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
             }).Get());
 
     if (FAILED(hr)) {
-        MessageBox(NULL, _T("WebView2 Environment creation failed!"), _T("PrismSSH C++"), 0);
+        MessageBox(NULL, _T("WebView2 Environment creation failed!"), _T("LdySSH C++"), 0);
     }
 
     MSG msg;
@@ -1678,6 +1811,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 webviewWindow->PostWebMessageAsJson(pStr->c_str());
             }
             delete pStr;
+        }
+        return 0;
+    }
+    case WM_TOPOLOGY_HEARTBEAT_UPDATE: {
+        HeartbeatUpdate* update = (HeartbeatUpdate*)lParam;
+        if (update) {
+            if (webviewWindow != nullptr) {
+                std::string js = "if (typeof window.updateNodeDelay === 'function') { window.updateNodeDelay('" + update->hostname + "', " + std::to_string(update->delay) + ", '" + update->status + "'); }";
+                std::wstring jsW = Utf8ToUtf16(js);
+                webviewWindow->ExecuteScript(jsW.c_str(), Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+                    [](HRESULT errorCode, LPCWSTR resultObjectAsJson) -> HRESULT {
+                        return S_OK;
+                    }).Get());
+            }
+            delete update;
         }
         return 0;
     }

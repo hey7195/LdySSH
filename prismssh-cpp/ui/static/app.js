@@ -500,7 +500,7 @@ function compileHighlightRegex() {
 
 function loadHighlightRules() {
     try {
-        const raw = localStorage.getItem('prismsshHighlightRules');
+        const raw = localStorage.getItem('ldysshHighlightRules') || localStorage.getItem('prismsshHighlightRules');
         const parsed = raw ? JSON.parse(raw) : null;
         // Require 46 rules to force upgrade to new extensive version
         highlightRules = Array.isArray(parsed) && parsed.length >= 46 ? parsed : getDefaultHighlightRules();
@@ -512,11 +512,13 @@ function loadHighlightRules() {
 }
 
 function saveHighlightRules() {
+    localStorage.setItem('ldysshHighlightRules', JSON.stringify(highlightRules));
     localStorage.setItem('prismsshHighlightRules', JSON.stringify(highlightRules));
     compileHighlightRegex();
 }
 
 function resetHighlightRules() {
+    localStorage.removeItem('ldysshHighlightRules');
     localStorage.removeItem('prismsshHighlightRules');
     highlightRules = getDefaultHighlightRules();
     compileHighlightRegex();
@@ -1049,286 +1051,453 @@ let currentUploadId = null;
 async function processUploadQueue() {
     if (isProcessingUploads || uploadQueue.length === 0) return;
 
-    isProcessingUploads = true;
+    // 浅拷贝保存一份作为渲染任务队列明细的依据
+    const activeTransfers = uploadQueue.map((item, index) => ({
+        id: index,
+        fileName: item.fileName,
+        remotePath: item.remotePath,
+        status: 'queued', // 'queued' | 'uploading' | 'completed' | 'failed'
+        percentage: 0,
+        uploadedBytes: 0,
+        totalBytes: 0,
+        speed: '',
+        errorMsg: ''
+    }));
 
-    // 动态获取或创建进度卡片
-    let progressDiv = document.getElementById('uploadProgress');
-    if (!progressDiv) {
-        progressDiv = document.createElement('div');
-        progressDiv.id = 'uploadProgress';
-        progressDiv.style.cssText = `
-            position: fixed;
-            bottom: 24px;
-            right: 24px;
-            background: linear-gradient(135deg, rgba(10, 10, 25, 0.92) 0%, rgba(20, 15, 35, 0.92) 100%);
-            border: 1px solid rgba(0, 242, 254, 0.35);
-            border-radius: 12px;
-            padding: 18px;
-            min-width: 320px;
-            max-width: 400px;
-            z-index: 10002;
-            box-shadow: 0 12px 40px rgba(0, 242, 254, 0.25), inset 0 0 15px rgba(0, 242, 254, 0.08);
-            backdrop-filter: blur(16px);
-            color: #fff;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-        `;
-        progressDiv.innerHTML = `
-            <style>
-                @keyframes uploadShimmer {
-                    0% { transform: translateX(-100%); }
-                    100% { transform: translateX(100%); }
-                }
-                @keyframes uploadPulse {
-                    0% { opacity: 0.5; transform: scale(0.92); }
-                    100% { opacity: 1; transform: scale(1.08); }
-                }
-                .upload-progress-fill-shimmer {
-                    position: absolute;
-                    top: 0; left: 0; right: 0; bottom: 0;
-                    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
-                    animation: uploadShimmer 2s infinite;
-                }
-                .upload-pulse-dot {
-                    width: 8px;
-                    height: 8px;
-                    background-color: #00f2fe;
-                    border-radius: 50%;
-                    box-shadow: 0 0 8px #00f2fe;
-                    animation: uploadPulse 1s ease-in-out infinite alternate;
-                }
-            </style>
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <div class="upload-pulse-dot"></div>
-                    <div style="font-weight: 600; font-size: 14px; color: #00f2fe; letter-spacing: 0.5px;" id="uploadStatusText">正在上传...</div>
-                </div>
-                <button id="cancelUploadBtn" style="
-                    background: transparent;
-                    border: none;
-                    color: rgba(255,255,255,0.5);
-                    font-size: 16px;
-                    cursor: pointer;
-                    padding: 0 4px;
-                    line-height: 1;
-                    transition: color 0.2s;
-                " onmouseover="this.style.color='#ff4d4f'" onmouseout="this.style.color='rgba(255,255,255,0.5)'">✕</button>
-            </div>
-            <div style="margin-bottom: 8px;">
-                <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; position: relative;">
-                    <div id="uploadBar" style="
-                        width: 0%;
+    isProcessingUploads = true;
+    try {
+        // 动态获取或创建进度卡片
+        let progressDiv = document.getElementById('uploadProgress');
+        if (!progressDiv) {
+            progressDiv = document.createElement('div');
+            progressDiv.id = 'uploadProgress';
+            progressDiv.style.cssText = `
+                position: fixed;
+                bottom: 24px;
+                right: 24px;
+                background: linear-gradient(135deg, rgba(10, 10, 25, 0.92) 0%, rgba(20, 15, 35, 0.92) 100%);
+                border: 1px solid rgba(0, 242, 254, 0.35);
+                border-radius: 12px;
+                padding: 18px;
+                min-width: 340px;
+                max-width: 440px;
+                z-index: 10002;
+                box-shadow: 0 12px 40px rgba(0, 242, 254, 0.25), inset 0 0 15px rgba(0, 242, 254, 0.08);
+                backdrop-filter: blur(16px);
+                color: #fff;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            `;
+            progressDiv.innerHTML = `
+                <style>
+                    @keyframes uploadShimmer {
+                        0% { transform: translateX(-100%); }
+                        100% { transform: translateX(100%); }
+                    }
+                    @keyframes uploadPulse {
+                        0% { opacity: 0.5; transform: scale(0.92); }
+                        100% { opacity: 1; transform: scale(1.08); }
+                    }
+                    .upload-progress-fill-shimmer {
+                        position: absolute;
+                        top: 0; left: 0; right: 0; bottom: 0;
+                        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+                        animation: uploadShimmer 2s infinite;
+                    }
+                    .upload-pulse-dot {
+                        width: 8px;
+                        height: 8px;
+                        background-color: #00f2fe;
+                        border-radius: 50%;
+                        box-shadow: 0 0 8px #00f2fe;
+                        animation: uploadPulse 1s ease-in-out infinite alternate;
+                    }
+                    .transfer-queue-container {
+                        max-height: 180px;
+                        overflow-y: auto;
+                        margin-top: 12px;
+                        border-top: 1px solid rgba(255,255,255,0.08);
+                        padding-top: 8px;
+                        font-size: 12px;
+                    }
+                    .transfer-queue-item {
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: 6px 0;
+                        border-bottom: 1px solid rgba(255,255,255,0.03);
+                        gap: 12px;
+                    }
+                    .transfer-item-name {
+                        max-width: 160px;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        color: rgba(255,255,255,0.85);
+                    }
+                    .transfer-item-status {
+                        font-size: 11px;
+                        color: rgba(255,255,255,0.5);
+                    }
+                    .transfer-item-progress-bar-bg {
+                        width: 80px;
+                        height: 4px;
+                        background: rgba(255,255,255,0.1);
+                        border-radius: 2px;
+                        overflow: hidden;
+                    }
+                    .transfer-item-progress-bar-fill {
                         height: 100%;
-                        background: linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%);
-                        border-radius: 3px;
-                        box-shadow: 0 0 10px rgba(0, 242, 254, 0.7);
+                        background: #00f2fe;
+                        border-radius: 2px;
+                        width: 0%;
                         transition: width 0.1s linear;
-                        position: relative;
-                    ">
-                        <div class="upload-progress-fill-shimmer"></div>
+                    }
+                    .transfer-queue-toggle-btn {
+                        background: transparent;
+                        border: none;
+                        color: #00f2fe;
+                        font-size: 11px;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        gap: 4px;
+                        padding: 0;
+                        margin-top: 8px;
+                    }
+                </style>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                    <div style="display: flex; align-items: center; gap: 8px; cursor: pointer;" id="uploadHeaderGroup">
+                        <div class="upload-pulse-dot"></div>
+                        <div style="font-weight: 600; font-size: 14px; color: #00f2fe; letter-spacing: 0.5px;" id="uploadStatusText">正在上传...</div>
+                    </div>
+                    <button id="cancelUploadBtn" style="
+                        background: transparent;
+                        border: none;
+                        color: rgba(255,255,255,0.5);
+                        font-size: 16px;
+                        cursor: pointer;
+                        padding: 0 4px;
+                        line-height: 1;
+                        transition: color 0.2s;
+                    " onmouseover="this.style.color='#ff4d4f'" onmouseout="this.style.color='rgba(255,255,255,0.5)'">✕</button>
+                </div>
+                <div style="margin-bottom: 8px;">
+                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; position: relative;">
+                        <div id="uploadBar" style="
+                            width: 0%;
+                            height: 100%;
+                            background: linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%);
+                            border-radius: 3px;
+                            box-shadow: 0 0 10px rgba(0, 242, 254, 0.7);
+                            transition: width 0.1s linear;
+                            position: relative;
+                        ">
+                            <div class="upload-progress-fill-shimmer"></div>
+                        </div>
                     </div>
                 </div>
-            </div>
-            <div style="display: flex; justify-content: space-between; font-size: 11px; color: rgba(255,255,255,0.6);">
-                <span id="uploadBytes">0 B / 0 B</span>
-                <span id="uploadSpeed">0 KB/s</span>
-            </div>
-        `;
-        document.body.appendChild(progressDiv);
-        
-        // 绑定取消按钮事件
-        const cancelBtn = progressDiv.querySelector('#cancelUploadBtn');
-        cancelBtn.addEventListener('click', async () => {
-            if (confirm('确定要取消上传当前任务吗？')) {
-                if (currentUploadId) {
-                    await window.pywebview.api.cancel_upload(currentUploadId);
-                }
-                uploadQueue = [];
-                isProcessingUploads = false;
-                progressDiv.style.display = 'none';
-            }
-        });
-    } else {
-        progressDiv.style.opacity = '1';
-        progressDiv.style.display = 'block';
-    }
-
-    const statusText = document.getElementById('uploadStatusText');
-    const uploadBar = document.getElementById('uploadBar');
-    const uploadBytes = document.getElementById('uploadBytes');
-    const uploadSpeed = document.getElementById('uploadSpeed');
-    const dot = progressDiv.querySelector('.upload-pulse-dot');
-    
-    // 初始化样式
-    statusText.style.color = '#00f2fe';
-    uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
-    uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
-    if (dot) {
-        dot.style.backgroundColor = '#00f2fe';
-        dot.style.boxShadow = '0 0 8px #00f2fe';
-        dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
-    }
-
-    let uploadedCount = 0;
-    let failedCount = 0;
-
-    while (uploadQueue.length > 0) {
-        const item = uploadQueue.shift();
-        const { remotePath, fileName } = item;
-        const queueRemaining = uploadQueue.length;
-
-        statusText.textContent = queueRemaining > 0
-            ? `Uploading ${fileName} (${queueRemaining} queued)...`
-            : `Uploading ${fileName}...`;
-
-        const uploadId = generateUploadId();
-        currentUploadId = uploadId;
-
-        try {
-            let startResult;
-            if (item.isBase64) {
-                // Browse button upload (base64 content)
-                startResult = await window.pywebview.api.start_upload_with_progress(
-                    currentSessionId,
-                    item.fileContent,
-                    remotePath,
-                    uploadId
-                );
-            } else {
-                // Drag-drop upload (local path)
-                startResult = await window.pywebview.api.upload_from_path_with_progress(
-                    currentSessionId,
-                    item.localPath,
-                    remotePath,
-                    uploadId
-                );
-            }
-
-            const startResponse = JSON.parse(startResult);
-            if (!startResponse.success) {
-                console.error('Failed to start upload:', fileName, startResponse.error);
-                failedCount++;
-                continue;
-            }
-
-            // Poll for progress
-            let completed = false;
-            let lastBytes = 0;
-            let lastTime = Date.now();
-
-            while (!completed) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-
-                const progressResult = await window.pywebview.api.get_upload_progress(
-                    currentSessionId,
-                    uploadId
-                );
-                const progress = JSON.parse(progressResult);
-
-                if (progress.status === 'uploading' || progress.status === 'starting') {
-                    uploadBar.style.width = `${progress.percentage}%`;
-                    uploadBytes.textContent = `${formatBytes(progress.uploaded)} / ${formatBytes(progress.total)}`;
-
-                    const now = Date.now();
-                    const timeDiff = (now - lastTime) / 1000;
-                    if (timeDiff >= 0.5) {
-                        const bytesDiff = progress.uploaded - lastBytes;
-                        const speed = bytesDiff / timeDiff;
-                        uploadSpeed.textContent = speed > 0 ? `${formatBytes(speed)}/s` : '';
-                        lastBytes = progress.uploaded;
-                        lastTime = now;
+                <div style="display: flex; justify-content: space-between; font-size: 11px; color: rgba(255,255,255,0.6);">
+                    <span id="uploadBytes">0 B / 0 B</span>
+                    <span id="uploadSpeed">0 KB/s</span>
+                </div>
+                
+                <button class="transfer-queue-toggle-btn" id="transferQueueToggleBtn" type="button">
+                    <span>展开任务明细</span> <span id="transferQueueToggleIcon">▼</span>
+                </button>
+                <div class="transfer-queue-container" id="transferQueueContainer" style="display: none;">
+                    <!-- 传输任务明细项会在这里渲染 -->
+                </div>
+            `;
+            document.body.appendChild(progressDiv);
+            
+            // 绑定取消按钮事件
+            const cancelBtn = progressDiv.querySelector('#cancelUploadBtn');
+            cancelBtn.addEventListener('click', async () => {
+                if (confirm('确定要取消上传当前任务吗？')) {
+                    if (currentUploadId) {
+                        await window.pywebview.api.cancel_upload(currentUploadId);
                     }
-
-                    const queueNow = uploadQueue.length;
-                    statusText.textContent = queueNow > 0
-                        ? `Uploading ${fileName} (${queueNow} queued)...`
-                        : `Uploading ${fileName}...`;
-
-                } else if (progress.status === 'completed') {
-                    uploadBar.style.width = '100%';
-                    uploadBytes.textContent = `${formatBytes(progress.total)} / ${formatBytes(progress.total)}`;
-                    uploadSpeed.textContent = '';
-                    uploadedCount++;
-                    completed = true;
-                } else if (progress.status === 'error' || progress.status === 'cancelled') {
-                    completed = true;
-                    failedCount++;
-                    console.error('Upload failed:', fileName, progress.error || progress.status);
-                } else if (progress.status === 'unknown') {
-                    completed = true;
-                    uploadedCount++;
+                    uploadQueue = [];
+                    isProcessingUploads = false;
+                    progressDiv.style.display = 'none';
                 }
+            });
+        } else {
+            progressDiv.style.opacity = '1';
+            progressDiv.style.display = 'block';
+        }
+
+        const toggleBtn = progressDiv.querySelector('#transferQueueToggleBtn');
+        const toggleIcon = progressDiv.querySelector('#transferQueueToggleIcon');
+        const toggleText = toggleBtn.querySelector('span');
+        const queueContainer = progressDiv.querySelector('#transferQueueContainer');
+        const headerGroup = progressDiv.querySelector('#uploadHeaderGroup');
+
+        // 解除旧监听并重新绑定
+        const newToggleQueue = () => {
+            if (queueContainer.style.display === 'none') {
+                queueContainer.style.display = 'block';
+                toggleText.textContent = '收折任务明细';
+                toggleIcon.textContent = '▲';
+            } else {
+                queueContainer.style.display = 'none';
+                toggleText.textContent = '展开任务明细';
+                toggleIcon.textContent = '▼';
+            }
+        };
+        toggleBtn.replaceWith(toggleBtn.cloneNode(true));
+        headerGroup.replaceWith(headerGroup.cloneNode(true));
+        
+        const freshToggleBtn = progressDiv.querySelector('#transferQueueToggleBtn');
+        const freshHeaderGroup = progressDiv.querySelector('#uploadHeaderGroup');
+        freshToggleBtn.addEventListener('click', newToggleQueue);
+        freshHeaderGroup.addEventListener('click', newToggleQueue);
+
+        const renderTransferQueueList = () => {
+            queueContainer.innerHTML = '';
+            activeTransfers.forEach(t => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'transfer-queue-item';
+
+                let statusLabel = '';
+                let progressHtml = '';
+                if (t.status === 'queued') {
+                    statusLabel = `<span style="color: rgba(255,255,255,0.4)">等待中</span>`;
+                    progressHtml = `<div class="transfer-item-progress-bar-bg"><div class="transfer-item-progress-bar-fill"></div></div>`;
+                } else if (t.status === 'uploading') {
+                    const speedLabel = t.speed ? ` (${t.speed})` : '';
+                    statusLabel = `<span style="color: #00f2fe">${t.percentage}%${speedLabel}</span>`;
+                    progressHtml = `<div class="transfer-item-progress-bar-bg"><div class="transfer-item-progress-bar-fill" style="width: ${t.percentage}%"></div></div>`;
+                } else if (t.status === 'completed') {
+                    statusLabel = `<span style="color: #52c41a">✓ 已完成</span>`;
+                    progressHtml = `<div class="transfer-item-progress-bar-bg"><div class="transfer-item-progress-bar-fill" style="width: 100%; background: #52c41a"></div></div>`;
+                } else if (t.status === 'failed') {
+                    statusLabel = `<span style="color: #ff4d4f" title="${t.errorMsg || '传输失败'}">✗ 失败</span>`;
+                    progressHtml = `<div class="transfer-item-progress-bar-bg"><div class="transfer-item-progress-bar-fill" style="width: 0%; background: #ff4d4f"></div></div>`;
+                }
+
+                itemDiv.innerHTML = `
+                    <span class="transfer-item-name" title="${t.fileName}">${t.fileName}</span>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        ${progressHtml}
+                        <span class="transfer-item-status">${statusLabel}</span>
+                    </div>
+                `;
+                queueContainer.appendChild(itemDiv);
+            });
+        };
+
+        const statusText = document.getElementById('uploadStatusText');
+        const uploadBar = document.getElementById('uploadBar');
+        const uploadBytes = document.getElementById('uploadBytes');
+        const uploadSpeed = document.getElementById('uploadSpeed');
+        const dot = progressDiv.querySelector('.upload-pulse-dot');
+        
+        // 初始化样式
+        statusText.style.color = '#00f2fe';
+        uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
+        uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
+        if (dot) {
+            dot.style.backgroundColor = '#00f2fe';
+            dot.style.boxShadow = '0 0 8px #00f2fe';
+            dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
+        }
+
+        renderTransferQueueList();
+
+        let uploadedCount = 0;
+        let failedCount = 0;
+        let activeIndex = 0;
+
+        while (uploadQueue.length > 0) {
+            const item = uploadQueue.shift();
+            const { remotePath, fileName } = item;
+            const queueRemaining = uploadQueue.length;
+
+            statusText.textContent = queueRemaining > 0
+                ? `Uploading ${fileName} (${queueRemaining} queued)...`
+                : `Uploading ${fileName}...`;
+
+            // 更新当前活跃任务状态
+            const currentTransfer = activeTransfers[activeIndex];
+            if (currentTransfer) {
+                currentTransfer.status = 'uploading';
+                renderTransferQueueList();
             }
 
-            await window.pywebview.api.clear_upload_progress(currentSessionId, uploadId);
-            uploadBar.style.width = '0%';
+            const uploadId = generateUploadId();
+            currentUploadId = uploadId;
 
-        } catch (error) {
-            console.error('Upload error for', fileName, error);
-            failedCount++;
-        }
-    }
+            try {
+                let startResult;
+                if (item.isBase64) {
+                    // Browse button upload (base64 content)
+                    startResult = await window.pywebview.api.start_upload_with_progress(
+                        currentSessionId,
+                        item.fileContent,
+                        remotePath,
+                        uploadId
+                    );
+                } else {
+                    // Drag-drop upload (local path)
+                    startResult = await window.pywebview.api.upload_from_path_with_progress(
+                        currentSessionId,
+                        item.localPath,
+                        remotePath,
+                        uploadId
+                    );
+                }
 
-    isProcessingUploads = false;
-    currentUploadId = null;
+                if (!startResult || !JSON.parse(startResult).success) {
+                    throw new Error(startResult ? JSON.parse(startResult).error : 'Failed to start upload');
+                }
 
-    if (failedCount === 0) {
-        statusText.textContent = `上传完成 (${uploadedCount} 个文件)`;
-        statusText.style.color = '#52c41a';
-        uploadBar.style.background = 'linear-gradient(90deg, #52c41a 0%, #b7eb8f 100%)';
-        uploadBar.style.boxShadow = '0 0 10px rgba(82, 196, 26, 0.7)';
-        if (dot) {
-            dot.style.backgroundColor = '#52c41a';
-            dot.style.boxShadow = '0 0 8px #52c41a';
-            dot.style.animation = 'none';
-        }
-        setTimeout(() => {
-            if (!isProcessingUploads) {
-                progressDiv.style.opacity = '0';
-                setTimeout(() => {
-                    if (!isProcessingUploads && progressDiv.style.opacity === '0') {
-                        progressDiv.style.display = 'none';
-                        progressDiv.style.opacity = '1';
-                        // 还原成初始样式
-                        statusText.style.color = '#00f2fe';
-                        uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
-                        uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
-                        if (dot) {
-                            dot.style.backgroundColor = '#00f2fe';
-                            dot.style.boxShadow = '0 0 8px #00f2fe';
-                            dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
+                // Poll progress
+                let completed = false;
+                let lastBytes = 0;
+                let lastTime = Date.now();
+
+                while (!completed) {
+                    await new Promise(r => setTimeout(r, 200));
+                    const progressResult = await window.pywebview.api.get_upload_progress(currentSessionId, uploadId);
+                    if (!progressResult) continue;
+
+                    const progress = JSON.parse(progressResult);
+                    if (progress.status === 'uploading' || progress.status === 'starting') {
+                        uploadBar.style.width = `${progress.percentage}%`;
+                        uploadBytes.textContent = `${formatBytes(progress.uploaded)} / ${formatBytes(progress.total)}`;
+
+                        const now = Date.now();
+                        const timeDiff = (now - lastTime) / 1000;
+                        let speedText = '';
+                        if (timeDiff >= 0.5) {
+                            const bytesDiff = progress.uploaded - lastBytes;
+                            const speed = bytesDiff / timeDiff;
+                            speedText = speed > 0 ? `${formatBytes(speed)}/s` : '';
+                            uploadSpeed.textContent = speedText;
+                            lastBytes = progress.uploaded;
+                            lastTime = now;
+                        }
+
+                        // 更新任务明细
+                        if (currentTransfer) {
+                            currentTransfer.percentage = progress.percentage;
+                            if (speedText) currentTransfer.speed = speedText;
+                            renderTransferQueueList();
+                        }
+
+                        const queueNow = uploadQueue.length;
+                        statusText.textContent = queueNow > 0
+                            ? `Uploading ${fileName} (${queueNow} queued)...`
+                            : `Uploading ${fileName}...`;
+
+                    } else if (progress.status === 'completed') {
+                        uploadBar.style.width = '100%';
+                        uploadBytes.textContent = `${formatBytes(progress.total)} / ${formatBytes(progress.total)}`;
+                        uploadSpeed.textContent = '';
+                        uploadedCount++;
+                        completed = true;
+
+                        if (currentTransfer) {
+                            currentTransfer.status = 'completed';
+                            currentTransfer.percentage = 100;
+                            renderTransferQueueList();
+                        }
+                    } else if (progress.status === 'error' || progress.status === 'cancelled') {
+                        completed = true;
+                        failedCount++;
+                        console.error('Upload failed:', fileName, progress.error || progress.status);
+
+                        if (currentTransfer) {
+                            currentTransfer.status = 'failed';
+                            currentTransfer.errorMsg = progress.error || '上传被取消';
+                            renderTransferQueueList();
+                        }
+                    } else if (progress.status === 'unknown') {
+                        completed = true;
+                        uploadedCount++;
+
+                        if (currentTransfer) {
+                            currentTransfer.status = 'completed';
+                            currentTransfer.percentage = 100;
+                            renderTransferQueueList();
                         }
                     }
-                }, 300);
-            }
-        }, 1500);
-    } else {
-        statusText.textContent = `上传结束 (成功 ${uploadedCount}, 失败 ${failedCount})`;
-        statusText.style.color = '#ff4d4f';
-        uploadBar.style.background = 'linear-gradient(90deg, #ff4d4f 0%, #ffccc7 100%)';
-        uploadBar.style.boxShadow = '0 0 10px rgba(255, 77, 79, 0.7)';
-        if (dot) {
-            dot.style.backgroundColor = '#ff4d4f';
-            dot.style.boxShadow = '0 0 8px #ff4d4f';
-            dot.style.animation = 'none';
-        }
-        setTimeout(() => {
-            if (!isProcessingUploads) {
-                progressDiv.style.display = 'none';
-                // 还原样式
-                statusText.style.color = '#00f2fe';
-                uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
-                uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
-                if (dot) {
-                    dot.style.backgroundColor = '#00f2fe';
-                    dot.style.boxShadow = '0 0 8px #00f2fe';
-                    dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
                 }
-            }
-        }, 3000);
-    }
 
-    await listFiles(currentPath);
+                await window.pywebview.api.clear_upload_progress(currentSessionId, uploadId);
+                uploadBar.style.width = '0%';
+
+            } catch (error) {
+                console.error('Upload error for', fileName, error);
+                failedCount++;
+            }
+        }
+
+        if (failedCount === 0) {
+            statusText.textContent = `上传完成 (${uploadedCount} 个文件)`;
+            statusText.style.color = '#52c41a';
+            uploadBar.style.background = 'linear-gradient(90deg, #52c41a 0%, #b7eb8f 100%)';
+            uploadBar.style.boxShadow = '0 0 10px rgba(82, 196, 26, 0.7)';
+            if (dot) {
+                dot.style.backgroundColor = '#52c41a';
+                dot.style.boxShadow = '0 0 8px #52c41a';
+                dot.style.animation = 'none';
+            }
+            setTimeout(() => {
+                if (!isProcessingUploads) {
+                    progressDiv.style.opacity = '0';
+                    setTimeout(() => {
+                        if (!isProcessingUploads && progressDiv.style.opacity === '0') {
+                            progressDiv.style.display = 'none';
+                            progressDiv.style.opacity = '1';
+                            // 还原成初始样式
+                            statusText.style.color = '#00f2fe';
+                            uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
+                            uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
+                            if (dot) {
+                                dot.style.backgroundColor = '#00f2fe';
+                                dot.style.boxShadow = '0 0 8px #00f2fe';
+                                dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
+                            }
+                        }
+                    }, 300);
+                }
+            }, 1500);
+        } else {
+            statusText.textContent = `上传结束 (成功 ${uploadedCount}, 失败 ${failedCount})`;
+            statusText.style.color = '#ff4d4f';
+            uploadBar.style.background = 'linear-gradient(90deg, #ff4d4f 0%, #ffccc7 100%)';
+            uploadBar.style.boxShadow = '0 0 10px rgba(255, 77, 79, 0.7)';
+            if (dot) {
+                dot.style.backgroundColor = '#ff4d4f';
+                dot.style.boxShadow = '0 0 8px #ff4d4f';
+                dot.style.animation = 'none';
+            }
+            setTimeout(() => {
+                if (!isProcessingUploads) {
+                    progressDiv.style.display = 'none';
+                    // 还原样式
+                    statusText.style.color = '#00f2fe';
+                    uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
+                    uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
+                    if (dot) {
+                        dot.style.backgroundColor = '#00f2fe';
+                        dot.style.boxShadow = '0 0 8px #00f2fe';
+                        dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
+                    }
+                }
+            }, 3000);
+        }
+
+        await listFiles(currentPath);
+    } catch (criticalErr) {
+        console.error("Critical error in processUploadQueue:", criticalErr);
+    } finally {
+        isProcessingUploads = false;
+        currentUploadId = null;
+    }
 }
 
 // Handle native file drop from pywebview (receives full file paths)
@@ -1343,10 +1512,50 @@ async function handleNativeFileDrop(filePaths) {
 const setupDragDrop = () => {
     const uploadArea = document.getElementById('uploadArea');
     if (!uploadArea) {
-        console.error('uploadArea element not found!');
-        return;
+        console.warn('uploadArea element not found, skipping uploadArea listeners.');
+    } else {
+        uploadArea.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.remove('dragover');
+
+            const dt = e.dataTransfer;
+            const files = dt?.files;
+            const htmlData = dt?.getData('text/html') || '';
+
+            if (files && files.length > 0) {
+                await uploadFiles(Array.from(files));
+                return;
+            }
+
+            if (htmlData.includes('file://')) {
+                const matches = htmlData.match(/file:\/\/[^"'<>\s\]]+/g);
+                if (matches && matches.length > 0) {
+                    const paths = [...new Set(matches)].map(uri => decodeURIComponent(uri.replace('file://', '')));
+                    await uploadFilesFromPaths(paths);
+                    return;
+                }
+            }
+        });
     }
-    // console.log('Setting up drag and drop on uploadArea');
 
     const terminalEl = document.getElementById('terminal');
     if (terminalEl) {
@@ -1374,56 +1583,7 @@ const setupDragDrop = () => {
         e.preventDefault();
     });
     document.addEventListener('drop', (e) => {
-        // console.log('Document drop event - preventing default');
         e.preventDefault();
-    });
-
-    uploadArea.addEventListener('dragenter', (e) => {
-        // console.log('dragenter on uploadArea');
-        e.preventDefault();
-        e.stopPropagation();
-        uploadArea.classList.add('dragover');
-    });
-
-    uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        uploadArea.classList.add('dragover');
-    });
-
-    uploadArea.addEventListener('dragleave', (e) => {
-        // console.log('dragleave on uploadArea');
-        e.preventDefault();
-        e.stopPropagation();
-        uploadArea.classList.remove('dragover');
-    });
-
-    uploadArea.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        uploadArea.classList.remove('dragover');
-
-        const dt = e.dataTransfer;
-        const files = dt?.files;
-        const htmlData = dt?.getData('text/html') || '';
-
-        // Standard files API
-        if (files && files.length > 0) {
-            await uploadFiles(Array.from(files));
-            return;
-        }
-
-        // WebKitGTK/Linux: extract file:// URLs from HTML
-        if (htmlData.includes('file://')) {
-            const matches = htmlData.match(/file:\/\/[^"'<>\s\]]+/g);
-            if (matches && matches.length > 0) {
-                const paths = [...new Set(matches)].map(uri => decodeURIComponent(uri.replace('file://', '')));
-                await uploadFilesFromPaths(paths);
-                return;
-            }
-        }
-
-        // console.log('No files in drop - use Browse for multiple files');
     });
 };
 
@@ -2552,6 +2712,9 @@ async function loadSavedConnections() {
         filterSavedConnections();
         renderRecentConnections();
         renderConnectionsHome();
+        if (topoViewer) {
+            topoViewer.buildTopology();
+        }
     } catch (error) {
         console.error('加载保存连接失败', error);
     }
@@ -2699,6 +2862,7 @@ function showHomeConnectionMenu(event, key) {
 function setConnectionsHomeView(view) {
     connectionsHomeView = view === 'list' ? 'list' : 'grid';
     try {
+        localStorage.setItem('ldysshConnectionsHomeView', connectionsHomeView);
         localStorage.setItem('prismsshConnectionsHomeView', connectionsHomeView);
     } catch (error) {
         console.warn('保存主机视图失败：', error);
@@ -2708,7 +2872,7 @@ function setConnectionsHomeView(view) {
 
 function restoreConnectionsHomeView() {
     try {
-        connectionsHomeView = localStorage.getItem('prismsshConnectionsHomeView') || 'grid';
+        connectionsHomeView = localStorage.getItem('ldysshConnectionsHomeView') || localStorage.getItem('prismsshConnectionsHomeView') || 'grid';
     } catch (error) {
         connectionsHomeView = 'grid';
     }
@@ -3377,7 +3541,7 @@ function showCopyNotification(message, type = 'success') {
 
 function getSavedTheme() {
     try {
-        return localStorage.getItem('prismsshTheme') || 'blue';
+        return localStorage.getItem('ldysshTheme') || localStorage.getItem('prismsshTheme') || 'blue';
     } catch (error) {
         return 'blue';
     }
@@ -3461,6 +3625,7 @@ function applyTheme(theme) {
     }
 
     try {
+        localStorage.setItem('ldysshTheme', normalized);
         localStorage.setItem('prismsshTheme', normalized);
     } catch (error) {
         console.warn('保存主题失败：', error);
@@ -3881,7 +4046,8 @@ function createTerminalForSession(sessionId, hostname) {
             scrollback: TERMINAL_SCROLLBACK,
             convertEol: true,
             windowsMode: true,
-            allowTransparency: true
+            allowTransparency: true,
+            allowProposedApi: true
         });
 
         // Create fit addon
@@ -3898,8 +4064,7 @@ function createTerminalForSession(sessionId, hostname) {
             terminal.loadAddon(terminalSearchAddon);
         }
 
-        // WebGL addon disabled because it causes transparent backgrounds to render as opaque black
-        /*
+        // WebGL addon enabled for 120 FPS high-performance text rendering
         if (typeof WebglAddon !== 'undefined') {
             try {
                 const webglAddon = new WebglAddon.WebglAddon();
@@ -3912,7 +4077,6 @@ function createTerminalForSession(sessionId, hostname) {
                 console.warn('WebGL addon failed to load, falling back to default renderer.', e);
             }
         }
-        */
 
         // Open terminal
         terminal.open(terminalElement);
@@ -3944,7 +4108,7 @@ function createTerminalForSession(sessionId, hostname) {
                             }
                             if (path && typeof navigateToPath === 'function') {
                                 if (path !== currentPath) {
-                                    console.log(`[PrismSSH OSC 7] Auto syncing folder to: ${path}`);
+                                    console.log(`[LdySSH OSC 7] Auto syncing folder to: ${path}`);
                                     navigateToPath(path);
                                 }
                             }
@@ -4215,9 +4379,9 @@ async function pollSessionOutput(sessionId) {
         const result = JSON.parse(await window.pywebview.api.get_output(sessionId));
         hasOutput = Boolean(result.output);
         if (result.output) {
-            console.log("[PrismSSH Debug] base64 output: ", result.output);
+            console.log("[LdySSH Debug] base64 output: ", result.output);
             const rawBytes = base64ToBytes(result.output);
-            console.log("[PrismSSH Debug] rawBytes len: ", rawBytes.length);
+            console.log("[LdySSH Debug] rawBytes len: ", rawBytes.length);
             if (rawBytes.length > 0) {
                 const sentinel = sessionId.startsWith('ssh_') ? getZmodemSentinel(sessionId) : null;
                 
@@ -4248,7 +4412,7 @@ async function pollSessionOutput(sessionId) {
 
                         // Adaptive Reflow: If the terminal was opened hidden and size collapsed to <= 5, trigger layout calculation
                         if (currentTerminal.cols <= 5 || currentTerminal.rows <= 5) {
-                            console.log(`[PrismSSH Fit] Collapsed layout detected (${currentTerminal.cols}x${currentTerminal.rows}). Refitting...`);
+                            console.log(`[LdySSH Fit] Collapsed layout detected (${currentTerminal.cols}x${currentTerminal.rows}). Refitting...`);
                             const session = sessions[sessionId];
                             if (session) {
                                 if (typeof session.calculateTerminalSize === 'function') {
@@ -4293,7 +4457,7 @@ async function pollSessionOutput(sessionId) {
                                         targetPath = targetPath.slice(0, -1);
                                     }
                                     
-                                    console.log("[PrismSSH Sync] Sniffed 'cd' command to: " + targetPath);
+                                    console.log("[LdySSH Sync] Sniffed 'cd' command to: " + targetPath);
                                     if (typeof navigateToPath === 'function') {
                                         setTimeout(() => {
                                             navigateToPath(targetPath);
@@ -4419,10 +4583,10 @@ window.handlePushOutput = function(sessionId, base64Output) {
                             
                             targetPath = targetPath.replace(/\/+/g, '/');
                             if (targetPath.endsWith('/') && targetPath.length > 1) {
-                                targetPath = targetPath.slice(0, -1);
+                                    targetPath = targetPath.slice(0, -1);
                             }
                             
-                            console.log("[PrismSSH Sync] Sniffed 'cd' command to: " + targetPath);
+                            console.log("[LdySSH Sync] Sniffed 'cd' command to: " + targetPath);
                             if (typeof navigateToPath === 'function') {
                                 setTimeout(() => {
                                     navigateToPath(targetPath);
@@ -4581,6 +4745,10 @@ window.showWorkbench = function() {
 function switchToSession(sessionId) {
     // console.log(`Switching to session ${sessionId} from ${currentSessionId}`);
 
+    if (isSplitMode && sessionId !== splitLeftSessionId && sessionId !== splitRightSessionId) {
+        disableSplitScreen();
+    }
+
     // Stop current output polling if switching from another session
     if (outputPollingInterval) {
         clearTimeout(outputPollingInterval);
@@ -4606,7 +4774,11 @@ function switchToSession(sessionId) {
     // Hide all screens
     document.getElementById('welcomeScreen').style.display = 'none';
     document.getElementById('splashScreen').style.display = 'none'; document.getElementById('splashScreen').style.display = 'none'; document.getElementById('connectingScreen').style.display = 'none';
-    document.getElementById('terminalWrapper').style.display = 'block';
+    
+    const wrapper = document.getElementById('terminalWrapper');
+    if (wrapper) {
+        wrapper.style.display = isSplitMode ? 'flex' : 'block';
+    }
 
     // Show status bar
     const statusBar = document.getElementById('statusBar');
@@ -4814,6 +4986,7 @@ async function cloneAndSplitSession(sessionId) {
             
             const newParams = { ...srcSession.connectionParams };
             newParams.name = (newParams.name || 'SSH') + ' (分屏)';
+            newParams.save = false;
             
             const newSessionId = await window.pywebview.api.create_session();
             const result = await connectWithHostVerification(newSessionId, newParams);
@@ -5858,7 +6031,7 @@ async function loadCommandLibrary() {
             }
             parsed = result.folders;
         } else {
-            const raw = localStorage.getItem('prismsshCommandLibrary');
+            const raw = localStorage.getItem('ldysshCommandLibrary') || localStorage.getItem('prismsshCommandLibrary');
             parsed = raw ? JSON.parse(raw) : null;
         }
 
@@ -5907,6 +6080,7 @@ async function saveCommandLibrary() {
                 throw new Error(result.error || 'save failed');
             }
         } else {
+            localStorage.setItem('ldysshCommandLibrary', payload);
             localStorage.setItem('prismsshCommandLibrary', payload);
         }
         return true;
@@ -6256,6 +6430,7 @@ function initCommandLibraryResize() {
                 10
             );
             if (currentHeight) {
+                localStorage.setItem('ldysshCommandLibraryHeightV2', String(currentHeight));
                 localStorage.setItem('prismsshCommandLibraryHeightV2', String(currentHeight));
             }
         };
@@ -6576,29 +6751,28 @@ async function stopPortForward(forwardId) {
 
 // Set up drag and drop for file browser area
 document.addEventListener('DOMContentLoaded', () => {
-    const fileBrowser = document.querySelector('.file-browser');
-    const uploadArea = document.getElementById('uploadArea');
     const fileListContainer = document.getElementById('fileListContainer');
+    const uploadArea = document.getElementById('uploadArea');
     
-    if (fileBrowser) {
-        fileBrowser.addEventListener('dragover', (e) => {
+    if (fileListContainer) {
+        fileListContainer.addEventListener('dragover', (e) => {
             e.preventDefault();
             if (uploadArea) uploadArea.classList.add('dragover');
-            if (fileListContainer) fileListContainer.style.boxShadow = 'inset 0 0 20px rgba(var(--theme-primary), 0.2)';
+            fileListContainer.style.boxShadow = 'inset 0 0 20px rgba(var(--theme-primary), 0.2)';
         });
         
-        fileBrowser.addEventListener('dragleave', (e) => {
+        fileListContainer.addEventListener('dragleave', (e) => {
             e.preventDefault();
-            if (!e.relatedTarget || !fileBrowser.contains(e.relatedTarget)) {
+            if (!e.relatedTarget || !fileListContainer.contains(e.relatedTarget)) {
                 if (uploadArea) uploadArea.classList.remove('dragover');
-                if (fileListContainer) fileListContainer.style.boxShadow = '';
+                fileListContainer.style.boxShadow = '';
             }
         });
         
-        fileBrowser.addEventListener('drop', (e) => {
+        fileListContainer.addEventListener('drop', (e) => {
             e.preventDefault();
             if (uploadArea) uploadArea.classList.remove('dragover');
-            if (fileListContainer) fileListContainer.style.boxShadow = '';
+            fileListContainer.style.boxShadow = '';
             
             if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
                 uploadFiles(Array.from(e.dataTransfer.files));
@@ -6739,7 +6913,7 @@ function syncSftpFromTerminalPrompt(sessionId) {
         const startLine = Math.max(0, cursorLineIndex - 2);
         const endLine = Math.min(buffer.length - 1, cursorLineIndex);
         
-        console.log(`[PrismSSH Sync Debug] Session: ${sessionId}, CursorY: ${buffer.cursorY}, BaseY: ${buffer.baseY}, ScanLines: [${startLine} to ${endLine}]`);
+        console.log(`[LdySSH Sync Debug] Session: ${sessionId}, CursorY: ${buffer.cursorY}, BaseY: ${buffer.baseY}, ScanLines: [${startLine} to ${endLine}]`);
         
         let targetPath = null;
         let matchedLineText = "";
@@ -6755,13 +6929,13 @@ function syncSftpFromTerminalPrompt(sessionId) {
             const line = buffer.getLine(i);
             if (line) {
                 const lineText = line.translateToString(true);
-                console.log(`[PrismSSH Sync Debug] Line ${i} content: ${JSON.stringify(lineText)}`);
+                console.log(`[LdySSH Sync Debug] Line ${i} content: ${JSON.stringify(lineText)}`);
                 
                 const match = promptRegex.exec(lineText);
                 if (match) {
                     targetPath = match[1].trim();
                     matchedLineText = lineText;
-                    console.log(`[PrismSSH Sync Debug] Hit prompt on Line ${i}: ${targetPath}`);
+                    console.log(`[LdySSH Sync Debug] Hit prompt on Line ${i}: ${targetPath}`);
                     break; // Found the latest prompt, break out immediately
                 }
             }
@@ -6776,7 +6950,7 @@ function syncSftpFromTerminalPrompt(sessionId) {
                 const relativeRemainder = targetPath.slice(1); // everything after '~'
                 let homePrefix = (username === 'root') ? '/root' : '/home/' + username;
                 targetPath = homePrefix + relativeRemainder;
-                console.log(`[PrismSSH Sync Debug] Mapped home symbol ~ to absolute path: ${targetPath} (user: ${username})`);
+                console.log(`[LdySSH Sync Debug] Mapped home symbol ~ to absolute path: ${targetPath} (user: ${username})`);
             }
             
             // Normalize path separators
@@ -6786,18 +6960,18 @@ function syncSftpFromTerminalPrompt(sessionId) {
             }
             
             if (targetPath && targetPath !== currentPath) {
-                console.log(`[PrismSSH Sync] Synced folder to: ${targetPath} (Sniffed from terminal)`);
+                console.log(`[LdySSH Sync] Synced folder to: ${targetPath} (Sniffed from terminal)`);
                 if (typeof navigateToPath === 'function') {
                     navigateToPath(targetPath);
                 }
             } else {
-                console.log(`[PrismSSH Sync Debug] Target path is already active: targetPath=${targetPath}, currentPath=${currentPath}`);
+                console.log(`[LdySSH Sync Debug] Target path is already active: targetPath=${targetPath}, currentPath=${currentPath}`);
             }
         } else {
-            console.log("[PrismSSH Sync Debug] No prompt pattern matched in scanning range.");
+            console.log("[LdySSH Sync Debug] No prompt pattern matched in scanning range.");
         }
     } catch (e) {
-        console.warn("[PrismSSH Sync] Prompt path extraction error:", e);
+        console.warn("[LdySSH Sync] Prompt path extraction error:", e);
     }
 }
 
@@ -6923,7 +7097,7 @@ function startZmodemSession(sessionId, detection) {
     const term = sessions[sessionId]?.terminal;
     if (!term) return;
 
-    term.write("\r\n[PrismSSH] 检测到 Zmodem 传输启动...\r\n");
+    term.write("\r\n[LdySSH] 检测到 Zmodem 传输启动...\r\n");
     const zsession = detection.confirm();
     activeZsession = zsession;
 
@@ -6942,7 +7116,7 @@ function startZmodemSession(sessionId, detection) {
                     return;
                 }
 
-                term.write(`[PrismSSH] 正在下载: ${fileName} (${(fileSize / 1024).toFixed(2)} KB) -> ${savePath}\r\n`);
+                term.write(`[LdySSH] 正在下载: ${fileName} (${(fileSize / 1024).toFixed(2)} KB) -> ${savePath}\r\n`);
                 updateZmodemProgress(`下载: ${fileName}`, 0, fileSize || 1);
                 
                 offer.accept().then(function() {
@@ -6965,9 +7139,9 @@ function startZmodemSession(sessionId, detection) {
                         window.pywebview.api.write_base64_file(savePath, base64Content).then(res => {
                             const response = JSON.parse(res);
                             if (response.success) {
-                                term.write(`\r\n[PrismSSH] 下载成功: ${fileName}\r\n`);
+                                term.write(`\r\n[LdySSH] 下载成功: ${fileName}\r\n`);
                             } else {
-                                term.write(`\r\n[PrismSSH] 写入文件失败: ${response.error || '未知错误'}\r\n`);
+                                term.write(`\r\n[LdySSH] 写入文件失败: ${response.error || '未知错误'}\r\n`);
                             }
                             cleanupZmodem(term);
                         });
@@ -6983,7 +7157,7 @@ function startZmodemSession(sessionId, detection) {
             
             const reader = new FileReader();
             reader.onerror = function(err) {
-                term.write(`\r\n[PrismSSH] 读取拖拽文件失败: ${err}\r\n`);
+                term.write(`\r\n[LdySSH] 读取拖拽文件失败: ${err}\r\n`);
                 zsession.close();
                 cleanupZmodem(term);
             };
@@ -6991,7 +7165,7 @@ function startZmodemSession(sessionId, detection) {
                 const fileBytes = new Uint8Array(evt.target.result);
                 const fileName = pendingFile.name;
                 
-                term.write(`[PrismSSH] 正在上传拖拽文件: ${fileName} (${(fileBytes.length / 1024).toFixed(2)} KB)\r\n`);
+                term.write(`[LdySSH] 正在上传拖拽文件: ${fileName} (${(fileBytes.length / 1024).toFixed(2)} KB)\r\n`);
                 updateZmodemProgress(`上传: ${fileName}`, 0, fileBytes.length);
                 
                 zsession.send_offer({
@@ -6999,7 +7173,7 @@ function startZmodemSession(sessionId, detection) {
                     size: fileBytes.length
                 }).then(function(xfer) {
                     if (!xfer) {
-                        term.write(`\r\n[PrismSSH] 上传被远程跳过或拒绝\r\n`);
+                        term.write(`\r\n[LdySSH] 上传被远程跳过或拒绝\r\n`);
                         cleanupZmodem(term);
                         return;
                     }
@@ -7010,7 +7184,7 @@ function startZmodemSession(sessionId, detection) {
                         if (!activeZsession) return; // 被中途取消
                         if (sentOffset >= fileBytes.length) {
                             xfer.close().then(function() {
-                                term.write(`\r\n[PrismSSH] 上传成功: ${fileName}\r\n`);
+                                term.write(`\r\n[LdySSH] 上传成功: ${fileName}\r\n`);
                                 cleanupZmodem(term);
                             });
                             return;
@@ -7042,7 +7216,7 @@ function startZmodemSession(sessionId, detection) {
                 const readResult = JSON.parse(readRes);
                 const base64Content = readResult.content;
                 if (!base64Content) {
-                    term.write(`\r\n[PrismSSH] 读取本地文件失败\r\n`);
+                    term.write(`\r\n[LdySSH] 读取本地文件失败\r\n`);
                     zsession.close();
                     cleanupZmodem(term);
                     return;
@@ -7051,7 +7225,7 @@ function startZmodemSession(sessionId, detection) {
                 const fileBytes = base64ToBytes(base64Content);
                 const fileName = localPath.split(/[\\/]/).pop();
                 
-                term.write(`[PrismSSH] 正在上传: ${fileName} (${(fileBytes.length / 1024).toFixed(2)} KB) 从 ${localPath}\r\n`);
+                term.write(`[LdySSH] 正在上传: ${fileName} (${(fileBytes.length / 1024).toFixed(2)} KB) 从 ${localPath}\r\n`);
                 updateZmodemProgress(`上传: ${fileName}`, 0, fileBytes.length);
 
                 zsession.send_offer({
@@ -7059,7 +7233,7 @@ function startZmodemSession(sessionId, detection) {
                     size: fileBytes.length
                 }).then(function(xfer) {
                     if (!xfer) {
-                        term.write(`\r\n[PrismSSH] 上传被远程跳过或拒绝\r\n`);
+                        term.write(`\r\n[LdySSH] 上传被远程跳过或拒绝\r\n`);
                         cleanupZmodem(term);
                         return;
                     }
@@ -7070,7 +7244,7 @@ function startZmodemSession(sessionId, detection) {
                         if (!activeZsession) return;
                         if (sentOffset >= fileBytes.length) {
                             xfer.close().then(function() {
-                                term.write(`\r\n[PrismSSH] 上传成功: ${fileName}\r\n`);
+                                term.write(`\r\n[LdySSH] 上传成功: ${fileName}\r\n`);
                                 cleanupZmodem(term);
                             });
                             return;
@@ -7093,13 +7267,13 @@ function cleanupZmodem(term) {
     hideZmodemProgress();
     if (term) {
         term.focus();
-        term.write("\r\n[PrismSSH] Zmodem 会话已结束。\r\n");
+        term.write("\r\n[LdySSH] Zmodem 会话已结束。\r\n");
     }
 }
 
 // --- Parameter Interpolation Helpers for Shortcuts ---
 function getParamHistory(paramName) {
-    const raw = localStorage.getItem('prismssh_param_hist_' + paramName);
+    const raw = localStorage.getItem('ldyssh_param_hist_' + paramName) || localStorage.getItem('prismssh_param_hist_' + paramName);
     try {
         return raw ? JSON.parse(raw) : [];
     } catch(e) {
@@ -7113,6 +7287,7 @@ function saveParamValueToHistory(paramName, value) {
     history = history.filter(h => h !== value);
     history.unshift(value);
     if (history.length > 15) history = history.slice(0, 15);
+    localStorage.setItem('ldyssh_param_hist_' + paramName, JSON.stringify(history));
     localStorage.setItem('prismssh_param_hist_' + paramName, JSON.stringify(history));
 }
 
@@ -7674,4 +7849,273 @@ function updateSplitScreenHighlight() {
         }
     });
 }
+
+// ==========================================================================
+// 3D Topology Full-Screen Background Rendering and Control (LdySSH v2.0)
+// ==========================================================================
+let topoViewer = null;
+
+function initBackgroundTopology() {
+    if (topoViewer) return;
+    const container = document.getElementById('threejsBackground');
+    if (!container || typeof THREE === 'undefined' || typeof THREE.OrbitControls === 'undefined') {
+        setTimeout(initBackgroundTopology, 100);
+        return;
+    }
+    try {
+        topoViewer = new TopologyViewer('threejsBackground');
+        topoViewer.init();
+        topoViewer.animate();
+        console.log("3D Background Topology successfully initialized.");
+    } catch (e) {
+        console.error("Failed to initialize 3D topology:", e);
+        topoViewer = null;
+        setTimeout(initBackgroundTopology, 1000);
+    }
+}
+
+class TopologyViewer {
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.controls = null;
+        this.nodes = [];
+        this.lines = [];
+        this.animationFrameId = null;
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
+        this.starfield = null;
+        this.gateway = null;
+    }
+
+    init() {
+        if (!this.container) return;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        // 1. Scene & Camera
+        this.scene = new THREE.Scene();
+        this.scene.fog = new THREE.FogExp2(0x050608, 0.008);
+        this.camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
+        this.camera.position.set(0, 45, 95);
+
+        // 2. WebGL Renderer
+        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        this.renderer.setSize(width, height);
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.container.innerHTML = ''; // Clear container
+        this.container.appendChild(this.renderer.domElement);
+
+        // 3. Orbit Controls (Bound to document.body for global dragging)
+        if (typeof THREE.OrbitControls !== 'undefined') {
+            this.controls = new THREE.OrbitControls(this.camera, document.body);
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.05;
+            this.controls.enableZoom = false; // Disable zoom to prevent scroll issues
+            this.controls.enablePan = false;  // Disable panning to focus on center
+            this.controls.maxPolarAngle = Math.PI / 2 - 0.02; // Prevent camera underfloor
+        }
+
+        // 4. Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+        this.scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0x00f2fe, 1.2);
+        dirLight.position.set(20, 50, 20);
+        this.scene.add(dirLight);
+
+        // 5. Starfield Background
+        const starsGeometry = new THREE.BufferGeometry();
+        const starsCount = 1000;
+        const starsPositions = new Float32Array(starsCount * 3);
+        for (let i = 0; i < starsCount * 3; i++) {
+            starsPositions[i] = (Math.random() - 0.5) * 350;
+        }
+        starsGeometry.setAttribute('position', new THREE.BufferAttribute(starsPositions, 3));
+        const starsMaterial = new THREE.PointsMaterial({
+            color: 0x00f2fe,
+            size: 0.9,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.5
+        });
+        this.starfield = new THREE.Points(starsGeometry, starsMaterial);
+        this.scene.add(this.starfield);
+
+        // 6. Build Grid and Connections
+        this.buildTopology();
+
+        // 7. Event listeners
+        this.onResizeHandler = this.onWindowResize.bind(this);
+        this.onClickHandler = this.onDocumentClick.bind(this);
+        window.addEventListener('resize', this.onResizeHandler);
+        this.renderer.domElement.addEventListener('click', this.onClickHandler);
+    }
+
+    buildTopology() {
+        // Clear existing nodes/lines/gateways
+        if (this.gateway) {
+            this.scene.remove(this.gateway);
+            if (this.gateway.geometry) this.gateway.geometry.dispose();
+            if (this.gateway.material) this.gateway.material.dispose();
+            this.gateway = null;
+        }
+        this.nodes.forEach(n => {
+            this.scene.remove(n.mesh);
+            if (n.mesh.geometry) n.mesh.geometry.dispose();
+            if (n.mesh.material) n.mesh.material.dispose();
+        });
+        this.lines.forEach(l => {
+            this.scene.remove(l);
+            if (l.geometry) l.geometry.dispose();
+            if (l.material) l.material.dispose();
+        });
+        this.nodes = [];
+        this.lines = [];
+
+        // Central Gateway Node
+        const gatewayGeo = new THREE.SphereGeometry(6, 32, 32);
+        const gatewayMat = new THREE.MeshPhongMaterial({
+            color: 0x00f2fe,
+            emissive: 0x002233,
+            shininess: 50,
+            wireframe: true
+        });
+        this.gateway = new THREE.Mesh(gatewayGeo, gatewayMat);
+        this.gateway.position.set(0, 0, 0);
+        this.scene.add(this.gateway);
+
+        // Use saved connections cache
+        const connections = savedConnectionsCache || [];
+        if (connections.length === 0) return;
+
+        connections.forEach((conn, index) => {
+            const angle = (index / connections.length) * Math.PI * 2;
+            const radius = 35 + Math.random() * 5;
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            const y = (Math.random() - 0.5) * 8;
+
+            // Host spherical node
+            const nodeGeo = new THREE.SphereGeometry(2.8, 16, 16);
+            const nodeMat = new THREE.MeshPhongMaterial({
+                color: 0x00ff88, // Default green
+                emissive: 0x002211,
+                shininess: 30
+            });
+            const nodeMesh = new THREE.Mesh(nodeGeo, nodeMat);
+            nodeMesh.position.set(x, y, z);
+            nodeMesh.userData = { key: conn.key, ip: conn.hostname, name: conn.name || conn.hostname };
+            this.scene.add(nodeMesh);
+
+            this.nodes.push({ mesh: nodeMesh, ip: conn.hostname, key: conn.key });
+
+            // Connection Lines
+            const points = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(x, y, z)];
+            const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+            const lineMat = new THREE.LineBasicMaterial({
+                color: 0x4facfe,
+                transparent: true,
+                opacity: 0.2
+            });
+            const line = new THREE.Line(lineGeo, lineMat);
+            this.scene.add(line);
+            this.lines.push(line);
+        });
+    }
+
+    animate() {
+        this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
+        if (this.controls) this.controls.update();
+        
+        // Slow rotations for background feeling
+        if (this.starfield) this.starfield.rotation.y += 0.0001;
+        if (this.gateway) {
+            this.gateway.rotation.y += 0.002;
+            this.gateway.rotation.x += 0.001;
+        }
+        
+        // Slowly rotate whole node structure slightly
+        this.nodes.forEach((n, idx) => {
+            if (n.mesh) {
+                const pulse = 1 + 0.05 * Math.sin(Date.now() * 0.002 + idx);
+                n.mesh.scale.set(pulse, pulse, pulse);
+            }
+        });
+
+        if (this.renderer && this.scene && this.camera) {
+            this.renderer.render(this.scene, this.camera);
+        }
+    }
+
+    stop() {
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+        window.removeEventListener('resize', this.onResizeHandler);
+        if (this.renderer && this.renderer.domElement) {
+            this.renderer.domElement.removeEventListener('click', this.onClickHandler);
+        }
+    }
+
+    onWindowResize() {
+        if (!this.container || !this.camera || !this.renderer) return;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        this.camera.aspect = width / height;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(width, height);
+    }
+
+    onDocumentClick(event) {
+        // Double check clicks only on the canvas backdrop, not on DOM panels
+        if (event.target.tagName !== 'CANVAS') return;
+
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+        const intersects = this.raycaster.intersectObjects(this.nodes.map(n => n.mesh));
+
+        if (intersects.length > 0) {
+            const selectedMesh = intersects[0].object;
+            const connKey = selectedMesh.userData.key;
+            console.log("Selected node in 3D background:", selectedMesh.userData.ip);
+            
+            if (connKey) {
+                quickConnect(connKey);
+            }
+        }
+    }
+}
+
+window.updateNodeDelay = function(ip, delay, status) {
+    if (!topoViewer || !topoViewer.nodes) return;
+    const node = topoViewer.nodes.find(n => n.ip === ip);
+    if (node && node.mesh) {
+        let color = 0x00ff88; // Green
+        let emissive = 0x002211;
+        
+        if (status === 'disconnected') {
+            color = 0xff3333; // Red
+            emissive = 0x440000;
+        } else if (delay > 150) {
+            color = 0xffaa00; // Orange
+            emissive = 0x332200;
+        } else if (delay > 50) {
+            color = 0xffff33; // Yellow
+            emissive = 0x222200;
+        }
+        
+        node.mesh.material.color.setHex(color);
+        node.mesh.material.emissive.setHex(emissive);
+        console.log(`Updated 3D node ${ip} latency: ${delay}ms, status: ${status}`);
+    }
+};
+
+// Initialize background 3D immediately
+initBackgroundTopology();
 
