@@ -46,14 +46,14 @@
       <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(UserProfile)\.nuget\packages\rmt_libssh2\1.8.0\build\native\include\v140\x64\Release\static;$(UserProfile)\.nuget\packages\rmt_openssl\1.1.0.3\build\native\include\v140\x64\Release\static;$(UserProfile)\.nuget\packages\rmt_zlib\1.2.8.7\build\native\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)vcpkg_installed\x64-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(UserProfile)\.nuget\packages\rmt_libssh2\1.8.0\build\native\lib\v140\x64\Release\static;$(UserProfile)\.nuget\packages\rmt_openssl\1.1.0.3\build\native\lib\v140\x64\Release\static;$(UserProfile)\.nuget\packages\rmt_zlib\1.2.8.7\build\native\lib\v140\x64\Release\static;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>libssh2.lib;libssl.lib;libcrypto.lib;zlibstat.lib;crypt32.lib;shlwapi.lib;user32.lib;gdi32.lib;dwmapi.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)vcpkg_installed\x64-windows-static\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libssh2.lib;zs.lib;crypt32.lib;shlwapi.lib;user32.lib;gdi32.lib;dwmapi.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -65,7 +65,7 @@
       <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(UserProfile)\.nuget\packages\rmt_libssh2\1.8.0\build\native\include\v140\x64\Release\static;$(UserProfile)\.nuget\packages\rmt_openssl\1.1.0.3\build\native\include\v140\x64\Release\static;$(UserProfile)\.nuget\packages\rmt_zlib\1.2.8.7\build\native\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)vcpkg_installed\x64-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -73,8 +73,8 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(UserProfile)\.nuget\packages\rmt_libssh2\1.8.0\build\native\lib\v140\x64\Release\static;$(UserProfile)\.nuget\packages\rmt_openssl\1.1.0.3\build\native\lib\v140\x64\Release\static;$(UserProfile)\.nuget\packages\rmt_zlib\1.2.8.7\build\native\lib\v140\x64\Release\static;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>libssh2.lib;libssl.lib;libcrypto.lib;zlibstat.lib;crypt32.lib;shlwapi.lib;user32.lib;gdi32.lib;dwmapi.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)vcpkg_installed\x64-windows-static\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libssh2.lib;zs.lib;crypt32.lib;shlwapi.lib;user32.lib;gdi32.lib;dwmapi.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
