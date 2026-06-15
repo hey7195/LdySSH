@@ -9054,3 +9054,99 @@ window.updateNodeDelay = function(ip, delay, status) {
 // Initialize background 3D immediately
 initBackgroundTopology();
 
+// --- 主机工作台搜索历史记录功能 (Local Storage) ---
+function getSearchHistory() {
+    try {
+        return JSON.parse(localStorage.getItem('home_search_history') || '[]');
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveSearchHistory(query) {
+    query = (query || '').trim();
+    if (!query) return;
+    let history = getSearchHistory();
+    history = history.filter(item => item !== query);
+    history.unshift(query);
+    if (history.length > 5) {
+        history = history.slice(0, 5);
+    }
+    localStorage.setItem('home_search_history', JSON.stringify(history));
+}
+
+window.showSearchHistory = function() {
+    const dropdown = document.getElementById('searchHistoryDropdown');
+    const input = document.getElementById('homeConnectionSearch');
+    if (!dropdown || !input) return;
+    const history = getSearchHistory();
+    if (history.length === 0) {
+        dropdown.style.display = 'none';
+        return;
+    }
+    
+    let html = `<div class="search-history-header">
+        <span>最近搜索</span>
+        <span class="search-history-clear" onclick="clearSearchHistory(event)">清空</span>
+    </div>`;
+    
+    history.forEach(item => {
+        html += `<div class="search-history-item" onclick="selectSearchHistory('${item.replace(/'/g, "\\'")}', event)">
+            <span>${item}</span>
+            <span class="search-history-delete" onclick="deleteSearchHistory('${item.replace(/'/g, "\\'")}', event)">×</span>
+        </div>`;
+    });
+    
+    dropdown.innerHTML = html;
+    dropdown.style.display = 'block';
+};
+
+window.selectSearchHistory = function(val, event) {
+    if (event) event.stopPropagation();
+    const input = document.getElementById('homeConnectionSearch');
+    if (input) {
+        input.value = val;
+        renderConnectionsHome();
+    }
+    window.hideSearchHistory();
+};
+
+window.deleteSearchHistory = function(val, event) {
+    if (event) event.stopPropagation();
+    let history = getSearchHistory();
+    history = history.filter(item => item !== val);
+    localStorage.setItem('home_search_history', JSON.stringify(history));
+    window.showSearchHistory();
+};
+
+window.clearSearchHistory = function(event) {
+    if (event) event.stopPropagation();
+    localStorage.removeItem('home_search_history');
+    window.hideSearchHistory();
+};
+
+window.hideSearchHistory = function() {
+    const dropdown = document.getElementById('searchHistoryDropdown');
+    if (dropdown) {
+        dropdown.style.display = 'none';
+    }
+};
+
+window.handleHomeSearchKeydown = function(event) {
+    if (event.key === 'Enter') {
+        const val = event.target.value.trim();
+        if (val) {
+            saveSearchHistory(val);
+            window.hideSearchHistory();
+        }
+    }
+};
+
+// 点击页面其他区域时自动关闭搜索历史菜单
+document.addEventListener('click', function(event) {
+    const searchWrapper = document.querySelector('.home-search');
+    if (searchWrapper && !searchWrapper.contains(event.target)) {
+        window.hideSearchHistory();
+    }
+});
+
