@@ -1,3 +1,14 @@
+// 备份并拦截原生 alert，以自定义漂亮弹窗呈现
+const _originalAlert = window.alert;
+window.alert = function(message) {
+    if (typeof showCustomAlert === 'function') {
+        showCustomAlert(message);
+    } else {
+        console.warn("showCustomAlert is not ready yet, falling back to original alert:", message);
+        _originalAlert(message);
+    }
+};
+
 // --- Global Console Logging Redirection to Local Log File ---
 (function() {
     let isLogForwarding = false;
@@ -74,6 +85,8 @@ let activeHighlightRules = [];
 let connectionsHomeView = 'grid';
 let currentSelectedGroup = 'All';
 let selectedConnectionKeys = new Set();
+let tempEmptyGroups = new Set();
+let currentMovingConnectionKey = null;
 let isPrivacyMode = true;
 const RECENT_CONNECTION_LIMIT = 5;
 let systemMonitorInterval = null;
@@ -952,8 +965,8 @@ function refreshFiles() {
     listFiles(currentPath);
 }
 
-function createNewFolder() {
-    const folderName = prompt('Enter folder name:');
+async function createNewFolder() {
+    const folderName = await showCustomPrompt('Enter folder name:', '输入文件夹名称');
     if (folderName) {
         const fullPath = currentPath.endsWith('/') ?
             currentPath + folderName :
@@ -1230,7 +1243,7 @@ async function processUploadQueue() {
             // 绑定取消按钮事件
             const cancelBtn = progressDiv.querySelector('#cancelUploadBtn');
             cancelBtn.addEventListener('click', async () => {
-                if (confirm('确定要取消上传当前任务吗？')) {
+                if (await showCustomConfirm('确定要取消上传当前任务吗？')) {
                     if (currentUploadId) {
                         await window.pywebview.api.cancel_upload(currentUploadId);
                     }
@@ -1688,7 +1701,7 @@ async function contextMenuAction(action) {
                 showLocalRenameModal(fileName, filePath);
                 break;
             case 'delete':
-                if (confirm(`确定要删除本地 ${fileType === 'directory' ? '文件夹' : '文件'} ${fileName} 吗？`)) {
+                if (await showCustomConfirm(`确定要删除本地 ${fileType === 'directory' ? '文件夹' : '文件'} ${fileName} 吗？`)) {
                     try {
                         const result = JSON.parse(await window.pywebview.api.delete_local_file(filePath));
                         if (result.success) {
@@ -1871,8 +1884,9 @@ async function downloadFileWithPicker(fileName, remotePath) {
                 return; // User cancelled
             } else if (dialogResponse.fallback_needed) {
                 // Fallback to simple prompt if native dialog fails
-                const savePath = prompt(
+                const savePath = await showCustomPrompt(
                     `Native file dialog not available. Enter save path for "${fileName}":`,
+                    `${fileName}`,
                     `${fileName}`
                 );
 
@@ -2562,7 +2576,7 @@ function showSyncNotification(fileName) {
 async function deleteFileOrFolder(fileName, fileType, filePath) {
     const itemType = fileType === 'directory' ? 'folder' : 'file';
 
-    if (!confirm(`Are you sure you want to delete this ${itemType}?\n\n${fileName}`)) {
+    if (!(await showCustomConfirm(`Are you sure you want to delete this ${itemType}?\n\n${fileName}`))) {
         return;
     }
 
@@ -2728,6 +2742,9 @@ async function loadSavedConnections() {
         filterSavedConnections();
         renderRecentConnections();
         renderConnectionsHome();
+        if (typeof updateBatchGroupSelectOptions === 'function') {
+            updateBatchGroupSelectOptions();
+        }
         if (topoViewer) {
             topoViewer.buildTopology();
         }
@@ -2787,6 +2804,7 @@ function renderRecentConnections() {
         const item = document.createElement('div');
         item.className = 'recent-connection-item';
         item.onclick = () => quickConnectSavedConnection(conn.key);
+        item.oncontextmenu = (event) => showHomeConnectionMenu(event, conn.key);
         item.innerHTML = `
             <span class="recent-connection-dot"></span>
             <span class="recent-connection-copy">
@@ -2862,7 +2880,6 @@ function renderConnectionsHome() {
     // 更新批量操作栏状态
     updateBatchActionBar();
 }
-
 function renderGroupsSidebar() {
     const sidebar = document.getElementById('homeGroupsSidebar');
     if (!sidebar) return;
@@ -2874,6 +2891,13 @@ function renderGroupsSidebar() {
         const groupName = conn.group || '未分组';
         groupCounts[groupName] = (groupCounts[groupName] || 0) + 1;
         totalCount++;
+    });
+
+    // 合并临时空分组
+    tempEmptyGroups.forEach(g => {
+        if (!groupCounts[g]) {
+            groupCounts[g] = 0;
+        }
     });
 
     // 2. 将分组排序，"未分组"排最后，其他字母排序
@@ -2891,8 +2915,9 @@ function renderGroupsSidebar() {
     `;
 
     groups.forEach(groupName => {
+        const isSpecial = groupName === '未分组';
         html += `
-            <div class="group-item ${currentSelectedGroup === groupName ? 'active' : ''}" onclick="selectGroup('${escapeJs(groupName)}')">
+            <div class="group-item ${currentSelectedGroup === groupName ? 'active' : ''}" onclick="selectGroup('${escapeJs(groupName)}')" oncontextmenu="showGroupItemContextMenu(event, '${escapeJs(groupName)}', ${isSpecial})">
                 <span class="group-name">🏷️ ${escapeHtml(groupName)}</span>
                 <span class="group-count">${groupCounts[groupName]}</span>
             </div>
@@ -2900,6 +2925,166 @@ function renderGroupsSidebar() {
     });
 
     sidebar.innerHTML = html;
+
+    // 绑定右键菜单
+    sidebar.oncontextmenu = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showGroupsSidebarContextMenu(event);
+    };
+
+    // 刷新 Datalist
+    updateGroupsDatalist();
+}
+
+function updateGroupsDatalist() {
+    const datalist = document.getElementById('existingGroupsDatalist');
+    if (!datalist) return;
+    
+    const groups = new Set();
+    savedConnectionsCache.forEach(conn => {
+        if (conn.group) groups.add(conn.group);
+    });
+    tempEmptyGroups.forEach(g => groups.add(g));
+    
+    datalist.innerHTML = '';
+    groups.forEach(g => {
+        const option = document.createElement('option');
+        option.value = g;
+        datalist.appendChild(option);
+    });
+}
+
+async function addNewGroupPrompt() {
+    const groupName = await showCustomPrompt("新建主机分组", "请输入新分组名称...");
+    if (groupName && groupName.trim()) {
+        const trimmed = groupName.trim();
+        tempEmptyGroups.add(trimmed);
+        renderGroupsSidebar();
+        showToast(`分组 "${trimmed}" 创建成功`, 'success');
+    }
+}
+
+function showGroupsSidebarContextMenu(event) {
+    const existing = document.getElementById('groupsSidebarContextMenu');
+    if (existing) existing.remove();
+
+    const menu = document.createElement('div');
+    menu.id = 'groupsSidebarContextMenu';
+    menu.className = 'context-menu groups-sidebar-context-menu';
+    menu.style.left = `${event.pageX}px`;
+    menu.style.top = `${event.pageY}px`;
+    menu.style.display = 'block';
+    menu.innerHTML = `
+        <div class="context-menu-item" data-action="new-group">新建分组</div>
+    `;
+
+    menu.onclick = (clickEvent) => {
+        const action = clickEvent.target?.dataset?.action;
+        if (action === 'new-group') {
+            addNewGroupPrompt();
+        }
+        menu.remove();
+    };
+
+    document.body.appendChild(menu);
+    setTimeout(() => {
+        document.addEventListener('click', () => menu.remove(), { once: true });
+    }, 0);
+}
+
+function showGroupItemContextMenu(event, groupName, isSpecial) {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (isSpecial) return; // 不对未分组提供重命名和删除
+
+    const existing = document.getElementById('groupItemContextMenu');
+    if (existing) existing.remove();
+
+    const menu = document.createElement('div');
+    menu.id = 'groupItemContextMenu';
+    menu.className = 'context-menu group-item-context-menu';
+    menu.style.left = `${event.pageX}px`;
+    menu.style.top = `${event.pageY}px`;
+    menu.style.display = 'block';
+    menu.innerHTML = `
+        <div class="context-menu-item" data-action="rename-group">重命名分组</div>
+        <div class="context-menu-item context-menu-delete" data-action="delete-group">删除分组</div>
+    `;
+
+    menu.onclick = async (clickEvent) => {
+        const action = clickEvent.target?.dataset?.action;
+        if (!action) return;
+        menu.remove();
+        if (action === 'rename-group') {
+            await renameGroupPrompt(groupName);
+        }
+        if (action === 'delete-group') {
+            await deleteGroupConfirm(groupName);
+        }
+    };
+
+    document.body.appendChild(menu);
+    setTimeout(() => {
+        document.addEventListener('click', () => menu.remove(), { once: true });
+    }, 0);
+}
+
+async function renameGroupPrompt(oldGroupName) {
+    const newGroupName = await showCustomPrompt(`重命名分组 "${oldGroupName}"`, "请输入新分组名称...", oldGroupName);
+    if (!newGroupName || !newGroupName.trim() || newGroupName.trim() === oldGroupName) return;
+    
+    const trimmed = newGroupName.trim();
+    showToast(`正在重命名分组...`, 'info');
+    
+    try {
+        const connsToUpdate = savedConnectionsCache.filter(conn => conn.group === oldGroupName);
+        for (const conn of connsToUpdate) {
+            await window.pywebview.api.update_connection_group(conn.key, trimmed);
+        }
+        
+        if (tempEmptyGroups.has(oldGroupName)) {
+            tempEmptyGroups.delete(oldGroupName);
+            tempEmptyGroups.add(trimmed);
+        }
+        
+        if (currentSelectedGroup === oldGroupName) {
+            currentSelectedGroup = trimmed;
+        }
+        
+        showToast('分组重命名成功', 'success');
+        await loadSavedConnections();
+    } catch (error) {
+        console.error('重命名分组失败', error);
+        showToast('重命名分组异常', 'error');
+    }
+}
+
+async function deleteGroupConfirm(groupName) {
+    if (!(await showCustomConfirm(`确定要删除分组 "${groupName}" 吗？该分组下的主机将变回 "未分组" 状态。`))) return;
+    
+    showToast(`正在删除分组...`, 'info');
+    try {
+        const connsToUpdate = savedConnectionsCache.filter(conn => conn.group === groupName);
+        for (const conn of connsToUpdate) {
+            await window.pywebview.api.update_connection_group(conn.key, "");
+        }
+        
+        if (tempEmptyGroups.has(groupName)) {
+            tempEmptyGroups.delete(groupName);
+        }
+        
+        if (currentSelectedGroup === groupName) {
+            currentSelectedGroup = 'All';
+        }
+        
+        showToast('分组删除成功', 'success');
+        await loadSavedConnections();
+    } catch (error) {
+        console.error('删除分组失败', error);
+        showToast('删除分组异常', 'error');
+    }
 }
 
 function selectGroup(groupName) {
@@ -2967,6 +3152,13 @@ function updateBatchActionBar() {
     if (connectBtn) {
         connectBtn.disabled = selectedInViewCount === 0;
         connectBtn.innerHTML = `⚡ 一键连接 (${selectedInViewCount}台)`;
+    }
+    const groupSelect = document.getElementById('batchGroupSelect');
+    if (groupSelect) {
+        groupSelect.disabled = selectedInViewCount === 0;
+        if (selectedInViewCount === 0) {
+            groupSelect.value = '';
+        }
     }
 }
 
@@ -3063,6 +3255,7 @@ function showHomeConnectionMenu(event, key) {
     menu.innerHTML = `
         <div class="context-menu-item" data-action="connect">连接</div>
         <div class="context-menu-item" data-action="edit">编辑</div>
+        <div class="context-menu-item" data-action="move-group">移动到分组</div>
         <div class="context-menu-item context-menu-delete" data-action="delete">删除</div>
     `;
 
@@ -3072,6 +3265,7 @@ function showHomeConnectionMenu(event, key) {
         menu.remove();
         if (action === 'connect') await quickConnectSavedConnection(key);
         if (action === 'edit') await editSavedConnection(key);
+        if (action === 'move-group') openMoveGroupModal(key);
         if (action === 'delete') await deleteConnection(key);
     };
 
@@ -3079,6 +3273,190 @@ function showHomeConnectionMenu(event, key) {
     setTimeout(() => {
         document.addEventListener('click', () => menu.remove(), { once: true });
     }, 0);
+}
+
+function openMoveGroupModal(key) {
+    currentMovingConnectionKey = key;
+    const select = document.getElementById('moveGroupSelect');
+    if (select) {
+        select.innerHTML = '<option value="">未分组 (留空)</option>';
+        const groups = new Set();
+        savedConnectionsCache.forEach(conn => {
+            if (conn.group) groups.add(conn.group);
+        });
+        tempEmptyGroups.forEach(g => groups.add(g));
+        groups.forEach(g => {
+            const opt = document.createElement('option');
+            opt.value = g;
+            opt.textContent = g;
+            select.appendChild(opt);
+        });
+        
+        const conn = savedConnectionsCache.find(c => c.key === key);
+        if (conn && conn.group) {
+            select.value = conn.group;
+        }
+    }
+    
+    const input = document.getElementById('moveGroupNewInput');
+    if (input) input.value = '';
+    
+    const modal = document.getElementById('moveGroupModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeMoveGroupModal() {
+    const modal = document.getElementById('moveGroupModal');
+    if (modal) modal.style.display = 'none';
+    currentMovingConnectionKey = null;
+}
+
+async function confirmMoveGroup() {
+    if (!currentMovingConnectionKey) return;
+    
+    const newInput = document.getElementById('moveGroupNewInput');
+    const select = document.getElementById('moveGroupSelect');
+    
+    let targetGroup = '';
+    if (newInput && newInput.value.trim()) {
+        targetGroup = newInput.value.trim();
+        tempEmptyGroups.add(targetGroup);
+    } else if (select) {
+        targetGroup = select.value;
+    }
+    
+    try {
+        const response = await window.pywebview.api.update_connection_group(currentMovingConnectionKey, targetGroup);
+        const resultObj = JSON.parse(response);
+        if (resultObj.success) {
+            showToast('主机分组修改成功', 'success');
+        } else {
+            showToast('修改分组失败，请确认主机是否存在', 'error');
+        }
+        await loadSavedConnections();
+        closeMoveGroupModal();
+    } catch (error) {
+        console.error('修改分组失败', error);
+        showToast('修改分组异常', 'error');
+    }
+}
+
+function showCustomPrompt(title, placeholder = '', defaultValue = '') {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('customPromptModal');
+        const titleEl = document.getElementById('customPromptTitle');
+        const inputEl = document.getElementById('customPromptInput');
+        const confirmBtn = document.getElementById('customPromptConfirmBtn');
+        const cancelBtn = document.getElementById('customPromptCancelBtn');
+        
+        if (!modal || !inputEl) {
+            resolve(prompt(title, defaultValue));
+            return;
+        }
+
+        titleEl.textContent = title;
+        inputEl.placeholder = placeholder;
+        inputEl.value = defaultValue;
+        
+        modal.style.display = 'flex';
+        setTimeout(() => {
+            inputEl.focus();
+            inputEl.select();
+        }, 50);
+
+        const handleConfirm = () => {
+            modal.style.display = 'none';
+            cleanup();
+            resolve(inputEl.value);
+        };
+
+        const handleCancel = () => {
+            modal.style.display = 'none';
+            cleanup();
+            resolve(null);
+        };
+
+        const handleKeyDown = (e) => {
+            if (e.key === 'Enter') handleConfirm();
+            if (e.key === 'Escape') handleCancel();
+        };
+
+        const cleanup = () => {
+            confirmBtn.onclick = null;
+            cancelBtn.onclick = null;
+            inputEl.onkeydown = null;
+        };
+
+        confirmBtn.onclick = handleConfirm;
+        cancelBtn.onclick = handleCancel;
+        inputEl.onkeydown = handleKeyDown;
+    });
+}
+
+function showCustomAlert(message) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('customAlertModal');
+        const messageEl = document.getElementById('customAlertMessage');
+        const confirmBtn = document.getElementById('customAlertConfirmBtn');
+
+        if (!modal || !messageEl) {
+            if (typeof _originalAlert === 'function') {
+                _originalAlert(message);
+            } else {
+                alert(message);
+            }
+            resolve();
+            return;
+        }
+
+        messageEl.textContent = message;
+        modal.style.display = 'flex';
+
+        const handleConfirm = () => {
+            modal.style.display = 'none';
+            confirmBtn.onclick = null;
+            resolve();
+        };
+
+        confirmBtn.onclick = handleConfirm;
+    });
+}
+
+function showCustomConfirm(message) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('customConfirmModal');
+        const messageEl = document.getElementById('customConfirmMessage');
+        const confirmBtn = document.getElementById('customConfirmConfirmBtn');
+        const cancelBtn = document.getElementById('customConfirmCancelBtn');
+
+        if (!modal || !messageEl) {
+            resolve(confirm(message));
+            return;
+        }
+
+        messageEl.textContent = message;
+        modal.style.display = 'flex';
+
+        const handleConfirm = () => {
+            modal.style.display = 'none';
+            cleanup();
+            resolve(true);
+        };
+
+        const handleCancel = () => {
+            modal.style.display = 'none';
+            cleanup();
+            resolve(false);
+        };
+
+        const cleanup = () => {
+            confirmBtn.onclick = null;
+            cancelBtn.onclick = null;
+        };
+
+        confirmBtn.onclick = handleConfirm;
+        cancelBtn.onclick = handleCancel;
+    });
 }
 
 function setConnectionsHomeView(view) {
@@ -3253,7 +3631,7 @@ async function quickConnect(key) {
 }
 
 async function deleteConnection(key) {
-    if (confirm('确定删除这个保存的连接吗？')) {
+    if (await showCustomConfirm('确定删除这个保存的连接吗？')) {
         // console.log('Deleting connection:', key);
         try {
             const result = await window.pywebview.api.delete_saved_connection(key);
@@ -4903,9 +5281,9 @@ function handleSessionDisconnect(sessionId, wasLogout, promptReconnect = true) {
         if (!promptReconnect) {
             return;
         }
-        setTimeout(() => {
+        setTimeout(async () => {
             if (sessions[sessionId] && !sessions[sessionId].connected) {
-                if (confirm('连接已断开，是否重新连接？')) {
+                if (await showCustomConfirm('连接已断开，是否重新连接？')) {
                     reconnectSession(sessionId);
                 } else {
                     removeSession(sessionId);
@@ -5345,8 +5723,8 @@ function updateSessionsList() {
         if (isConnected) {
             item.onclick = () => switchToSession(session.id);
         } else {
-            item.onclick = () => {
-                if (confirm('该会话已断开，是否重新连接？')) {
+            item.onclick = async () => {
+                if (await showCustomConfirm('该会话已断开，是否重新连接？')) {
                     reconnectSession(session.id);
                 }
             };
@@ -5366,7 +5744,7 @@ function updateSessionsList() {
 }
 
 async function disconnectSession(sessionId) {
-    if (confirm('确定要断开这个会话吗？')) {
+    if (await showCustomConfirm('确定要断开这个会话吗？')) {
         // console.log(`断开会话 ${sessionId}`);
 
         try {
@@ -6827,7 +7205,7 @@ async function deleteCommandLibraryModal() {
             alert('至少保留一个文件夹。');
             return;
         }
-        if (confirm(`确定要删除文件夹 "${commandLibraryFolders[commandLibraryEditIndex].name}" 以及里面所有命令吗？`)) {
+        if (await showCustomConfirm(`确定要删除文件夹 "${commandLibraryFolders[commandLibraryEditIndex].name}" 以及里面所有命令吗？`)) {
             commandLibraryFolders.splice(commandLibraryEditIndex, 1);
             activeCommandFolderIndex = Math.max(0, activeCommandFolderIndex - 1);
             if (await saveCommandLibrary()) {
@@ -6837,7 +7215,7 @@ async function deleteCommandLibraryModal() {
         }
     } else if (commandLibraryModalMode === 'edit-command') {
         const item = commandLibraryFolders[activeCommandFolderIndex].commands[commandLibraryEditIndex];
-        if (confirm(`确定要删除命令 "${item.name}" 吗？`)) {
+        if (await showCustomConfirm(`确定要删除命令 "${item.name}" 吗？`)) {
             commandLibraryFolders[activeCommandFolderIndex].commands.splice(commandLibraryEditIndex, 1);
             if (await saveCommandLibrary()) {
                 renderCommandLibrary();
@@ -7028,7 +7406,7 @@ async function refreshPortForwards() {
 }
 
 async function stopPortForward(forwardId) {
-    if (!currentSessionId || !confirm('确认停止此端口转发吗？')) return;
+    if (!currentSessionId || !(await showCustomConfirm('确认停止此端口转发吗？'))) return;
     try {
         const resultStr = await window.pywebview.api.stop_port_forward(currentSessionId, forwardId);
         const result = JSON.parse(resultStr);
@@ -7962,7 +8340,7 @@ function refreshLocalFiles() {
 }
 
 async function createLocalFolderPrompt() {
-    const folderName = prompt("请输入新建本地文件夹的名称：");
+    const folderName = await showCustomPrompt("请输入新建本地文件夹的名称：", "文件夹名称");
     if (!folderName) return;
     const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
     const fullPath = localCurrentPath + sep + folderName;
@@ -9372,3 +9750,81 @@ document.addEventListener('click', function(event) {
     }
 });
 
+// 批量移动分组 UI 渲染与核心逻辑
+window.updateBatchGroupSelectOptions = function() {
+    const select = document.getElementById('batchGroupSelect');
+    if (!select) return;
+    
+    // 保留提示选项
+    select.innerHTML = '<option value="" disabled selected>📁 批量移至分组...</option>';
+    
+    // 未分组
+    const optUnassigned = document.createElement('option');
+    optUnassigned.value = '';
+    optUnassigned.textContent = '未分组 (留空)';
+    select.appendChild(optUnassigned);
+    
+    // 收集所有分组
+    const groups = new Set();
+    savedConnectionsCache.forEach(conn => {
+        if (conn.group) groups.add(conn.group);
+    });
+    tempEmptyGroups.forEach(g => groups.add(g));
+    
+    groups.forEach(g => {
+        const opt = document.createElement('option');
+        opt.value = g;
+        opt.textContent = g;
+        select.appendChild(opt);
+    });
+    
+    // 新建并移至分组
+    const optNew = document.createElement('option');
+    optNew.value = '__new_group__';
+    optNew.textContent = '+ 新建分组并移动...';
+    select.appendChild(optNew);
+};
+
+window.handleBatchGroupChange = async function(value) {
+    if (selectedConnectionKeys.size === 0) {
+        document.getElementById('batchGroupSelect').value = '';
+        return;
+    }
+    
+    let targetGroup = '';
+    if (value === '__new_group__') {
+        const newGroup = await showCustomPrompt('新建分组并移动主机', '输入新分组名称...');
+        if (!newGroup || !newGroup.trim()) {
+            document.getElementById('batchGroupSelect').value = '';
+            return;
+        }
+        targetGroup = newGroup.trim();
+        tempEmptyGroups.add(targetGroup);
+    } else {
+        targetGroup = value;
+    }
+    
+    const keysToMove = Array.from(selectedConnectionKeys);
+    showToast(`正在批量移动 ${keysToMove.length} 台主机...`, 'info');
+    
+    let successCount = 0;
+    for (const key of keysToMove) {
+        try {
+            const response = await window.pywebview.api.update_connection_group(key, targetGroup);
+            const res = JSON.parse(response);
+            if (res.success) successCount++;
+        } catch (e) {
+            console.error('批量修改分组失败 key=' + key, e);
+        }
+    }
+    
+    showToast(`成功将 ${successCount} 台主机移动到分组 [${targetGroup || '未分组'}]`, 'success');
+    
+    // 清空选择
+    selectedConnectionKeys.clear();
+    const selectAllCheckbox = document.getElementById('batchSelectAllCheckbox');
+    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+    
+    // 重新载入和刷新
+    await loadSavedConnections();
+};

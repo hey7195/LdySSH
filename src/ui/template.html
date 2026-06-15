@@ -256,7 +256,7 @@
                     <div class="section-header" onclick="toggleSection('newConnection')"><span class="section-title">&#26032;&#24314;&#36830;&#25509;</span><svg class="section-chevron" id="newConnectionChevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
                     <div class="section-content" id="newConnectionContent"><div class="connect-form">
                         <div class="form-group"><label>&#20027;&#26426;&#21629;&#21517;</label><input type="text" id="connectionName" placeholder="&#20363;&#22914;&#65306;&#29983;&#20135;&#36339;&#26495;&#26426;" /></div>
-                        <div class="form-group"><label>&#20027;&#26426;&#20998;&#32452;</label><input type="text" id="connectionGroup" placeholder="&#20363;&#22914;&#65306;&#29983;&#20135;&#29615;&#22659;" /></div>
+                        <div class="form-group"><label>&#20027;&#26426;&#20998;&#32452;</label><input type="text" id="connectionGroup" list="existingGroupsDatalist" placeholder="&#20363;&#22914;&#65306;&#29983;&#20135;&#29615;&#22659;" /><datalist id="existingGroupsDatalist"></datalist></div>
                         <div class="form-group"><label>&#20027;&#26426;&#22320;&#22336;</label><input type="text" id="hostname" placeholder="example.com" /></div>
                         <div class="form-group"><label>&#31471;&#21475;</label><input type="number" id="port" placeholder="22" value="22" /></div>
                         <div class="form-group"><label>&#29992;&#25143;&#21517;</label><input type="text" id="username" placeholder="root" /></div>
@@ -303,6 +303,18 @@
                     </div></div>
                 </div>
                 <div class="collapsible-section">
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;" onclick="toggleSection('homeGroups')">
+                        <span class="section-title">主机分组</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span id="addGroupBtn" onclick="addNewGroupPrompt(event)" style="font-size: 16px; font-weight: bold; cursor: pointer; color: #38bdf8; padding: 2px 8px; line-height: 1;" title="新建分组">+</span>
+                            <svg class="section-chevron open" id="homeGroupsChevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M6 9l6 6 6-6"/></svg>
+                        </div>
+                    </div>
+                    <div class="section-content open" id="homeGroupsContent">
+                        <div id="homeGroupsSidebar" class="connections-groups-sidebar"></div>
+                    </div>
+                </div>
+                <div class="collapsible-section">
                     <div class="section-header" onclick="toggleSection('savedConnections')"><span class="section-title">&#26368;&#36817;&#20027;&#26426;</span><svg class="section-chevron open" id="savedConnectionsChevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
                     <div class="section-content open" id="savedConnectionsContent"><div class="saved-connections"><input type="hidden" id="savedConnectionSearch" value="" /><div id="recentConnectionsList" class="recent-connections-list"></div><div id="savedConnectionsList" style="display:none"></div></div></div>
                 </div>
@@ -325,8 +337,6 @@
                             </div>
                             <div id="connectionsHome" class="connections-home-content">
                                 <div class="connections-home-shell">
-                                    <!-- 左侧分组侧边栏 -->
-                                    <div id="homeGroupsSidebar" class="connections-groups-sidebar"></div>
                                     <!-- 右侧内容 -->
                                     <div class="connections-home-main">
                                         <div class="connections-home-header">
@@ -343,15 +353,14 @@
                                         </div>
                                         <!-- 批量操作栏 -->
                                         <div id="batchActionBar" class="batch-action-bar">
-                                            <div class="batch-action-left">
-                                                <label class="batch-checkbox-wrapper">
-                                                    <input type="checkbox" id="batchSelectAllCheckbox" onclick="toggleBatchSelectAll(this.checked)" />
-                                                    <span>全选当前</span>
-                                                </label>
-                                            </div>
-                                            <div class="batch-action-right">
-                                                <button type="button" id="batchConnectBtn" class="batch-connect-btn" onclick="batchConnectSelected()" disabled>⚡ 一键连接 (0台)</button>
-                                            </div>
+                                            <label class="batch-checkbox-wrapper">
+                                                <input type="checkbox" id="batchSelectAllCheckbox" onclick="toggleBatchSelectAll(this.checked)" />
+                                                <span>全选当前</span>
+                                            </label>
+                                            <button type="button" id="batchConnectBtn" class="batch-connect-btn" onclick="batchConnectSelected()" disabled>⚡ 一键连接 (0台)</button>
+                                            <select id="batchGroupSelect" class="batch-group-select" onchange="handleBatchGroupChange(this.value)" disabled>
+                                                <option value="" disabled selected>📁 批量移至分组...</option>
+                                            </select>
                                         </div>
                                         <div id="homeConnectionsList" class="home-connections-grid"></div>
                                         <div id="homeConnectionsEmpty" class="home-connections-empty" style="display:none"><div class="home-empty-title">&#26242;&#26080;&#24050;&#20445;&#23384;&#20027;&#26426;</div><div>&#21487;&#20174;&#24038;&#20391;&#26032;&#24314;&#36830;&#25509;&#65292;&#25110;&#30452;&#25509;&#28155;&#21152;&#31532;&#19968;&#21488; SSH &#20027;&#26426;&#12290;</div><button type="button" onclick="openNewConnectionForm('hostname', true)">&#26032;&#24314;&#36830;&#25509;</button></div>
@@ -534,6 +543,58 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ext-modelist.js"></script>
 
     <script src="static/app.js?v=1017"></script>
+        </div>
+    </div>
+
+
+    <!-- 移动分组/自定义输入/自定义确认弹窗 -->
+    <div id="moveGroupModal" class="modal" style="display:none; z-index: 3000;">
+        <div class="modal-content" style="background: linear-gradient(135deg, #1e1e2e 0%, #0f0f16 100%); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 20px; max-width: 400px; width: 90%; color: #fff; box-shadow: 0 10px 40px rgba(0,0,0,0.8);">
+            <h3 style="margin-top:0; font-size:16px; color:#38bdf8; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:15px;">📁 移动主机到分组</h3>
+            <div class="form-group" style="margin-bottom: 12px;">
+                <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px;">选择已有分组</label>
+                <select id="moveGroupSelect" style="width:100%; height:32px; background:#0f141c; color:#fff; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:0 8px; font-size:13px; outline:none;"></select>
+            </div>
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px;">或创建新分组</label>
+                <input type="text" id="moveGroupNewInput" placeholder="输入新分组名称..." style="width:100%; height:32px; background:#0f141c; color:#fff; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:2px 8px; font-size:13px; outline:none; box-sizing:border-box;" />
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:8px;">
+                <button onclick="closeMoveGroupModal()" style="padding:6px 14px; background:rgba(255,255,255,0.08); border:none; border-radius:6px; color:#e2e8f0; font-size:12px; cursor:pointer; transition:all 0.2s;">取消</button>
+                <button onclick="confirmMoveGroup()" style="padding:6px 14px; background:linear-gradient(135deg, #00f2fe, #4facfe); border:none; border-radius:6px; color:#0f172a; font-weight:bold; font-size:12px; cursor:pointer; transition:all 0.2s;">确定</button>
+            </div>
+        </div>
+    </div>
+    <div id="customPromptModal" class="modal" style="display:none; z-index: 4000;">
+        <div class="modal-content" style="background: linear-gradient(135deg, #1e1e2e 0%, #0f0f16 100%); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 20px; max-width: 400px; width: 90%; color: #fff; box-shadow: 0 10px 40px rgba(0,0,0,0.8);">
+            <h3 id="customPromptTitle" style="margin-top:0; font-size:16px; color:#38bdf8; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:15px;">输入内容</h3>
+            <div class="form-group" style="margin-bottom: 20px;">
+                <input type="text" id="customPromptInput" style="width:100%; height:32px; background:#0f141c; color:#fff; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:2px 8px; font-size:13px; outline:none; box-sizing:border-box;" />
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:8px;">
+                <button id="customPromptCancelBtn" style="padding:6px 14px; background:rgba(255,255,255,0.08); border:none; border-radius:6px; color:#e2e8f0; font-size:12px; cursor:pointer; transition:all 0.2s;">取消</button>
+                <button id="customPromptConfirmBtn" style="padding:6px 14px; background:linear-gradient(135deg, #00f2fe, #4facfe); border:none; border-radius:6px; color:#0f172a; font-weight:bold; font-size:12px; cursor:pointer; transition:all 0.2s;">确定</button>
+            </div>
+        </div>
+    </div>
+    <div id="customConfirmModal" class="modal" style="display:none; z-index: 4000;">
+        <div class="modal-content" style="background: linear-gradient(135deg, #1e1e2e 0%, #0f0f16 100%); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 20px; max-width: 400px; width: 90%; color: #fff; box-shadow: 0 10px 40px rgba(0,0,0,0.8);">
+            <h3 style="margin-top:0; font-size:16px; color:#ef4444; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:15px;">⚠️ 确认操作</h3>
+            <p id="customConfirmMessage" style="font-size:13px; color:#e2e8f0; line-height:1.6; margin-bottom:20px;"></p>
+            <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:8px;">
+                <button id="customConfirmCancelBtn" style="padding:6px 14px; background:rgba(255,255,255,0.08); border:none; border-radius:6px; color:#e2e8f0; font-size:12px; cursor:pointer; transition:all 0.2s;">取消</button>
+                <button id="customConfirmConfirmBtn" style="padding:6px 14px; background:linear-gradient(135deg, #f87171, #ef4444); border:none; border-radius:6px; color:#fff; font-weight:bold; font-size:12px; cursor:pointer; transition:all 0.2s;">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="customAlertModal" class="modal" style="display:none; z-index: 4000;">
+        <div class="modal-content" style="background: linear-gradient(135deg, #1e1e2e 0%, #0f0f16 100%); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 20px; max-width: 400px; width: 90%; color: #fff; box-shadow: 0 10px 40px rgba(0,0,0,0.8);">
+            <h3 style="margin-top:0; font-size:16px; color:#38bdf8; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:15px;">💡 提示</h3>
+            <p id="customAlertMessage" style="font-size:13px; color:#e2e8f0; line-height:1.6; margin-bottom:20px;"></p>
+            <div class="modal-footer" style="display:flex; justify-content:flex-end;">
+                <button id="customAlertConfirmBtn" style="padding:6px 14px; background:linear-gradient(135deg, #00f2fe, #4facfe); border:none; border-radius:6px; color:#0f172a; font-weight:bold; font-size:12px; cursor:pointer; transition:all 0.2s;">确定</button>
+            </div>
         </div>
     </div>
 

@@ -3266,7 +3266,8 @@ input[type="checkbox"] {
 
 /* Modal Styles */
 
-.modal-overlay {
+.modal-overlay,
+.modal {
     position: fixed;
     top: 0;
     left: 0;
@@ -4981,6 +4982,129 @@ input[type="checkbox"] {
     max-width: 140px !important;
     min-width: 140px !important;
     padding: 0 12px !important;
+    height: 32px !important;
+    border-radius: 16px !important;
+    border: 1px solid rgba(56, 189, 248, 0.25) !important;
+    background: rgba(56, 189, 248, 0.05) !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+}
+
+.home-search span {
+    font-size: 11px !important;
+    color: #38bdf8 !important;
+    opacity: 0.7 !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+.home-search input {
+    height: 100% !important;
+    width: 100% !important;
+    border: none !important;
+    outline: none !important;
+    background: transparent !important;
+    color: #fff !important;
+    font-size: 12px !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+.privacy-mode-btn {
+    height: 32px !important;
+    border-radius: 16px !important;
+    padding: 0 14px !important;
+    box-sizing: border-box !important;
+    font-size: 12px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    cursor: pointer !important;
+    transition: all 0.2s !important;
+    white-space: nowrap !important;
+    background: rgba(56, 189, 248, 0.05) !important;
+    border: 1px solid rgba(56, 189, 248, 0.2) !important;
+    color: rgba(56, 189, 248, 0.85) !important;
+}
+
+.privacy-mode-btn:hover {
+    background: rgba(56, 189, 248, 0.12) !important;
+    border-color: rgba(56, 189, 248, 0.45) !important;
+    color: #38bdf8 !important;
+    box-shadow: none !important;
+}
+
+.privacy-mode-btn.active {
+    background: rgba(56, 189, 248, 0.18) !important;
+    border-color: rgba(56, 189, 248, 0.5) !important;
+    color: #fff !important;
+    box-shadow: none !important;
+}
+
+.home-refresh {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 16px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    transition: all 0.2s !important;
+    background: rgba(56, 189, 248, 0.05) !important;
+    border: 1px solid rgba(56, 189, 248, 0.2) !important;
+    color: rgba(56, 189, 248, 0.85) !important;
+    padding: 0 !important;
+    font-size: 14px !important;
+}
+
+.home-refresh:hover {
+    background: rgba(56, 189, 248, 0.12) !important;
+    border-color: rgba(56, 189, 248, 0.45) !important;
+    color: #38bdf8 !important;
+    box-shadow: none !important;
+}
+
+.home-view-switch {
+    height: 32px !important;
+    border-radius: 16px !important;
+    padding: 2px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 2px !important;
+    background: rgba(15, 23, 42, 0.3) !important;
+    border: 1px solid rgba(56, 189, 248, 0.18) !important;
+}
+
+.home-view-switch button {
+    width: 26px !important;
+    height: 26px !important;
+    border-radius: 13px !important;
+    border: none !important;
+    background: transparent !important;
+    color: #64748b !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    transition: all 0.2s !important;
+    font-size: 14px !important;
+}
+
+.home-view-switch button:hover {
+    color: #38bdf8 !important;
+}
+
+.home-view-switch button.active {
+    background: rgba(56, 189, 248, 0.15) !important;
+    color: #38bdf8 !important;
+    box-shadow: none !important;
 }
 
 /* 搜索历史下拉框样式 */
@@ -5386,7 +5510,7 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
 }
 
 /* Top Action & Utility Buttons (Hide, Refresh, Privacy Mode, Views) */
-.home-refresh, .privacy-mode-btn, button[data-view="grid"], button[data-view="list"], .command-library-hide {
+.command-library-hide {
     border: 1px solid rgba(245, 158, 11, 0.3) ;
     border-top: 1px solid rgba(245, 158, 11, 0.5) ;
     background: linear-gradient(135deg, rgba(180, 83, 9, 0.3), rgba(120, 53, 15, 0.2)) ;
@@ -5394,7 +5518,7 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     transition: background-color 0.2s ease , color 0.2s ease , border-color 0.2s ease , box-shadow 0.2s ease , transform 0.2s ease , opacity 0.2s ease ;
     color: #fde68a ;
 }
-.home-refresh:hover, .privacy-mode-btn:hover, button[data-view="grid"]:hover, button[data-view="list"]:hover, .privacy-mode-btn.active, .command-library-hide:hover {
+.command-library-hide:hover {
     border-color: rgba(251, 191, 36, 0.7) ;
     border-top: 1px solid #fde047 ;
     box-shadow: 0 0 15px rgba(245, 158, 11, 0.4), inset 0 2px 5px rgba(0,0,0,0.5) ;
@@ -6082,36 +6206,23 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
    ========================================================================== */
 
 .connections-home-shell {
-    display: flex !important;
-    flex-direction: row;
-    gap: 24px;
-    max-width: 1200px !important;
+    max-width: 1080px !important;
     width: 100%;
 }
 
-.connections-home-main {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-}
-
-/* 1. 左侧分组边栏 */
+/* 1. 左侧分组边栏 (嵌入在左侧 sidebar 伸缩区内) */
 .connections-groups-sidebar {
-    width: 200px;
-    flex-shrink: 0;
-    background: rgba(15, 23, 42, 0.45);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 16px 12px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    pointer-events: auto !important; /* 防击穿 */
-    align-self: flex-start;
+    gap: 4px;
+    padding: 6px 4px;
     box-sizing: border-box;
+    width: 100% !important;
+    background: transparent !important;
+    border: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    pointer-events: auto !important;
 }
 
 .group-item {
@@ -6119,24 +6230,26 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     align-items: center;
     justify-content: space-between;
     padding: 8px 12px;
-    border-radius: 8px;
+    border-radius: 6px;
     color: #94a3b8;
     font-size: 13px;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.2s ease;
     user-select: none;
+    background: rgba(255, 255, 255, 0.02);
     border: 1px solid transparent;
 }
 
 .group-item:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.08);
     color: #f1f5f9;
+    transform: translateX(2px);
 }
 
 .group-item.active {
-    background: rgba(56, 189, 248, 0.15);
-    border: 1px solid rgba(56, 189, 248, 0.3);
-    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.15) !important;
+    border: 1px solid rgba(56, 189, 248, 0.25) !important;
+    color: #38bdf8 !important;
     font-weight: 600;
 }
 
@@ -6153,18 +6266,18 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     color: #38bdf8;
 }
 
-/* 2. 批量操作栏 */
 .batch-action-bar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 10px 16px;
+    justify-content: flex-start;
+    gap: 16px;
+    padding: 4px 0px;
     margin-bottom: 16px;
-    background: rgba(15, 23, 42, 0.45);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    box-shadow: none !important;
     font-size: 13px;
     color: #94a3b8;
     pointer-events: auto !important; /* 防击穿 */
@@ -6201,11 +6314,13 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
 }
 
 .batch-connect-btn {
-    background: linear-gradient(135deg, #00f2fe, #4facfe);
-    border: none;
-    color: #0f172a;
+    background: rgba(56, 189, 248, 0.12) !important;
+    border: 1px solid rgba(56, 189, 248, 0.3) !important;
+    color: #38bdf8 !important;
     font-weight: 600;
-    padding: 6px 14px;
+    padding: 5px 8px !important;
+    width: auto !important;
+    min-width: 0 !important;
     border-radius: 6px;
     font-size: 12px;
     cursor: pointer;
@@ -6216,17 +6331,53 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
 }
 
 .batch-connect-btn:hover {
-    opacity: 0.95;
+    background: rgba(56, 189, 248, 0.2) !important;
+    border-color: rgba(56, 189, 248, 0.45) !important;
     transform: translateY(-1px);
-    box-shadow: 0 0 12px rgba(0, 242, 254, 0.4);
+    box-shadow: none !important;
 }
 
 .batch-connect-btn:disabled {
-    background: #334155 !important;
-    color: #64748b !important;
+    background: rgba(255, 255, 255, 0.02) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    color: #475569 !important;
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
+}
+
+.batch-group-select {
+    background: rgba(56, 189, 248, 0.12) !important;
+    border: 1px solid rgba(56, 189, 248, 0.3) !important;
+    color: #38bdf8 !important;
+    font-weight: 600;
+    padding: 4px 8px !important;
+    width: auto !important;
+    min-width: 140px !important;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.batch-group-select:hover {
+    background: rgba(56, 189, 248, 0.2) !important;
+    border-color: rgba(56, 189, 248, 0.45) !important;
+    box-shadow: none !important;
+}
+
+.batch-group-select:disabled {
+    background: rgba(255, 255, 255, 0.02) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    color: #475569 !important;
+    cursor: not-allowed;
+}
+
+.batch-group-select option {
+    background: #1e1e2e;
+    color: #fff;
 }
 
 /* 3. 卡片上的勾选框绝对定位 */
@@ -6260,33 +6411,14 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     border-radius: 4px;
 }
 
-/* 4. 响应式布局优化 */
-@media (max-width: 960px) {
-    .connections-home-shell {
-        flex-direction: column !important;
-        gap: 16px;
-    }
-    
-    .connections-groups-sidebar {
-        width: 100% !important;
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-self: stretch;
-        padding: 8px;
-        gap: 6px;
-    }
-    
-    .group-item {
-        padding: 6px 10px;
-        font-size: 12px;
-        flex-grow: 1;
-        justify-content: center;
-        gap: 6px;
-    }
-    
-    .group-count {
-        margin-left: 4px;
-    }
+/* 分组侧栏右键菜单样式 */
+.groups-sidebar-context-menu,
+.group-item-context-menu {
+    border: 1px solid rgba(56, 189, 248, 0.25) !important;
+    background: rgba(15, 23, 42, 0.9) !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
 }
+
+
 
 
