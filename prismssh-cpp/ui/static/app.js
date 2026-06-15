@@ -7919,14 +7919,46 @@ class TopologyViewer {
         this.container.innerHTML = ''; // Clear container
         this.container.appendChild(this.renderer.domElement);
 
-        // 3. Orbit Controls (Bound to WebGL canvas for safe dragging)
+        // 3. Orbit Controls (Bound to document.body for global dragging, including transparent panel areas)
         if (typeof THREE.OrbitControls !== 'undefined') {
-            this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+            this.controls = new THREE.OrbitControls(this.camera, document.body);
             this.controls.enableDamping = true;
             this.controls.dampingFactor = 0.05;
             this.controls.enableZoom = false; // Disable zoom to prevent scroll issues
             this.controls.enablePan = false;  // Disable panning to focus on center
             this.controls.maxPolarAngle = Math.PI / 2 - 0.02; // Prevent camera underfloor
+        }
+
+        // Custom Title Bar Drag Handling & Event Isolation
+        const titleBar = document.querySelector('.title-bar');
+        if (titleBar) {
+            const handleDrag = (e) => {
+                if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                    return;
+                }
+                if (window.chrome && window.chrome.webview) {
+                    window.chrome.webview.postMessage(JSON.stringify({
+                        id: 'drag',
+                        action: 'window_drag',
+                        args: []
+                    }));
+                }
+                e.stopPropagation();
+            };
+
+            // Prevent OrbitControls (on body) from capturing title bar drag and calling preventDefault()
+            ['mousedown', 'pointerdown', 'touchstart'].forEach(evt => {
+                titleBar.addEventListener(evt, (e) => {
+                    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                        return;
+                    }
+                    if (evt === 'mousedown') {
+                        handleDrag(e);
+                    } else {
+                        e.stopPropagation();
+                    }
+                }, { capture: true });
+            });
         }
 
         // 4. Lights
