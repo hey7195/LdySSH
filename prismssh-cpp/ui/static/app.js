@@ -4714,8 +4714,10 @@ async function reconnectSession(oldSessionId) {
 }
 
 window.showWorkbench = function() {
-    // console.log("Switching to workbench");
-
+    const termContainer = document.querySelector('.terminal-container');
+    if (termContainer) {
+        termContainer.classList.add('in-workbench');
+    }
     if (outputPollingInterval) {
         clearTimeout(outputPollingInterval);
         outputPollingInterval = null;
@@ -4743,8 +4745,10 @@ window.showWorkbench = function() {
 };
 
 function switchToSession(sessionId) {
-    // console.log(`Switching to session ${sessionId} from ${currentSessionId}`);
-
+    const termContainer = document.querySelector('.terminal-container');
+    if (termContainer) {
+        termContainer.classList.remove('in-workbench');
+    }
     if (isSplitMode && sessionId !== splitLeftSessionId && sessionId !== splitRightSessionId) {
         disableSplitScreen();
     }
@@ -7886,7 +7890,7 @@ class TopologyViewer {
         this.animationFrameId = null;
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
-        this.starfield = null;
+        this.starfields = [];
         this.gateway = null;
     }
 
@@ -7895,9 +7899,15 @@ class TopologyViewer {
         const width = window.innerWidth;
         const height = window.innerHeight;
 
+        // Hide inner glowing border and dark overlay immediately on workbench load
+        const termContainer = document.querySelector('.terminal-container');
+        if (termContainer) {
+            termContainer.classList.add('in-workbench');
+        }
+
         // 1. Scene & Camera
         this.scene = new THREE.Scene();
-        this.scene.fog = new THREE.FogExp2(0x050608, 0.008);
+        this.scene.fog = new THREE.FogExp2(0x050608, 0.006);
         this.camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
         this.camera.position.set(0, 45, 95);
 
@@ -7919,29 +7929,60 @@ class TopologyViewer {
         }
 
         // 4. Lights
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
         this.scene.add(ambientLight);
-        const dirLight = new THREE.DirectionalLight(0x00f2fe, 1.2);
+        const dirLight = new THREE.DirectionalLight(0x00f2fe, 1.5);
         dirLight.position.set(20, 50, 20);
         this.scene.add(dirLight);
 
-        // 5. Starfield Background
-        const starsGeometry = new THREE.BufferGeometry();
-        const starsCount = 1000;
-        const starsPositions = new Float32Array(starsCount * 3);
-        for (let i = 0; i < starsCount * 3; i++) {
-            starsPositions[i] = (Math.random() - 0.5) * 350;
+        // 5. Dual-Color Nebula Starfield
+        this.starfields = [];
+        
+        // Group 1: Cyan Nebula Disk
+        const starsGeo1 = new THREE.BufferGeometry();
+        const count1 = 2000;
+        const pos1 = new Float32Array(count1 * 3);
+        for (let i = 0; i < count1; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const r = 15 + Math.random() * 150;
+            pos1[i * 3] = Math.cos(theta) * r + (Math.random() - 0.5) * 8;
+            pos1[i * 3 + 1] = (Math.random() - 0.5) * 12; // thin disk
+            pos1[i * 3 + 2] = Math.sin(theta) * r + (Math.random() - 0.5) * 8;
         }
-        starsGeometry.setAttribute('position', new THREE.BufferAttribute(starsPositions, 3));
-        const starsMaterial = new THREE.PointsMaterial({
+        starsGeo1.setAttribute('position', new THREE.BufferAttribute(pos1, 3));
+        const starMat1 = new THREE.PointsMaterial({
             color: 0x00f2fe,
-            size: 0.9,
+            size: 0.8,
             sizeAttenuation: true,
             transparent: true,
             opacity: 0.5
         });
-        this.starfield = new THREE.Points(starsGeometry, starsMaterial);
-        this.scene.add(this.starfield);
+        const starfield1 = new THREE.Points(starsGeo1, starMat1);
+        this.scene.add(starfield1);
+        this.starfields.push({ points: starfield1, speed: 0.0003 });
+
+        // Group 2: Purple Nebula Belt (slanted)
+        const starsGeo2 = new THREE.BufferGeometry();
+        const count2 = 2000;
+        const pos2 = new Float32Array(count2 * 3);
+        for (let i = 0; i < count2; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const r = 25 + Math.random() * 180;
+            pos2[i * 3] = Math.cos(theta) * r;
+            pos2[i * 3 + 1] = (Math.random() - 0.5) * 25 + (pos2[i * 3] * 0.08); // slanted
+            pos2[i * 3 + 2] = Math.sin(theta) * r;
+        }
+        starsGeo2.setAttribute('position', new THREE.BufferAttribute(pos2, 3));
+        const starMat2 = new THREE.PointsMaterial({
+            color: 0xa855f7, // Purple
+            size: 0.9,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.4
+        });
+        const starfield2 = new THREE.Points(starsGeo2, starMat2);
+        this.scene.add(starfield2);
+        this.starfields.push({ points: starfield2, speed: -0.0002 }); // rotates opposite
 
         // 6. Build Grid and Connections
         this.buildTopology();
@@ -7974,13 +8015,10 @@ class TopologyViewer {
         this.nodes = [];
         this.lines = [];
 
-        // Central Gateway Node
-        const gatewayGeo = new THREE.SphereGeometry(6, 32, 32);
-        const gatewayMat = new THREE.MeshPhongMaterial({
-            color: 0x00f2fe,
-            emissive: 0x002233,
-            shininess: 50,
-            wireframe: true
+        // Central Gateway Node (Small glowing core instead of giant wireframe)
+        const gatewayGeo = new THREE.SphereGeometry(1.2, 16, 16);
+        const gatewayMat = new THREE.MeshBasicMaterial({
+            color: 0x00f2fe
         });
         this.gateway = new THREE.Mesh(gatewayGeo, gatewayMat);
         this.gateway.position.set(0, 0, 0);
@@ -7992,13 +8030,13 @@ class TopologyViewer {
 
         connections.forEach((conn, index) => {
             const angle = (index / connections.length) * Math.PI * 2;
-            const radius = 35 + Math.random() * 5;
+            const radius = 30 + Math.random() * 5;
             const x = Math.cos(angle) * radius;
             const z = Math.sin(angle) * radius;
-            const y = (Math.random() - 0.5) * 8;
+            const y = (Math.random() - 0.5) * 6;
 
-            // Host spherical node
-            const nodeGeo = new THREE.SphereGeometry(2.8, 16, 16);
+            // Host spherical node (smaller, more aesthetic)
+            const nodeGeo = new THREE.SphereGeometry(0.9, 16, 16);
             const nodeMat = new THREE.MeshPhongMaterial({
                 color: 0x00ff88, // Default green
                 emissive: 0x002211,
@@ -8011,13 +8049,13 @@ class TopologyViewer {
 
             this.nodes.push({ mesh: nodeMesh, ip: conn.hostname, key: conn.key });
 
-            // Connection Lines
+            // Connection Lines (fainter, more sci-fi)
             const points = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(x, y, z)];
             const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
             const lineMat = new THREE.LineBasicMaterial({
                 color: 0x4facfe,
                 transparent: true,
-                opacity: 0.2
+                opacity: 0.1
             });
             const line = new THREE.Line(lineGeo, lineMat);
             this.scene.add(line);
@@ -8029,11 +8067,15 @@ class TopologyViewer {
         this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
         if (this.controls) this.controls.update();
         
-        // Slow rotations for background feeling
-        if (this.starfield) this.starfield.rotation.y += 0.0001;
+        // Rotating dual-color nebula starfield Y-axis
+        if (this.starfields) {
+            this.starfields.forEach(sf => {
+                if (sf.points) sf.points.rotation.y += sf.speed;
+            });
+        }
+        
         if (this.gateway) {
-            this.gateway.rotation.y += 0.002;
-            this.gateway.rotation.x += 0.001;
+            this.gateway.rotation.y += 0.005;
         }
         
         // Slowly rotate whole node structure slightly
