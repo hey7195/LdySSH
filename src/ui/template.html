@@ -13,8 +13,8 @@
         body { font-family: 'Inter', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; }
         .app { display: flex; height: 100vh; }
     </style>
-    <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-    <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/build/three.min.js" defer></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js" defer></script>
 </head>
 <body>
     <div class="app">
@@ -24,8 +24,8 @@
             </div>
             
             <div class="sidebar-content">
-                <div class="3d-topo-entry" style="padding: 10px 15px;">
-                    <button class="connect-btn" style="background: linear-gradient(135deg, #00f2fe, #4facfe); width: 100%;" onclick="openTopologyDrawer()">
+                <div class="three-d-topo-entry">
+                    <button class="connect-btn topo-btn-3d" onclick="openTopologyDrawer()">
                         🌐 3D 集群拓扑看板
                     </button>
                 </div>
