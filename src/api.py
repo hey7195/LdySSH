@@ -91,26 +91,26 @@ class PrismSSHAPI:
                         for host, (delay, status) in zip(hosts, results):
                             hostname, _ = host
                             try:
-                                # 广播给 WebGL 前端
-                                self._window.evaluate_js(
+                                # 广播给 WebGL 前端，使用 json.dumps 确保安全
+                                js_call = (
                                     f'if (typeof window.updateNodeDelay === "function") {{ '
-                                    f'window.updateNodeDelay("{hostname}", {delay}, "{status}"); }}'
+                                    f'window.updateNodeDelay({json.dumps(hostname)}, {delay}, {json.dumps(status)}); }}'
                                 )
+                                self._window.evaluate_js(js_call)
                             except Exception:
                                 pass
             except Exception as e:
                 self.logger.error(f"Error in topology heartbeat loop: {e}")
                 
-            time.sleep(8) # 每 8 秒扫描一次
+            self._heartbeat_stop_event.wait(8) # 每 8 秒扫描一次，如果触发停止事件则即刻退出
 
     def _ping_host(self, host_info) -> tuple:
         hostname, port = host_info
         start_time = time.perf_counter()
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(1.5)
-            s.connect((hostname, port))
-            s.close()
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1.5)
+                s.connect((hostname, port))
             delay = int((time.perf_counter() - start_time) * 1000)
             return (delay, 'connected')
         except Exception:
@@ -1543,6 +1543,11 @@ class PrismSSHAPI:
     def cleanup(self):
         """Cleanup resources on shutdown."""
         self.logger.info("API: Cleaning up resources")
+        
+        # Stop 3D topology heartbeat thread
+        if hasattr(self, '_heartbeat_stop_event'):
+            self._heartbeat_stop_event.set()
+        self._window = None
         
         # Stop file watcher
         if hasattr(self, 'file_watcher'):

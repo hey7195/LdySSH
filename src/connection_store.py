@@ -3,6 +3,7 @@
 import json
 import os
 import base64
+import threading
 from typing import Dict, Any, Optional
 from pathlib import Path
 
@@ -33,6 +34,7 @@ class ConnectionStore:
         self.logger = Logger.get_logger(__name__)
         self.cipher = self._get_cipher() if ENCRYPTION_AVAILABLE else None
         self.encryption_warning_shown = False
+        self._lock = threading.RLock()
         
         if not ENCRYPTION_AVAILABLE:
             self.logger.warning(
@@ -114,90 +116,94 @@ class ConnectionStore:
     
     def save_connection(self, connection: Dict[str, Any]) -> bool:
         """Save a connection profile."""
-        try:
-            connections = self.load_connections()
-            
-            # Encrypt password if encryption is available and password exists
-            if self.cipher and connection.get('password'):
-                try:
-                    connection['password'] = self.cipher.encrypt(
-                        connection['password'].encode()
-                    ).decode()
-                    connection['password_encrypted'] = True
-                except Exception as e:
-                    self.logger.error(f"Error encrypting password: {e}")
-                    # Store in plain text if encryption fails
-                    connection['password_encrypted'] = False
-            
-            # Use hostname@username as key
-            key = f"{connection['hostname']}@{connection['username']}"
-            connections[key] = connection
-            
-            # Ensure directory exists before writing
-            self._ensure_config_dir()
-            
-            with open(self.config.connections_file, 'w') as f:
-                json.dump(connections, f, indent=2)
+        with self._lock:
+            try:
+                connections = self.load_connections()
                 
-            self.logger.info(f"Connection saved: {key}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error saving connection: {e}")
-            return False
+                # Encrypt password if encryption is available and password exists
+                if self.cipher and connection.get('password'):
+                    try:
+                        connection['password'] = self.cipher.encrypt(
+                            connection['password'].encode()
+                        ).decode()
+                        connection['password_encrypted'] = True
+                    except Exception as e:
+                        self.logger.error(f"Error encrypting password: {e}")
+                        # Store in plain text if encryption fails
+                        connection['password_encrypted'] = False
+                
+                # Use hostname@username as key
+                key = f"{connection['hostname']}@{connection['username']}"
+                connections[key] = connection
+                
+                # Ensure directory exists before writing
+                self._ensure_config_dir()
+                
+                with open(self.config.connections_file, 'w') as f:
+                    json.dump(connections, f, indent=2)
+                    
+                self.logger.info(f"Connection saved: {key}")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"Error saving connection: {e}")
+                return False
     
     def load_connections(self) -> Dict[str, Any]:
         """Load all saved connections."""
-        if not Path(self.config.connections_file).exists():
-            return {}
-        
-        try:
-            with open(self.config.connections_file, 'r') as f:
-                connections = json.load(f)
+        with self._lock:
+            if not Path(self.config.connections_file).exists():
+                return {}
             
-            # Decrypt passwords if cipher is available
-            for key, conn in connections.items():
-                if conn.get('password_encrypted') and conn.get('password') and self.cipher:
-                    try:
-                        conn['password'] = self.cipher.decrypt(
-                            conn['password'].encode()
-                        ).decode()
-                    except Exception as e:
-                        self.logger.error(f"Error decrypting password for {key}: {e}")
-                        # If decryption fails, remove the password
+            try:
+                with open(self.config.connections_file, 'r') as f:
+                    connections = json.load(f)
+                
+                # Decrypt passwords if cipher is available
+                for key, conn in connections.items():
+                    if conn.get('password_encrypted') and conn.get('password') and self.cipher:
+                        try:
+                            conn['password'] = self.cipher.decrypt(
+                                conn['password'].encode()
+                            ).decode()
+                        except Exception as e:
+                            self.logger.error(f"Error decrypting password for {key}: {e}")
+                            # If decryption fails, remove the password
+                            conn['password'] = ''
+                        conn.pop('password_encrypted', None)
+                    elif conn.get('password_encrypted') and not self.cipher:
+                        # Encrypted password but no cipher available
+                        self.logger.warning(
+                            f"Cannot decrypt password for {key} (install cryptography package)"
+                        )
                         conn['password'] = ''
-                    conn.pop('password_encrypted', None)
-                elif conn.get('password_encrypted') and not self.cipher:
-                    # Encrypted password but no cipher available
-                    self.logger.warning(
-                        f"Cannot decrypt password for {key} (install cryptography package)"
-                    )
-                    conn['password'] = ''
-                    conn.pop('password_encrypted', None)
-            
-            return connections
-        except Exception as e:
-            self.logger.error(f"Error loading connections: {e}")
-            return {}
+                        conn.pop('password_encrypted', None)
+                
+                return connections
+            except Exception as e:
+                self.logger.error(f"Error loading connections: {e}")
+                return {}
     
     def delete_connection(self, key: str) -> bool:
         """Delete a saved connection."""
-        try:
-            connections = self.load_connections()
-            if key in connections:
-                del connections[key]
-                with open(self.config.connections_file, 'w') as f:
-                    json.dump(connections, f, indent=2)
-                self.logger.info(f"Connection deleted: {key}")
-                return True
-            else:
-                self.logger.warning(f"Connection not found: {key}")
+        with self._lock:
+            try:
+                connections = self.load_connections()
+                if key in connections:
+                    del connections[key]
+                    with open(self.config.connections_file, 'w') as f:
+                        json.dump(connections, f, indent=2)
+                    self.logger.info(f"Connection deleted: {key}")
+                    return True
+                else:
+                    self.logger.warning(f"Connection not found: {key}")
+                    return False
+            except Exception as e:
+                self.logger.error(f"Error deleting connection: {e}")
                 return False
-        except Exception as e:
-            self.logger.error(f"Error deleting connection: {e}")
-            return False
     
     def get_connection(self, key: str) -> Optional[Dict[str, Any]]:
         """Get a specific connection by key."""
-        connections = self.load_connections()
-        return connections.get(key)
+        with self._lock:
+            connections = self.load_connections()
+            return connections.get(key)
