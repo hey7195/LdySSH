@@ -1,3 +1,4 @@
+let globalSavedConnections = [];
 let currentSessionId = null;
 let currentTerminal = null;
 let sessions = {};
@@ -1587,7 +1588,8 @@ async function loadSavedConnections() {
     try {
         console.log('Loading saved connections...');
         const response = await window.pywebview.api.get_saved_connections();
-        const connections = JSON.parse(response);
+        const connections = JSON.parse(response);
+        globalSavedConnections = connections;
         console.log('Loaded connections:', connections.length, 'items');
         updateSavedConnectionsList(connections);
     } catch (error) {
@@ -3739,4 +3741,204 @@ function showCustomModal(title, isConfirm = false) {
             }, { once: true });
         }
     });
+}
+
+let topoViewer = null;
+
+function openTopologyDrawer() {
+    const drawer = document.getElementById('topologyDrawer');
+    if (!drawer) return;
+    drawer.classList.add('open');
+    if (!topoViewer) {
+        topoViewer = new TopologyViewer('threejsContainer');
+        topoViewer.init();
+    }
+    topoViewer.animate();
+}
+
+function closeTopologyDrawer() {
+    const drawer = document.getElementById('topologyDrawer');
+    if (!drawer) return;
+    drawer.classList.remove('open');
+    if (topoViewer) {
+        topoViewer.stop();
+    }
+}
+
+class TopologyViewer {
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.controls = null;
+        this.nodes = [];
+        this.lines = [];
+        this.animationFrameId = null;
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
+        this.starfield = null;
+    }
+
+    init() {
+        if (!this.container) return;
+        const width = this.container.clientWidth || window.innerWidth;
+        const height = this.container.clientHeight || (window.innerHeight * 0.6);
+
+        // 1. Scene & Camera
+        this.scene = new THREE.Scene();
+        this.scene.fog = new THREE.FogExp2(0x0a0a0c, 0.012);
+        this.camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
+        this.camera.position.set(0, 40, 80);
+
+        // 2. WebGL Renderer
+        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        this.renderer.setSize(width, height);
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.container.innerHTML = ''; // 清空容器
+        this.container.appendChild(this.renderer.domElement);
+
+        // 3. Orbit Controls (如果 THREE.OrbitControls 可用)
+        if (THREE.OrbitControls) {
+            this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.05;
+            this.controls.maxPolarAngle = Math.PI / 2 - 0.05; // 限制仰角防穿帮
+        }
+
+        // 4. Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        this.scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0x00f2fe, 1.2);
+        dirLight.position.set(20, 40, 20);
+        this.scene.add(dirLight);
+
+        // 5. Starfield Background
+        const starsGeometry = new THREE.BufferGeometry();
+        const starsCount = 800;
+        const starsPositions = new Float32Array(starsCount * 3);
+        for (let i = 0; i < starsCount * 3; i++) {
+            starsPositions[i] = (Math.random() - 0.5) * 250;
+        }
+        starsGeometry.setAttribute('position', new THREE.BufferAttribute(starsPositions, 3));
+        const starsMaterial = new THREE.PointsMaterial({ color: 0x4facfe, size: 1.2, sizeAttenuation: true });
+        this.starfield = new THREE.Points(starsGeometry, starsMaterial);
+        this.scene.add(this.starfield);
+
+        // 6. Build Grid and Connections
+        this.buildTopology();
+
+        // 7. Event listeners
+        this.onResizeHandler = this.onWindowResize.bind(this);
+        this.onClickHandler = this.onDocumentClick.bind(this);
+        window.addEventListener('resize', this.onResizeHandler);
+        this.renderer.domElement.addEventListener('click', this.onClickHandler);
+    }
+
+    buildTopology() {
+        // 清除原有物体
+        this.nodes.forEach(n => this.scene.remove(n.mesh));
+        this.lines.forEach(l => this.scene.remove(l));
+        this.nodes = [];
+        this.lines = [];
+
+        // 核心网关节点
+        const gatewayGeo = new THREE.SphereGeometry(5, 32, 32);
+        const gatewayMat = new THREE.MeshPhongMaterial({
+            color: 0x00f2fe,
+            emissive: 0x003344,
+            shininess: 50,
+            wireframe: true
+        });
+        const gateway = new THREE.Mesh(gatewayGeo, gatewayMat);
+        gateway.position.set(0, 0, 0);
+        this.scene.add(gateway);
+
+        // 读取已缓存的连接
+        const connections = globalSavedConnections || [];
+        if (connections.length === 0) return;
+
+        connections.forEach((conn, index) => {
+            const angle = (index / connections.length) * Math.PI * 2;
+            const radius = 30 + Math.random() * 8;
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            const y = (Math.random() - 0.5) * 12;
+
+            // 主机节点球体
+            const nodeGeo = new THREE.SphereGeometry(2.5, 16, 16);
+            const nodeMat = new THREE.MeshPhongMaterial({
+                color: 0x00ff88, // 绿色代表连通状态良好
+                emissive: 0x002211,
+                shininess: 30
+            });
+            const nodeMesh = new THREE.Mesh(nodeGeo, nodeMat);
+            nodeMesh.position.set(x, y, z);
+            nodeMesh.userData = { key: conn.key, ip: conn.hostname, name: conn.name || conn.hostname };
+            this.scene.add(nodeMesh);
+
+            this.nodes.push({ mesh: nodeMesh, ip: conn.hostname, key: conn.key });
+
+            // 绘制连接线
+            const points = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(x, y, z)];
+            const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+            const lineMat = new THREE.LineBasicMaterial({
+                color: 0x4facfe,
+                transparent: true,
+                opacity: 0.35
+            });
+            const line = new THREE.Line(lineGeo, lineMat);
+            this.scene.add(line);
+            this.lines.push(line);
+        });
+    }
+
+    animate() {
+        this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
+        if (this.controls) this.controls.update();
+        if (this.starfield) this.starfield.rotation.y += 0.0004;
+        if (this.renderer && this.scene && this.camera) {
+            this.renderer.render(this.scene, this.camera);
+        }
+    }
+
+    stop() {
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+        window.removeEventListener('resize', this.onResizeHandler);
+        if (this.renderer && this.renderer.domElement) {
+            this.renderer.domElement.removeEventListener('click', this.onClickHandler);
+        }
+    }
+
+    onWindowResize() {
+        if (!this.container || !this.camera || !this.renderer) return;
+        const width = this.container.clientWidth;
+        const height = this.container.clientHeight;
+        this.camera.aspect = width / height;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(width, height);
+    }
+
+    onDocumentClick(event) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+        const intersects = this.raycaster.intersectObjects(this.nodes.map(n => n.mesh));
+
+        if (intersects.length > 0) {
+            const selectedMesh = intersects[0].object;
+            const connKey = selectedMesh.userData.key;
+            console.log("Selected node in 3D:", selectedMesh.userData.ip);
+            
+            // 点击节点触发高亮并连接
+            if (connKey) {
+                quickConnect(connKey);
+            }
+        }
+    }
 }
