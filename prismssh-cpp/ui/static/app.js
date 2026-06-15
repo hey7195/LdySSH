@@ -3794,7 +3794,8 @@ async function connect() {
                 username,
                 name: connectionName,
                 connected: true,
-                connectionParams: connectionParams
+                connectionParams: connectionParams,
+                connectTime: Date.now()
             };
 
             // Create terminal (this will update the sessions object)
@@ -6915,6 +6916,14 @@ function triggerSftpSyncDebounced(sessionId) {
 // Real-time SFTP Sync from Terminal Screen Prompt
 function syncSftpFromTerminalPrompt(sessionId) {
     if (!sessionId.startsWith('ssh_') || !currentTerminal) return;
+    
+    // Avoid early path sniffing/sftp syncing in the first 5 seconds of session connection
+    // to prevent blocking the WebView main thread during SSH/SFTP handshake lockup in C++
+    const session = sessions[sessionId];
+    if (session && session.connectTime && (Date.now() - session.connectTime < 5000)) {
+        return;
+    }
+
     try {
         const term = currentTerminal;
         const buffer = term.buffer.active;
