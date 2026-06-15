@@ -4423,10 +4423,8 @@ async function pollSessionOutput(sessionId) {
                             }
                         }
                         
-                        // Real-time SFTP Sync from Terminal Screen Prompt (delayed to allow Xterm render)
-                        setTimeout(() => {
-                            syncSftpFromTerminalPrompt(sessionId);
-                        }, 80);
+                        // Real-time SFTP Sync from Terminal Screen Prompt (debounced to prevent main thread blocking)
+                        triggerSftpSyncDebounced(sessionId);
                         
                         // Smart cd command detection fallback to sync SFTP when OSC 7 is not configured on remote host
                         if (sessionId.startsWith('ssh_') && filtered) {
@@ -4554,9 +4552,7 @@ window.handlePushOutput = function(sessionId, base64Output) {
                     }
                 }
                 
-                setTimeout(() => {
-                    syncSftpFromTerminalPrompt(sessionId);
-                }, 80);
+                triggerSftpSyncDebounced(sessionId);
                 
                 if (sessionId.startsWith('ssh_') && filtered) {
                     const cdRegex = /(?:^|\r?\n|;)\s*cd\s+([^\r\n;&\s]+)/g;
@@ -6905,6 +6901,17 @@ function handleTerminalSearch(e) {
     }
 }
 
+let sftpSyncTimers = {};
+function triggerSftpSyncDebounced(sessionId) {
+    if (sftpSyncTimers[sessionId]) {
+        clearTimeout(sftpSyncTimers[sessionId]);
+    }
+    sftpSyncTimers[sessionId] = setTimeout(() => {
+        syncSftpFromTerminalPrompt(sessionId);
+        delete sftpSyncTimers[sessionId];
+    }, 120);
+}
+
 // Real-time SFTP Sync from Terminal Screen Prompt
 function syncSftpFromTerminalPrompt(sessionId) {
     if (!sessionId.startsWith('ssh_') || !currentTerminal) return;
@@ -7056,6 +7063,7 @@ function cancelActiveZmodem() {
     cleanupZmodem(term);
 }
 
+let zmodemWarned = false;
 function getZmodemSentinel(sessionId) {
     let zmodemLib = null;
     if (typeof zmodem !== 'undefined') {
@@ -7065,7 +7073,10 @@ function getZmodemSentinel(sessionId) {
     }
     
     if (!zmodemLib) {
-        console.warn('zmodem.js is not loaded.');
+        if (!zmodemWarned) {
+            console.warn('zmodem.js is not loaded.');
+            zmodemWarned = true;
+        }
         return null;
     }
     
@@ -7896,6 +7907,8 @@ class TopologyViewer {
         this.sunAtmosphere = null;
         this.sunParticles = null;
         this.orbits = [];
+        this.lastFrameTime = 0;
+        this.fpsInterval = 1000 / 30; // Limit WebGL backdrop rendering to 30 FPS to save CPU/GPU resource
     }
 
     createSunGlowTexture() {
@@ -8707,6 +8720,16 @@ class TopologyViewer {
 
     animate() {
         this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
+        
+        const now = performance.now();
+        const elapsed = now - this.lastFrameTime;
+        
+        if (elapsed < this.fpsInterval) {
+            return;
+        }
+        
+        this.lastFrameTime = now - (elapsed % this.fpsInterval);
+
         if (this.controls) this.controls.update();
 
         // 1. 太阳表面流动与自转 (利用 UV 移动创造不断喷涌流出的岩浆效果)
