@@ -6077,3 +6077,216 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     display: none !important;
 }
 
+/* ==========================================================================
+   LdySSH v2.0 - Connection Grouping & Batch Operations Styling
+   ========================================================================== */
+
+.connections-home-shell {
+    display: flex !important;
+    flex-direction: row;
+    gap: 24px;
+    max-width: 1200px !important;
+    width: 100%;
+}
+
+.connections-home-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 1. 左侧分组边栏 */
+.connections-groups-sidebar {
+    width: 200px;
+    flex-shrink: 0;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: auto !important; /* 防击穿 */
+    align-self: flex-start;
+    box-sizing: border-box;
+}
+
+.group-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-radius: 8px;
+    color: #94a3b8;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+    border: 1px solid transparent;
+}
+
+.group-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #f1f5f9;
+}
+
+.group-item.active {
+    background: rgba(56, 189, 248, 0.15);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    color: #38bdf8;
+    font-weight: 600;
+}
+
+.group-count {
+    font-size: 11px;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 2px 6px;
+    border-radius: 10px;
+    color: #64748b;
+}
+
+.group-item.active .group-count {
+    background: rgba(56, 189, 248, 0.2);
+    color: #38bdf8;
+}
+
+/* 2. 批量操作栏 */
+.batch-action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    font-size: 13px;
+    color: #94a3b8;
+    pointer-events: auto !important; /* 防击穿 */
+    box-sizing: border-box;
+}
+
+.batch-action-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.batch-action-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.batch-checkbox-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    color: #e2e8f0;
+}
+
+.batch-checkbox-wrapper input[type="checkbox"] {
+    cursor: pointer;
+    width: 14px;
+    height: 14px;
+    accent-color: #38bdf8;
+}
+
+.batch-connect-btn {
+    background: linear-gradient(135deg, #00f2fe, #4facfe);
+    border: none;
+    color: #0f172a;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.batch-connect-btn:hover {
+    opacity: 0.95;
+    transform: translateY(-1px);
+    box-shadow: 0 0 12px rgba(0, 242, 254, 0.4);
+}
+
+.batch-connect-btn:disabled {
+    background: #334155 !important;
+    color: #64748b !important;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* 3. 卡片上的勾选框绝对定位 */
+.home-connection-card {
+    position: relative !important;
+}
+
+.card-select-wrapper {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: auto !important; /* 防击穿 */
+}
+
+/* 当卡片 hover，或者本身已被勾选时，显示勾选框 */
+.home-connection-card:hover .card-select-wrapper,
+.home-connection-card.selected .card-select-wrapper {
+    opacity: 1;
+}
+
+.card-select-checkbox {
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    accent-color: #38bdf8;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+/* 4. 响应式布局优化 */
+@media (max-width: 960px) {
+    .connections-home-shell {
+        flex-direction: column !important;
+        gap: 16px;
+    }
+    
+    .connections-groups-sidebar {
+        width: 100% !important;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-self: stretch;
+        padding: 8px;
+        gap: 6px;
+    }
+    
+    .group-item {
+        padding: 6px 10px;
+        font-size: 12px;
+        flex-grow: 1;
+        justify-content: center;
+        gap: 6px;
+    }
+    
+    .group-count {
+        margin-left: 4px;
+    }
+}
+
+

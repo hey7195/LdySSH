@@ -72,6 +72,8 @@ let highlightRules = [];
 let cachedHighlightRegex = null;
 let activeHighlightRules = [];
 let connectionsHomeView = 'grid';
+let currentSelectedGroup = 'All';
+let selectedConnectionKeys = new Set();
 let isPrivacyMode = true;
 const RECENT_CONNECTION_LIMIT = 5;
 let systemMonitorInterval = null;
@@ -2803,10 +2805,24 @@ function renderConnectionsHome() {
     const search = document.getElementById('homeConnectionSearch');
     if (!container || !empty) return;
 
+    // 渲染分组侧栏
+    renderGroupsSidebar();
+
     const query = (search?.value || '').trim().toLowerCase();
+    
+    // 1. 进行分组过滤
+    let filtered = savedConnectionsCache;
+    if (currentSelectedGroup !== 'All') {
+        filtered = savedConnectionsCache.filter(conn => {
+            const g = conn.group || '未分组';
+            return g === currentSelectedGroup;
+        });
+    }
+
+    // 2. 进行搜索过滤
     const connections = query
-        ? savedConnectionsCache.filter(conn => getConnectionSearchHaystack(conn).includes(query))
-        : savedConnectionsCache;
+        ? filtered.filter(conn => getConnectionSearchHaystack(conn).includes(query))
+        : filtered;
 
     container.classList.toggle('list-view', connectionsHomeView === 'list');
     document.querySelectorAll('.home-view-switch button').forEach(button => {
@@ -2819,10 +2835,15 @@ function renderConnectionsHome() {
     connections.forEach(conn => {
         const parts = getConnectionDisplayParts(conn);
         const card = document.createElement('div');
-        card.className = 'home-connection-card';
+        const isSelected = selectedConnectionKeys.has(conn.key);
+        card.className = `home-connection-card ${isSelected ? 'selected' : ''}`;
         card.onclick = () => quickConnectSavedConnection(conn.key);
         card.oncontextmenu = (event) => showHomeConnectionMenu(event, conn.key);
         card.innerHTML = `
+            <!-- 卡片勾选框 -->
+            <div class="card-select-wrapper">
+                <input type="checkbox" class="card-select-checkbox" data-key="${escapeHtml(conn.key)}" ${isSelected ? 'checked' : ''} onclick="handleCardSelect(event, '${escapeJs(conn.key)}')" />
+            </div>
             <div class="home-connection-top">
                 <span class="home-connection-icon">~</span>
                 <span class="home-connection-protocol">SSH</span>
@@ -2837,6 +2858,193 @@ function renderConnectionsHome() {
         `;
         container.appendChild(card);
     });
+
+    // 更新批量操作栏状态
+    updateBatchActionBar();
+}
+
+function renderGroupsSidebar() {
+    const sidebar = document.getElementById('homeGroupsSidebar');
+    if (!sidebar) return;
+
+    // 1. 统计各分组的数量
+    const groupCounts = {};
+    let totalCount = 0;
+    savedConnectionsCache.forEach(conn => {
+        const groupName = conn.group || '未分组';
+        groupCounts[groupName] = (groupCounts[groupName] || 0) + 1;
+        totalCount++;
+    });
+
+    // 2. 将分组排序，"未分组"排最后，其他字母排序
+    const groups = Object.keys(groupCounts).sort((a, b) => {
+        if (a === '未分组') return 1;
+        if (b === '未分组') return -1;
+        return a.localeCompare(b, 'zh');
+    });
+    
+    let html = `
+        <div class="group-item ${currentSelectedGroup === 'All' ? 'active' : ''}" onclick="selectGroup('All')">
+            <span class="group-name">📁 全部主机</span>
+            <span class="group-count">${totalCount}</span>
+        </div>
+    `;
+
+    groups.forEach(groupName => {
+        html += `
+            <div class="group-item ${currentSelectedGroup === groupName ? 'active' : ''}" onclick="selectGroup('${escapeJs(groupName)}')">
+                <span class="group-name">🏷️ ${escapeHtml(groupName)}</span>
+                <span class="group-count">${groupCounts[groupName]}</span>
+            </div>
+        `;
+    });
+
+    sidebar.innerHTML = html;
+}
+
+function selectGroup(groupName) {
+    currentSelectedGroup = groupName;
+    selectedConnectionKeys.clear(); // 切换分组清空已选
+    renderConnectionsHome();
+}
+
+function handleCardSelect(event, key) {
+    event.stopPropagation(); // 阻止卡片连接事件触发
+    const checked = event.target.checked;
+    if (checked) {
+        selectedConnectionKeys.add(key);
+    } else {
+        selectedConnectionKeys.delete(key);
+    }
+    
+    const card = event.target.closest('.home-connection-card');
+    if (card) {
+        card.classList.toggle('selected', checked);
+    }
+
+    updateBatchActionBar();
+}
+
+function updateBatchActionBar() {
+    const search = document.getElementById('homeConnectionSearch');
+    const query = (search?.value || '').trim().toLowerCase();
+    
+    // 获取当前过滤后的所有连接
+    let filtered = savedConnectionsCache;
+    if (currentSelectedGroup !== 'All') {
+        filtered = savedConnectionsCache.filter(conn => {
+            const g = conn.group || '未分组';
+            return g === currentSelectedGroup;
+        });
+    }
+    const filteredConnections = query
+        ? filtered.filter(conn => getConnectionSearchHaystack(conn).includes(query))
+        : filtered;
+
+    const totalInView = filteredConnections.length;
+    let selectedInViewCount = 0;
+    filteredConnections.forEach(conn => {
+        if (selectedConnectionKeys.has(conn.key)) {
+            selectedInViewCount++;
+        }
+    });
+
+    const selectAllCheckbox = document.getElementById('batchSelectAllCheckbox');
+    if (selectAllCheckbox) {
+        if (totalInView > 0 && selectedInViewCount === totalInView) {
+            selectAllCheckbox.checked = true;
+            selectAllCheckbox.indeterminate = false;
+        } else if (selectedInViewCount > 0) {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = true;
+        } else {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = false;
+        }
+    }
+
+    const connectBtn = document.getElementById('batchConnectBtn');
+    if (connectBtn) {
+        connectBtn.disabled = selectedInViewCount === 0;
+        connectBtn.innerHTML = `⚡ 一键连接 (${selectedInViewCount}台)`;
+    }
+}
+
+function toggleBatchSelectAll(checked) {
+    const search = document.getElementById('homeConnectionSearch');
+    const query = (search?.value || '').trim().toLowerCase();
+    
+    let filtered = savedConnectionsCache;
+    if (currentSelectedGroup !== 'All') {
+        filtered = savedConnectionsCache.filter(conn => {
+            const g = conn.group || '未分组';
+            return g === currentSelectedGroup;
+        });
+    }
+    const filteredConnections = query
+        ? filtered.filter(conn => getConnectionSearchHaystack(conn).includes(query))
+        : filtered;
+
+    filteredConnections.forEach(conn => {
+        if (checked) {
+            selectedConnectionKeys.add(conn.key);
+        } else {
+            selectedConnectionKeys.delete(conn.key);
+        }
+    });
+
+    renderConnectionsHome();
+}
+
+async function batchConnectSelected() {
+    if (selectedConnectionKeys.size === 0) return;
+    
+    if (selectedConnectionKeys.size > 10) {
+        showToast('批量连接单次上限为 10 台主机！', 'warning');
+        return;
+    }
+
+    const keysToConnect = Array.from(selectedConnectionKeys);
+    showToast(`正在启动批量连接，共 ${keysToConnect.length} 台主机...`, 'info');
+
+    // 逐台发起连接，非阻塞，平滑间隔 200ms
+    for (const key of keysToConnect) {
+        const conn = savedConnectionsCache.find(c => c.key === key);
+        if (!conn) continue;
+        
+        const connectionParams = {
+            hostname: conn.hostname,
+            port: parseInt(conn.port || 22),
+            username: conn.username,
+            authType: conn.authType || 'password',
+            password: conn.password || null,
+            keyPath: conn.keyPath || null,
+            keyPassphrase: conn.keyPassphrase || null,
+            save: false,
+            name: conn.name || conn.hostname,
+            group: conn.group || '未分组',
+            jumpHost: conn.jumpHost || '',
+            jumpPort: parseInt(conn.jumpPort || 22),
+            jumpUser: conn.jumpUser || '',
+            jumpPass: conn.jumpPass || '',
+            jumpKey: conn.jumpKey || '',
+            jumpKeyPassphrase: conn.jumpKeyPassphrase || '',
+            proxyType: conn.proxyType || 'none',
+            proxyHost: conn.proxyHost || '',
+            proxyPort: parseInt(conn.proxyPort || 1080),
+            proxyUser: conn.proxyUser || '',
+            proxyPass: conn.proxyPass || ''
+        };
+
+        connectWithParams(connectionParams, true).catch(err => {
+            console.error(`批量连接 ${conn.name || conn.hostname} 失败:`, err);
+        });
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    // 连完清空已选
+    selectedConnectionKeys.clear();
+    renderConnectionsHome();
 }
 
 function showHomeConnectionMenu(event, key) {
@@ -2970,8 +3178,9 @@ async function loadConnection(key) {
         return { loaded: false, passwordUnavailable: false };
     }
 
-    document.getElementById('connectionName').value = conn.name || '';
-    document.getElementById('hostname').value = conn.hostname;
+    if (document.getElementById('connectionName')) document.getElementById('connectionName').value = conn.name || '';
+    if (document.getElementById('connectionGroup')) document.getElementById('connectionGroup').value = conn.group || '';
+    if (document.getElementById('hostname')) document.getElementById('hostname').value = conn.hostname;
     document.getElementById('port').value = conn.port || 22;
     document.getElementById('username').value = conn.username;
     document.getElementById('saveConnection').checked = true;
@@ -3746,8 +3955,80 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+async function connectWithParams(connectionParams, isBatch = false) {
+    if (!isBatch) {
+        document.getElementById('welcomeScreen').style.display = 'none';
+        document.getElementById('connectingScreen').style.display = 'block';
+    }
+
+    try {
+        const sessionId = await window.pywebview.api.create_session();
+        const result = await connectWithHostVerification(sessionId, connectionParams);
+
+        if (result.success) {
+            sessions[sessionId] = {
+                id: sessionId,
+                hostname: connectionParams.hostname,
+                username: connectionParams.username,
+                name: connectionParams.name,
+                connected: true,
+                connectionParams: connectionParams,
+                connectTime: Date.now()
+            };
+
+            createTerminalForSession(sessionId, connectionParams.hostname);
+
+            updateSessionsList();
+            updateSessionTabs();
+            switchToSession(sessionId);
+
+            startOutputPolling(sessionId);
+
+            if (connectionParams.save) {
+                await loadSavedConnections();
+            }
+
+            const appNode = document.querySelector('.app');
+            if (appNode) {
+                appNode.classList.add('ssh-sidebar-collapsed');
+            }
+            if (typeof openTool === 'function') {
+                openTool('commands');
+            }
+            return { success: true, sessionId };
+        } else {
+            console.error('Connection failed:', result.error);
+            if (isBatch) {
+                showToast(`连接 ${connectionParams.name || connectionParams.hostname} 失败: ${result.error || '未知错误'}`, 'error');
+            } else {
+                alert(formatConnectionError(result.error));
+                document.getElementById('splashScreen').style.display = 'none';
+                document.getElementById('connectingScreen').style.display = 'none';
+                showConnectionsHome();
+            }
+            return { success: false, error: result.error };
+        }
+    } catch (error) {
+        console.error('Connection error:', error);
+        if (isBatch) {
+            showToast(`连接 ${connectionParams.name || connectionParams.hostname} 异常: ${error.message || error}`, 'error');
+        } else {
+            alert(formatConnectionError(error));
+            document.getElementById('splashScreen').style.display = 'none';
+            document.getElementById('connectingScreen').style.display = 'none';
+            showConnectionsHome();
+        }
+        return { success: false, error };
+    } finally {
+        if (!isBatch) {
+            document.getElementById('connectingScreen').style.display = 'none';
+        }
+    }
+}
+
 async function connect() {
     const connectionName = document.getElementById('connectionName').value.trim();
+    const group = document.getElementById('connectionGroup') ? document.getElementById('connectionGroup').value.trim() : '';
     const hostname = document.getElementById('hostname').value;
     const port = document.getElementById('port').value || 22;
     const username = document.getElementById('username').value;
@@ -3801,91 +4082,31 @@ async function connect() {
         return;
     }
 
-    // Show connecting screen
-    document.getElementById('welcomeScreen').style.display = 'none';
-    document.getElementById('connectingScreen').style.display = 'block';
+    const connectionParams = {
+        hostname,
+        port: parseInt(port),
+        username,
+        authType,
+        password,
+        keyPath,
+        keyPassphrase,
+        save: saveConnection,
+        name: connectionName,
+        group,
+        jumpHost,
+        jumpPort,
+        jumpUser,
+        jumpPass,
+        jumpKey,
+        jumpKeyPassphrase,
+        proxyType,
+        proxyHost,
+        proxyPort,
+        proxyUser,
+        proxyPass
+    };
 
-    try {
-        // Create new session
-        const sessionId = await window.pywebview.api.create_session();
-
-        const connectionParams = {
-            hostname,
-            port: parseInt(port),
-            username,
-            authType,
-            password,
-            keyPath,
-            keyPassphrase,
-            save: saveConnection,
-            name: connectionName,
-            // 传入堡垒机参数
-            jumpHost,
-            jumpPort,
-            jumpUser,
-            jumpPass,
-            jumpKey,
-            jumpKeyPassphrase,
-            // 传入代理参数
-            proxyType,
-            proxyHost,
-            proxyPort,
-            proxyUser,
-            proxyPass
-        };
-
-        // Connect (with host verification if needed)
-        const result = await connectWithHostVerification(sessionId, connectionParams);
-
-        if (result.success) {
-            // Add basic session info first
-            sessions[sessionId] = {
-                id: sessionId,
-                hostname,
-                username,
-                name: connectionName,
-                connected: true,
-                connectionParams: connectionParams,
-                connectTime: Date.now()
-            };
-
-            // Create terminal (this will update the sessions object)
-            createTerminalForSession(sessionId, hostname);
-
-            updateSessionsList();
-            updateSessionTabs();
-            switchToSession(sessionId);
-
-            // Start polling for output
-            startOutputPolling(sessionId);
-
-            // Reload saved connections if a new one was saved
-            if (saveConnection) {
-                await loadSavedConnections();
-            }
-
-            // Automatically hide SSH sidebar and show CMD panel upon successful connection
-            const appNode = document.querySelector('.app');
-            if (appNode) {
-                appNode.classList.add('ssh-sidebar-collapsed');
-            }
-            if (typeof openTool === 'function') {
-                openTool('commands');
-            }
-
-            // console.log('Terminal setup complete');
-        } else {
-            console.error('Connection failed:', result.error);
-            alert(formatConnectionError(result.error));
-            document.getElementById('splashScreen').style.display = 'none'; document.getElementById('splashScreen').style.display = 'none'; document.getElementById('connectingScreen').style.display = 'none';
-            showConnectionsHome();
-        }
-    } catch (error) {
-        console.error('Connection error:', error);
-        alert(formatConnectionError(error));
-        document.getElementById('splashScreen').style.display = 'none'; document.getElementById('splashScreen').style.display = 'none'; document.getElementById('connectingScreen').style.display = 'none';
-        showConnectionsHome();
-    }
+    await connectWithParams(connectionParams, false);
 }
 
 async function createLocalSession() {
@@ -5979,8 +6200,9 @@ function setSshSidebarVisible(visible) {
 }
 
 function clearConnectionForm() {
-    document.getElementById('connectionName').value = '';
-    document.getElementById('hostname').value = '';
+    if (document.getElementById('connectionName')) document.getElementById('connectionName').value = '';
+    if (document.getElementById('connectionGroup')) document.getElementById('connectionGroup').value = '';
+    if (document.getElementById('hostname')) document.getElementById('hostname').value = '';
     document.getElementById('port').value = '22';
     document.getElementById('username').value = '';
     document.getElementById('authType').value = 'password';

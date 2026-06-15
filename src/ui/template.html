@@ -256,6 +256,7 @@
                     <div class="section-header" onclick="toggleSection('newConnection')"><span class="section-title">&#26032;&#24314;&#36830;&#25509;</span><svg class="section-chevron" id="newConnectionChevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
                     <div class="section-content" id="newConnectionContent"><div class="connect-form">
                         <div class="form-group"><label>&#20027;&#26426;&#21629;&#21517;</label><input type="text" id="connectionName" placeholder="&#20363;&#22914;&#65306;&#29983;&#20135;&#36339;&#26495;&#26426;" /></div>
+                        <div class="form-group"><label>&#20027;&#26426;&#20998;&#32452;</label><input type="text" id="connectionGroup" placeholder="&#20363;&#22914;&#65306;&#29983;&#20135;&#29615;&#22659;" /></div>
                         <div class="form-group"><label>&#20027;&#26426;&#22320;&#22336;</label><input type="text" id="hostname" placeholder="example.com" /></div>
                         <div class="form-group"><label>&#31471;&#21475;</label><input type="number" id="port" placeholder="22" value="22" /></div>
                         <div class="form-group"><label>&#29992;&#25143;&#21517;</label><input type="text" id="username" placeholder="root" /></div>
@@ -324,20 +325,37 @@
                             </div>
                             <div id="connectionsHome" class="connections-home-content">
                                 <div class="connections-home-shell">
-                                    <div class="connections-home-header">
-                                        <div class="connections-home-heading"><div class="connections-home-kicker">SSH WORKBENCH</div><div class="connections-home-title">&#20027;&#26426;&#24037;&#20316;&#21488;</div><div class="connections-home-subtitle">&#36873;&#25321;&#24050;&#20445;&#23384;&#20027;&#26426;&#24555;&#36895;&#36830;&#25509;</div><div id="homeConnectionSummary" class="home-connection-summary">&#27491;&#22312;&#21152;&#36733;&#20027;&#26426;...</div></div>
-                                        <div class="connections-home-actions">
-                                            <div class="home-search"><span>&#9906;</span><input id="homeConnectionSearch" type="text" placeholder="搜索..." oninput="renderConnectionsHome()" onfocus="showSearchHistory()" onkeydown="handleHomeSearchKeydown(event)" /><div id="searchHistoryDropdown" class="search-history-dropdown"></div></div>
-                                            <button type="button" id="privacyModeBtn" class="privacy-mode-btn active" onclick="togglePrivacyMode()" title="隐私模式 (隐藏主机和IP)">🔒 隐私模式</button>
-                                            <button type="button" class="home-refresh" onclick="loadSavedConnections()" title="刷新">&#8635;</button>
-                                            <div class="home-view-switch">
-                                                <button type="button" data-view="grid" onclick="setConnectionsHomeView('grid')" title="网格视图">&#9638;</button>
-                                                <button type="button" data-view="list" onclick="setConnectionsHomeView('list')" title="列表视图">&#9776;</button>
+                                    <!-- 左侧分组侧边栏 -->
+                                    <div id="homeGroupsSidebar" class="connections-groups-sidebar"></div>
+                                    <!-- 右侧内容 -->
+                                    <div class="connections-home-main">
+                                        <div class="connections-home-header">
+                                            <div class="connections-home-heading"><div class="connections-home-kicker">SSH WORKBENCH</div><div class="connections-home-title">&#20027;&#26426;&#24037;&#20316;&#21488;</div><div class="connections-home-subtitle">&#36873;&#25321;&#24050;&#20445;&#23384;&#20027;&#26426;&#24555;&#36895;&#36830;&#25509;</div><div id="homeConnectionSummary" class="home-connection-summary">&#27491;&#22312;&#21152;&#36733;&#20027;&#26426;...</div></div>
+                                            <div class="connections-home-actions">
+                                                <div class="home-search"><span>&#9906;</span><input id="homeConnectionSearch" type="text" placeholder="搜索..." oninput="renderConnectionsHome()" onfocus="showSearchHistory()" onkeydown="handleHomeSearchKeydown(event)" /><div id="searchHistoryDropdown" class="search-history-dropdown"></div></div>
+                                                <button type="button" id="privacyModeBtn" class="privacy-mode-btn active" onclick="togglePrivacyMode()" title="隐私模式 (隐藏主机和IP)">🔒 隐私模式</button>
+                                                <button type="button" class="home-refresh" onclick="loadSavedConnections()" title="刷新">&#8635;</button>
+                                                <div class="home-view-switch">
+                                                    <button type="button" data-view="grid" onclick="setConnectionsHomeView('grid')" title="网格视图">&#9638;</button>
+                                                    <button type="button" data-view="list" onclick="setConnectionsHomeView('list')" title="列表视图">&#9776;</button>
+                                                </div>
                                             </div>
                                         </div>
+                                        <!-- 批量操作栏 -->
+                                        <div id="batchActionBar" class="batch-action-bar">
+                                            <div class="batch-action-left">
+                                                <label class="batch-checkbox-wrapper">
+                                                    <input type="checkbox" id="batchSelectAllCheckbox" onclick="toggleBatchSelectAll(this.checked)" />
+                                                    <span>全选当前</span>
+                                                </label>
+                                            </div>
+                                            <div class="batch-action-right">
+                                                <button type="button" id="batchConnectBtn" class="batch-connect-btn" onclick="batchConnectSelected()" disabled>⚡ 一键连接 (0台)</button>
+                                            </div>
+                                        </div>
+                                        <div id="homeConnectionsList" class="home-connections-grid"></div>
+                                        <div id="homeConnectionsEmpty" class="home-connections-empty" style="display:none"><div class="home-empty-title">&#26242;&#26080;&#24050;&#20445;&#23384;&#20027;&#26426;</div><div>&#21487;&#20174;&#24038;&#20391;&#26032;&#24314;&#36830;&#25509;&#65292;&#25110;&#30452;&#25509;&#28155;&#21152;&#31532;&#19968;&#21488; SSH &#20027;&#26426;&#12290;</div><button type="button" onclick="openNewConnectionForm('hostname', true)">&#26032;&#24314;&#36830;&#25509;</button></div>
                                     </div>
-                                    <div id="homeConnectionsList" class="home-connections-grid"></div>
-                                    <div id="homeConnectionsEmpty" class="home-connections-empty" style="display:none"><div class="home-empty-title">&#26242;&#26080;&#24050;&#20445;&#23384;&#20027;&#26426;</div><div>&#21487;&#20174;&#24038;&#20391;&#26032;&#24314;&#36830;&#25509;&#65292;&#25110;&#30452;&#25509;&#28155;&#21152;&#31532;&#19968;&#21488; SSH &#20027;&#26426;&#12290;</div><button type="button" onclick="openNewConnectionForm('hostname', true)">&#26032;&#24314;&#36830;&#25509;</button></div>
                                 </div>
                             </div>
                         </div>
