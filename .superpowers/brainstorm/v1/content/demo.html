@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>LdySSH v2.0 - 3D 行星引力环悬浮交互菜单原型演示</title>
+    <style>
+        :root {
+            --bg-color: #050608;
+            --primary: #38bdf8;
+            --primary-glow: rgba(56, 189, 248, 0.4);
+            --connect-color: #00ff88;
+            --edit-color: #ffaa00;
+            --remove-color: #ff3366;
+            --text-color: #e2e8f0;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        /* 极速流星与星空背景 */
+        .stars-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, #0f172a 0%, #020617 100%);
+            z-index: 1;
+            overflow: hidden;
+        }
+
+        .star {
+            position: absolute;
+            background: #fff;
+            border-radius: 50%;
+            opacity: 0.3;
+            animation: pulseStar 4s infinite ease-in-out;
+        }
+
+        @keyframes pulseStar {
+            0%, 100% { opacity: 0.2; transform: scale(0.8); }
+            50% { opacity: 0.8; transform: scale(1.2); }
+        }
+
+        /* 引导与标题 */
+        .info-panel {
+            position: absolute;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            text-align: center;
+            pointer-events: none;
+        }
+
+        .info-panel h1 {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            background: linear-gradient(135deg, #00f2fe, #4facfe);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 20px rgba(0, 242, 254, 0.3);
+            margin-bottom: 8px;
+        }
+
+        .info-panel p {
+            font-size: 13px;
+            color: #94a3b8;
+            letter-spacing: 0.5px;
+        }
+
+        /* 核心系统容器：行星 + 环 */
+        .system-container {
+            position: relative;
+            width: 350px;
+            height: 350px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 5;
+        }
+
+        /* 3D 行星公转模拟轨道（弱底线） */
+        .orbit-track {
+            position: absolute;
+            width: 320px;
+            height: 320px;
+            border: 1px dashed rgba(56, 189, 248, 0.12);
+            border-radius: 50%;
+            pointer-events: none;
+            transform: rotateX(70deg);
+        }
+
+        /* 3D行星（主星） */
+        .planet {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            cursor: pointer;
+            background: radial-gradient(circle at 30% 30%, #1e293b 0%, #0f172a 70%, #020617 100%);
+            box-shadow: 
+                inset -8px -8px 20px rgba(0,0,0,0.8),
+                inset 8px 8px 15px rgba(56, 189, 248, 0.25),
+                0 0 15px rgba(56, 189, 248, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            z-index: 6;
+        }
+
+        .planet::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="none"/><path d="M10,20 Q30,10 50,25 T90,20 T130,30 T170,15 T210,25" fill="none" stroke="rgba(56,189,248,0.2)" stroke-width="2"/><path d="M5,60 Q35,70 65,55 T125,60 T185,50" fill="none" stroke="rgba(0,255,136,0.15)" stroke-width="2"/><circle cx="40" cy="40" r="3" fill="rgba(56,189,248,0.3)"/><circle cx="140" cy="70" r="2" fill="rgba(56,189,248,0.4)"/></svg>');
+            background-size: 200% 100%;
+            opacity: 0.8;
+            animation: rotateMap 12s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes rotateMap {
+            0% { background-position: 0% 0%; }
+            100% { background-position: -200% 0%; }
+        }
+
+        /* 行星发光呼吸 */
+        .planet-glow {
+            position: absolute;
+            width: 86px;
+            height: 86px;
+            border-radius: 50%;
+            border: 1px solid rgba(56, 189, 248, 0.15);
+            pointer-events: none;
+            z-index: 5;
+            animation: breathe 3s infinite ease-in-out;
+        }
+
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); opacity: 0.3; }
+            50% { transform: scale(1.08); opacity: 0.7; }
+        }
+
+        /* 3D 引力环 (Orbit Ring) */
+        .gravity-ring {
+            position: absolute;
+            width: 130px;
+            height: 130px;
+            border: 2px solid var(--primary);
+            border-radius: 50%;
+            pointer-events: none;
+            opacity: 0;
+            transform: scale(0.6) rotateX(72deg) rotateY(12deg);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 
+                0 0 15px var(--primary-glow),
+                inset 0 0 15px var(--primary-glow);
+            z-index: 4;
+        }
+
+        /* 引力环旋转动画 */
+        .gravity-ring-spin {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 1px dashed rgba(56, 189, 248, 0.45);
+            animation: spinRing 6s linear infinite;
+        }
+
+        @keyframes spinRing {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* 当悬停在系统容器时，引力环亮起并缩放 */
+        .system-container.active .gravity-ring {
+            opacity: 0.7;
+            transform: scale(1) rotateX(72deg) rotateY(12deg);
+        }
+
+        /* 2D 贴身环抱菜单 */
+        .topo-hover-menu {
+            position: absolute;
+            width: 130px;
+            height: 130px;
+            pointer-events: none;
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .topo-hover-menu-inner {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            pointer-events: none;
+        }
+
+        /* 弧形排列的按钮 */
+        .topo-menu-btn {
+            position: absolute;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: rgba(15, 23, 42, 0.9) !important;
+            border: 1px solid rgba(56, 189, 248, 0.35) !important;
+            color: #38bdf8 !important;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            cursor: pointer;
+            pointer-events: auto;
+            transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+            opacity: 0;
+            transform: scale(0.6);
+        }
+
+        .topo-menu-btn:hover {
+            color: #fff !important;
+            transform: scale(1.18) !important;
+        }
+
+        /* 按钮特定高亮色 */
+        .topo-menu-btn.connect:hover {
+            background: rgba(0, 255, 136, 0.2) !important;
+            border-color: var(--connect-color) !important;
+            box-shadow: 0 0 12px rgba(0, 255, 136, 0.5);
+        }
+
+        .topo-menu-btn.edit:hover {
+            background: rgba(255, 170, 0, 0.2) !important;
+            border-color: var(--edit-color) !important;
+            box-shadow: 0 0 12px rgba(255, 170, 0, 0.5);
+        }
+
+        .topo-menu-btn.remove:hover {
+            background: rgba(255, 51, 102, 0.2) !important;
+            border-color: var(--remove-color) !important;
+            box-shadow: 0 0 12px rgba(255, 51, 102, 0.5);
+        }
+
+        /* 展开状态的弧形极坐标定位 */
+        .system-container.active .topo-hover-menu {
+            opacity: 1;
+        }
+
+        .system-container.active .topo-menu-btn.connect {
+            left: 92px;
+            top: 15px;
+            opacity: 1;
+            transform: scale(1);
+            transition-delay: 0.02s;
+        }
+
+        .system-container.active .topo-menu-btn.edit {
+            left: 108px;
+            top: 48px;
+            opacity: 1;
+            transform: scale(1);
+            transition-delay: 0.08s;
+        }
+
+        .system-container.active .topo-menu-btn.remove {
+            left: 92px;
+            top: 81px;
+            opacity: 1;
+            transform: scale(1);
+            transition-delay: 0.14s;
+        }
+
+        /* 互动提示板 */
+        .console-panel {
+            position: absolute;
+            bottom: 40px;
+            width: 320px;
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-family: monospace;
+            font-size: 12px;
+            z-index: 10;
+        }
+
+        .console-header {
+            color: #64748b;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .console-log {
+            color: #38bdf8;
+            height: 36px;
+            overflow-y: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+        }
+
+        .log-line {
+            animation: logFadeIn 0.3s ease-out;
+        }
+
+        @keyframes logFadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 使用说明 */
+        .instruction-box {
+            position: absolute;
+            right: 30px;
+            top: 30px;
+            background: rgba(30, 41, 59, 0.4);
+            border-left: 3px solid var(--primary);
+            padding: 10px 15px;
+            font-size: 12px;
+            max-width: 250px;
+            border-radius: 0 4px 4px 0;
+            z-index: 10;
+        }
+        
+        .instruction-box h4 {
+            color: #38bdf8;
+            margin-bottom: 5px;
+        }
+        
+        .instruction-box ul {
+            list-style: none;
+        }
+        
+        .instruction-box li {
+            margin-bottom: 4px;
+            color: #94a3b8;
+        }
+
+        /* ==========================================
+           霓虹焦点边框 (方案三)
+           ========================================== */
+        .topo-focus-frame {
+            position: absolute;
+            width: 96px;
+            height: 96px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 4;
+        }
+
+        .system-container.active .topo-focus-frame {
+            opacity: 1;
+        }
+
+        .topo-focus-frame-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 1px dashed rgba(0, 242, 254, 0.25);
+            box-sizing: border-box;
+            animation: focusRotate 12s linear infinite;
+        }
+
+        .focus-bracket {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-color: #00f2fe;
+            border-style: solid;
+            border-width: 0;
+            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 0 8px rgba(0, 242, 254, 0.5);
+        }
+
+        .focus-bracket.top-left {
+            top: -4px;
+            left: -4px;
+            border-top-width: 2px;
+            border-left-width: 2px;
+        }
+
+        .focus-bracket.top-right {
+            top: -4px;
+            right: -4px;
+            border-top-width: 2px;
+            border-right-width: 2px;
+        }
+
+        .focus-bracket.bottom-left {
+            bottom: -4px;
+            left: -4px;
+            border-bottom-width: 2px;
+            border-left-width: 2px;
+        }
+
+        .focus-bracket.bottom-right {
+            bottom: -4px;
+            right: -4px;
+            border-bottom-width: 2px;
+            border-right-width: 2px;
+        }
+
+        .system-container.active .focus-bracket.top-left { transform: translate(3px, 3px); }
+        .system-container.active .focus-bracket.top-right { transform: translate(-3px, 3px); }
+        .system-container.active .focus-bracket.bottom-left { transform: translate(3px, -3px); }
+        .system-container.active .focus-bracket.bottom-right { transform: translate(-3px, -3px); }
+
+        .focus-scanner {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: conic-gradient(from 0deg, transparent 50%, rgba(0, 242, 254, 0.1) 85%, rgba(0, 242, 254, 0.3) 100%);
+            mask: radial-gradient(circle, transparent 48%, black 49%);
+            -webkit-mask: radial-gradient(circle, transparent 48%, black 49%);
+            animation: radarScan 3s linear infinite;
+        }
+
+        @keyframes focusRotate {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes radarScan {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="stars-bg" id="starsBg"></div>
+
+    <div class="info-panel">
+        <h1>🚀 行星引力环 & 霓虹焦点边框</h1>
+        <p>方案三：在线三维交互原型演示面版</p>
+    </div>
+
+    <div class="instruction-box">
+        <h4>💡 原型体验指南</h4>
+        <ul>
+            <li>1. 将鼠标<strong>悬停</strong>在中心的蓝色行星上。</li>
+            <li>2. 观察 3D 引力环浮现自旋、2D 按钮飞入。</li>
+            <li>3. 移出鼠标，有 <strong>350ms</strong> 的防抖延时。</li>
+            <li>4. 试着点击 🚀、⚙️ 或 🗑️ 按钮触发动作。</li>
+        </ul>
+    </div>
+
+    <!-- 核心系统 -->
+    <div class="system-container" id="systemContainer">
+        <!-- 轨道 -->
+        <div class="orbit-track"></div>
+        
+        <!-- 3D 引力环 -->
+        <div class="gravity-ring">
+            <div class="gravity-ring-spin"></div>
+        </div>
+
+        <!-- 3D行星 -->
+        <div class="planet" id="planetNode"></div>
+        
+        <!-- 行星呼吸圈 -->
+        <div class="planet-glow"></div>
+
+        <!-- 霓虹焦点边框 (方案三) -->
+        <div class="topo-focus-frame">
+            <div class="topo-focus-frame-inner">
+                <div class="focus-bracket top-left"></div>
+                <div class="focus-bracket top-right"></div>
+                <div class="focus-bracket bottom-left"></div>
+                <div class="focus-bracket bottom-right"></div>
+                <div class="focus-scanner"></div>
+            </div>
+        </div>
+
+        <!-- 2D 悬浮菜单 (由于演示需要，在此容器内使用 absolute，客户端内将使用 fixed) -->
+        <div class="topo-hover-menu">
+            <div class="topo-hover-menu-inner">
+                <button class="topo-menu-btn connect" onclick="triggerAction('connect', event)" title="立即连接">🚀</button>
+                <button class="topo-menu-btn edit" onclick="triggerAction('edit', event)" title="编辑主机">⚙️</button>
+                <button class="topo-menu-btn remove" onclick="triggerAction('remove', event)" title="移除主机">🗑️</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模拟终端日志输出 -->
+    <div class="console-panel">
+        <div class="console-header">
+            <span>📡 EVENT_LOGGER</span>
+            <span>STATUS: ONLINE</span>
+        </div>
+        <div class="console-log" id="consoleLog">
+            <div class="log-line">> 系统就绪。等待交互。</div>
+        </div>
+    </div>
+
+    <script>
+        // 初始化随机背景点点星空
+        const starsBg = document.getElementById('starsBg');
+        const count = 60;
+        for (let i = 0; i < count; i++) {
+            const star = document.createElement('div');
+            star.className = 'star';
+            star.style.width = Math.random() * 3 + 'px';
+            star.style.height = star.style.width;
+            star.style.left = Math.random() * 100 + '%';
+            star.style.top = Math.random() * 100 + '%';
+            star.style.animationDelay = Math.random() * 4 + 's';
+            starsBg.appendChild(star);
+        }
+
+        const systemContainer = document.getElementById('systemContainer');
+        const planetNode = document.getElementById('planetNode');
+        const consoleLog = document.getElementById('consoleLog');
+        
+        let hideTimeout = null;
+
+        // 星体移入
+        planetNode.addEventListener('mouseenter', () => {
+            if (hideTimeout) {
+                clearTimeout(hideTimeout);
+                hideTimeout = null;
+            }
+            systemContainer.classList.add('active');
+            logEvent("检测到指针悬浮：已触发引力环激活 & 2D 菜单展开");
+        });
+
+        // 星体移出 -> 启动 350ms 延时保护
+        planetNode.addEventListener('mouseleave', () => {
+            hideTimeout = setTimeout(() => {
+                systemContainer.classList.remove('active');
+                logEvent("指针移出：激活 350ms 防抖延迟隐藏...");
+            }, 350);
+        });
+
+        // 移入菜单元素时 -> 取消延迟隐藏
+        const hoverMenu = document.querySelector('.topo-hover-menu');
+        hoverMenu.addEventListener('mouseenter', () => {
+            if (hideTimeout) {
+                clearTimeout(hideTimeout);
+                hideTimeout = null;
+            }
+            systemContainer.classList.add('active');
+        });
+
+        hoverMenu.addEventListener('mouseleave', () => {
+            hideTimeout = setTimeout(() => {
+                systemContainer.classList.remove('active');
+                logEvent("指针移出菜单：隐藏引力环与菜单");
+            }, 350);
+        });
+
+        // 点击动作模拟
+        function triggerAction(action, event) {
+            event.stopPropagation();
+            let actionText = '';
+            if (action === 'connect') {
+                actionText = "🚀 立即连接 (quickConnect) -> 启动超空间跃迁动画并连接 SSH...";
+            } else if (action === 'edit') {
+                actionText = "⚙️ 编辑主机 (editSavedConnection) -> 弹出主机参数配置面板...";
+            } else if (action === 'remove') {
+                actionText = "🗑️ 移除主机 (deleteConnection) -> 激活警告，请求删除确认...";
+            }
+            logEvent(actionText);
+            
+            // 触发立即隐藏
+            systemContainer.classList.remove('active');
+        }
+
+        // 日志打印
+        function logEvent(text) {
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            line.textContent = `> ${text}`;
+            consoleLog.appendChild(line);
+            
+            // 仅保留最新两行
+            while (consoleLog.children.length > 2) {
+                consoleLog.removeChild(consoleLog.firstChild);
+            }
+        }
+    </script>
+</body>
+</html>

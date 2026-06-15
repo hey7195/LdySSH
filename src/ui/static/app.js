@@ -9905,6 +9905,18 @@ class TopologyViewer {
             hoverMenu.offsetHeight; // 强制回流以让 CSS 动画正常执行
             hoverMenu.classList.add('active');
         }
+
+        const focusFrame = document.getElementById('topoFocusFrame');
+        if (focusFrame) {
+            if (node.isVirtual) {
+                focusFrame.classList.add('is-virtual-planet');
+            } else {
+                focusFrame.classList.remove('is-virtual-planet');
+            }
+            focusFrame.style.display = 'block';
+            focusFrame.offsetHeight; // 强制回流
+            focusFrame.classList.add('active');
+        }
     }
 
     hideHoverMenu() {
@@ -9919,12 +9931,23 @@ class TopologyViewer {
                 }
             }, 220);
         }
+
+        const focusFrame = document.getElementById('topoFocusFrame');
+        if (focusFrame) {
+            focusFrame.classList.remove('active');
+            setTimeout(() => {
+                if (!this.hoveredNode && !focusFrame.classList.contains('active')) {
+                    focusFrame.style.display = 'none';
+                }
+            }, 350);
+        }
     }
 
     updateHoverMenuPosition() {
         if (!this.hoveredNode || !this.hoveredNode.mesh || !this.camera || !this.renderer) return;
         const hoverMenu = document.getElementById('topoHoverMenu');
-        if (!hoverMenu) return;
+        const focusFrame = document.getElementById('topoFocusFrame');
+        if (!hoverMenu && !focusFrame) return;
 
         const vector = new THREE.Vector3();
         this.hoveredNode.mesh.getWorldPosition(vector);
@@ -9938,8 +9961,14 @@ class TopologyViewer {
         const x = rect.left + (vector.x * 0.5 + 0.5) * rect.width;
         const y = rect.top + (-vector.y * 0.5 + 0.5) * rect.height;
         
-        hoverMenu.style.left = `${x}px`;
-        hoverMenu.style.top = `${y}px`;
+        if (hoverMenu) {
+            hoverMenu.style.left = `${x}px`;
+            hoverMenu.style.top = `${y}px`;
+        }
+        if (focusFrame) {
+            focusFrame.style.left = `${x}px`;
+            focusFrame.style.top = `${y}px`;
+        }
     }
 }
 

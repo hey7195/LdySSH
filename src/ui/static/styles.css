@@ -6540,6 +6540,118 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     display: none !important;
 }
 
+/* ==========================================================================
+   LdySSH v2.1 - Neon Focus Frame (霓虹焦点边框 - 方案三)
+   ========================================================================== */
+.topo-focus-frame {
+    width: 90px;
+    height: 90px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    opacity: 0;
+}
+
+.topo-focus-frame.active {
+    opacity: 1;
+}
+
+/* 焦点框的圆环轨道与自旋转 */
+.topo-focus-frame-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 1px dashed rgba(0, 242, 254, 0.25);
+    box-sizing: border-box;
+    animation: focusRotate 12s linear infinite;
+}
+
+/* 虚拟行星状态下，霓虹焦点框配色切换为粉红/红色 */
+.topo-focus-frame.is-virtual-planet .topo-focus-frame-inner {
+    border-color: rgba(244, 63, 94, 0.25);
+}
+
+/* 四角准星括号 */
+.focus-bracket {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-color: #00f2fe;
+    border-style: solid;
+    border-width: 0;
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 0 8px rgba(0, 242, 254, 0.5);
+}
+
+.topo-focus-frame.is-virtual-planet .focus-bracket {
+    border-color: #f43f5e;
+    box-shadow: 0 0 8px rgba(244, 63, 94, 0.5);
+}
+
+.focus-bracket.top-left {
+    top: -4px;
+    left: -4px;
+    border-top-width: 2px;
+    border-left-width: 2px;
+}
+
+.focus-bracket.top-right {
+    top: -4px;
+    right: -4px;
+    border-top-width: 2px;
+    border-right-width: 2px;
+}
+
+.focus-bracket.bottom-left {
+    bottom: -4px;
+    left: -4px;
+    border-bottom-width: 2px;
+    border-left-width: 2px;
+}
+
+.focus-bracket.bottom-right {
+    bottom: -4px;
+    right: -4px;
+    border-bottom-width: 2px;
+    border-right-width: 2px;
+}
+
+/* 激活时，外角准星微微向内回缩，产生咬合的科技感动效 */
+.topo-focus-frame.active .focus-bracket.top-left { transform: translate(3px, 3px); }
+.topo-focus-frame.active .focus-bracket.top-right { transform: translate(-3px, 3px); }
+.topo-focus-frame.active .focus-bracket.bottom-left { transform: translate(3px, -3px); }
+.topo-focus-frame.active .focus-bracket.bottom-right { transform: translate(-3px, -3px); }
+
+/* 雷达扫描效果 */
+.focus-scanner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 50%, rgba(0, 242, 254, 0.1) 85%, rgba(0, 242, 254, 0.3) 100%);
+    mask: radial-gradient(circle, transparent 48%, black 49%);
+    -webkit-mask: radial-gradient(circle, transparent 48%, black 49%);
+    animation: radarScan 3s linear infinite;
+    pointer-events: none;
+}
+
+.topo-focus-frame.is-virtual-planet .focus-scanner {
+    background: conic-gradient(from 0deg, transparent 50%, rgba(244, 63, 94, 0.1) 85%, rgba(244, 63, 94, 0.3) 100%);
+}
+
+@keyframes focusRotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes radarScan {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
 
 
 
