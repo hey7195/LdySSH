@@ -276,6 +276,26 @@
                                 <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">私钥口令（可选）</label><input type="password" id="jumpKeyPassphrase" placeholder="有口令时填写" style="height: 24px; font-size: 11px;" /></div>
                             </div>
                         </div>
+                        <div class="advanced-section" style="margin-top: 10px; margin-bottom: 10px;">
+                            <div style="font-size: 11px; color: #00f2fe; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px;" onclick="toggleProxyFields()">
+                                <span>🌐 SOCKS5/HTTP 代理配置 (可选)</span>
+                                <span id="proxyChevron" style="font-size: 8px;">▶</span>
+                            </div>
+                            <div id="proxyFields" style="display: none; padding: 6px; border: 1px dashed rgba(0, 242, 254, 0.2); border-radius: 4px; background: rgba(0, 242, 254, 0.03); margin-top: 6px;">
+                                <div class="form-group" style="margin-bottom: 6px;">
+                                    <label style="color: #aaa; font-size: 10px;">代理类型</label>
+                                    <select id="proxyType" style="height: 24px; font-size: 11px; background: #1f1f2e; color: #fff; border: 1px solid #444; border-radius: 4px; width: 100%;">
+                                        <option value="none">无代理</option>
+                                        <option value="socks5">SOCKS5 代理</option>
+                                        <option value="http">HTTP CONNECT 代理</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">代理主机/IP</label><input type="text" id="proxyHost" placeholder="127.0.0.1" style="height: 24px; font-size: 11px;" /></div>
+                                <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">代理端口</label><input type="number" id="proxyPort" placeholder="1080" value="1080" style="height: 24px; font-size: 11px;" /></div>
+                                <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">代理用户名 (可选)</label><input type="text" id="proxyUser" placeholder="proxy_user" style="height: 24px; font-size: 11px;" /></div>
+                                <div class="form-group" style="margin-bottom: 6px;"><label style="color: #aaa; font-size: 10px;">代理密码 (可选)</label><input type="password" id="proxyPass" placeholder="proxy_password" style="height: 24px; font-size: 11px;" /></div>
+                            </div>
+                        </div>
                         <div class="checkbox-group"><input type="checkbox" id="saveConnection" /><label for="saveConnection">&#20445;&#23384;&#36830;&#25509;</label></div>
                         <button class="connect-btn" onclick="connect()">&#36830;&#25509;</button>
                         <button class="connect-btn" style="margin-top: 10px; background-color: var(--secondary-color);" onclick="createLocalSession()">💻 本地终端 (CMD)</button>

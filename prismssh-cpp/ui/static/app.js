@@ -2980,6 +2980,23 @@ async function loadConnection(key) {
         jumpHostChevron.textContent = '▶';
     }
 
+    // 填入代理高级参数
+    document.getElementById('proxyType').value = conn.proxyType || 'none';
+    document.getElementById('proxyHost').value = conn.proxyHost || '';
+    document.getElementById('proxyPort').value = conn.proxyPort || 1080;
+    document.getElementById('proxyUser').value = conn.proxyUser || '';
+    document.getElementById('proxyPass').value = conn.proxyPass || '';
+
+    const proxyFields = document.getElementById('proxyFields');
+    const proxyChevron = document.getElementById('proxyChevron');
+    if (conn.proxyType && conn.proxyType !== 'none') {
+        proxyFields.style.display = 'block';
+        proxyChevron.textContent = '▼';
+    } else {
+        proxyFields.style.display = 'none';
+        proxyChevron.textContent = '▶';
+    }
+
     if (conn.password_unavailable) {
         document.getElementById('authType').value = 'password';
         document.getElementById('password').value = '';
@@ -3734,9 +3751,22 @@ async function connect() {
     const jumpKey = document.getElementById('jumpKey').value.trim();
     const jumpKeyPassphrase = document.getElementById('jumpKeyPassphrase').value;
 
+    // 获取代理参数
+    const proxyType = document.getElementById('proxyType').value;
+    const proxyHost = document.getElementById('proxyHost').value.trim();
+    const proxyPort = parseInt(document.getElementById('proxyPort').value || 1080);
+    const proxyUser = document.getElementById('proxyUser').value.trim();
+    const proxyPass = document.getElementById('proxyPass').value;
+
     if (jumpHost && !jumpUser) {
         alert('请填入堡垒机用户名');
         document.getElementById('jumpUser').focus();
+        return;
+    }
+
+    if (proxyType && proxyType !== 'none' && !proxyHost) {
+        alert('请填入代理主机/IP');
+        document.getElementById('proxyHost').focus();
         return;
     }
 
@@ -3781,7 +3811,13 @@ async function connect() {
             jumpUser,
             jumpPass,
             jumpKey,
-            jumpKeyPassphrase
+            jumpKeyPassphrase,
+            // 传入代理参数
+            proxyType,
+            proxyHost,
+            proxyPort,
+            proxyUser,
+            proxyPass
         };
 
         // Connect (with host verification if needed)
@@ -5941,6 +5977,15 @@ function clearConnectionForm() {
     document.getElementById('jumpKeyPassphrase').value = '';
     document.getElementById('jumpHostFields').style.display = 'none';
     document.getElementById('jumpHostChevron').textContent = '▶';
+
+    // 重置代理相关
+    document.getElementById('proxyType').value = 'none';
+    document.getElementById('proxyHost').value = '';
+    document.getElementById('proxyPort').value = '1080';
+    document.getElementById('proxyUser').value = '';
+    document.getElementById('proxyPass').value = '';
+    document.getElementById('proxyFields').style.display = 'none';
+    document.getElementById('proxyChevron').textContent = '▶';
 }
 
 function openNewConnectionForm(focusField = 'hostname', clearForm = false) {
@@ -7855,6 +7900,18 @@ function setupSftpDragAndDrop() {
 function toggleJumpHostFields() {
     const fields = document.getElementById('jumpHostFields');
     const chevron = document.getElementById('jumpHostChevron');
+    if (fields.style.display === 'none') {
+        fields.style.display = 'block';
+        chevron.textContent = '▼';
+    } else {
+        fields.style.display = 'none';
+        chevron.textContent = '▶';
+    }
+}
+
+function toggleProxyFields() {
+    const fields = document.getElementById('proxyFields');
+    const chevron = document.getElementById('proxyChevron');
     if (fields.style.display === 'none') {
         fields.style.display = 'block';
         chevron.textContent = '▼';

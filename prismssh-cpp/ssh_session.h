@@ -25,6 +25,14 @@ struct JumpHostConfig {
     std::string jumpKeyPassphrase;
 };
 
+struct ProxyConfig {
+    std::string proxyType; // "none", "socks5", "http"
+    std::string proxyHost;
+    int proxyPort = 1080;
+    std::string proxyUser;
+    std::string proxyPass;
+};
+
 // SSH Session implementation
 class SSHSession : public Session {
 public:
@@ -67,7 +75,7 @@ public:
     bool IsConnected() override;
 
     // Connect options
-    bool Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath = "", const std::string& keyPassphrase = "", int cols = 80, int rows = 24, const JumpHostConfig& jumpConfig = {});
+    bool Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath = "", const std::string& keyPassphrase = "", int cols = 80, int rows = 24, const JumpHostConfig& jumpConfig = {}, const ProxyConfig& proxyConfig = {});
 
     // SFTP operations
     std::string ListFiles(const std::string& path);

@@ -273,8 +273,186 @@ bool SSHSession::IsConnected() {
     return running;
 }
 
+static bool ConnectSocks5Proxy(SOCKET s, const std::string& targetHost, int targetPort, const std::string& user, const std::string& pass, std::string& errStr) {
+    // 1. Send greeting
+    // We support NO_AUTH (0x00) and USER_PASS (0x02)
+    std::vector<char> greeting = { 0x05, 0x02, 0x00, 0x02 };
+    if (send(s, greeting.data(), (int)greeting.size(), 0) <= 0) {
+        errStr = "SOCKS5 greeting send failed";
+        return false;
+    }
+
+    // 2. Read greeting response (2 bytes)
+    char resp[2] = {0};
+    int n = recv(s, resp, 2, 0);
+    if (n < 2) {
+        errStr = "SOCKS5 greeting response read failed";
+        return false;
+    }
+    if (resp[0] != 0x05) {
+        errStr = "SOCKS5 greeting response invalid version";
+        return false;
+    }
+
+    char method = resp[1];
+    if (method == 0x02) {
+        // Username/Password authentication
+        if (user.empty()) {
+            errStr = "SOCKS5 proxy requires authentication, but credentials are empty";
+            return false;
+        }
+        std::vector<char> authReq;
+        authReq.push_back(0x01); // Subnegotiation version
+        authReq.push_back((char)user.size());
+        authReq.insert(authReq.end(), user.begin(), user.end());
+        authReq.push_back((char)pass.size());
+        authReq.insert(authReq.end(), pass.begin(), pass.end());
+
+        if (send(s, authReq.data(), (int)authReq.size(), 0) <= 0) {
+            errStr = "SOCKS5 auth request send failed";
+            return false;
+        }
+
+        char authResp[2] = {0};
+        if (recv(s, authResp, 2, 0) < 2) {
+            errStr = "SOCKS5 auth response read failed";
+            return false;
+        }
+        if (authResp[0] != 0x01 || authResp[1] != 0x00) {
+            errStr = "SOCKS5 auth failed (status: " + std::to_string((int)authResp[1]) + ")";
+            return false;
+        }
+    } else if (method == 0x00) {
+        // No authentication required
+    } else {
+        errStr = "SOCKS5 proxy rejected authentication methods (method: " + std::to_string((int)method) + ")";
+        return false;
+    }
+
+    // 3. Connect request
+    std::vector<char> connReq;
+    connReq.push_back(0x05); // Version
+    connReq.push_back(0x01); // Command: CONNECT
+    connReq.push_back(0x00); // Reserved
+    connReq.push_back(0x03); // Address type: Domain Name
+    connReq.push_back((char)targetHost.size());
+    connReq.insert(connReq.end(), targetHost.begin(), targetHost.end());
+    
+    // Port in network byte order
+    unsigned short netPort = htons((unsigned short)targetPort);
+    connReq.push_back((char)(netPort >> 8));
+    connReq.push_back((char)(netPort & 0xFF));
+
+    if (send(s, connReq.data(), (int)connReq.size(), 0) <= 0) {
+        errStr = "SOCKS5 connect request send failed";
+        return false;
+    }
+
+    // 4. Read response
+    // Header is 4 bytes
+    char connRespHeader[4] = {0};
+    if (recv(s, connRespHeader, 4, 0) < 4) {
+        errStr = "SOCKS5 connect response header read failed";
+        return false;
+    }
+
+    if (connRespHeader[0] != 0x05) {
+        errStr = "SOCKS5 connect response invalid version";
+        return false;
+    }
+    if (connRespHeader[1] != 0x00) {
+        errStr = "SOCKS5 connect failed (reply code: " + std::to_string((int)connRespHeader[1]) + ")";
+        return false;
+    }
+
+    // Read bound address based on type
+    char atyp = connRespHeader[3];
+    int skipBytes = 0;
+    if (atyp == 0x01) { // IPv4
+        skipBytes = 4 + 2;
+    } else if (atyp == 0x03) { // Domain name
+        unsigned char len = 0;
+        if (recv(s, (char*)&len, 1, 0) < 1) {
+            errStr = "SOCKS5 connect response domain len read failed";
+            return false;
+        }
+        skipBytes = len + 2;
+    } else if (atyp == 0x04) { // IPv6
+        skipBytes = 16 + 2;
+    } else {
+        errStr = "SOCKS5 connect response unknown address type " + std::to_string((int)atyp);
+        return false;
+    }
+
+    if (skipBytes > 0) {
+        std::vector<char> temp(skipBytes);
+        if (recv(s, temp.data(), skipBytes, 0) < skipBytes) {
+            errStr = "SOCKS5 connect response body read failed";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool ConnectHttpProxy(SOCKET s, const std::string& targetHost, int targetPort, const std::string& user, const std::string& pass, std::string& errStr) {
+    std::string req = "CONNECT " + targetHost + ":" + std::to_string(targetPort) + " HTTP/1.1\r\n";
+    req += "Host: " + targetHost + ":" + std::to_string(targetPort) + "\r\n";
+    if (!user.empty()) {
+        std::string credentials = user + ":" + pass;
+        std::string encoded = Base64Encode(credentials);
+        req += "Proxy-Authorization: Basic " + encoded + "\r\n";
+    }
+    req += "\r\n";
+
+    if (send(s, req.data(), (int)req.size(), 0) <= 0) {
+        errStr = "HTTP CONNECT request send failed";
+        return false;
+    }
+
+    // Read HTTP response until \r\n\r\n
+    std::string resp;
+    char ch;
+    while (true) {
+        int n = recv(s, &ch, 1, 0);
+        if (n <= 0) {
+            errStr = "HTTP CONNECT response read socket closed/failed";
+            return false;
+        }
+        resp += ch;
+        if (resp.size() >= 4 && resp.substr(resp.size() - 4) == "\r\n\r\n") {
+            break;
+        }
+        if (resp.size() > 8192) {
+            errStr = "HTTP CONNECT response too large";
+            return false;
+        }
+    }
+
+    // Parse status code from first line
+    // e.g. "HTTP/1.1 200 OK\r\n"
+    size_t firstLineEnd = resp.find("\r\n");
+    if (firstLineEnd == std::string::npos) {
+        errStr = "HTTP CONNECT response format invalid";
+        return false;
+    }
+    std::string firstLine = resp.substr(0, firstLineEnd);
+    std::vector<std::string> parts = SplitStringWhitespace(firstLine);
+    if (parts.size() < 2) {
+        errStr = "HTTP CONNECT response status line invalid: " + firstLine;
+        return false;
+    }
+    std::string statusCode = parts[1];
+    if (statusCode != "200") {
+        errStr = "HTTP CONNECT proxy connection rejected: " + firstLine;
+        return false;
+    }
+
+    return true;
+}
+
 // Connect options implementation
-bool SSHSession::Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath, const std::string& keyPassphrase, int cols, int rows, const JumpHostConfig& jumpConfig) {
+bool SSHSession::Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath, const std::string& keyPassphrase, int cols, int rows, const JumpHostConfig& jumpConfig, const ProxyConfig& proxyConfig) {
     lastError = "";
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
@@ -412,10 +590,20 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    std::string portStr = std::to_string(connectPort);
-    int gai_res = getaddrinfo(connectHost.c_str(), portStr.c_str(), &hints, &addrs);
+    std::string connectHostReal = connectHost;
+    int connectPortReal = connectPort;
+
+    bool useProxy = (!proxyConfig.proxyType.empty() && proxyConfig.proxyType != "none");
+    if (useProxy) {
+        connectHostReal = proxyConfig.proxyHost;
+        connectPortReal = proxyConfig.proxyPort;
+        PrismLog("INFO", "SSHSession connecting via proxy: " + proxyConfig.proxyType + "://" + connectHostReal + ":" + std::to_string(connectPortReal));
+    }
+
+    std::string portStr = std::to_string(connectPortReal);
+    int gai_res = getaddrinfo(connectHostReal.c_str(), portStr.c_str(), &hints, &addrs);
     if (gai_res != 0) {
-        lastError = "getaddrinfo failed for " + connectHost + ":" + portStr + " (error: " + std::to_string(gai_res) + ")";
+        lastError = "getaddrinfo failed for " + connectHostReal + ":" + portStr + " (error: " + std::to_string(gai_res) + ")";
         return false;
     }
 
@@ -436,6 +624,27 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
     if (sock == INVALID_SOCKET) {
         lastError = "socket connect failed (WSAGetLastError: " + std::to_string(connect_err) + ")";
         return false;
+    }
+
+    if (useProxy) {
+        std::string proxyErr;
+        bool proxySuccess = false;
+        if (proxyConfig.proxyType == "socks5") {
+            proxySuccess = ConnectSocks5Proxy(sock, connectHost, connectPort, proxyConfig.proxyUser, proxyConfig.proxyPass, proxyErr);
+        } else if (proxyConfig.proxyType == "http") {
+            proxySuccess = ConnectHttpProxy(sock, connectHost, connectPort, proxyConfig.proxyUser, proxyConfig.proxyPass, proxyErr);
+        } else {
+            proxyErr = "Unsupported proxy type: " + proxyConfig.proxyType;
+        }
+
+        if (!proxySuccess) {
+            closesocket(sock);
+            sock = INVALID_SOCKET;
+            lastError = "Proxy handshake failed: " + proxyErr;
+            PrismLog("ERROR", "Proxy handshake failed: " + proxyErr);
+            return false;
+        }
+        PrismLog("INFO", "Proxy handshake success to target " + connectHost + ":" + std::to_string(connectPort));
     }
 
     int bufSize = 256 * 1024;
@@ -2808,11 +3017,18 @@ void HandleConnectApi(const std::string& reqId, const nlohmann::json& args, nloh
     
     std::string storeKey = hostname + "@" + username;
     
+    // 提取 SOCKS5 / HTTP 代理参数
+    std::string proxyType = SafeGetJsonString(params, "proxyType", "none");
+    std::string proxyHost = SafeGetJsonString(params, "proxyHost", "");
+    int proxyPort = SafeGetJsonInt(params, "proxyPort", 1080);
+    std::string proxyUser = SafeGetJsonString(params, "proxyUser", "");
+    std::string proxyPass = SafeGetJsonString(params, "proxyPass", "");
+
     if (SafeGetJsonBool(params, "save", false)) {
-        NamedMutexLock lock(L"Global\\PrismSSHConfigMutex");
+        NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
         std::wstring configDir = GetConfigDirectory();
         std::wstring connPath = configDir + L"\\connections.json";
-        std::string connData = ReadFileToUtf8(connPath);
+        std::string connData = ReadConnectionConfigWithRecovery(connPath);
         
         nlohmann::json conns = nlohmann::json::object();
         if (!connData.empty()) {
@@ -2842,9 +3058,30 @@ void HandleConnectApi(const std::string& reqId, const nlohmann::json& args, nloh
             connObj["password"] = "";
             connObj["password_encrypted"] = false;
         }
+
+        // 保存代理配置
+        connObj["proxyType"] = proxyType;
+        connObj["proxyHost"] = proxyHost;
+        connObj["proxyPort"] = proxyPort;
+        connObj["proxyUser"] = proxyUser;
+        if (!proxyPass.empty()) {
+            std::string fernetKey = GetOrCreateFernetKey();
+            std::string encrypted = EncryptFernetPassword(fernetKey, proxyPass);
+            if (!encrypted.empty()) {
+                connObj["proxyPass"] = encrypted;
+                connObj["proxyPass_encrypted"] = true;
+            } else {
+                connObj["proxyPass"] = proxyPass;
+                connObj["proxyPass_encrypted"] = false;
+            }
+        } else {
+            connObj["proxyPass"] = "";
+            connObj["proxyPass_encrypted"] = false;
+        }
         
         conns[storeKey] = connObj;
         
+        BackupConnectionConfig(connPath);
         WriteUtf8ToFile(connPath, conns.dump(2));
     }
 
@@ -2853,7 +3090,15 @@ void HandleConnectApi(const std::string& reqId, const nlohmann::json& args, nloh
 
     auto session = std::make_shared<SSHSession>(sessId);
     PrismLog("INFO", "SSHSession connect initiated for " + storeKey);
-    bool success = session->Connect(hostname, port, username, password, keyPath, keyPassphrase);
+
+    ProxyConfig pc;
+    pc.proxyType = proxyType;
+    pc.proxyHost = proxyHost;
+    pc.proxyPort = proxyPort;
+    pc.proxyUser = proxyUser;
+    pc.proxyPass = proxyPass;
+
+    bool success = session->Connect(hostname, port, username, password, keyPath, keyPassphrase, 80, 24, {}, pc);
     
     nlohmann::json retObj;
     if (success) {

@@ -44,6 +44,7 @@ class ConnectionStore:
             )
         
         self._ensure_config_dir()
+        self._import_ssh_config_migration()
     
     def get_encryption_status(self) -> dict:
         """Get encryption status for frontend warning."""
@@ -115,16 +116,136 @@ class ConnectionStore:
             self.logger.error(f"Error setting up encryption: {e}")
             raise EncryptionError(f"Failed to setup encryption: {e}")
     
+    def _backup_config(self):
+        """Create a rolling backup (up to 5 versions) of the connections configuration."""
+        try:
+            conn_path = Path(self.config.connections_file)
+            if not conn_path.exists() or conn_path.stat().st_size == 0:
+                return
+            
+            # Roll backups: .bak.4 -> .bak.5, ..., connections.json -> .bak.1
+            for i in range(4, 0, -1):
+                src = conn_path.with_name(f"{conn_path.name}.bak.{i}")
+                dst = conn_path.with_name(f"{conn_path.name}.bak.{i+1}")
+                if src.exists():
+                    if dst.exists():
+                        dst.unlink()
+                    src.rename(dst)
+            
+            bak1 = conn_path.with_name(f"{conn_path.name}.bak.1")
+            if bak1.exists():
+                bak1.unlink()
+            
+            import shutil
+            shutil.copy2(conn_path, bak1)
+            self.logger.debug("Rolling backup created for connections configuration")
+        except Exception as e:
+            self.logger.error(f"Error creating config backup: {e}")
+
+    def _attempt_disaster_recovery(self) -> Optional[Dict[str, Any]]:
+        """Try to recover connection settings from rolling backups .bak.1 to .bak.5."""
+        conn_path = Path(self.config.connections_file)
+        for i in range(1, 6):
+            bak_path = conn_path.with_name(f"{conn_path.name}.bak.{i}")
+            if bak_path.exists():
+                try:
+                    with open(bak_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    # Successfully parsed backup, write back to primary connections.json
+                    self._ensure_config_dir()
+                    with open(self.config.connections_file, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=2)
+                    self.logger.info(f"Disaster recovery: successfully restored config from backup version {i}")
+                    return data
+                except Exception as ex:
+                    self.logger.error(f"Failed to recover from backup version {i}: {ex}")
+        return None
+
+    def _import_ssh_config_migration(self):
+        """Scan ~/.ssh/config and import hosts that are not yet saved in connections.json."""
+        try:
+            ssh_config_path = Path.home() / ".ssh" / "config"
+            if not ssh_config_path.exists():
+                return
+            
+            self.logger.info(f"Migration Helper: Found SSH config at {ssh_config_path}, scanning...")
+            
+            with open(ssh_config_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            imported_count = 0
+            current_host = {}
+            connections = self.load_connections()
+            
+            for line in content.splitlines():
+                line_stripped = line.strip()
+                if not line_stripped or line_stripped.startswith('#'):
+                    continue
+                
+                parts = line_stripped.split(None, 1)
+                if len(parts) < 2:
+                    continue
+                
+                key = parts[0].lower()
+                val = parts[1].strip().strip('"')
+                
+                if key == 'host':
+                    # Save previous host if valid
+                    if current_host.get('hostname') and current_host.get('username'):
+                        store_key = f"{current_host['hostname']}@{current_host['username']}"
+                        if store_key not in connections:
+                            self.save_connection(current_host)
+                            connections[store_key] = current_host.copy()
+                            imported_count += 1
+                    
+                    # Start new host parsing
+                    current_host = {
+                        'name': val,
+                        'hostname': '',
+                        'port': 22,
+                        'username': '',
+                        'keyPath': '',
+                        'password': ''
+                    }
+                elif current_host:
+                    if key == 'hostname':
+                        current_host['hostname'] = val
+                    elif key == 'user':
+                        current_host['username'] = val
+                    elif key == 'port':
+                        try:
+                            current_host['port'] = int(val)
+                        except ValueError:
+                            current_host['port'] = 22
+                    elif key == 'identityfile':
+                        expanded_path = os.path.expanduser(val)
+                        current_host['keyPath'] = expanded_path
+            
+            # Save the last host if valid
+            if current_host.get('hostname') and current_host.get('username'):
+                store_key = f"{current_host['hostname']}@{current_host['username']}"
+                if store_key not in connections:
+                    self.save_connection(current_host)
+                    imported_count += 1
+            
+            if imported_count > 0:
+                self.logger.info(f"Migration Helper: Automatically imported {imported_count} hosts from ~/.ssh/config")
+        except Exception as e:
+            self.logger.error(f"Migration Helper error: {e}")
+
     def _load_raw_connections(self) -> Dict[str, Any]:
         """Load connections from disk without decrypting passwords."""
         with self._lock:
             if not Path(self.config.connections_file).exists():
                 return {}
             try:
-                with open(self.config.connections_file, 'r') as f:
+                with open(self.config.connections_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                self.logger.error(f"Error loading raw connections: {e}")
+                self.logger.error(f"Error loading raw connections, attempting disaster recovery: {e}")
+                recovered = self._attempt_disaster_recovery()
+                if recovered is not None:
+                    return recovered
                 return {}
 
     def save_connection(self, connection: Dict[str, Any]) -> bool:
@@ -154,8 +275,9 @@ class ConnectionStore:
                 
                 # Ensure directory exists before writing
                 self._ensure_config_dir()
+                self._backup_config()
                 
-                with open(self.config.connections_file, 'w') as f:
+                with open(self.config.connections_file, 'w', encoding='utf-8') as f:
                     json.dump(connections, f, indent=2)
                     
                 self.logger.info(f"Connection saved: {key}")
@@ -172,9 +294,16 @@ class ConnectionStore:
                 return {}
             
             try:
-                with open(self.config.connections_file, 'r') as f:
+                with open(self.config.connections_file, 'r', encoding='utf-8') as f:
                     connections = json.load(f)
+            except Exception as e:
+                self.logger.error(f"Error loading connections, attempting disaster recovery: {e}")
+                recovered = self._attempt_disaster_recovery()
+                if recovered is None:
+                    return {}
+                connections = recovered
                 
+            try:
                 # Decrypt passwords if cipher is available
                 for key, conn in connections.items():
                     if conn.get('password_encrypted') and conn.get('password') and self.cipher:
@@ -197,8 +326,8 @@ class ConnectionStore:
                 
                 return connections
             except Exception as e:
-                self.logger.error(f"Error loading connections: {e}")
-                return {}
+                self.logger.error(f"Error decrypting passwords: {e}")
+                return connections
     
     def delete_connection(self, key: str) -> bool:
         """Delete a saved connection."""
@@ -207,7 +336,8 @@ class ConnectionStore:
                 connections = self._load_raw_connections()
                 if key in connections:
                     del connections[key]
-                    with open(self.config.connections_file, 'w') as f:
+                    self._backup_config()
+                    with open(self.config.connections_file, 'w', encoding='utf-8') as f:
                         json.dump(connections, f, indent=2)
                     self.logger.info(f"Connection deleted: {key}")
                     return True

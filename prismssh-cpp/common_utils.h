@@ -380,4 +380,80 @@ inline bool RenameLocalFileOrFolder(const std::wstring& oldPath, const std::wstr
     }
 }
 
+inline void BackupConnectionConfig(const std::wstring& connPath) {
+    try {
+        fs::path p(connPath);
+        if (!fs::exists(p) || fs::file_size(p) == 0) {
+            return;
+        }
+
+        // Roll backups: .bak.4 -> .bak.5, ..., .bak.1 -> .bak.2
+        for (int i = 4; i >= 1; --i) {
+            fs::path src = p.parent_path() / (p.filename().wstring() + L".bak." + std::to_wstring(i));
+            fs::path dst = p.parent_path() / (p.filename().wstring() + L".bak." + std::to_wstring(i + 1));
+            if (fs::exists(src)) {
+                if (fs::exists(dst)) {
+                    fs::remove(dst);
+                }
+                fs::rename(src, dst);
+            }
+        }
+
+        fs::path bak1 = p.parent_path() / (p.filename().wstring() + L".bak.1");
+        if (fs::exists(bak1)) {
+            fs::remove(bak1);
+        }
+        fs::copy_file(p, bak1);
+        PrismLog("INFO", "Rolling backup created for connections configuration in C++");
+    }
+    catch (const std::exception& e) {
+        PrismLog("ERROR", std::string("Error creating config backup in C++: ") + e.what());
+    }
+    catch (...) {
+        PrismLog("ERROR", "Unknown error creating config backup in C++");
+    }
+}
+
+inline std::string ReadConnectionConfigWithRecovery(const std::wstring& connPath) {
+    fs::path p(connPath);
+    if (fs::exists(p) && fs::file_size(p) > 0) {
+        std::string content = ReadFileToUtf8(connPath);
+        if (!content.empty()) {
+            try {
+                auto j = nlohmann::json::parse(content);
+                return content; // Valid JSON
+            }
+            catch (const std::exception& e) {
+                PrismLog("ERROR", std::string("Primary config JSON parse failed: ") + e.what() + ", attempting recovery...");
+            }
+            catch (...) {
+                PrismLog("ERROR", "Primary config JSON parse failed (unknown error), attempting recovery...");
+            }
+        }
+    }
+
+    // Try recovering from bak.1 to bak.5
+    for (int i = 1; i <= 5; ++i) {
+        fs::path bakPath = p.parent_path() / (p.filename().wstring() + L".bak." + std::to_wstring(i));
+        if (fs::exists(bakPath) && fs::file_size(bakPath) > 0) {
+            std::wstring bakPathW = bakPath.wstring();
+            std::string content = ReadFileToUtf8(bakPathW);
+            if (!content.empty()) {
+                try {
+                    auto j = nlohmann::json::parse(content);
+                    // Valid backup, write back to primary connections.json
+                    WriteUtf8ToFile(connPath, content);
+                    PrismLog("INFO", "Disaster recovery: successfully restored config from backup version " + std::to_string(i) + " in C++");
+                    return content;
+                }
+                catch (...) {
+                    PrismLog("ERROR", "Failed to parse backup version " + std::to_string(i) + " in C++");
+                }
+            }
+        }
+    }
+
+    return "";
+}
+
 #endif // COMMON_UTILS_H

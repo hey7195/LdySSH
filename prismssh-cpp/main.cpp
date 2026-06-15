@@ -132,7 +132,7 @@ void TopologyHeartbeatLoop() {
     while (true) {
         std::wstring configDir = GetConfigDirectory();
         std::wstring connPath = configDir + L"\\connections.json";
-        std::string connData = ReadFileToUtf8(connPath);
+        std::string connData = ReadConnectionConfigWithRecovery(connPath);
 
         if (!connData.empty()) {
             try {
@@ -319,7 +319,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::wstring connPath = configDir + L"\\connections.json";
             std::wstring keyPath = configDir + L"\\.key";
             
-            std::string connData = ReadFileToUtf8(connPath);
+            std::string connData = ReadConnectionConfigWithRecovery(connPath);
             std::string keyData = ReadFileToUtf8(keyPath);
             
             nlohmann::json result = nlohmann::json::array();
@@ -361,6 +361,21 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                         }
                         conn.erase("jumpPass_encrypted");
                     }
+
+                    if (conn.contains("proxyPass_encrypted") && conn["proxyPass_encrypted"].get<bool>()) {
+                        std::string encryptedProxyPass = conn["proxyPass"].get<std::string>();
+                        if (!keyData.empty()) {
+                            std::string decrypted = DecryptFernetPassword(keyData, encryptedProxyPass);
+                            if (!decrypted.empty()) {
+                                conn["proxyPass"] = decrypted;
+                            } else {
+                                conn["proxyPass"] = "";
+                            }
+                        } else {
+                            conn["proxyPass"] = "";
+                        }
+                        conn.erase("proxyPass_encrypted");
+                    }
                     result.push_back(conn);
                 }
             }
@@ -373,12 +388,13 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::wstring configDir = GetConfigDirectory();
             std::wstring connPath = configDir + L"\\connections.json";
             
-            std::string connData = ReadFileToUtf8(connPath);
+            std::string connData = ReadConnectionConfigWithRecovery(connPath);
             bool deleted = false;
             if (!connData.empty()) {
                 nlohmann::json conns = nlohmann::json::parse(connData);
                 if (conns.contains(keyToDelete)) {
                     conns.erase(keyToDelete);
+                    BackupConnectionConfig(connPath);
                     WriteUtf8ToFile(connPath, conns.dump(2));
                     deleted = true;
                 }
@@ -447,13 +463,20 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string jumpKey = SafeGetJsonString(params, "jumpKey", "");
             std::string jumpKeyPassphrase = SafeGetJsonString(params, "jumpKeyPassphrase", "");
 
+            // 提取 SOCKS5 / HTTP 代理参数
+            std::string proxyType = SafeGetJsonString(params, "proxyType", "none");
+            std::string proxyHost = SafeGetJsonString(params, "proxyHost", "");
+            int proxyPort = SafeGetJsonInt(params, "proxyPort", 1080);
+            std::string proxyUser = SafeGetJsonString(params, "proxyUser", "");
+            std::string proxyPass = SafeGetJsonString(params, "proxyPass", "");
+
             std::string storeKey = hostname + "@" + username;
             
             if (SafeGetJsonBool(params, "save", false)) {
                 NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
                 std::wstring configDir = GetConfigDirectory();
                 std::wstring connPath = configDir + L"\\connections.json";
-                std::string connData = ReadFileToUtf8(connPath);
+                std::string connData = ReadConnectionConfigWithRecovery(connPath);
                 
                 nlohmann::json conns = nlohmann::json::object();
                 if (!connData.empty()) {
@@ -505,12 +528,33 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                     connObj["jumpPass_encrypted"] = false;
                 }
 
+                // 保存代理配置
+                connObj["proxyType"] = proxyType;
+                connObj["proxyHost"] = proxyHost;
+                connObj["proxyPort"] = proxyPort;
+                connObj["proxyUser"] = proxyUser;
+                if (!proxyPass.empty()) {
+                    std::string fernetKey = GetOrCreateFernetKey();
+                    std::string encrypted = EncryptFernetPassword(fernetKey, proxyPass);
+                    if (!encrypted.empty()) {
+                        connObj["proxyPass"] = encrypted;
+                        connObj["proxyPass_encrypted"] = true;
+                    } else {
+                        connObj["proxyPass"] = proxyPass;
+                        connObj["proxyPass_encrypted"] = false;
+                    }
+                } else {
+                    connObj["proxyPass"] = "";
+                    connObj["proxyPass_encrypted"] = false;
+                }
+
                 conns[storeKey] = connObj;
                 
+                BackupConnectionConfig(connPath);
                 WriteUtf8ToFile(connPath, conns.dump(2));
             }
 
-            std::thread([sessId, hostname, port, username, password, keyPath, keyPassphrase, storeKey, reqId, jumpHost, jumpPort, jumpUser, jumpPass, jumpKey, jumpKeyPassphrase]() {
+            std::thread([sessId, hostname, port, username, password, keyPath, keyPassphrase, storeKey, reqId, jumpHost, jumpPort, jumpUser, jumpPass, jumpKey, jumpKeyPassphrase, proxyType, proxyHost, proxyPort, proxyUser, proxyPass]() {
                 auto session = std::make_shared<SSHSession>(sessId);
                 PrismLog("INFO", "SSHSession connect initiated asynchronously for " + storeKey);
                 
@@ -522,7 +566,14 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 jc.jumpKey = jumpKey;
                 jc.jumpKeyPassphrase = jumpKeyPassphrase;
 
-                bool success = session->Connect(hostname, port, username, password, keyPath, keyPassphrase, 80, 24, jc);
+                ProxyConfig pc;
+                pc.proxyType = proxyType;
+                pc.proxyHost = proxyHost;
+                pc.proxyPort = proxyPort;
+                pc.proxyUser = proxyUser;
+                pc.proxyPass = proxyPass;
+
+                bool success = session->Connect(hostname, port, username, password, keyPath, keyPassphrase, 80, 24, jc, pc);
                 
                 nlohmann::json response;
                 response["id"] = reqId;

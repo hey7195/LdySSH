@@ -149,7 +149,20 @@ class PrismSSHAPI:
                     'username': params['username'],
                     'password': params.get('password'),
                     'keyPath': params.get('keyPath'),
-                    'name': params.get('name', f"{params['username']}@{params['hostname']}")
+                    'name': params.get('name', f"{params['username']}@{params['hostname']}"),
+                    # 堡垒机参数
+                    'jumpHost': params.get('jumpHost', ''),
+                    'jumpPort': params.get('jumpPort', 22),
+                    'jumpUser': params.get('jumpUser', ''),
+                    'jumpPass': params.get('jumpPass', ''),
+                    'jumpKey': params.get('jumpKey', ''),
+                    'jumpKeyPassphrase': params.get('jumpKeyPassphrase', ''),
+                    # 代理参数
+                    'proxyType': params.get('proxyType', 'none'),
+                    'proxyHost': params.get('proxyHost', ''),
+                    'proxyPort': params.get('proxyPort', 1080),
+                    'proxyUser': params.get('proxyUser', ''),
+                    'proxyPass': params.get('proxyPass', '')
                 }
                 
                 save_result = self.connection_store.save_connection(save_data)
