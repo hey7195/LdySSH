@@ -3043,6 +3043,7 @@ void HandleConnectApi(const std::string& reqId, const nlohmann::json& args, nloh
         connObj["username"] = username;
         connObj["name"] = SafeGetJsonString(params, "name", username + "@" + hostname);
         connObj["keyPath"] = SafeGetJsonString(params, "keyPath", "");
+        connObj["group"] = SafeGetJsonString(params, "group", "");
         
         if (!password.empty()) {
             std::string fernetKey = GetOrCreateFernetKey();
