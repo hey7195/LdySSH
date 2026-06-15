@@ -3494,6 +3494,9 @@ function showConnectionsHome() {
     if (home) home.style.display = 'block';
     renderConnectionsHome();
     toggleWorkbenchActive(true);
+    if (topoViewer && typeof topoViewer.resetWarp === 'function') {
+        topoViewer.resetWarp();
+    }
 }
 
 function filterSavedConnections() {
@@ -4335,8 +4338,16 @@ window.addEventListener('DOMContentLoaded', () => {
 
 async function connectWithParams(connectionParams, isBatch = false) {
     if (!isBatch) {
-        document.getElementById('welcomeScreen').style.display = 'none';
-        document.getElementById('connectingScreen').style.display = 'block';
+        if (topoViewer && typeof topoViewer.warpToNode === 'function') {
+            topoViewer.warpToNode(connectionParams.hostname);
+            setTimeout(() => {
+                document.getElementById('welcomeScreen').style.display = 'none';
+                document.getElementById('connectingScreen').style.display = 'block';
+            }, 750);
+        } else {
+            document.getElementById('welcomeScreen').style.display = 'none';
+            document.getElementById('connectingScreen').style.display = 'block';
+        }
     }
 
     try {
@@ -9457,6 +9468,45 @@ class TopologyViewer {
         }
     }
 
+    warpToNode(nodeIp) {
+        if (!this.nodes) return;
+        const node = this.nodes.find(n => n.ip === nodeIp);
+        if (!node || !node.mesh) return;
+
+        this.isWarping = true;
+        this.isWarpingBack = false;
+        this.warpStartTime = Date.now();
+        this.warpDuration = 900;
+
+        this.warpStartPos = this.camera.position.clone();
+        this.warpStartFov = this.camera.fov;
+        
+        if (this.controls) {
+            this.warpStartTarget = this.controls.target.clone();
+        }
+
+        const nodePos = node.mesh.position.clone();
+        const dir = nodePos.clone().normalize();
+        const offsetDist = node.mesh.geometry.parameters.radius * 3.5;
+        this.warpTargetPos = nodePos.clone().add(dir.multiplyScalar(offsetDist));
+        this.warpTargetNode = node;
+    }
+
+    resetWarp() {
+        if (!this.warpStartPos) return;
+        
+        this.isWarping = false;
+        this.isWarpingBack = true;
+        this.warpBackStartTime = Date.now();
+        this.warpBackDuration = 800;
+
+        this.warpBackStartPos = this.camera.position.clone();
+        this.warpBackStartFov = this.camera.fov;
+        if (this.controls) {
+            this.warpBackStartTarget = this.controls.target.clone();
+        }
+    }
+
     animate() {
         this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
         
@@ -9469,7 +9519,53 @@ class TopologyViewer {
         
         this.lastFrameTime = now - (elapsed % this.fpsInterval);
 
-        if (this.controls) this.controls.update();
+        // 3D 跃迁插值动画
+        let warpSpeedMultiplier = 1.0;
+        if (this.isWarping && this.warpTargetNode) {
+            const t = Math.min(1.0, (Date.now() - this.warpStartTime) / this.warpDuration);
+            const easeT = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            
+            this.camera.position.lerpVectors(this.warpStartPos, this.warpTargetPos, easeT);
+            
+            if (this.controls && this.warpStartTarget) {
+                this.controls.target.lerpVectors(this.warpStartTarget, this.warpTargetNode.mesh.position, easeT);
+            }
+            
+            this.camera.fov = this.warpStartFov + Math.sin(t * Math.PI) * 25;
+            this.camera.updateProjectionMatrix();
+            
+            warpSpeedMultiplier = 1.0 + Math.sin(t * Math.PI) * 45;
+            
+            if (t >= 1.0) {
+                this.isWarping = false;
+            }
+        } else if (this.isWarpingBack) {
+            const t = Math.min(1.0, (Date.now() - this.warpBackStartTime) / this.warpBackDuration);
+            const easeT = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            
+            const defaultPos = new THREE.Vector3(0, 40, 80);
+            const defaultTarget = new THREE.Vector3(0, 0, 0);
+            
+            this.camera.position.lerpVectors(this.warpBackStartPos, defaultPos, easeT);
+            
+            if (this.controls && this.warpBackStartTarget) {
+                this.controls.target.lerpVectors(this.warpBackStartTarget, defaultTarget, easeT);
+            }
+            
+            this.camera.fov = this.warpBackStartFov + (60 - this.warpBackStartFov) * easeT;
+            this.camera.updateProjectionMatrix();
+            
+            warpSpeedMultiplier = 1.0 + (1.0 - easeT) * 15;
+            
+            if (t >= 1.0) {
+                this.isWarpingBack = false;
+            }
+        }
+
+        if (this.controls) {
+            this.controls.enabled = !(this.isWarping || this.isWarpingBack);
+            this.controls.update();
+        }
 
         // 1. 太阳表面流动与自转 (利用 UV 移动创造不断喷涌流出的岩浆效果)
         if (this.gateway) {
@@ -9489,7 +9585,7 @@ class TopologyViewer {
         // 2. 多层星空极慢旋转
         this.starfields.forEach(sf => {
             if (sf.points) {
-                sf.points.rotation.y += sf.speed;
+                sf.points.rotation.y += sf.speed * warpSpeedMultiplier;
             }
         });
 
@@ -9497,7 +9593,7 @@ class TopologyViewer {
         this.nodes.forEach((n, idx) => {
             if (n.mesh) {
                 // 行星自转
-                n.mesh.rotation.y += 0.008;
+                n.mesh.rotation.y += 0.008 * (1.0 + (warpSpeedMultiplier - 1.0) * 0.15);
 
                 // 地球云层与大气的不同速度浮动自转
                 n.mesh.traverse(child => {
@@ -9508,7 +9604,7 @@ class TopologyViewer {
                 });
 
                 // 公转相位累加
-                n.phase += n.speed;
+                n.phase += n.speed * (1.0 + (warpSpeedMultiplier - 1.0) * 0.15);
 
                 // 计算更新后的公转位置
                 const x = n.orbitR * Math.cos(n.phase);
