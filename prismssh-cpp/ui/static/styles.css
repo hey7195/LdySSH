@@ -58,9 +58,9 @@ body {
 .activity-bar {
     width: 56px;
     flex-shrink: 0;
-    background: rgba(15, 23, 42, 0.6);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: rgba(10, 10, 15, 0.15) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     border-right: 1px solid rgba(255, 255, 255, 0.05);
     display: flex;
     flex-direction: column;
@@ -141,9 +141,9 @@ body {
 
 .sidebar {
     width: 224px;
-    background: rgba(15, 23, 42, 0.75);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: rgba(10, 10, 15, 0.15) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     border-right: 1px solid rgba(255, 255, 255, 0.05);
     display: flex;
     flex-direction: column;
@@ -989,9 +989,9 @@ input[type="checkbox"] {
 .right-sidebar {
     width: 0;
     --sidebar-width: 380px;
-    background: rgba(15, 23, 42, 0.75);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: rgba(10, 10, 15, 0.15) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     border-left: 1px solid rgba(255, 255, 255, 0.05);
     display: flex;
     transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
@@ -5055,6 +5055,7 @@ input[type="checkbox"] {
     width: 100vw !important;
     height: 100vh !important;
     display: block !important;
+    z-index: 2 !important; /* Stacked above 3D background container */
 }
 
 .window-container::before {
@@ -5069,6 +5070,7 @@ input[type="checkbox"] {
     top: -75% !important;
     left: -75% !important;
     pointer-events: none !important;
+    display: none !important;
 }
 
 .window-inner {
@@ -5090,6 +5092,7 @@ input[type="checkbox"] {
 }
 
 .title-bar {
+    position: relative; /* Enable z-index stacking context */
     height: 28px;
     background: transparent;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -5222,6 +5225,7 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     top: -75% !important;
     left: -75% !important;
     pointer-events: none !important;
+    display: none !important;
 }
 
 .sftp-panel::after, .terminal-container::after, .pf-card::after, .monitor-card::after {
@@ -5231,7 +5235,9 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     left: 1px !important;
     right: 1px !important;
     bottom: 1px !important;
-    background: linear-gradient(145deg, #0f141c, #0a0c12) !important;
+    background: rgba(10, 15, 25, 0.45) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     border-radius: 5px !important;
     z-index: 2 !important;
     pointer-events: none !important;
@@ -5250,7 +5256,9 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     border: 1px solid rgba(255, 255, 255, 0.05) ;
     border-top: 1px solid rgba(var(--theme-primary), 0.3) ;
     border-left: 1px solid rgba(var(--theme-secondary), 0.3) ;
-    background: linear-gradient(145deg, #181d2a, #11141d) ;
+    background: rgba(15, 23, 42, 0.35) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
     box-shadow: 0 4px 15px rgba(0,0,0,0.5) ;
     transition: background-color 0.3s ease , color 0.3s ease , border-color 0.3s ease , box-shadow 0.3s ease , transform 0.3s ease , opacity 0.3s ease ;
 }
@@ -5259,7 +5267,9 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     border-left: 1px solid rgba(var(--theme-secondary), 0.6) ;
     box-shadow: 0 8px 25px rgba(0,0,0,0.6), var(--neon-glow-strong) ;
     transform: translateY(-4px) ;
-    background: linear-gradient(145deg, #1d2333, #151824) ;
+    background: rgba(30, 41, 59, 0.55) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
 }
 
 /* Context Menus */
@@ -5921,7 +5931,7 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     left: 0;
     width: 100vw;
     height: 100vh;
-    z-index: 0;
+    z-index: 1; /* Below window-container (z-index 2), above body default background */
     pointer-events: auto;
     background: radial-gradient(circle at center, #0b0c16 0%, #030406 100%);
 }
@@ -5991,4 +6001,12 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
 }
 .terminal-container.in-workbench::after {
     background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
 }
+
+/* 当工作台激活时，隐藏整个大框架的外框流光，露出纯净深邃的 3D 宇宙星系 */
+.window-container:has(.in-workbench)::before {
+    display: none !important;
+}
+

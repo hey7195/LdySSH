@@ -7993,6 +7993,7 @@ class TopologyViewer {
         this.onClickHandler = this.onDocumentClick.bind(this);
         window.addEventListener('resize', this.onResizeHandler);
         this.renderer.domElement.addEventListener('click', this.onClickHandler);
+
     }
 
     buildTopology() {
