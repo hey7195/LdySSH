@@ -4740,6 +4740,7 @@ window.showWorkbench = function() {
     }
 
     updateUIForCurrentSession();
+    toggleWorkbenchActive(true);
 };
 
 function switchToSession(sessionId) {
