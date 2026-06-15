@@ -7893,6 +7893,9 @@ class TopologyViewer {
         this.mouse = new THREE.Vector2();
         this.starfields = [];
         this.gateway = null;
+        this.sunAtmosphere = null;
+        this.sunParticles = null;
+        this.orbits = [];
     }
 
     createSunGlowTexture() {

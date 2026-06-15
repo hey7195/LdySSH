@@ -1,6 +1,56 @@
+// --- Global Console Logging Redirection to Local Log File ---
+(function() {
+    let isLogForwarding = false;
+    
+    function safeForward(level, args) {
+        if (isLogForwarding) return;
+        isLogForwarding = true;
+        try {
+            const msg = args.map(arg => {
+                if (arg instanceof Error) {
+                    return arg.message + "\n" + arg.stack;
+                }
+                if (typeof arg === 'object') {
+                    try { return JSON.stringify(arg); } catch(e) { return "[Object]"; }
+                }
+                return String(arg);
+            }).join(' ');
+            
+            if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.write_log === 'function') {
+                window.pywebview.api.write_log(level, msg).catch(() => {});
+            }
+        } catch (e) {
+            // prevent infinite loops
+        } finally {
+            isLogForwarding = false;
+        }
+    }
+
+    const orgLog = console.log;
+    console.log = function(...args) {
+        orgLog.apply(console, args);
+        safeForward("JS_INFO", args);
+    };
+
+    const orgWarn = console.warn;
+    console.warn = function(...args) {
+        orgWarn.apply(console, args);
+        safeForward("JS_WARN", args);
+    };
+
+    const orgError = console.error;
+    console.error = function(...args) {
+        orgError.apply(console, args);
+        safeForward("JS_ERROR", args);
+    };
+})();
+
 let currentSessionId = null;
 let currentTerminal = null;
 let sessions = {};
+let isSplitMode = false;
+let splitLeftSessionId = null;
+let splitRightSessionId = null;
 let outputPollingInterval = null;
 let outputPollFailureCount = 0;
 let fitAddon = null;
@@ -34,7 +84,7 @@ let lastStatusCheckTime = 0;
 const COMMAND_INPUT_MAX = 240;
 const AI_CONTEXT_MAX = 4000;
 // 注入的海量智能命令库
-let LINUX_COMMAND_SUGGESTIONS = /* INJECT_COMMANDS_JSON */;
+let LINUX_COMMAND_SUGGESTIONS = window.LINUX_COMMAND_SUGGESTIONS || [];
 if (!Array.isArray(LINUX_COMMAND_SUGGESTIONS)) {
     LINUX_COMMAND_SUGGESTIONS = [];
 }
@@ -195,7 +245,7 @@ function renderCommandSuggestion(sessionId) {
     state.suggestions.forEach((item, idx) => {
         const isSelected = idx === state.suggestionIndex;
         const className = isSelected ? 'terminal-command-item selected' : 'terminal-command-item';
-        html += `<div class="${className}" style="${isSelected ? 'background: rgba(255,255,255,0.1); border-left: 2px solid var(--accent-color); padding-left: 8px;' : 'padding-left: 10px; border-left: 2px solid transparent;'} display: flex; justify-content: space-between; padding-top: 4px; padding-bottom: 4px; padding-right: 10px; font-size: 13px;">
+        html += `<div class="${className}" style="${isSelected ? 'background: rgba(255,255,255,0.1); border-left: 2px solid var(--accent-color); padding-left: 8px;' : 'padding-left: 10px; border-left: 2px solid transparent;'} display: flex; justify-content: space-between; padding-top: 4px; padding-bottom: 4px; padding-right: 10px; font-size: 13px; cursor: pointer;" onclick="selectCommandSuggestionAndAccept('${escapeJs(item.command)}', '${escapeJs(sessionId)}'); event.stopPropagation();">
                     <span class="terminal-command-main" style="${isSelected ? 'color: var(--accent-color); font-weight: bold;' : ''}">${escapeHtml(item.command)}</span>
                     <span class="terminal-command-desc" style="color: #aaa; margin-left: 15px; opacity: 0.8; font-size: 12px; white-space: nowrap;">${escapeHtml(item.description)}</span>
                  </div>`;
@@ -337,6 +387,31 @@ function acceptCommandSuggestion(sessionId) {
     return true;
 }
 
+function selectCommandSuggestionAndAccept(commandText, sessionId) {
+    const state = getCommandInputState(sessionId);
+    if (!state) return;
+    
+    saveCommandToHistory(commandText);
+
+    const typed = state.buffer;
+    let sequence = '';
+    // 发送与已输入字符等量的退格符，让远程 Shell 自动擦除提示内容
+    for (let i = 0; i < typed.length; i++) {
+        sequence += '\x7f';
+    }
+    // 发送完整的预测命令
+    sequence += commandText;
+
+    if (currentSessionId && sessions[currentSessionId]?.connected) {
+        window.pywebview.api.send_input(sessionId, sequence).catch(console.error);
+    }
+    
+    // 清除状态，收起提示框
+    state.buffer = '';
+    state.suggestions = [];
+    hideCommandSuggestion();
+}
+
 function appendSessionOutputContext(sessionId, output) {
     if (!sessions[sessionId] || !output) return;
     const previous = sessions[sessionId].recentOutput || '';
@@ -409,7 +484,12 @@ function compileHighlightRegex() {
     try {
         const ansiRegex = '\\x1b\\[[0-9;?]*[a-zA-Z]|\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)';
         const combinedPattern = `(?<ansi>${ansiRegex})|` + activeHighlightRules.map((r, i) => {
-            return `(?<rule${i}>${r.pattern})`;
+            let pattern = r.pattern;
+            // 智能边界保护：若是纯字母/数字/下划线单词，自动增加 \b 边界限制以防误伤
+            if (/^[a-zA-Z0-9_-]+$/.test(pattern)) {
+                pattern = `\\b${pattern}\\b`;
+            }
+            return `(?<rule${i}>${pattern})`;
         }).join('|');
         cachedHighlightRegex = new RegExp(combinedPattern, 'gi');
     } catch (error) {
@@ -420,7 +500,7 @@ function compileHighlightRegex() {
 
 function loadHighlightRules() {
     try {
-        const raw = localStorage.getItem('prismsshHighlightRules');
+        const raw = localStorage.getItem('ldysshHighlightRules') || localStorage.getItem('prismsshHighlightRules');
         const parsed = raw ? JSON.parse(raw) : null;
         // Require 46 rules to force upgrade to new extensive version
         highlightRules = Array.isArray(parsed) && parsed.length >= 46 ? parsed : getDefaultHighlightRules();
@@ -432,11 +512,13 @@ function loadHighlightRules() {
 }
 
 function saveHighlightRules() {
+    localStorage.setItem('ldysshHighlightRules', JSON.stringify(highlightRules));
     localStorage.setItem('prismsshHighlightRules', JSON.stringify(highlightRules));
     compileHighlightRegex();
 }
 
 function resetHighlightRules() {
+    localStorage.removeItem('ldysshHighlightRules');
     localStorage.removeItem('prismsshHighlightRules');
     highlightRules = getDefaultHighlightRules();
     compileHighlightRegex();
@@ -451,7 +533,7 @@ function normalizeHighlightColor(color) {
     return ansiColorToCss(color);
 }
 
-function getHighlightAnsiStart(color) {
+function getHighlightAnsiStart(color, useBg) {
     const value = String(color || '').trim();
     const match = value.match(/^#([0-9a-fA-F]{6})$/);
     if (!match) {
@@ -462,31 +544,40 @@ function getHighlightAnsiStart(color) {
     const red = parseInt(hex.slice(0, 2), 16);
     const green = parseInt(hex.slice(2, 4), 16);
     const blue = parseInt(hex.slice(4, 6), 16);
-    return `\x1b[1;38;2;${red};${green};${blue}m`;
+    
+    if (useBg) {
+        // 计算同色系、暗色调的背景色（透明底色质感，降噪）
+        const bgR = Math.round(red * 0.22);
+        const bgG = Math.round(green * 0.22);
+        const bgB = Math.round(blue * 0.22);
+        // 38;2 是前景色，48;2 是背景色，1 是加粗
+        return `\x1b[1;38;2;${red};${green};${blue};48;2;${bgR};${bgG};${bgB}m`;
+    } else {
+        // 只使用高对比度前景色，不带背景底色，避免背景块泛滥导致“不真实”
+        return `\x1b[1;38;2;${red};${green};${blue}m`;
+    }
 }
 
 function applyTerminalHighlights(output) {
     if (!output || !cachedHighlightRegex || activeHighlightRules.length === 0) return output;
 
-    // We don't need a try/catch here because it's guaranteed to be valid if cachedHighlightRegex is set
-    // Reset lastIndex just in case
     cachedHighlightRegex.lastIndex = 0;
     
     return String(output).replace(cachedHighlightRegex, (match, ...args) => {
         const groups = args[args.length - 1];
         
-        // If it's an ANSI escape sequence, leave it completely untouched
         if (groups.ansi) return match;
 
-        // Find which rule matched using the pre-filtered activeHighlightRules array
         for (let i = 0; i < activeHighlightRules.length; i++) {
             if (groups[`rule${i}`] !== undefined) {
                 const rule = activeHighlightRules[i];
-                const start = getHighlightAnsiStart(rule.color);
+                // 只有高危警告、错误、异常、敏感词、根提示符等核心严重性词汇才获得微光背景高亮
+                const useBg = ['error', 'warning', 'permission', 'network', 'python_exc', 'java_exc', 'secrets', 'root'].includes(rule.id);
+                const start = getHighlightAnsiStart(rule.color, useBg);
                 return `${start}${match}\x1b[0m`;
             }
         }
-        return match; // Fallback
+        return match;
     });
 }
 
@@ -551,11 +642,13 @@ function ansiColorToCss(code) {
 
 // Tool panel functions
 function openTool(toolName) {
-    // Check if we have an active session
-    if (!currentSessionId || !sessions[currentSessionId]) {
-        closeToolPanel();
-        alert('请先连接服务器');
-        return;
+    // Check if we have an active session (AI tool is exempt from this check)
+    if (toolName !== 'ai') {
+        if (!currentSessionId || !sessions[currentSessionId]) {
+            closeToolPanel();
+            alert('请先连接服务器');
+            return;
+        }
     }
 
     // Close current tool if clicking the same icon
@@ -564,12 +657,18 @@ function openTool(toolName) {
         return;
     }
 
+    if (currentTool === 'ai' && toolName !== 'ai') {
+        if (window.pywebview && window.pywebview.api) {
+            window.pywebview.api.hide_chatgpt_subwindow();
+        }
+    }
+
     if (currentTool === 'monitor') {
         clearSystemMonitorRefresh();
     }
 
     // Reset tool activity buttons
-    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands').forEach(icon => {
+    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands, #aiIcon').forEach(icon => {
         icon.classList.remove('active', 'tool-active');
     });
 
@@ -606,6 +705,37 @@ function openTool(toolName) {
         initializePortForwarding();
     } else if (toolName === 'highlight') {
         renderHighlightRules();
+    } else if (toolName === 'ai') {
+        document.getElementById('aiPanel').classList.add('active');
+        document.getElementById('aiIcon').classList.add('active', 'tool-active');
+        
+        // 智能提取屏幕上下文并传给 C++！
+        try {
+            const getTerminalContext = (linesCount = 40) => {
+                const session = sessions[currentSessionId];
+                if (!session || !session.terminal) return "";
+                const term = session.terminal;
+                const buffer = term.buffer.active;
+                let lines = [];
+                const end = buffer.length - 1;
+                const start = Math.max(0, end - linesCount + 1);
+                for (let i = start; i <= end; i++) {
+                    const line = buffer.getLine(i);
+                    if (line) {
+                        lines.push(line.translateToString(true));
+                    }
+                }
+                return lines.join('\n');
+            };
+            const context = getTerminalContext(40);
+            if (context && window.pywebview && window.pywebview.api && window.pywebview.api.send_ai_context) {
+                window.pywebview.api.send_ai_context(context);
+            }
+        } catch(e) {
+            console.error("Failed to send terminal AI context", e);
+        }
+
+        startSyncAiSubWindow();
     }
 
     // Resize terminal after sidebar opens
@@ -617,10 +747,16 @@ function openTool(toolName) {
 }
 
 function closeToolPanel() {
+    if (currentTool === 'ai') {
+        if (window.pywebview && window.pywebview.api) {
+            window.pywebview.api.hide_chatgpt_subwindow();
+        }
+    }
+
     clearSystemMonitorRefresh();
     currentTool = null;
     document.getElementById('rightSidebar')?.classList.remove('open');
-    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands').forEach(icon => {
+    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands, #aiIcon').forEach(icon => {
         icon.classList.remove('active', 'tool-active');
     });
     document.querySelectorAll('.tool-panel').forEach(panel => {
@@ -641,6 +777,12 @@ async function initializeSFTP() {
     currentPath = username === 'root' ? '/root' : '/home/' + username;
     document.getElementById('currentPath').value = currentPath;
     await listFiles(currentPath);
+
+    // 初始化本地文件浏览器
+    localCurrentPath = 'C:\\';
+    document.getElementById('localCurrentPath').value = localCurrentPath;
+    await listLocalFiles(localCurrentPath);
+    setupSftpDragAndDrop();
 }
 
 function navigateToPath(path) {
@@ -905,136 +1047,457 @@ function uploadFilesFromPaths(filePaths) {
 
 
 // Process upload queue
+let currentUploadId = null;
 async function processUploadQueue() {
     if (isProcessingUploads || uploadQueue.length === 0) return;
 
+    // 浅拷贝保存一份作为渲染任务队列明细的依据
+    const activeTransfers = uploadQueue.map((item, index) => ({
+        id: index,
+        fileName: item.fileName,
+        remotePath: item.remotePath,
+        status: 'queued', // 'queued' | 'uploading' | 'completed' | 'failed'
+        percentage: 0,
+        uploadedBytes: 0,
+        totalBytes: 0,
+        speed: '',
+        errorMsg: ''
+    }));
+
     isProcessingUploads = true;
-
-    const progressDiv = document.getElementById('uploadProgress');
-    const statusText = document.getElementById('uploadStatusText');
-    const uploadBar = document.getElementById('uploadBar');
-    const uploadBytes = document.getElementById('uploadBytes');
-    const uploadSpeed = document.getElementById('uploadSpeed');
-
-    progressDiv.style.display = 'block';
-
-    let uploadedCount = 0;
-    let failedCount = 0;
-
-    while (uploadQueue.length > 0) {
-        const item = uploadQueue.shift();
-        const { remotePath, fileName } = item;
-        const queueRemaining = uploadQueue.length;
-
-        statusText.textContent = queueRemaining > 0
-            ? `Uploading ${fileName} (${queueRemaining} queued)...`
-            : `Uploading ${fileName}...`;
-
-        const uploadId = generateUploadId();
-
-        try {
-            let startResult;
-            if (item.isBase64) {
-                // Browse button upload (base64 content)
-                startResult = await window.pywebview.api.start_upload_with_progress(
-                    currentSessionId,
-                    item.fileContent,
-                    remotePath,
-                    uploadId
-                );
-            } else {
-                // Drag-drop upload (local path)
-                startResult = await window.pywebview.api.upload_from_path_with_progress(
-                    currentSessionId,
-                    item.localPath,
-                    remotePath,
-                    uploadId
-                );
-            }
-
-            const startResponse = JSON.parse(startResult);
-            if (!startResponse.success) {
-                console.error('Failed to start upload:', fileName, startResponse.error);
-                failedCount++;
-                continue;
-            }
-
-            // Poll for progress
-            let completed = false;
-            let lastBytes = 0;
-            let lastTime = Date.now();
-
-            while (!completed) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-
-                const progressResult = await window.pywebview.api.get_upload_progress(
-                    currentSessionId,
-                    uploadId
-                );
-                const progress = JSON.parse(progressResult);
-
-                if (progress.status === 'uploading' || progress.status === 'starting') {
-                    uploadBar.style.width = `${progress.percentage}%`;
-                    uploadBytes.textContent = `${formatBytes(progress.uploaded)} / ${formatBytes(progress.total)}`;
-
-                    const now = Date.now();
-                    const timeDiff = (now - lastTime) / 1000;
-                    if (timeDiff >= 0.5) {
-                        const bytesDiff = progress.uploaded - lastBytes;
-                        const speed = bytesDiff / timeDiff;
-                        uploadSpeed.textContent = speed > 0 ? `${formatBytes(speed)}/s` : '';
-                        lastBytes = progress.uploaded;
-                        lastTime = now;
+    try {
+        // 动态获取或创建进度卡片
+        let progressDiv = document.getElementById('uploadProgress');
+        if (!progressDiv) {
+            progressDiv = document.createElement('div');
+            progressDiv.id = 'uploadProgress';
+            progressDiv.style.cssText = `
+                position: fixed;
+                bottom: 24px;
+                right: 24px;
+                background: linear-gradient(135deg, rgba(10, 10, 25, 0.92) 0%, rgba(20, 15, 35, 0.92) 100%);
+                border: 1px solid rgba(0, 242, 254, 0.35);
+                border-radius: 12px;
+                padding: 18px;
+                min-width: 340px;
+                max-width: 440px;
+                z-index: 10002;
+                box-shadow: 0 12px 40px rgba(0, 242, 254, 0.25), inset 0 0 15px rgba(0, 242, 254, 0.08);
+                backdrop-filter: blur(16px);
+                color: #fff;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            `;
+            progressDiv.innerHTML = `
+                <style>
+                    @keyframes uploadShimmer {
+                        0% { transform: translateX(-100%); }
+                        100% { transform: translateX(100%); }
                     }
-
-                    const queueNow = uploadQueue.length;
-                    statusText.textContent = queueNow > 0
-                        ? `Uploading ${fileName} (${queueNow} queued)...`
-                        : `Uploading ${fileName}...`;
-
-                } else if (progress.status === 'completed') {
-                    uploadBar.style.width = '100%';
-                    uploadBytes.textContent = `${formatBytes(progress.total)} / ${formatBytes(progress.total)}`;
-                    uploadSpeed.textContent = '';
-                    uploadedCount++;
-                    completed = true;
-                    // console.log('Successfully uploaded:', fileName);
-                } else if (progress.status === 'error' || progress.status === 'cancelled') {
-                    completed = true;
-                    failedCount++;
-                    console.error('Upload failed:', fileName, progress.error || progress.status);
-                } else if (progress.status === 'unknown') {
-                    completed = true;
-                    uploadedCount++;
+                    @keyframes uploadPulse {
+                        0% { opacity: 0.5; transform: scale(0.92); }
+                        100% { opacity: 1; transform: scale(1.08); }
+                    }
+                    .upload-progress-fill-shimmer {
+                        position: absolute;
+                        top: 0; left: 0; right: 0; bottom: 0;
+                        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+                        animation: uploadShimmer 2s infinite;
+                    }
+                    .upload-pulse-dot {
+                        width: 8px;
+                        height: 8px;
+                        background-color: #00f2fe;
+                        border-radius: 50%;
+                        box-shadow: 0 0 8px #00f2fe;
+                        animation: uploadPulse 1s ease-in-out infinite alternate;
+                    }
+                    .transfer-queue-container {
+                        max-height: 180px;
+                        overflow-y: auto;
+                        margin-top: 12px;
+                        border-top: 1px solid rgba(255,255,255,0.08);
+                        padding-top: 8px;
+                        font-size: 12px;
+                    }
+                    .transfer-queue-item {
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: 6px 0;
+                        border-bottom: 1px solid rgba(255,255,255,0.03);
+                        gap: 12px;
+                    }
+                    .transfer-item-name {
+                        max-width: 160px;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        color: rgba(255,255,255,0.85);
+                    }
+                    .transfer-item-status {
+                        font-size: 11px;
+                        color: rgba(255,255,255,0.5);
+                    }
+                    .transfer-item-progress-bar-bg {
+                        width: 80px;
+                        height: 4px;
+                        background: rgba(255,255,255,0.1);
+                        border-radius: 2px;
+                        overflow: hidden;
+                    }
+                    .transfer-item-progress-bar-fill {
+                        height: 100%;
+                        background: #00f2fe;
+                        border-radius: 2px;
+                        width: 0%;
+                        transition: width 0.1s linear;
+                    }
+                    .transfer-queue-toggle-btn {
+                        background: transparent;
+                        border: none;
+                        color: #00f2fe;
+                        font-size: 11px;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        gap: 4px;
+                        padding: 0;
+                        margin-top: 8px;
+                    }
+                </style>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                    <div style="display: flex; align-items: center; gap: 8px; cursor: pointer;" id="uploadHeaderGroup">
+                        <div class="upload-pulse-dot"></div>
+                        <div style="font-weight: 600; font-size: 14px; color: #00f2fe; letter-spacing: 0.5px;" id="uploadStatusText">正在上传...</div>
+                    </div>
+                    <button id="cancelUploadBtn" style="
+                        background: transparent;
+                        border: none;
+                        color: rgba(255,255,255,0.5);
+                        font-size: 16px;
+                        cursor: pointer;
+                        padding: 0 4px;
+                        line-height: 1;
+                        transition: color 0.2s;
+                    " onmouseover="this.style.color='#ff4d4f'" onmouseout="this.style.color='rgba(255,255,255,0.5)'">✕</button>
+                </div>
+                <div style="margin-bottom: 8px;">
+                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; position: relative;">
+                        <div id="uploadBar" style="
+                            width: 0%;
+                            height: 100%;
+                            background: linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%);
+                            border-radius: 3px;
+                            box-shadow: 0 0 10px rgba(0, 242, 254, 0.7);
+                            transition: width 0.1s linear;
+                            position: relative;
+                        ">
+                            <div class="upload-progress-fill-shimmer"></div>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 11px; color: rgba(255,255,255,0.6);">
+                    <span id="uploadBytes">0 B / 0 B</span>
+                    <span id="uploadSpeed">0 KB/s</span>
+                </div>
+                
+                <button class="transfer-queue-toggle-btn" id="transferQueueToggleBtn" type="button">
+                    <span>展开任务明细</span> <span id="transferQueueToggleIcon">▼</span>
+                </button>
+                <div class="transfer-queue-container" id="transferQueueContainer" style="display: none;">
+                    <!-- 传输任务明细项会在这里渲染 -->
+                </div>
+            `;
+            document.body.appendChild(progressDiv);
+            
+            // 绑定取消按钮事件
+            const cancelBtn = progressDiv.querySelector('#cancelUploadBtn');
+            cancelBtn.addEventListener('click', async () => {
+                if (confirm('确定要取消上传当前任务吗？')) {
+                    if (currentUploadId) {
+                        await window.pywebview.api.cancel_upload(currentUploadId);
+                    }
+                    uploadQueue = [];
+                    isProcessingUploads = false;
+                    progressDiv.style.display = 'none';
                 }
+            });
+        } else {
+            progressDiv.style.opacity = '1';
+            progressDiv.style.display = 'block';
+        }
+
+        const toggleBtn = progressDiv.querySelector('#transferQueueToggleBtn');
+        const toggleIcon = progressDiv.querySelector('#transferQueueToggleIcon');
+        const toggleText = toggleBtn.querySelector('span');
+        const queueContainer = progressDiv.querySelector('#transferQueueContainer');
+        const headerGroup = progressDiv.querySelector('#uploadHeaderGroup');
+
+        // 解除旧监听并重新绑定
+        const newToggleQueue = () => {
+            if (queueContainer.style.display === 'none') {
+                queueContainer.style.display = 'block';
+                toggleText.textContent = '收折任务明细';
+                toggleIcon.textContent = '▲';
+            } else {
+                queueContainer.style.display = 'none';
+                toggleText.textContent = '展开任务明细';
+                toggleIcon.textContent = '▼';
+            }
+        };
+        toggleBtn.replaceWith(toggleBtn.cloneNode(true));
+        headerGroup.replaceWith(headerGroup.cloneNode(true));
+        
+        const freshToggleBtn = progressDiv.querySelector('#transferQueueToggleBtn');
+        const freshHeaderGroup = progressDiv.querySelector('#uploadHeaderGroup');
+        freshToggleBtn.addEventListener('click', newToggleQueue);
+        freshHeaderGroup.addEventListener('click', newToggleQueue);
+
+        const renderTransferQueueList = () => {
+            queueContainer.innerHTML = '';
+            activeTransfers.forEach(t => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'transfer-queue-item';
+
+                let statusLabel = '';
+                let progressHtml = '';
+                if (t.status === 'queued') {
+                    statusLabel = `<span style="color: rgba(255,255,255,0.4)">等待中</span>`;
+                    progressHtml = `<div class="transfer-item-progress-bar-bg"><div class="transfer-item-progress-bar-fill"></div></div>`;
+                } else if (t.status === 'uploading') {
+                    const speedLabel = t.speed ? ` (${t.speed})` : '';
+                    statusLabel = `<span style="color: #00f2fe">${t.percentage}%${speedLabel}</span>`;
+                    progressHtml = `<div class="transfer-item-progress-bar-bg"><div class="transfer-item-progress-bar-fill" style="width: ${t.percentage}%"></div></div>`;
+                } else if (t.status === 'completed') {
+                    statusLabel = `<span style="color: #52c41a">✓ 已完成</span>`;
+                    progressHtml = `<div class="transfer-item-progress-bar-bg"><div class="transfer-item-progress-bar-fill" style="width: 100%; background: #52c41a"></div></div>`;
+                } else if (t.status === 'failed') {
+                    statusLabel = `<span style="color: #ff4d4f" title="${t.errorMsg || '传输失败'}">✗ 失败</span>`;
+                    progressHtml = `<div class="transfer-item-progress-bar-bg"><div class="transfer-item-progress-bar-fill" style="width: 0%; background: #ff4d4f"></div></div>`;
+                }
+
+                itemDiv.innerHTML = `
+                    <span class="transfer-item-name" title="${t.fileName}">${t.fileName}</span>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        ${progressHtml}
+                        <span class="transfer-item-status">${statusLabel}</span>
+                    </div>
+                `;
+                queueContainer.appendChild(itemDiv);
+            });
+        };
+
+        const statusText = document.getElementById('uploadStatusText');
+        const uploadBar = document.getElementById('uploadBar');
+        const uploadBytes = document.getElementById('uploadBytes');
+        const uploadSpeed = document.getElementById('uploadSpeed');
+        const dot = progressDiv.querySelector('.upload-pulse-dot');
+        
+        // 初始化样式
+        statusText.style.color = '#00f2fe';
+        uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
+        uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
+        if (dot) {
+            dot.style.backgroundColor = '#00f2fe';
+            dot.style.boxShadow = '0 0 8px #00f2fe';
+            dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
+        }
+
+        renderTransferQueueList();
+
+        let uploadedCount = 0;
+        let failedCount = 0;
+        let activeIndex = 0;
+
+        while (uploadQueue.length > 0) {
+            const item = uploadQueue.shift();
+            const { remotePath, fileName } = item;
+            const queueRemaining = uploadQueue.length;
+
+            statusText.textContent = queueRemaining > 0
+                ? `Uploading ${fileName} (${queueRemaining} queued)...`
+                : `Uploading ${fileName}...`;
+
+            // 更新当前活跃任务状态
+            const currentTransfer = activeTransfers[activeIndex];
+            if (currentTransfer) {
+                currentTransfer.status = 'uploading';
+                renderTransferQueueList();
             }
 
-            await window.pywebview.api.clear_upload_progress(currentSessionId, uploadId);
-            uploadBar.style.width = '0%';
+            const uploadId = generateUploadId();
+            currentUploadId = uploadId;
 
-        } catch (error) {
-            console.error('Upload error for', fileName, error);
-            failedCount++;
+            try {
+                let startResult;
+                if (item.isBase64) {
+                    // Browse button upload (base64 content)
+                    startResult = await window.pywebview.api.start_upload_with_progress(
+                        currentSessionId,
+                        item.fileContent,
+                        remotePath,
+                        uploadId
+                    );
+                } else {
+                    // Drag-drop upload (local path)
+                    startResult = await window.pywebview.api.upload_from_path_with_progress(
+                        currentSessionId,
+                        item.localPath,
+                        remotePath,
+                        uploadId
+                    );
+                }
+
+                if (!startResult || !JSON.parse(startResult).success) {
+                    throw new Error(startResult ? JSON.parse(startResult).error : 'Failed to start upload');
+                }
+
+                // Poll progress
+                let completed = false;
+                let lastBytes = 0;
+                let lastTime = Date.now();
+
+                while (!completed) {
+                    await new Promise(r => setTimeout(r, 200));
+                    const progressResult = await window.pywebview.api.get_upload_progress(currentSessionId, uploadId);
+                    if (!progressResult) continue;
+
+                    const progress = JSON.parse(progressResult);
+                    if (progress.status === 'uploading' || progress.status === 'starting') {
+                        uploadBar.style.width = `${progress.percentage}%`;
+                        uploadBytes.textContent = `${formatBytes(progress.uploaded)} / ${formatBytes(progress.total)}`;
+
+                        const now = Date.now();
+                        const timeDiff = (now - lastTime) / 1000;
+                        let speedText = '';
+                        if (timeDiff >= 0.5) {
+                            const bytesDiff = progress.uploaded - lastBytes;
+                            const speed = bytesDiff / timeDiff;
+                            speedText = speed > 0 ? `${formatBytes(speed)}/s` : '';
+                            uploadSpeed.textContent = speedText;
+                            lastBytes = progress.uploaded;
+                            lastTime = now;
+                        }
+
+                        // 更新任务明细
+                        if (currentTransfer) {
+                            currentTransfer.percentage = progress.percentage;
+                            if (speedText) currentTransfer.speed = speedText;
+                            renderTransferQueueList();
+                        }
+
+                        const queueNow = uploadQueue.length;
+                        statusText.textContent = queueNow > 0
+                            ? `Uploading ${fileName} (${queueNow} queued)...`
+                            : `Uploading ${fileName}...`;
+
+                    } else if (progress.status === 'completed') {
+                        uploadBar.style.width = '100%';
+                        uploadBytes.textContent = `${formatBytes(progress.total)} / ${formatBytes(progress.total)}`;
+                        uploadSpeed.textContent = '';
+                        uploadedCount++;
+                        completed = true;
+
+                        if (currentTransfer) {
+                            currentTransfer.status = 'completed';
+                            currentTransfer.percentage = 100;
+                            renderTransferQueueList();
+                        }
+                    } else if (progress.status === 'error' || progress.status === 'cancelled') {
+                        completed = true;
+                        failedCount++;
+                        console.error('Upload failed:', fileName, progress.error || progress.status);
+
+                        if (currentTransfer) {
+                            currentTransfer.status = 'failed';
+                            currentTransfer.errorMsg = progress.error || '上传被取消';
+                            renderTransferQueueList();
+                        }
+                    } else if (progress.status === 'unknown') {
+                        completed = true;
+                        uploadedCount++;
+
+                        if (currentTransfer) {
+                            currentTransfer.status = 'completed';
+                            currentTransfer.percentage = 100;
+                            renderTransferQueueList();
+                        }
+                    }
+                }
+
+                await window.pywebview.api.clear_upload_progress(currentSessionId, uploadId);
+                uploadBar.style.width = '0%';
+
+            } catch (error) {
+                console.error('Upload error for', fileName, error);
+                failedCount++;
+            }
         }
+
+        if (failedCount === 0) {
+            statusText.textContent = `上传完成 (${uploadedCount} 个文件)`;
+            statusText.style.color = '#52c41a';
+            uploadBar.style.background = 'linear-gradient(90deg, #52c41a 0%, #b7eb8f 100%)';
+            uploadBar.style.boxShadow = '0 0 10px rgba(82, 196, 26, 0.7)';
+            if (dot) {
+                dot.style.backgroundColor = '#52c41a';
+                dot.style.boxShadow = '0 0 8px #52c41a';
+                dot.style.animation = 'none';
+            }
+            setTimeout(() => {
+                if (!isProcessingUploads) {
+                    progressDiv.style.opacity = '0';
+                    setTimeout(() => {
+                        if (!isProcessingUploads && progressDiv.style.opacity === '0') {
+                            progressDiv.style.display = 'none';
+                            progressDiv.style.opacity = '1';
+                            // 还原成初始样式
+                            statusText.style.color = '#00f2fe';
+                            uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
+                            uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
+                            if (dot) {
+                                dot.style.backgroundColor = '#00f2fe';
+                                dot.style.boxShadow = '0 0 8px #00f2fe';
+                                dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
+                            }
+                        }
+                    }, 300);
+                }
+            }, 1500);
+        } else {
+            statusText.textContent = `上传结束 (成功 ${uploadedCount}, 失败 ${failedCount})`;
+            statusText.style.color = '#ff4d4f';
+            uploadBar.style.background = 'linear-gradient(90deg, #ff4d4f 0%, #ffccc7 100%)';
+            uploadBar.style.boxShadow = '0 0 10px rgba(255, 77, 79, 0.7)';
+            if (dot) {
+                dot.style.backgroundColor = '#ff4d4f';
+                dot.style.boxShadow = '0 0 8px #ff4d4f';
+                dot.style.animation = 'none';
+            }
+            setTimeout(() => {
+                if (!isProcessingUploads) {
+                    progressDiv.style.display = 'none';
+                    // 还原样式
+                    statusText.style.color = '#00f2fe';
+                    uploadBar.style.background = 'linear-gradient(90deg, #00f2fe 0%, #a18cd1 100%)';
+                    uploadBar.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.7)';
+                    if (dot) {
+                        dot.style.backgroundColor = '#00f2fe';
+                        dot.style.boxShadow = '0 0 8px #00f2fe';
+                        dot.style.animation = 'uploadPulse 1s ease-in-out infinite alternate';
+                    }
+                }
+            }, 3000);
+        }
+
+        await listFiles(currentPath);
+    } catch (criticalErr) {
+        console.error("Critical error in processUploadQueue:", criticalErr);
+    } finally {
+        isProcessingUploads = false;
+        currentUploadId = null;
     }
-
-    // console.log(`Upload complete: ${uploadedCount} succeeded, ${failedCount} failed`);
-    statusText.textContent = failedCount > 0
-        ? `Done: ${uploadedCount} uploaded, ${failedCount} failed`
-        : `Uploaded ${uploadedCount} file${uploadedCount !== 1 ? 's' : ''}`;
-
-    await listFiles(currentPath);
-
-    isProcessingUploads = false;
-
-    setTimeout(() => {
-        if (!isProcessingUploads && uploadQueue.length === 0) {
-            progressDiv.style.display = 'none';
-            uploadBar.style.width = '0%';
-            uploadBytes.textContent = '';
-            uploadSpeed.textContent = '';
-        }
-    }, 2000);
 }
 
 // Handle native file drop from pywebview (receives full file paths)
@@ -1049,80 +1512,94 @@ async function handleNativeFileDrop(filePaths) {
 const setupDragDrop = () => {
     const uploadArea = document.getElementById('uploadArea');
     if (!uploadArea) {
-        console.error('uploadArea element not found!');
-        return;
+        console.warn('uploadArea element not found, skipping uploadArea listeners.');
+    } else {
+        uploadArea.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.remove('dragover');
+
+            const dt = e.dataTransfer;
+            const files = dt?.files;
+            const htmlData = dt?.getData('text/html') || '';
+
+            if (files && files.length > 0) {
+                await uploadFiles(Array.from(files));
+                return;
+            }
+
+            if (htmlData.includes('file://')) {
+                const matches = htmlData.match(/file:\/\/[^"'<>\s\]]+/g);
+                if (matches && matches.length > 0) {
+                    const paths = [...new Set(matches)].map(uri => decodeURIComponent(uri.replace('file://', '')));
+                    await uploadFilesFromPaths(paths);
+                    return;
+                }
+            }
+        });
     }
-    // console.log('Setting up drag and drop on uploadArea');
+
+    const terminalEl = document.getElementById('terminal');
+    if (terminalEl) {
+        terminalEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+        terminalEl.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                if (currentSessionId && sessions[currentSessionId]) {
+                    const file = e.dataTransfer.files[0];
+                    sessions[currentSessionId].pendingDropFile = file;
+                    const base64Rz = bytesToBase64(new TextEncoder().encode("rz -be\r"));
+                    window.pywebview.api.send_input_base64(currentSessionId, base64Rz).catch(console.error);
+                }
+            }
+        });
+    }
 
     // Prevent browser from opening files when dropped anywhere on the page
     document.addEventListener('dragover', (e) => {
         e.preventDefault();
     });
     document.addEventListener('drop', (e) => {
-        // console.log('Document drop event - preventing default');
         e.preventDefault();
-    });
-
-    uploadArea.addEventListener('dragenter', (e) => {
-        // console.log('dragenter on uploadArea');
-        e.preventDefault();
-        e.stopPropagation();
-        uploadArea.classList.add('dragover');
-    });
-
-    uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        uploadArea.classList.add('dragover');
-    });
-
-    uploadArea.addEventListener('dragleave', (e) => {
-        // console.log('dragleave on uploadArea');
-        e.preventDefault();
-        e.stopPropagation();
-        uploadArea.classList.remove('dragover');
-    });
-
-    uploadArea.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        uploadArea.classList.remove('dragover');
-
-        const dt = e.dataTransfer;
-        const files = dt?.files;
-        const htmlData = dt?.getData('text/html') || '';
-
-        // Standard files API
-        if (files && files.length > 0) {
-            await uploadFiles(Array.from(files));
-            return;
-        }
-
-        // WebKitGTK/Linux: extract file:// URLs from HTML
-        if (htmlData.includes('file://')) {
-            const matches = htmlData.match(/file:\/\/[^"'<>\s\]]+/g);
-            if (matches && matches.length > 0) {
-                const paths = [...new Set(matches)].map(uri => decodeURIComponent(uri.replace('file://', '')));
-                await uploadFilesFromPaths(paths);
-                return;
-            }
-        }
-
-        // console.log('No files in drop - use Browse for multiple files');
     });
 };
 
 // Context Menu Functions
 let contextMenuTarget = null;
 
-function showContextMenu(event, fileItem) {
+function showContextMenu(event, fileItem, isLocal = false) {
     const contextMenu = document.getElementById('contextMenu');
 
     // Hide any existing context menu
     contextMenu.style.display = 'none';
 
-    // Remove previous selection
-    document.querySelectorAll('.file-item').forEach(item => {
+    isContextMenuLocal = isLocal;
+
+    // Remove previous selection from both lists to be safe
+    document.querySelectorAll('#localFileList .file-item, #fileList .file-item').forEach(item => {
         item.classList.remove('context-selected');
     });
 
@@ -1139,10 +1616,17 @@ function showContextMenu(event, fileItem) {
     const downloadMenuItem = contextMenu.querySelector('[onclick*="download"]');
 
     if (editMenuItem) {
-        editMenuItem.style.display = isDirectory ? 'none' : 'flex';
+        // 本地文件右键没有编辑选项
+        editMenuItem.style.display = (isLocal || isDirectory) ? 'none' : 'flex';
     }
     if (downloadMenuItem) {
-        downloadMenuItem.style.display = isDirectory ? 'none' : 'flex';
+        if (isLocal) {
+            downloadMenuItem.textContent = '上传 (Upload)';
+            downloadMenuItem.style.display = isDirectory ? 'none' : 'flex';
+        } else {
+            downloadMenuItem.textContent = '下载 (Download)';
+            downloadMenuItem.style.display = isDirectory ? 'none' : 'flex';
+        }
     }
 
     // Position the context menu
@@ -1173,25 +1657,56 @@ async function contextMenuAction(action) {
 
     const fileName = contextMenuTarget.getAttribute('data-filename');
     const fileType = contextMenuTarget.getAttribute('data-filetype');
-    const filePath = currentPath.endsWith('/') ?
-        currentPath + fileName :
-        currentPath + '/' + fileName;
 
-    hideContextMenu();
+    if (isContextMenuLocal) {
+        const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+        const filePath = localCurrentPath + sep + fileName;
+        
+        hideContextMenu();
+        
+        switch (action) {
+            case 'download': // 本地上传
+                await uploadFileFromPath(filePath, fileName);
+                break;
+            case 'rename':
+                showLocalRenameModal(fileName, filePath);
+                break;
+            case 'delete':
+                if (confirm(`确定要删除本地 ${fileType === 'directory' ? '文件夹' : '文件'} ${fileName} 吗？`)) {
+                    try {
+                        const result = JSON.parse(await window.pywebview.api.delete_local_file(filePath));
+                        if (result.success) {
+                            refreshLocalFiles();
+                        } else {
+                            alert("删除失败: " + result.error);
+                        }
+                    } catch(e) {
+                        alert("删除失败: " + e.message);
+                    }
+                }
+                break;
+        }
+    } else {
+        const filePath = currentPath.endsWith('/') ?
+            currentPath + fileName :
+            currentPath + '/' + fileName;
 
-    switch (action) {
-        case 'download':
-            await downloadFile(fileName);
-            break;
-        case 'edit':
-            await editFile(fileName);
-            break;
-        case 'rename':
-            showRenameModal(fileName);
-            break;
-        case 'delete':
-            await deleteFileOrFolder(fileName, fileType, filePath);
-            break;
+        hideContextMenu();
+
+        switch (action) {
+            case 'download':
+                await downloadFile(fileName);
+                break;
+            case 'edit':
+                await editFile(fileName);
+                break;
+            case 'rename':
+                showRenameModal(fileName);
+                break;
+            case 'delete':
+                await deleteFileOrFolder(fileName, fileType, filePath);
+                break;
+        }
     }
 }
 
@@ -2093,13 +2608,14 @@ function closeRenameModal() {
     const modal = document.getElementById('renameModal');
     modal.style.display = 'none';
     renameTarget = null;
+    isRenameLocal = false;
 }
 
 async function confirmRename() {
     const newName = document.getElementById('renameInput').value.trim();
 
     if (!newName) {
-        alert('Please enter a valid name');
+        alert('请输入有效名称');
         return;
     }
 
@@ -2108,29 +2624,43 @@ async function confirmRename() {
         return;
     }
 
-    const oldPath = currentPath.endsWith('/') ?
-        currentPath + renameTarget :
-        currentPath + '/' + renameTarget;
-
-    const newPath = currentPath.endsWith('/') ?
-        currentPath + newName :
-        currentPath + '/' + newName;
-
-    try {
-        const result = await window.pywebview.api.rename_file(currentSessionId, oldPath, newPath);
-        const response = JSON.parse(result);
-
-        if (response.success) {
-            // console.log('Successfully renamed:', renameTarget, 'to', newName);
-            closeRenameModal();
-            // Refresh file list
-            await listFiles(currentPath);
-        } else {
-            alert(`Failed to rename: ${response.error}`);
+    if (isRenameLocal) {
+        const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+        const newPath = localCurrentPath + sep + newName;
+        try {
+            const result = JSON.parse(await window.pywebview.api.rename_local_file(localRenameOldPath, newPath));
+            if (result.success) {
+                closeRenameModal();
+                refreshLocalFiles();
+            } else {
+                alert("重命名失败: " + result.error);
+            }
+        } catch(e) {
+            alert("重命名失败: " + e.message);
         }
-    } catch (error) {
-        console.error('Rename error:', error);
-        alert('Rename failed: ' + error.message);
+    } else {
+        const oldPath = currentPath.endsWith('/') ?
+            currentPath + renameTarget :
+            currentPath + '/' + renameTarget;
+
+        const newPath = currentPath.endsWith('/') ?
+            currentPath + newName :
+            currentPath + '/' + newName;
+
+        try {
+            const result = await window.pywebview.api.rename_file(currentSessionId, oldPath, newPath);
+            const response = JSON.parse(result);
+
+            if (response.success) {
+                closeRenameModal();
+                await listFiles(currentPath);
+            } else {
+                alert(`重命名失败: ${response.error}`);
+            }
+        } catch (error) {
+            console.error('Rename error:', error);
+            alert('Rename failed: ' + error.message);
+        }
     }
 }
 
@@ -2182,6 +2712,9 @@ async function loadSavedConnections() {
         filterSavedConnections();
         renderRecentConnections();
         renderConnectionsHome();
+        if (topoViewer) {
+            topoViewer.buildTopology();
+        }
     } catch (error) {
         console.error('加载保存连接失败', error);
     }
@@ -2241,8 +2774,8 @@ function renderRecentConnections() {
         item.innerHTML = `
             <span class="recent-connection-dot"></span>
             <span class="recent-connection-copy">
-                <span class="recent-connection-name">${escapeHtml(parts.name)}</span>
-                <span class="recent-connection-address">${escapeHtml(isPrivacyMode ? '******@***.***' : parts.target)}</span>
+                <span class="recent-connection-name" title="${escapeHtml(parts.name)}">${escapeHtml(parts.name)}</span>
+                <span class="recent-connection-address" title="${escapeHtml(parts.target)}">${escapeHtml(isPrivacyMode ? '******@***.***' : parts.target)}</span>
             </span>
             <button type="button" class="recent-connection-action" onclick="event.stopPropagation(); quickConnectSavedConnection('${escapeJs(conn.key)}');">连接</button>
         `;
@@ -2329,6 +2862,7 @@ function showHomeConnectionMenu(event, key) {
 function setConnectionsHomeView(view) {
     connectionsHomeView = view === 'list' ? 'list' : 'grid';
     try {
+        localStorage.setItem('ldysshConnectionsHomeView', connectionsHomeView);
         localStorage.setItem('prismsshConnectionsHomeView', connectionsHomeView);
     } catch (error) {
         console.warn('保存主机视图失败：', error);
@@ -2338,7 +2872,7 @@ function setConnectionsHomeView(view) {
 
 function restoreConnectionsHomeView() {
     try {
-        connectionsHomeView = localStorage.getItem('prismsshConnectionsHomeView') || 'grid';
+        connectionsHomeView = localStorage.getItem('ldysshConnectionsHomeView') || localStorage.getItem('prismsshConnectionsHomeView') || 'grid';
     } catch (error) {
         connectionsHomeView = 'grid';
     }
@@ -2426,6 +2960,24 @@ async function loadConnection(key) {
     document.getElementById('port').value = conn.port || 22;
     document.getElementById('username').value = conn.username;
     document.getElementById('saveConnection').checked = true;
+
+    // 填入堡垒机高级参数
+    document.getElementById('jumpHost').value = conn.jumpHost || '';
+    document.getElementById('jumpPort').value = conn.jumpPort || 22;
+    document.getElementById('jumpUser').value = conn.jumpUser || '';
+    document.getElementById('jumpPass').value = conn.jumpPass || '';
+    document.getElementById('jumpKey').value = conn.jumpKey || '';
+    document.getElementById('jumpKeyPassphrase').value = conn.jumpKeyPassphrase || '';
+
+    const jumpHostFields = document.getElementById('jumpHostFields');
+    const jumpHostChevron = document.getElementById('jumpHostChevron');
+    if (conn.jumpHost) {
+        jumpHostFields.style.display = 'block';
+        jumpHostChevron.textContent = '▼';
+    } else {
+        jumpHostFields.style.display = 'none';
+        jumpHostChevron.textContent = '▶';
+    }
 
     if (conn.password_unavailable) {
         document.getElementById('authType').value = 'password';
@@ -2989,7 +3541,7 @@ function showCopyNotification(message, type = 'success') {
 
 function getSavedTheme() {
     try {
-        return localStorage.getItem('prismsshTheme') || 'blue';
+        return localStorage.getItem('ldysshTheme') || localStorage.getItem('prismsshTheme') || 'blue';
     } catch (error) {
         return 'blue';
     }
@@ -3073,6 +3625,7 @@ function applyTheme(theme) {
     }
 
     try {
+        localStorage.setItem('ldysshTheme', normalized);
         localStorage.setItem('prismsshTheme', normalized);
     } catch (error) {
         console.warn('保存主题失败：', error);
@@ -3172,6 +3725,20 @@ async function connect() {
     const keyPassphrase = authType === 'key' ? document.getElementById('keyPassphrase').value : null;
     const saveConnection = document.getElementById('saveConnection').checked;
 
+    // 获取堡垒机参数
+    const jumpHost = document.getElementById('jumpHost').value.trim();
+    const jumpPort = parseInt(document.getElementById('jumpPort').value || 22);
+    const jumpUser = document.getElementById('jumpUser').value.trim();
+    const jumpPass = document.getElementById('jumpPass').value;
+    const jumpKey = document.getElementById('jumpKey').value.trim();
+    const jumpKeyPassphrase = document.getElementById('jumpKeyPassphrase').value;
+
+    if (jumpHost && !jumpUser) {
+        alert('请填入堡垒机用户名');
+        document.getElementById('jumpUser').focus();
+        return;
+    }
+
     if (authType === 'password' && !password) {
         alert('请输入 SSH 密码');
         document.getElementById('password').focus();
@@ -3185,7 +3752,7 @@ async function connect() {
     }
 
     if (!hostname || !username) {
-        alert('璇峰～鍐欎富鏈哄湴鍧€鍜岀敤鎴峰悕');
+        alert('请填写主机地址和用户名');
         return;
     }
 
@@ -3197,8 +3764,7 @@ async function connect() {
         // Create new session
         const sessionId = await window.pywebview.api.create_session();
 
-        // Connect (with host verification if needed)
-        const result = await connectWithHostVerification(sessionId, {
+        const connectionParams = {
             hostname,
             port: parseInt(port),
             username,
@@ -3207,21 +3773,28 @@ async function connect() {
             keyPath,
             keyPassphrase,
             save: saveConnection,
-            name: connectionName
-        });
+            name: connectionName,
+            // 传入堡垒机参数
+            jumpHost,
+            jumpPort,
+            jumpUser,
+            jumpPass,
+            jumpKey,
+            jumpKeyPassphrase
+        };
 
-        // console.log('Connection result:', result);
+        // Connect (with host verification if needed)
+        const result = await connectWithHostVerification(sessionId, connectionParams);
 
         if (result.success) {
-            // console.log('Connection successful, creating terminal...');
-
             // Add basic session info first
             sessions[sessionId] = {
                 id: sessionId,
                 hostname,
                 username,
                 name: connectionName,
-                connected: true
+                connected: true,
+                connectionParams: connectionParams
             };
 
             // Create terminal (this will update the sessions object)
@@ -3275,7 +3848,8 @@ async function createLocalSession() {
             hostname: 'Local CMD',
             username: 'localhost',
             name: 'Local CMD',
-            connected: true
+            connected: true,
+            isLocal: true
         };
 
         createTerminalForSession(sessionId, 'Local CMD');
@@ -3360,9 +3934,18 @@ function showSessionTabMenu(event, sessionId) {
     const session = sessions[sessionId];
     const canReconnect = session && session.connected === false;
     const canDisconnect = session && session.connected !== false;
+    
+    let splitMenuItem = '';
+    if (isSplitMode) {
+        splitMenuItem = `<div class="context-menu-item" data-action="unsplit">退出分屏</div>`;
+    } else {
+        splitMenuItem = `<div class="context-menu-item" data-action="split">垂直分屏 (右侧)</div>`;
+    }
+
     menu.innerHTML = `
         <div class="context-menu-item ${canReconnect ? '' : 'disabled'}" data-action="reconnect">连接</div>
         <div class="context-menu-item ${canDisconnect ? '' : 'disabled'}" data-action="disconnect">断开连接</div>
+        ${splitMenuItem}
         <div class="context-menu-item" data-action="close">关闭终端</div>
         <div class="context-menu-item" data-action="reconnectAll">连接全部</div>
         <div class="context-menu-item context-menu-delete" data-action="closeAll">关闭全部终端</div>
@@ -3377,6 +3960,15 @@ function showSessionTabMenu(event, sessionId) {
         if (action === 'close') await closeSessionTab(sessionId);
         if (action === 'reconnectAll') await reconnectAllSessions();
         if (action === 'closeAll') await closeAllSessions();
+        if (action === 'unsplit') disableSplitScreen();
+        if (action === 'split') {
+            const otherActiveIds = Object.keys(sessions).filter(id => id !== sessionId && sessions[id].connected !== false);
+            if (otherActiveIds.length > 0) {
+                enableSplitScreen(sessionId, otherActiveIds[0]);
+            } else {
+                await cloneAndSplitSession(sessionId);
+            }
+        }
     };
 
     document.body.appendChild(menu);
@@ -3454,7 +4046,8 @@ function createTerminalForSession(sessionId, hostname) {
             scrollback: TERMINAL_SCROLLBACK,
             convertEol: true,
             windowsMode: true,
-            allowTransparency: true
+            allowTransparency: true,
+            allowProposedApi: true
         });
 
         // Create fit addon
@@ -3471,8 +4064,7 @@ function createTerminalForSession(sessionId, hostname) {
             terminal.loadAddon(terminalSearchAddon);
         }
 
-        // WebGL addon disabled because it causes transparent backgrounds to render as opaque black
-        /*
+        // WebGL addon enabled for 120 FPS high-performance text rendering
         if (typeof WebglAddon !== 'undefined') {
             try {
                 const webglAddon = new WebglAddon.WebglAddon();
@@ -3485,13 +4077,71 @@ function createTerminalForSession(sessionId, hostname) {
                 console.warn('WebGL addon failed to load, falling back to default renderer.', e);
             }
         }
-        */
 
         // Open terminal
         terminal.open(terminalElement);
 
+        // Register OSC 7 directory synchronization
+        if (sessionId.startsWith('ssh_')) {
+            try {
+                terminal.parser.registerOscHandler(7, data => {
+                    try {
+                        if (currentSessionId !== sessionId) {
+                            return true; // Skip background session path syncs to prevent tab conflicts
+                        }
+                        let path = null;
+                        if (data.startsWith("file://")) {
+                            let rawUrl = data.substring(7);
+                            let firstSlash = rawUrl.indexOf('/');
+                            if (firstSlash !== -1) {
+                                path = rawUrl.substring(firstSlash);
+                            } else {
+                                path = "/";
+                            }
+                            try {
+                                path = decodeURIComponent(path);
+                            } catch(err) {}
+                        }
+                        if (path) {
+                            if (/^\/[A-Za-z]:/.test(path)) {
+                                path = path.substring(1);
+                            }
+                            if (path && typeof navigateToPath === 'function') {
+                                if (path !== currentPath) {
+                                    console.log(`[LdySSH OSC 7] Auto syncing folder to: ${path}`);
+                                    navigateToPath(path);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error("OSC 7 path extraction error:", e);
+                    }
+                    return true;
+                });
+            } catch (e) {
+                console.error("Failed to register OSC 7 handler:", e);
+            }
+        }
+
         // Set up copy/paste functionality
         setupTerminalClipboard(terminal, sessionId);
+
+        // 点击终端容器，瞬间激活对应的分屏会话与高亮
+        terminalElement.addEventListener('mousedown', () => {
+            if (currentSessionId !== sessionId) {
+                switchToSession(sessionId);
+                updateSplitScreenHighlight();
+            }
+        });
+
+        if (terminal.textarea) {
+            terminal.textarea.addEventListener('focus', () => {
+                if (currentSessionId !== sessionId) {
+                    switchToSession(sessionId);
+                    updateSplitScreenHighlight();
+                }
+            });
+        }
 
         // Feature REMOVED: addTimestampToLine. 
         // This was a massive CPU drain during high-throughput output (like 'cat' large files) 
@@ -3531,6 +4181,8 @@ function createTerminalForSession(sessionId, hostname) {
             }
         };
 
+        sessions[sessionId].calculateTerminalSize = calculateTerminalSize;
+
         // Calculate size after delays
         setTimeout(calculateTerminalSize, 50);
         setTimeout(calculateTerminalSize, 200);
@@ -3545,128 +4197,131 @@ function createTerminalForSession(sessionId, hostname) {
 
         // Handle input - ensure input goes to the correct session
         terminal.onData((data) => {
-            if (currentSessionId === sessionId) {
-                const state = getCommandInputState(sessionId);
+            if (currentSessionId !== sessionId) {
+                switchToSession(sessionId);
+                updateSplitScreenHighlight();
+            }
+            
+            const state = getCommandInputState(sessionId);
+            
+            // --- Start Dangerous Command Interceptor ---
+            // Only run on small data chunks to prevent OOM on massive log files (e.g. cat huge.log)
+            if ((data.includes('\r') || data.includes('\n')) && data.length < 5000) {
+                let cmd = '';
+                // Extract the actual rendered line from the screen to catch commands retrieved via Up Arrow
+                if (terminal.buffer && terminal.buffer.active) {
+                    const bufferY = terminal.buffer.active.baseY + terminal.buffer.active.cursorY;
+                    const lineObj = terminal.buffer.active.getLine(bufferY);
+                    if (lineObj) {
+                        cmd = lineObj.translateToString(true);
+                    }
+                }
                 
-                // --- Start Dangerous Command Interceptor ---
-                // Only run on small data chunks to prevent OOM on massive log files (e.g. cat huge.log)
-                if ((data.includes('\r') || data.includes('\n')) && data.length < 5000) {
-                    let cmd = '';
-                    // Extract the actual rendered line from the screen to catch commands retrieved via Up Arrow
-                    if (terminal.buffer && terminal.buffer.active) {
-                        const bufferY = terminal.buffer.active.baseY + terminal.buffer.active.cursorY;
-                        const lineObj = terminal.buffer.active.getLine(bufferY);
-                        if (lineObj) {
-                            cmd = lineObj.translateToString(true);
+                // Combine with keystroke buffer and incoming paste data for absolute safety
+                const checkCmd = cmd + " " + ((state && state.buffer) ? state.buffer : "") + " " + data;
+                
+                if (checkCmd.length < 10000) {
+                    let isDangerous = false;
+                    const subCmds = checkCmd.split(/;|&&|\|\||\||\r|\n/);
+                    for (let subCmd of subCmds) {
+                        const tokens = subCmd.trim().split(/\s+/);
+                        let rmFound = false;
+                        let hasTarget = false;
+
+                        for (let i = 0; i < tokens.length; i++) {
+                            const token = tokens[i];
+                            if (token === 'rm') rmFound = true;
+                            else if (rmFound && (token === '*' || token === '/*' || token === '/')) {
+                                hasTarget = true;
+                            }
+                        }
+                        // Block rm targeting *, /*, or / 
+                        if (rmFound && hasTarget) {
+                            isDangerous = true;
+                            break;
                         }
                     }
                     
-                    // Combine with keystroke buffer and incoming paste data for absolute safety
-                    const checkCmd = cmd + " " + ((state && state.buffer) ? state.buffer : "") + " " + data;
-                    
-                    if (checkCmd.length < 10000) {
-                        let isDangerous = false;
-                        const subCmds = checkCmd.split(/;|&&|\|\||\||\r|\n/);
-                        for (let subCmd of subCmds) {
-                            const tokens = subCmd.trim().split(/\s+/);
-                            let rmFound = false;
-                            let hasTarget = false;
+                    if (isDangerous) {
+                        terminal.write('\r\n\x1b[41;37;1m [拦截机制] 高危操作警告 \x1b[0m\r\n');
+                        terminal.write(`\x1b[31mLdySSH 已阻止执行潜在的毁灭性命令。\x1b[0m\r\n`);
+                        terminal.write('\x1b[33m系统提示: 请避免使用 rm -rf /* 或 rm -rf *，这可能导致整个系统或当前目录数据被永久删除且无法恢复。\x1b[0m\r\n');
+                        
+                        // Send Ctrl+C to cancel the prompt on the remote server
+                        window.pywebview.api.send_input(sessionId, '\x03');
+                        
+                        // Reset local state
+                        if (state) {
+                            state.buffer = '';
+                            state.suggestions = [];
+                        }
+                        hideCommandSuggestion();
+                        return; // Stop processing to prevent the \r from executing the command
+                    } else if (state && state.buffer && state.buffer.trim().length >= 2) {
+                        saveCommandToHistory(state.buffer.trim());
+                    }
+                }
+            }
+            // --- End Dangerous Command Interceptor ---
+            
+            // If suggestion box is open, capture Up/Down/Enter/RightArrow
+            if (commandSuggestIsVisible() && state && state.suggestions && state.suggestions.length > 0) {
+                if (data === '\x1b[C' || data === '\t') {
+                    // Right Arrow or Tab accepts suggestion
+                    if (acceptCommandSuggestion(sessionId)) return;
+                } else if (data === '\r' || data === '\n') {
+                    // Enter accepts only if explicitly navigated
+                    if (state.suggestionExplicitlySelected && acceptCommandSuggestion(sessionId)) {
+                        window.pywebview.api.send_input(sessionId, '\r');
+                        state.buffer = '';
+                        return;
+                    } else {
+                        // Otherwise pass through to terminal
+                        hideCommandSuggestion();
+                        state.suggestions = [];
+                        state.buffer = '';
+                    }
+                } else if (data === '\x1b[A') { // Up Arrow
+                    state.suggestionIndex = Math.max(0, state.suggestionIndex - 1);
+                    state.suggestionExplicitlySelected = true;
+                    renderCommandSuggestion(sessionId);
+                    return; // prevent history backward
+                } else if (data === '\x1b[B') { // Down Arrow
+                    state.suggestionIndex = Math.min(state.suggestions.length - 1, state.suggestionIndex + 1);
+                    state.suggestionExplicitlySelected = true;
+                    renderCommandSuggestion(sessionId);
+                    return; // prevent history forward
+                }
+            } else {
+                if (data === '\x1b[C' && acceptCommandSuggestion(sessionId)) {
+                    return;
+                }
+            }
 
-                            for (let i = 0; i < tokens.length; i++) {
-                                const token = tokens[i];
-                                if (token === 'rm') rmFound = true;
-                                else if (rmFound && (token === '*' || token === '/*' || token === '/')) {
-                                    hasTarget = true;
-                                }
-                            }
-                            // Block rm targeting *, /*, or / 
-                            if (rmFound && hasTarget) {
-                                isDangerous = true;
+            updateCommandSuggestion(sessionId, data);
+
+            if (isOptimisticChar(data)) {
+                if (data.charCodeAt(0) === 127) {
+                    const hasPendingChar = pendingEchoBuffer.some(e => e.char);
+                    if (hasPendingChar) {
+                        for (let i = pendingEchoBuffer.length - 1; i >= 0; i--) {
+                            if (pendingEchoBuffer[i].char) {
+                                pendingEchoBuffer.splice(i, 1);
                                 break;
                             }
                         }
-                        
-                        if (isDangerous) {
-                            terminal.write('\r\n\x1b[41;37;1m [拦截机制] 高危操作警告 \x1b[0m\r\n');
-                            terminal.write(`\x1b[31mLdySSH 已阻止执行潜在的毁灭性命令。\x1b[0m\r\n`);
-                            terminal.write('\x1b[33m系统提示: 请避免使用 rm -rf /* 或 rm -rf *，这可能导致整个系统或当前目录数据被永久删除且无法恢复。\x1b[0m\r\n');
-                            
-                            // Send Ctrl+C to cancel the prompt on the remote server
-                            window.pywebview.api.send_input(sessionId, '\x03');
-                            
-                            // Reset local state
-                            if (state) {
-                                state.buffer = '';
-                                state.suggestions = [];
-                            }
-                            hideCommandSuggestion();
-                            return; // Stop processing to prevent the \r from executing the command
-                        } else if (state && state.buffer && state.buffer.trim().length >= 2) {
-                            saveCommandToHistory(state.buffer.trim());
-                        }
-                    }
-                }
-                // --- End Dangerous Command Interceptor ---
-                
-                // If suggestion box is open, capture Up/Down/Enter/RightArrow
-                if (commandSuggestIsVisible() && state && state.suggestions && state.suggestions.length > 0) {
-                    if (data === '\x1b[C') {
-                        // Right Arrow accepts
-                        if (acceptCommandSuggestion(sessionId)) return;
-                    } else if (data === '\r' || data === '\n') {
-                        // Enter accepts only if explicitly navigated
-                        if (state.suggestionExplicitlySelected && acceptCommandSuggestion(sessionId)) {
-                            window.pywebview.api.send_input(sessionId, '\r');
-                            state.buffer = '';
-                            return;
-                        } else {
-                            // Otherwise pass through to terminal
-                            hideCommandSuggestion();
-                            state.suggestions = [];
-                            state.buffer = '';
-                        }
-                    } else if (data === '\x1b[A') { // Up Arrow
-                        state.suggestionIndex = Math.max(0, state.suggestionIndex - 1);
-                        state.suggestionExplicitlySelected = true;
-                        renderCommandSuggestion(sessionId);
-                        return; // prevent history backward
-                    } else if (data === '\x1b[B') { // Down Arrow
-                        state.suggestionIndex = Math.min(state.suggestions.length - 1, state.suggestionIndex + 1);
-                        state.suggestionExplicitlySelected = true;
-                        renderCommandSuggestion(sessionId);
-                        return; // prevent history forward
+                        terminal.write('\b \b');
                     }
                 } else {
-                    if (data === '\x1b[C' && acceptCommandSuggestion(sessionId)) {
-                        return;
-                    }
+                    terminal.write(data);
+                    pendingEchoBuffer.push({ char: data, time: Date.now() });
                 }
-
-                updateCommandSuggestion(sessionId, data);
-
-                if (isOptimisticChar(data)) {
-                    if (data.charCodeAt(0) === 127) {
-                        const hasPendingChar = pendingEchoBuffer.some(e => e.char);
-                        if (hasPendingChar) {
-                            for (let i = pendingEchoBuffer.length - 1; i >= 0; i--) {
-                                if (pendingEchoBuffer[i].char) {
-                                    pendingEchoBuffer.splice(i, 1);
-                                    break;
-                                }
-                            }
-                            terminal.write('\b \b');
-                        }
-                    } else {
-                        terminal.write(data);
-                        pendingEchoBuffer.push({ char: data, time: Date.now() });
-                    }
-                }
-                
-                if (currentSessionId && sessions[currentSessionId]?.connected) {
-                    window.pywebview.api.send_input(currentSessionId, data).catch(console.error);
-                    // Extreme Responsiveness: Immediately trigger an output poll to instantly see the echoed character
-                    scheduleOutputPoll(currentSessionId, 0);
-                }
+            }
+            
+            if (sessionId && sessions[sessionId]?.connected) {
+                window.pywebview.api.send_input(sessionId, data).catch(console.error);
+                // Extreme Responsiveness: Immediately trigger an output poll to instantly see the echoed character
+                scheduleOutputPoll(sessionId, 0);
             }
         });
 
@@ -3724,20 +4379,100 @@ async function pollSessionOutput(sessionId) {
         const result = JSON.parse(await window.pywebview.api.get_output(sessionId));
         hasOutput = Boolean(result.output);
         if (result.output) {
-            const filtered = stripPredictedEchoes(result.output);
-            if (filtered.length > 0 && currentTerminal) {
-                // Prevent V8 OOM by skipping heavy regex highlighting on massive bursts (e.g. from cat huge.log)
-                if (filtered.length > 50000) {
-                    currentTerminal.write(filtered);
-                } else {
-                    currentTerminal.write(applyTerminalHighlights(filtered));
+            console.log("[LdySSH Debug] base64 output: ", result.output);
+            const rawBytes = base64ToBytes(result.output);
+            console.log("[LdySSH Debug] rawBytes len: ", rawBytes.length);
+            if (rawBytes.length > 0) {
+                const sentinel = sessionId.startsWith('ssh_') ? getZmodemSentinel(sessionId) : null;
+                
+                if (activeZsession) {
+                    try {
+                        activeZsession.consume(Array.from(rawBytes));
+                    } catch (zerr) {
+                        console.warn("Zmodem session consume error:", zerr);
+                    }
+                } else if (sentinel) {
+                    try {
+                        sentinel.consume(Array.from(rawBytes));
+                    } catch (zerr) {
+                        console.warn("Zmodem sentinel consume error:", zerr);
+                    }
                 }
-                appendSessionOutputContext(sessionId, filtered);
+
+                // Normal terminal rendering - active only when not in Zmodem file transfer session
+                if (!activeZsession && currentTerminal) {
+                    const filtered = stripPredictedEchoes(bytesToUtf8(sessionId, rawBytes));
+                    if (filtered.length > 0) {
+                        if (filtered.length > 50000) {
+                            currentTerminal.write(filtered);
+                        } else {
+                            currentTerminal.write(applyTerminalHighlights(filtered));
+                        }
+                        appendSessionOutputContext(sessionId, filtered);
+
+                        // Adaptive Reflow: If the terminal was opened hidden and size collapsed to <= 5, trigger layout calculation
+                        if (currentTerminal.cols <= 5 || currentTerminal.rows <= 5) {
+                            console.log(`[LdySSH Fit] Collapsed layout detected (${currentTerminal.cols}x${currentTerminal.rows}). Refitting...`);
+                            const session = sessions[sessionId];
+                            if (session) {
+                                if (typeof session.calculateTerminalSize === 'function') {
+                                    session.calculateTerminalSize();
+                                } else if (session.fitAddon) {
+                                    try { session.fitAddon.fit(); } catch(e) {}
+                                }
+                            }
+                        }
+                        
+                        // Real-time SFTP Sync from Terminal Screen Prompt (delayed to allow Xterm render)
+                        setTimeout(() => {
+                            syncSftpFromTerminalPrompt(sessionId);
+                        }, 80);
+                        
+                        // Smart cd command detection fallback to sync SFTP when OSC 7 is not configured on remote host
+                        if (sessionId.startsWith('ssh_') && filtered) {
+                            const cdRegex = /(?:^|\r?\n|;)\s*cd\s+([^\r\n;&\s]+)/g;
+                            let match;
+                            while ((match = cdRegex.exec(filtered)) !== null) {
+                                let target = match[1].trim();
+                                target = target.replace(/^['"]|['"]$/g, '');
+                                if (target) {
+                                    let targetPath = '';
+                                    if (target.startsWith('/')) {
+                                        targetPath = target;
+                                    } else if (target === '~') {
+                                        targetPath = '/';
+                                    } else if (target === '..') {
+                                        const parts = currentPath.split('/').filter(Boolean);
+                                        parts.pop();
+                                        targetPath = '/' + parts.join('/');
+                                    } else if (target === '.') {
+                                        continue;
+                                    } else {
+                                        const base = currentPath.endsWith('/') ? currentPath : currentPath + '/';
+                                        targetPath = base + target;
+                                    }
+                                    
+                                    targetPath = targetPath.replace(/\/+/g, '/');
+                                    if (targetPath.endsWith('/') && targetPath.length > 1) {
+                                        targetPath = targetPath.slice(0, -1);
+                                    }
+                                    
+                                    console.log("[LdySSH Sync] Sniffed 'cd' command to: " + targetPath);
+                                    if (typeof navigateToPath === 'function') {
+                                        setTimeout(() => {
+                                            navigateToPath(targetPath);
+                                        }, 400);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     } catch (error) {
         console.error('Error polling output:', error);
-        // We will just let the loop continue and rely on the status check to disconnect if needed
+        alert('Poll Error: ' + error.message + '\n' + error.stack);
     }
 
     if (hasOutput) {
@@ -3774,15 +4509,100 @@ async function pollSessionOutput(sessionId) {
     scheduleOutputPoll(sessionId, currentPollDelay);
 }
 
-async function startOutputPolling(sessionId) {
-    if (outputPollingInterval) {
-        clearTimeout(outputPollingInterval);
-        outputPollingInterval = null;
+window.handlePushOutput = function(sessionId, base64Output) {
+    if (!sessions[sessionId] || sessions[sessionId].connected === false) {
+        return;
     }
-    outputPollFailureCount = 0;
-    currentPollDelay = OUTPUT_POLL_DELAY_MS;
-    lastStatusCheckTime = Date.now();
-    scheduleOutputPoll(sessionId);
+    if (!base64Output) return;
+
+    const rawBytes = base64ToBytes(base64Output);
+    if (rawBytes.length > 0) {
+        const sentinel = sessionId.startsWith('ssh_') ? getZmodemSentinel(sessionId) : null;
+        if (activeZsession && currentSessionId === sessionId) {
+            try {
+                activeZsession.consume(Array.from(rawBytes));
+            } catch (zerr) {
+                console.warn("Zmodem session consume error:", zerr);
+            }
+        } else if (sentinel && currentSessionId === sessionId) {
+            try {
+                sentinel.consume(Array.from(rawBytes));
+            } catch (zerr) {
+                console.warn("Zmodem sentinel consume error:", zerr);
+            }
+        }
+
+        const targetTerminal = sessions[sessionId].terminal;
+        if (!activeZsession && targetTerminal) {
+            const filtered = stripPredictedEchoes(bytesToUtf8(sessionId, rawBytes));
+            if (filtered.length > 0) {
+                if (filtered.length > 50000) {
+                    targetTerminal.write(filtered);
+                } else {
+                    targetTerminal.write(applyTerminalHighlights(filtered));
+                }
+                appendSessionOutputContext(sessionId, filtered);
+
+                if (targetTerminal.cols <= 5 || targetTerminal.rows <= 5) {
+                    const session = sessions[sessionId];
+                    if (session) {
+                        if (typeof session.calculateTerminalSize === 'function') {
+                            session.calculateTerminalSize();
+                        } else if (session.fitAddon) {
+                            try { session.fitAddon.fit(); } catch(e) {}
+                        }
+                    }
+                }
+                
+                setTimeout(() => {
+                    syncSftpFromTerminalPrompt(sessionId);
+                }, 80);
+                
+                if (sessionId.startsWith('ssh_') && filtered) {
+                    const cdRegex = /(?:^|\r?\n|;)\s*cd\s+([^\r\n;&\s]+)/g;
+                    let match;
+                    while ((match = cdRegex.exec(filtered)) !== null) {
+                        let target = match[1].trim();
+                        target = target.replace(/^['"]|['"]$/g, '');
+                        if (target) {
+                            let targetPath = '';
+                            if (target.startsWith('/')) {
+                                targetPath = target;
+                            } else if (target === '~') {
+                                targetPath = '/';
+                            } else if (target === '..') {
+                                const parts = currentPath.split('/').filter(Boolean);
+                                parts.pop();
+                                targetPath = '/' + parts.join('/');
+                            } else if (target === '.') {
+                                continue;
+                            } else {
+                                const base = currentPath.endsWith('/') ? currentPath : currentPath + '/';
+                                targetPath = base + target;
+                            }
+                            
+                            targetPath = targetPath.replace(/\/+/g, '/');
+                            if (targetPath.endsWith('/') && targetPath.length > 1) {
+                                    targetPath = targetPath.slice(0, -1);
+                            }
+                            
+                            console.log("[LdySSH Sync] Sniffed 'cd' command to: " + targetPath);
+                            if (typeof navigateToPath === 'function') {
+                                setTimeout(() => {
+                                    navigateToPath(targetPath);
+                                }, 400);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+};
+
+async function startOutputPolling(sessionId) {
+    // Polling has been completely replaced by high-performance PostMessage push notifications (0% Idle CPU)
+    return;
 }
 
 function handleSessionDisconnect(sessionId, wasLogout, promptReconnect = true) {
@@ -3894,8 +4714,10 @@ async function reconnectSession(oldSessionId) {
 }
 
 window.showWorkbench = function() {
-    // console.log("Switching to workbench");
-
+    const termContainer = document.querySelector('.terminal-container');
+    if (termContainer) {
+        termContainer.classList.add('in-workbench');
+    }
     if (outputPollingInterval) {
         clearTimeout(outputPollingInterval);
         outputPollingInterval = null;
@@ -3923,7 +4745,13 @@ window.showWorkbench = function() {
 };
 
 function switchToSession(sessionId) {
-    // console.log(`Switching to session ${sessionId} from ${currentSessionId}`);
+    const termContainer = document.querySelector('.terminal-container');
+    if (termContainer) {
+        termContainer.classList.remove('in-workbench');
+    }
+    if (isSplitMode && sessionId !== splitLeftSessionId && sessionId !== splitRightSessionId) {
+        disableSplitScreen();
+    }
 
     // Stop current output polling if switching from another session
     if (outputPollingInterval) {
@@ -3936,17 +4764,25 @@ function switchToSession(sessionId) {
     pendingEchoBuffer = [];
     if (typeof hideCommandSuggestion === 'function') hideCommandSuggestion();
 
-    // Hide all terminal elements from previous sessions
+    // Hide all terminal elements from previous sessions, respecting split mode visibility
     Object.keys(sessions).forEach(id => {
         if (sessions[id].terminalElement) {
-            sessions[id].terminalElement.style.display = 'none';
+            if (isSplitMode && (id === splitLeftSessionId || id === splitRightSessionId)) {
+                sessions[id].terminalElement.style.display = 'block';
+            } else {
+                sessions[id].terminalElement.style.display = 'none';
+            }
         }
     });
 
     // Hide all screens
     document.getElementById('welcomeScreen').style.display = 'none';
     document.getElementById('splashScreen').style.display = 'none'; document.getElementById('splashScreen').style.display = 'none'; document.getElementById('connectingScreen').style.display = 'none';
-    document.getElementById('terminalWrapper').style.display = 'block';
+    
+    const wrapper = document.getElementById('terminalWrapper');
+    if (wrapper) {
+        wrapper.style.display = isSplitMode ? 'flex' : 'block';
+    }
 
     // Show status bar
     const statusBar = document.getElementById('statusBar');
@@ -3989,6 +4825,205 @@ function switchToSession(sessionId) {
 
     updateSessionsList();
     updateSessionTabs();
+}
+
+function enableSplitScreen(leftId, rightId, direction = 'row') {
+    if (!sessions[leftId] || !sessions[rightId]) return;
+    
+    isSplitMode = true;
+    splitLeftSessionId = leftId;
+    splitRightSessionId = rightId;
+    
+    const wrapper = document.getElementById('terminalWrapper');
+    if (!wrapper) return;
+
+    // 配置容器为 flex 弹性布局
+    wrapper.style.position = 'relative';
+    wrapper.style.display = 'flex';
+    wrapper.style.flexDirection = direction === 'row' ? 'row' : 'column';
+    wrapper.style.gap = '8px';
+    wrapper.style.padding = '4px';
+    wrapper.style.boxSizing = 'border-box';
+    
+    // 遍历所有会话
+    Object.keys(sessions).forEach(id => {
+        const el = sessions[id].terminalElement;
+        if (el) {
+            if (id === leftId || id === rightId) {
+                // 显示分屏元素，设为弹性占据
+                el.style.display = 'block';
+                el.style.position = 'relative';
+                el.style.left = 'auto';
+                el.style.top = 'auto';
+                el.style.right = 'auto';
+                el.style.bottom = 'auto';
+                el.style.width = '100%';
+                el.style.height = '100%';
+                el.style.flex = '1';
+                el.style.boxSizing = 'border-box';
+                el.style.borderRadius = '6px';
+                el.style.overflow = 'hidden';
+                el.style.border = '1px solid rgba(255, 255, 255, 0.05)';
+            } else {
+                el.style.display = 'none';
+            }
+        }
+    });
+    
+    document.getElementById('welcomeScreen').style.display = 'none';
+    
+    // 切换当前聚焦会话
+    if (currentSessionId !== leftId && currentSessionId !== rightId) {
+        currentSessionId = leftId;
+    }
+    
+    updateSplitScreenHighlight();
+    
+    // 触发尺寸自适应
+    setTimeout(() => {
+        [leftId, rightId].forEach(id => {
+            if (sessions[id]) {
+                if (typeof sessions[id].calculateTerminalSize === 'function') {
+                    sessions[id].calculateTerminalSize();
+                } else if (sessions[id].fitAddon) {
+                    try { sessions[id].fitAddon.fit(); } catch(e) {}
+                }
+            }
+        });
+    }, 150);
+    
+    updateSessionsList();
+    updateSessionTabs();
+    
+    if (sessions[currentSessionId] && sessions[currentSessionId].terminal) {
+        sessions[currentSessionId].terminal.focus();
+    }
+}
+
+function disableSplitScreen() {
+    isSplitMode = false;
+    splitLeftSessionId = null;
+    splitRightSessionId = null;
+    
+    const wrapper = document.getElementById('terminalWrapper');
+    if (wrapper) {
+        wrapper.style.display = 'block';
+        wrapper.style.padding = '0';
+    }
+    
+    // 恢复原来的绝对定位样式
+    Object.keys(sessions).forEach(id => {
+        const el = sessions[id].terminalElement;
+        if (el) {
+            el.style.position = 'absolute';
+            el.style.left = '0';
+            el.style.top = '0';
+            el.style.right = '0';
+            el.style.bottom = '0';
+            el.style.width = '100%';
+            el.style.height = '100%';
+            el.style.flex = 'none';
+            el.style.border = 'none';
+            el.classList.remove('active-split');
+            
+            if (id === currentSessionId) {
+                el.style.display = 'block';
+            } else {
+                el.style.display = 'none';
+            }
+        }
+    });
+    
+    setTimeout(() => {
+        if (currentSessionId && sessions[currentSessionId]) {
+            if (typeof sessions[currentSessionId].calculateTerminalSize === 'function') {
+                sessions[currentSessionId].calculateTerminalSize();
+            } else if (sessions[currentSessionId].fitAddon) {
+                try { sessions[currentSessionId].fitAddon.fit(); } catch(e) {}
+            }
+            if (sessions[currentSessionId].terminal) {
+                sessions[currentSessionId].terminal.focus();
+            }
+        }
+    }, 150);
+    
+    updateSessionsList();
+    updateSessionTabs();
+}
+
+async function cloneAndSplitSession(sessionId) {
+    const srcSession = sessions[sessionId];
+    if (!srcSession) return;
+    
+    document.getElementById('welcomeScreen').style.display = 'none';
+    const connectingScreen = document.getElementById('connectingScreen');
+    connectingScreen.style.display = 'block';
+    
+    const textNode = connectingScreen.querySelector('div:last-child');
+    const originalText = textNode ? textNode.textContent : '正在连接...';
+    if (textNode) {
+        textNode.textContent = '正在克隆会话并配置双分屏...';
+    }
+    
+    try {
+        if (srcSession.isLocal) {
+            const newSessionId = await window.pywebview.api.create_local_session();
+            sessions[newSessionId] = {
+                id: newSessionId,
+                hostname: 'Local CMD',
+                username: 'localhost',
+                name: 'Local CMD (2)',
+                connected: true,
+                isLocal: true
+            };
+            
+            createTerminalForSession(newSessionId, 'Local CMD');
+            startOutputPolling(newSessionId);
+            enableSplitScreen(sessionId, newSessionId);
+        } else {
+            if (!srcSession.connectionParams) {
+                alert('克隆失败：未找到原始连接的认证参数');
+                connectingScreen.style.display = 'none';
+                if (textNode) textNode.textContent = originalText;
+                return;
+            }
+            
+            const newParams = { ...srcSession.connectionParams };
+            newParams.name = (newParams.name || 'SSH') + ' (分屏)';
+            newParams.save = false;
+            
+            const newSessionId = await window.pywebview.api.create_session();
+            const result = await connectWithHostVerification(newSessionId, newParams);
+            
+            if (result.success) {
+                sessions[newSessionId] = {
+                    id: newSessionId,
+                    hostname: newParams.hostname,
+                    username: newParams.username,
+                    name: newParams.name,
+                    connected: true,
+                    connectionParams: newParams
+                };
+                
+                createTerminalForSession(newSessionId, newParams.hostname);
+                startOutputPolling(newSessionId);
+                enableSplitScreen(sessionId, newSessionId);
+            } else {
+                alert('克隆分屏失败：' + (result.error || '未知连接错误'));
+            }
+        }
+    } catch (error) {
+        console.error('Error cloning session for split screen:', error);
+        alert('克隆分屏发生异常：' + error.message);
+    } finally {
+        connectingScreen.style.display = 'none';
+        if (textNode) textNode.textContent = originalText;
+        
+        const appNode = document.querySelector('.app');
+        if (appNode) {
+            appNode.classList.add('ssh-sidebar-collapsed');
+        }
+    }
 }
 
 let lastSessionsListFingerprint = '';
@@ -4449,7 +5484,7 @@ function displayProcessList(processes) {
     html += '<div>进程</div>';
     html += '<div>PID</div>';
     html += '<div>CPU</div>';
-    html += '<div>进程</div>';
+    html += '<div>内存</div>';
     html += '</div>';
 
     processes.slice(0, 20).forEach(process => {
@@ -4745,23 +5780,130 @@ function resizeTerminalAfterLayout(delay = 180) {
     }, delay);
 }
 
-// --- OpenAI split mode UI shell ---
+// --- OpenAI integrated sidebar panels ---
 
-async function toggleAiSplitMode() {
-    if (window.pywebview && window.pywebview.api) {
-        try {
-            const result = JSON.parse(await window.pywebview.api.open_chatgpt_window());
-            if (!result.success) {
-                console.error("Failed to open ChatGPT window:", result.error);
-                alert("无法打开 ChatGPT 窗口：" + result.error);
-            }
-        } catch (e) {
-            console.error("Error calling open_chatgpt_window:", e);
-        }
-    } else {
-        alert("API 未就绪");
+let aiSubWindowResizeInterval = null;
+
+function updateAiSubWindowBounds() {
+    const placeholder = document.getElementById('aiSubWindowPlaceholder');
+    if (!placeholder || currentTool !== 'ai') return;
+
+    const rect = placeholder.getBoundingClientRect();
+    const dpi = window.devicePixelRatio || 1;
+    
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    const bounds = {
+        left: Math.round(rect.left * dpi),
+        top: Math.round(rect.top * dpi),
+        width: Math.round(rect.width * dpi),
+        height: Math.round(rect.height * dpi)
+    };
+
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.resize_chatgpt_subwindow) {
+        window.pywebview.api.resize_chatgpt_subwindow(JSON.stringify(bounds));
     }
 }
+
+function startSyncAiSubWindow() {
+    if (aiSubWindowResizeInterval) clearInterval(aiSubWindowResizeInterval);
+
+    const startTime = Date.now();
+    aiSubWindowResizeInterval = setInterval(() => {
+        updateAiSubWindowBounds();
+        if (Date.now() - startTime > 350) {
+            clearInterval(aiSubWindowResizeInterval);
+            aiSubWindowResizeInterval = null;
+        }
+    }, 16);
+}
+
+window.addEventListener('resize', () => {
+    if (currentTool === 'ai') {
+        updateAiSubWindowBounds();
+    }
+});
+
+// --- Right Sidebar Resizable drag logic ---
+
+let isResizingSidebar = false;
+let startSidebarWidth = 380;
+let startMouseX = 0;
+
+function initSidebarResizer() {
+    const resizer = document.getElementById('sidebarResizer');
+    const sidebar = document.getElementById('rightSidebar');
+    if (!resizer || !sidebar) return;
+
+    resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        isResizingSidebar = true;
+        startSidebarWidth = sidebar.getBoundingClientRect().width;
+        startMouseX = e.clientX;
+
+        resizer.classList.add('dragging');
+        sidebar.classList.add('no-transition');
+
+        let dragOverlay = document.getElementById('sidebarDragOverlay');
+        if (!dragOverlay) {
+            dragOverlay = document.createElement('div');
+            dragOverlay.id = 'sidebarDragOverlay';
+            dragOverlay.style.position = 'fixed';
+            dragOverlay.style.left = '0';
+            dragOverlay.style.top = '0';
+            dragOverlay.style.width = '100vw';
+            dragOverlay.style.height = '100vh';
+            dragOverlay.style.zIndex = '99999';
+            dragOverlay.style.cursor = 'col-resize';
+            dragOverlay.style.background = 'transparent';
+            document.body.appendChild(dragOverlay);
+        }
+    });
+}
+
+window.addEventListener('mousemove', (e) => {
+    if (!isResizingSidebar) return;
+
+    const sidebar = document.getElementById('rightSidebar');
+    if (!sidebar) return;
+
+    const dx = startMouseX - e.clientX;
+    let newWidth = startSidebarWidth + dx;
+
+    const minWidth = 260;
+    const maxWidth = Math.round(window.innerWidth * 0.8);
+    if (newWidth < minWidth) newWidth = minWidth;
+    if (newWidth > maxWidth) newWidth = maxWidth;
+
+    sidebar.style.setProperty('--sidebar-width', newWidth + 'px');
+
+    if (currentTool === 'ai') {
+        updateAiSubWindowBounds();
+    }
+});
+
+window.addEventListener('mouseup', () => {
+    if (!isResizingSidebar) return;
+
+    isResizingSidebar = false;
+
+    const resizer = document.getElementById('sidebarResizer');
+    const sidebar = document.getElementById('rightSidebar');
+    if (resizer) resizer.classList.remove('dragging');
+    if (sidebar) sidebar.classList.remove('no-transition');
+
+    const dragOverlay = document.getElementById('sidebarDragOverlay');
+    if (dragOverlay) dragOverlay.remove();
+
+    if (sessions[currentSessionId]?.calculateSize) {
+        sessions[currentSessionId].calculateSize();
+    } else if (typeof fitAddon !== 'undefined' && fitAddon) {
+        fitAddon.fit();
+    }
+});
+
+// 在初始化中调用
+initSidebarResizer();
 
 // --- Workbench side panels ---
 function setSshSidebarVisible(visible) {
@@ -4789,6 +5931,16 @@ function clearConnectionForm() {
     document.getElementById('saveConnection').checked = false;
     document.getElementById('passwordGroup').style.display = 'block';
     document.getElementById('keyGroup').style.display = 'none';
+
+    // 重置堡垒机相关
+    document.getElementById('jumpHost').value = '';
+    document.getElementById('jumpPort').value = '22';
+    document.getElementById('jumpUser').value = '';
+    document.getElementById('jumpPass').value = '';
+    document.getElementById('jumpKey').value = '';
+    document.getElementById('jumpKeyPassphrase').value = '';
+    document.getElementById('jumpHostFields').style.display = 'none';
+    document.getElementById('jumpHostChevron').textContent = '▶';
 }
 
 function openNewConnectionForm(focusField = 'hostname', clearForm = false) {
@@ -4860,9 +6012,9 @@ function getDefaultCommandLibrary() {
         {
             name: 'ADB',
             commands: [
-                { name: 'Logcat 错误', command: 'adb logcat *:E\n' },
-                { name: '当前 Activity', command: 'adb shell dumpsys activity top\n' },
-                { name: '包列表', command: 'adb shell pm list packages\n' }
+                { name: 'Logcat 错误', command: 'logcat *:E\n' },
+                { name: '当前 Activity', command: 'dumpsys activity top\n' },
+                { name: '包列表', command: 'pm list packages\n' }
             ]
         }
     ];
@@ -4883,7 +6035,7 @@ async function loadCommandLibrary() {
             }
             parsed = result.folders;
         } else {
-            const raw = localStorage.getItem('prismsshCommandLibrary');
+            const raw = localStorage.getItem('ldysshCommandLibrary') || localStorage.getItem('prismsshCommandLibrary');
             parsed = raw ? JSON.parse(raw) : null;
         }
 
@@ -4891,6 +6043,30 @@ async function loadCommandLibrary() {
             commandLibraryFolders = parsed;
         } else {
             commandLibraryFolders = getDefaultCommandLibrary();
+        }
+
+        // Clean up legacy ADB commands with 'adb shell' or 'adb' prefix if present
+        let migrationPerformed = false;
+        commandLibraryFolders.forEach(folder => {
+            if (folder.name === 'ADB' && Array.isArray(folder.commands)) {
+                folder.commands.forEach(cmd => {
+                    if (cmd.name === 'Logcat 错误' && (cmd.command.startsWith('adb ') || cmd.command.startsWith('adb.exe '))) {
+                        cmd.command = 'logcat *:E\n';
+                        migrationPerformed = true;
+                    }
+                    if (cmd.name === '当前 Activity' && cmd.command.startsWith('adb shell ')) {
+                        cmd.command = 'dumpsys activity top\n';
+                        migrationPerformed = true;
+                    }
+                    if (cmd.name === '包列表' && cmd.command.startsWith('adb shell ')) {
+                        cmd.command = 'pm list packages\n';
+                        migrationPerformed = true;
+                    }
+                });
+            }
+        });
+        if (migrationPerformed) {
+            saveCommandLibrary().catch(err => console.error('Failed to auto-save migrated command library:', err));
         }
     } catch (error) {
         console.error('加载保存连接失败', error);
@@ -4908,6 +6084,7 @@ async function saveCommandLibrary() {
                 throw new Error(result.error || 'save failed');
             }
         } else {
+            localStorage.setItem('ldysshCommandLibrary', payload);
             localStorage.setItem('prismsshCommandLibrary', payload);
         }
         return true;
@@ -4966,24 +6143,97 @@ function renderCommandLibrary() {
     }
 
     commands.forEach((item, index) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        
-        button.className = 'command-btn';
         const isAuto = item.auto_execute !== false;
-        if (!isAuto) {
-            button.style.borderLeft = '3px solid var(--theme-secondary)';
-            button.title = item.command + ' (只输入不执行)';
+        
+        // Detect parameters, e.g. [p#1 Parameter Name]
+        const paramRegex = /\[p#(\d+)\s+([^\]]+)\]/;
+        const hasParams = paramRegex.test(item.command);
+        
+        let clickTimeout = null;
+        
+        if (!hasParams) {
+            // No parameters, render standard command button but with custom glow style
+            const button = document.createElement('div');
+            button.className = 'glow-btn';
+            
+            if (!isAuto) {
+                button.title = item.command + ' (只输入不执行)';
+            } else {
+                button.title = item.command + ' (直接执行)';
+            }
+            
+            const borderLeftStyle = !isAuto ? 'border-left: 3px solid var(--theme-secondary) !important;' : '';
+            
+            // Inner container with narrow padding, no gear icon
+            button.innerHTML = `<div class="glow-btn-inner" style="${borderLeftStyle}">${escapeHtml(item.name)}</div>`;
+            
+            button.onclick = (event) => {
+                if (clickTimeout) {
+                    clearTimeout(clickTimeout);
+                    clickTimeout = null;
+                }
+                clickTimeout = setTimeout(() => {
+                    sendCommandLibraryCommand(item.command, isAuto);
+                    clickTimeout = null;
+                }, 250);
+            };
+            
+            button.ondblclick = (event) => {
+                if (clickTimeout) {
+                    clearTimeout(clickTimeout);
+                    clickTimeout = null;
+                }
+                event.stopPropagation();
+                openCommandLibraryModal('edit-command', '', index);
+            };
+            
+            button.oncontextmenu = (event) => {
+                event.preventDefault();
+                showSnippetContextMenu(event, 'command', index);
+            };
+            grid.appendChild(button);
         } else {
-            button.title = item.command + ' (直接执行)';
+            // Contains parameters, render as custom glow-btn with compact inline layout
+            const button = document.createElement('div');
+            button.className = 'glow-btn';
+            
+            if (!isAuto) {
+                button.title = item.command + ' (只输入不执行)';
+            } else {
+                button.title = item.command + ' (直接执行)';
+            }
+            
+            const borderLeftStyle = !isAuto ? 'border-left: 3px solid var(--theme-secondary) !important;' : '';
+            
+            // Inner container with narrow padding and inline gear icon
+            button.innerHTML = `<div class="glow-btn-inner" style="${borderLeftStyle}">${escapeHtml(item.name)}<span style="font-size: 9px; color: var(--theme-primary, #38bdf8); margin-left: 2px;">⚙️</span></div>`;
+            
+            button.onclick = (event) => {
+                if (clickTimeout) {
+                    clearTimeout(clickTimeout);
+                    clickTimeout = null;
+                }
+                clickTimeout = setTimeout(() => {
+                    toggleDynamicConsole(event, index);
+                    clickTimeout = null;
+                }, 250);
+            };
+            
+            button.ondblclick = (event) => {
+                if (clickTimeout) {
+                    clearTimeout(clickTimeout);
+                    clickTimeout = null;
+                }
+                event.stopPropagation();
+                openCommandLibraryModal('edit-command', '', index);
+            };
+            
+            button.oncontextmenu = (event) => {
+                event.preventDefault();
+                showSnippetContextMenu(event, 'command', index);
+            };
+            grid.appendChild(button);
         }
-        button.textContent = item.name;
-        button.onclick = () => sendCommandLibraryCommand(item.command, isAuto);
-        button.oncontextmenu = (event) => {
-            event.preventDefault();
-            showSnippetContextMenu(event, 'command', index);
-        };
-        grid.appendChild(button);
     });
 }
 
@@ -4992,6 +6242,19 @@ function sendCommandLibraryCommand(command, autoExecute = true) {
         alert('请先连接服务器。');
         return;
     }
+    
+    // Detect placeholders like [p#1 Parameter Name]
+    const paramRegex = /\[p#(\d+)\s+([^\]]+)\]/;
+    if (paramRegex.test(command)) {
+        const activeFolder = commandLibraryFolders[activeCommandFolderIndex];
+        const commands = activeFolder?.commands || [];
+        const index = commands.findIndex(c => c.command === command);
+        if (index !== -1) {
+            toggleDynamicConsole(null, index);
+            return;
+        }
+    }
+    
     const finalCommand = autoExecute ? (command.endsWith('\n') ? command : `${command}\n`) : (command.endsWith('\n') ? command.slice(0, -1) : command);
     window.pywebview.api.send_input(currentSessionId, finalCommand);
 }
@@ -5171,6 +6434,7 @@ function initCommandLibraryResize() {
                 10
             );
             if (currentHeight) {
+                localStorage.setItem('ldysshCommandLibraryHeightV2', String(currentHeight));
                 localStorage.setItem('prismsshCommandLibraryHeightV2', String(currentHeight));
             }
         };
@@ -5491,29 +6755,28 @@ async function stopPortForward(forwardId) {
 
 // Set up drag and drop for file browser area
 document.addEventListener('DOMContentLoaded', () => {
-    const fileBrowser = document.querySelector('.file-browser');
-    const uploadArea = document.getElementById('uploadArea');
     const fileListContainer = document.getElementById('fileListContainer');
+    const uploadArea = document.getElementById('uploadArea');
     
-    if (fileBrowser) {
-        fileBrowser.addEventListener('dragover', (e) => {
+    if (fileListContainer) {
+        fileListContainer.addEventListener('dragover', (e) => {
             e.preventDefault();
             if (uploadArea) uploadArea.classList.add('dragover');
-            if (fileListContainer) fileListContainer.style.boxShadow = 'inset 0 0 20px rgba(var(--theme-primary), 0.2)';
+            fileListContainer.style.boxShadow = 'inset 0 0 20px rgba(var(--theme-primary), 0.2)';
         });
         
-        fileBrowser.addEventListener('dragleave', (e) => {
+        fileListContainer.addEventListener('dragleave', (e) => {
             e.preventDefault();
-            if (!e.relatedTarget || !fileBrowser.contains(e.relatedTarget)) {
+            if (!e.relatedTarget || !fileListContainer.contains(e.relatedTarget)) {
                 if (uploadArea) uploadArea.classList.remove('dragover');
-                if (fileListContainer) fileListContainer.style.boxShadow = '';
+                fileListContainer.style.boxShadow = '';
             }
         });
         
-        fileBrowser.addEventListener('drop', (e) => {
+        fileListContainer.addEventListener('drop', (e) => {
             e.preventDefault();
             if (uploadArea) uploadArea.classList.remove('dragover');
-            if (fileListContainer) fileListContainer.style.boxShadow = '';
+            fileListContainer.style.boxShadow = '';
             
             if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
                 uploadFiles(Array.from(e.dataTransfer.files));
@@ -5641,3 +6904,1988 @@ function handleTerminalSearch(e) {
         closeTerminalSearch();
     }
 }
+
+// Real-time SFTP Sync from Terminal Screen Prompt
+function syncSftpFromTerminalPrompt(sessionId) {
+    if (!sessionId.startsWith('ssh_') || !currentTerminal) return;
+    try {
+        const term = currentTerminal;
+        const buffer = term.buffer.active;
+        if (!buffer) return;
+        
+        const cursorLineIndex = buffer.baseY + buffer.cursorY;
+        const startLine = Math.max(0, cursorLineIndex - 2);
+        const endLine = Math.min(buffer.length - 1, cursorLineIndex);
+        
+        console.log(`[LdySSH Sync Debug] Session: ${sessionId}, CursorY: ${buffer.cursorY}, BaseY: ${buffer.baseY}, ScanLines: [${startLine} to ${endLine}]`);
+        
+        let targetPath = null;
+        let matchedLineText = "";
+        
+        // Regexp to match path after colon E.g.: root@host:/var/log$ or user@host:~$
+        const promptRegex = /:([\/~][^\s$#>\(\)]*)/;
+        
+        // Regexp to extract username E.g.: root@f6b95c8493b114d9
+        const userRegex = /(?:^|\s)([a-zA-Z0-9_\-\.]+)(?:@[a-zA-Z0-9_\-\.]+):/;
+        
+        // Scan bottom-up to capture the absolute LATEST prompt path
+        for (let i = endLine; i >= startLine; i--) {
+            const line = buffer.getLine(i);
+            if (line) {
+                const lineText = line.translateToString(true);
+                console.log(`[LdySSH Sync Debug] Line ${i} content: ${JSON.stringify(lineText)}`);
+                
+                const match = promptRegex.exec(lineText);
+                if (match) {
+                    targetPath = match[1].trim();
+                    matchedLineText = lineText;
+                    console.log(`[LdySSH Sync Debug] Hit prompt on Line ${i}: ${targetPath}`);
+                    break; // Found the latest prompt, break out immediately
+                }
+            }
+        }
+        
+        if (targetPath) {
+            // Intelligent home directory (~) path mapping
+            if (targetPath.startsWith('~')) {
+                const userMatch = userRegex.exec(matchedLineText);
+                const username = userMatch ? userMatch[1].trim() : 'root';
+                
+                const relativeRemainder = targetPath.slice(1); // everything after '~'
+                let homePrefix = (username === 'root') ? '/root' : '/home/' + username;
+                targetPath = homePrefix + relativeRemainder;
+                console.log(`[LdySSH Sync Debug] Mapped home symbol ~ to absolute path: ${targetPath} (user: ${username})`);
+            }
+            
+            // Normalize path separators
+            targetPath = targetPath.replace(/\/+/g, '/');
+            if (targetPath.endsWith('/') && targetPath.length > 1) {
+                targetPath = targetPath.slice(0, -1);
+            }
+            
+            if (targetPath && targetPath !== currentPath) {
+                console.log(`[LdySSH Sync] Synced folder to: ${targetPath} (Sniffed from terminal)`);
+                if (typeof navigateToPath === 'function') {
+                    navigateToPath(targetPath);
+                }
+            } else {
+                console.log(`[LdySSH Sync Debug] Target path is already active: targetPath=${targetPath}, currentPath=${currentPath}`);
+            }
+        } else {
+            console.log("[LdySSH Sync Debug] No prompt pattern matched in scanning range.");
+        }
+    } catch (e) {
+        console.warn("[LdySSH Sync] Prompt path extraction error:", e);
+    }
+}
+
+// --- Base64 / Binary conversion helpers ---
+function base64ToBytes(base64) {
+    const raw = atob(base64);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) {
+        bytes[i] = raw.charCodeAt(i);
+    }
+    return bytes;
+}
+
+function bytesToBase64(bytes) {
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+function bytesToUtf8(sessionId, bytes) {
+    if (typeof TextDecoder !== 'undefined') {
+        const session = sessions[sessionId];
+        if (session) {
+            if (!session.textDecoder) {
+                session.textDecoder = new TextDecoder('utf-8');
+            }
+            return session.textDecoder.decode(bytes, { stream: true });
+        }
+        return new TextDecoder('utf-8').decode(bytes);
+    }
+    let utf8 = '';
+    for (let i = 0; i < bytes.length; i++) {
+        utf8 += String.fromCharCode(bytes[i]);
+    }
+    return utf8;
+}
+
+// --- Zmodem (sz/rz) Integration ---
+let activeZsession = null;
+let zsentinels = {}; // Mapping from sessionId to its Zmodem.Sentinel instance
+
+// Zmodem 进度更新与界面控制函数
+function updateZmodemProgress(title, offset, total) {
+    const panel = document.getElementById("zmodemProgressPanel");
+    const titleEl = document.getElementById("zmodemProgressTitle");
+    const percentEl = document.getElementById("zmodemProgressPercent");
+    const barEl = document.getElementById("zmodemProgressBar");
+    const sizeEl = document.getElementById("zmodemProgressSize");
+    
+    if (panel) panel.style.display = "block";
+    if (titleEl) titleEl.innerText = title;
+    
+    const pct = total > 0 ? Math.min(100, Math.floor((offset / total) * 100)) : 0;
+    if (percentEl) percentEl.innerText = `${pct}%`;
+    if (barEl) barEl.style.width = `${pct}%`;
+    
+    const formattedOffset = (offset / 1024).toFixed(1);
+    const formattedTotal = (total / 1024).toFixed(1);
+    if (sizeEl) sizeEl.innerText = `${formattedOffset} KB / ${formattedTotal} KB`;
+}
+
+function hideZmodemProgress() {
+    const panel = document.getElementById("zmodemProgressPanel");
+    if (panel) panel.style.display = "none";
+}
+
+function cancelActiveZmodem() {
+    if (activeZsession) {
+        try {
+            activeZsession.abort();
+        } catch(e) {}
+    }
+    const currentSess = currentSessionId;
+    const term = currentSess ? sessions[currentSess]?.terminal : null;
+    cleanupZmodem(term);
+}
+
+function getZmodemSentinel(sessionId) {
+    let zmodemLib = null;
+    if (typeof zmodem !== 'undefined') {
+        zmodemLib = zmodem;
+    } else if (typeof Zmodem !== 'undefined') {
+        zmodemLib = Zmodem;
+    }
+    
+    if (!zmodemLib) {
+        console.warn('zmodem.js is not loaded.');
+        return null;
+    }
+    
+    const SentinelConstructor = zmodemLib.Sentry || zmodemLib.Sentinel || (zmodemLib.Browser && zmodemLib.Browser.Sentinel) || (zmodemLib.Browser && zmodemLib.Browser.Sentry);
+    if (!SentinelConstructor || typeof SentinelConstructor !== 'function') {
+        console.warn('Zmodem Sentry/Sentinel constructor is not available in the library.');
+        return null;
+    }
+    
+    if (!zsentinels[sessionId]) {
+        try {
+            zsentinels[sessionId] = new SentinelConstructor({
+                on_detect: function(detection) {
+                    startZmodemSession(sessionId, detection);
+                },
+                on_retract: function() {
+                    // Cancelled
+                },
+                sender: function(octets) {
+                    const base64Data = bytesToBase64(new Uint8Array(octets));
+                    window.pywebview.api.send_input_base64(sessionId, base64Data).catch(console.error);
+                }
+            });
+        } catch (instError) {
+            console.error("Zmodem Sentinel instantiation failed:", instError);
+            return null;
+        }
+    }
+    return zsentinels[sessionId];
+}
+
+function startZmodemSession(sessionId, detection) {
+    const term = sessions[sessionId]?.terminal;
+    if (!term) return;
+
+    term.write("\r\n[LdySSH] 检测到 Zmodem 传输启动...\r\n");
+    const zsession = detection.confirm();
+    activeZsession = zsession;
+
+    if (zsession.type === "receive") {
+        zsession.on("offer", function(offer) {
+            const details = offer.get_details();
+            const fileName = details.name;
+            const fileSize = details.size;
+
+            window.pywebview.api.show_save_file_dialog(fileName).then(res => {
+                const response = JSON.parse(res);
+                const savePath = response.filePath;
+                if (!savePath) {
+                    offer.skip();
+                    cleanupZmodem(term);
+                    return;
+                }
+
+                term.write(`[LdySSH] 正在下载: ${fileName} (${(fileSize / 1024).toFixed(2)} KB) -> ${savePath}\r\n`);
+                updateZmodemProgress(`下载: ${fileName}`, 0, fileSize || 1);
+                
+                offer.accept().then(function() {
+                    let receivedChunks = [];
+                    offer.on("chunk", function(chunk) {
+                        receivedChunks.push(new Uint8Array(chunk));
+                        const currentOffset = offer.get_offset();
+                        updateZmodemProgress(`下载: ${fileName}`, currentOffset, fileSize || 1);
+                    });
+
+                    offer.on("close", function() {
+                        const totalLen = receivedChunks.reduce((acc, val) => acc + val.length, 0);
+                        const fileData = new Uint8Array(totalLen);
+                        let offset = 0;
+                        for (let chunk of receivedChunks) {
+                            fileData.set(chunk, offset);
+                            offset += chunk.length;
+                        }
+                        const base64Content = bytesToBase64(fileData);
+                        window.pywebview.api.write_base64_file(savePath, base64Content).then(res => {
+                            const response = JSON.parse(res);
+                            if (response.success) {
+                                term.write(`\r\n[LdySSH] 下载成功: ${fileName}\r\n`);
+                            } else {
+                                term.write(`\r\n[LdySSH] 写入文件失败: ${response.error || '未知错误'}\r\n`);
+                            }
+                            cleanupZmodem(term);
+                        });
+                    });
+                });
+            });
+        });
+    } else {
+        // 如果有拖入的待发送文件，直接处理
+        const pendingFile = sessions[sessionId]?.pendingDropFile;
+        if (pendingFile) {
+            sessions[sessionId].pendingDropFile = null;
+            
+            const reader = new FileReader();
+            reader.onerror = function(err) {
+                term.write(`\r\n[LdySSH] 读取拖拽文件失败: ${err}\r\n`);
+                zsession.close();
+                cleanupZmodem(term);
+            };
+            reader.onload = function(evt) {
+                const fileBytes = new Uint8Array(evt.target.result);
+                const fileName = pendingFile.name;
+                
+                term.write(`[LdySSH] 正在上传拖拽文件: ${fileName} (${(fileBytes.length / 1024).toFixed(2)} KB)\r\n`);
+                updateZmodemProgress(`上传: ${fileName}`, 0, fileBytes.length);
+                
+                zsession.send_offer({
+                    name: fileName,
+                    size: fileBytes.length
+                }).then(function(xfer) {
+                    if (!xfer) {
+                        term.write(`\r\n[LdySSH] 上传被远程跳过或拒绝\r\n`);
+                        cleanupZmodem(term);
+                        return;
+                    }
+                    
+                    const chunkSize = 64 * 1024;
+                    let sentOffset = 0;
+                    function sendNextChunk() {
+                        if (!activeZsession) return; // 被中途取消
+                        if (sentOffset >= fileBytes.length) {
+                            xfer.close().then(function() {
+                                term.write(`\r\n[LdySSH] 上传成功: ${fileName}\r\n`);
+                                cleanupZmodem(term);
+                            });
+                            return;
+                        }
+                        const slice = fileBytes.slice(sentOffset, sentOffset + chunkSize);
+                        xfer.send(slice);
+                        sentOffset += slice.length;
+                        updateZmodemProgress(`上传: ${fileName}`, sentOffset, fileBytes.length);
+                        setTimeout(sendNextChunk, 2);
+                    }
+                    sendNextChunk();
+                });
+            };
+            reader.readAsArrayBuffer(pendingFile);
+            return;
+        }
+
+        // 正常的系统文件对话框触发
+        window.pywebview.api.show_open_file_dialog().then(res => {
+            const response = JSON.parse(res);
+            const localPath = response.filePath;
+            if (!localPath) {
+                zsession.close();
+                cleanupZmodem(term);
+                return;
+            }
+
+            window.pywebview.api.read_base64_file(localPath).then(readRes => {
+                const readResult = JSON.parse(readRes);
+                const base64Content = readResult.content;
+                if (!base64Content) {
+                    term.write(`\r\n[LdySSH] 读取本地文件失败\r\n`);
+                    zsession.close();
+                    cleanupZmodem(term);
+                    return;
+                }
+
+                const fileBytes = base64ToBytes(base64Content);
+                const fileName = localPath.split(/[\\/]/).pop();
+                
+                term.write(`[LdySSH] 正在上传: ${fileName} (${(fileBytes.length / 1024).toFixed(2)} KB) 从 ${localPath}\r\n`);
+                updateZmodemProgress(`上传: ${fileName}`, 0, fileBytes.length);
+
+                zsession.send_offer({
+                    name: fileName,
+                    size: fileBytes.length
+                }).then(function(xfer) {
+                    if (!xfer) {
+                        term.write(`\r\n[LdySSH] 上传被远程跳过或拒绝\r\n`);
+                        cleanupZmodem(term);
+                        return;
+                    }
+
+                    const chunkSize = 64 * 1024;
+                    let sentOffset = 0;
+                    function sendNextChunk() {
+                        if (!activeZsession) return;
+                        if (sentOffset >= fileBytes.length) {
+                            xfer.close().then(function() {
+                                term.write(`\r\n[LdySSH] 上传成功: ${fileName}\r\n`);
+                                cleanupZmodem(term);
+                            });
+                            return;
+                        }
+                        const slice = fileBytes.slice(sentOffset, sentOffset + chunkSize);
+                        xfer.send(slice);
+                        sentOffset += slice.length;
+                        updateZmodemProgress(`上传: ${fileName}`, sentOffset, fileBytes.length);
+                        setTimeout(sendNextChunk, 2);
+                    }
+                    sendNextChunk();
+                });
+            });
+        });
+    }
+}
+
+function cleanupZmodem(term) {
+    activeZsession = null;
+    hideZmodemProgress();
+    if (term) {
+        term.focus();
+        term.write("\r\n[LdySSH] Zmodem 会话已结束。\r\n");
+    }
+}
+
+// --- Parameter Interpolation Helpers for Shortcuts ---
+function getParamHistory(paramName) {
+    const raw = localStorage.getItem('ldyssh_param_hist_' + paramName) || localStorage.getItem('prismssh_param_hist_' + paramName);
+    try {
+        return raw ? JSON.parse(raw) : [];
+    } catch(e) {
+        return [];
+    }
+}
+
+function saveParamValueToHistory(paramName, value) {
+    if (!value || !value.trim()) return;
+    let history = getParamHistory(paramName);
+    history = history.filter(h => h !== value);
+    history.unshift(value);
+    if (history.length > 15) history = history.slice(0, 15);
+    localStorage.setItem('ldyssh_param_hist_' + paramName, JSON.stringify(history));
+    localStorage.setItem('prismssh_param_hist_' + paramName, JSON.stringify(history));
+}
+
+function showParamHistoryDropdown(event, buttonEl, paramName, inputEl) {
+    if (event) event.stopPropagation();
+    
+    const old = document.getElementById('param-history-popover');
+    if (old) old.remove();
+    
+    const history = getParamHistory(paramName);
+    if (history.length === 0) {
+        alert('暂无该参数的历史记录');
+        return;
+    }
+    
+    const popover = document.createElement('div');
+    popover.id = 'param-history-popover';
+    
+    const rect = buttonEl.getBoundingClientRect();
+    
+    popover.style = `
+        position: fixed; z-index: 11000; background: #1f202e;
+        border: 1px solid rgba(255,255,255,0.18); border-radius: 6px;
+        padding: 4px 0; width: 200px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        left: ${rect.left + rect.width - 200}px; top: ${rect.bottom + 4}px;
+        font-family: inherit;
+    `;
+    
+    history.forEach(val => {
+        const item = document.createElement('div');
+        item.style = 'padding: 8px 12px; font-size: 12px; color: #e2e8f0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: background 0.15s;';
+        item.textContent = val;
+        item.onmouseover = () => item.style.background = 'var(--theme-primary, #38bdf8)';
+        item.onmouseout = () => item.style.background = 'transparent';
+        item.onclick = () => {
+            inputEl.value = val;
+            popover.remove();
+            inputEl.focus();
+        };
+        popover.appendChild(item);
+    });
+    
+    document.body.appendChild(popover);
+    
+    const outsideClick = (e) => {
+        if (!popover.contains(e.target) && e.target !== buttonEl) {
+            popover.remove();
+            document.removeEventListener('mousedown', outsideClick);
+        }
+    };
+    setTimeout(() => {
+        document.addEventListener('mousedown', outsideClick);
+    }, 50);
+}
+
+function insertParamPlaceholder(num) {
+    const input = document.getElementById('commandLibraryCommandInput');
+    if (!input) return;
+    const val = input.value;
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const textToInsert = `[p#${num} 参数${num}]`;
+    input.value = val.slice(0, start) + textToInsert + val.slice(end);
+    // Move cursor and select the parameter name "参数X" for easy renaming
+    input.selectionStart = start + 5; // right after "[p#X "
+    input.selectionEnd = start + textToInsert.length - 1; // right before "]"
+    input.focus();
+}
+
+let currentActiveConsoleIndex = -1;
+
+function escapeHtml(string) {
+    const r = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+        "/": "&#x2F;"
+    };
+    return String(string).replace(/[&<>"'/]/g, (s) => r[s]);
+}
+
+function toggleDynamicConsole(event, index) {
+    if (event) event.stopPropagation();
+    
+    const consoleEl = document.getElementById('dynamicCommandConsole');
+    if (!consoleEl) return;
+    
+    // 折叠/收起控制台时的排版优化：清空内容并彻底移除外边距、内边距、边框占位，解决白边残留
+    if (currentActiveConsoleIndex === index && consoleEl.style.display !== 'none') {
+        consoleEl.style.display = 'none';
+        consoleEl.style.marginTop = '0px';
+        consoleEl.style.borderTop = 'none';
+        consoleEl.style.paddingTop = '0px';
+        consoleEl.innerHTML = '';
+        currentActiveConsoleIndex = -1;
+        return;
+    }
+    
+    currentActiveConsoleIndex = index;
+    const item = commandLibraryFolders[activeCommandFolderIndex].commands[index];
+    const isAuto = item.auto_execute !== false;
+    
+    // Parse parameters like [p#1 PID游戏]
+    const paramRegexLocal = /\[p#(\d+)\s+([^\]]+)\]/g;
+    const paramsFound = [];
+    let match;
+    while ((match = paramRegexLocal.exec(item.command)) !== null) {
+        paramsFound.push({
+            num: parseInt(match[1]),
+            name: match[2].trim(),
+            rawMatch: match[0]
+        });
+    }
+    
+    let inputsHtml = '';
+    paramsFound.forEach(p => {
+        const history = getParamHistory(p.name);
+        const latestVal = history.length > 0 ? history[0] : '';
+        
+        let labelHtml = '';
+        if (/^\d+$/.test(p.name)) {
+            labelHtml = `<span class="glow-console-param-label" title="参数 ${p.name}"># ${p.name.padStart(2, '0')}</span>`;
+        } else {
+            labelHtml = `<span class="glow-console-param-label" style="min-width: 50px !important; color: #38bdf8 !important; background: rgba(56,189,248,0.08) !important; border-color: rgba(56,189,248,0.22) !important;" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>`;
+        }
+        
+        inputsHtml += `
+            <div style="display: flex; align-items: center; margin-top: 8px; gap: 8px; width: 100%;">
+                <div style="width: 70px; display: flex; align-items: center; justify-content: flex-start; flex-shrink: 0;">
+                    ${labelHtml}
+                </div>
+                <input type="text" class="glow-console-input param-console-input" data-raw="${escapeHtml(p.rawMatch)}" data-name="${escapeHtml(p.name)}" value="${escapeHtml(latestVal)}">
+                <button type="button" class="glow-console-action-btn" onclick="showParamHistoryDropdown(event, this, '${p.name.replace(/'/g, "\\'")}', this.previousElementSibling)">历史</button>
+            </div>
+        `;
+    });
+    
+    consoleEl.innerHTML = `
+        <div class="glow-console">
+            <div class="glow-console-inner">
+                <!-- Top Line: Send Button + Command Preview + Edit button -->
+                <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
+                    <button type="button" id="console-btn-send" class="glow-console-send-btn">🚀 执行: ${escapeHtml(item.name)}</button>
+                    
+                    <div class="glow-console-preview" title="${escapeHtml(item.command)}">
+                        ${escapeHtml(item.command)}
+                    </div>
+                    
+                    <button type="button" class="glow-console-action-btn" onclick="openCommandLibraryModal('edit-command', '', ${index})">编辑</button>
+                </div>
+                
+                <!-- Parameters Inputs -->
+                <div style="margin-top: 4px;">
+                    ${inputsHtml}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 展开时恢复边框和内边距，确保布局正常
+    consoleEl.style.display = 'block';
+    consoleEl.style.marginTop = '10px';
+    consoleEl.style.borderTop = 'none';
+    consoleEl.style.paddingTop = '0px';
+    
+    // Bind Execute Action
+    const executeAction = () => {
+        if (!currentSessionId || !sessions[currentSessionId]) {
+            alert('请先连接服务器。');
+            return;
+        }
+        
+        let finalCmd = item.command;
+        const inputs = consoleEl.querySelectorAll('.param-console-input');
+        inputs.forEach(input => {
+            const raw = input.getAttribute('data-raw');
+            const name = input.getAttribute('data-name');
+            const val = input.value.trim();
+            finalCmd = finalCmd.replaceAll(raw, val);
+            saveParamValueToHistory(name, val);
+        });
+        
+        const executed = isAuto ? (finalCmd.endsWith('\n') ? finalCmd : `${finalCmd}\n`) : (finalCmd.endsWith('\n') ? finalCmd.slice(0, -1) : finalCmd);
+        window.pywebview.api.send_input(currentSessionId, executed);
+    };
+    
+    consoleEl.querySelector('#console-btn-send').onclick = executeAction;
+    
+    // Bind Enter key on inputs
+    const inputs = consoleEl.querySelectorAll('.param-console-input');
+    inputs.forEach(input => {
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                executeAction();
+            }
+        });
+    });
+}
+
+// --- 本地文件浏览器状态与函数 ---
+let localCurrentPath = 'C:\\';
+let isLoadingLocalFiles = false;
+let selectedLocalFileElement = null;
+let isRenameLocal = false;
+let localRenameOldPath = '';
+let isContextMenuLocal = false;
+
+function getLocalParentPath(path) {
+    let tempPath = path;
+    if (tempPath.endsWith('\\') && tempPath.length > 3) {
+        tempPath = tempPath.slice(0, -1);
+    }
+    const idx = tempPath.lastIndexOf('\\');
+    if (idx !== -1) {
+        let parent = tempPath.substring(0, idx);
+        if (parent.endsWith(':')) {
+            parent += '\\';
+        }
+        return parent;
+    }
+    return 'C:\\';
+}
+
+async function listLocalFiles(path) {
+    if (isLoadingLocalFiles) return;
+    isLoadingLocalFiles = true;
+    const fileList = document.getElementById('localFileList');
+    if (!fileList) return;
+    fileList.classList.add('loading');
+    
+    try {
+        const result = JSON.parse(
+            await window.pywebview.api.list_local_directory(path)
+        );
+        if (!result.success) {
+            console.error('Failed to list local directory:', result.error);
+            fileList.innerHTML = '<div class="empty-message">文件加载失败</div>';
+            return;
+        }
+        
+        fileList.innerHTML = '';
+        
+        // 判断是否是根目录
+        const isRoot = /^[a-zA-Z]:\\?$/.test(path);
+        if (!isRoot) {
+            const parentItem = document.createElement('div');
+            parentItem.className = 'file-item';
+            parentItem.innerHTML = `
+                <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+                <span class="file-name">..</span>
+                <span class="file-size">-</span>
+                <span class="file-date">-</span>
+            `;
+            parentItem.ondblclick = () => {
+                if (!isLoadingLocalFiles) navigateLocalUp();
+            };
+            parentItem.onclick = () => selectLocalFile(parentItem);
+            fileList.appendChild(parentItem);
+        }
+        
+        result.files.forEach(file => {
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            item.setAttribute('data-filename', file.name);
+            item.setAttribute('data-filetype', file.is_dir ? 'directory' : 'file');
+            
+            // 支持拖拽上传
+            item.draggable = true;
+            item.ondragstart = (e) => {
+                const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+                const fullLocalPath = localCurrentPath + sep + file.name;
+                e.dataTransfer.setData('text/plain', JSON.stringify({
+                    source: 'local',
+                    name: file.name,
+                    path: fullLocalPath,
+                    isDir: file.is_dir
+                }));
+            };
+            
+            const sizeStr = file.is_dir ? '-' : formatBytes(file.size);
+            
+            item.innerHTML = `
+                <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    ${file.is_dir ?
+                        '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>' :
+                        '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>'
+                    }
+                </svg>
+                <span class="file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+                <span class="file-size">${escapeHtml(sizeStr)}</span>
+                <span class="file-date">${escapeHtml(file.date)}</span>
+            `;
+            
+            if (file.is_dir) {
+                item.ondblclick = () => {
+                    if (!isLoadingLocalFiles) navigateLocalToFolder(file.name);
+                };
+            }
+            
+            item.onclick = () => selectLocalFile(item);
+            item.oncontextmenu = (e) => {
+                e.preventDefault();
+                showContextMenu(e, item, true);
+            };
+            
+            fileList.appendChild(item);
+        });
+        fileList.scrollTop = 0;
+    } catch (e) {
+        console.error('Error listing local files:', e);
+        fileList.innerHTML = '<div class="empty-message">文件加载失败</div>';
+    } finally {
+        isLoadingLocalFiles = false;
+        fileList.classList.remove('loading');
+    }
+}
+
+function selectLocalFile(element) {
+    document.querySelectorAll('#localFileList .file-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+    element.classList.add('selected');
+    selectedLocalFileElement = element;
+}
+
+function navigateLocalToFolder(folderName) {
+    if (isLoadingLocalFiles) return;
+    const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+    localCurrentPath = localCurrentPath + sep + folderName;
+    document.getElementById('localCurrentPath').value = localCurrentPath;
+    listLocalFiles(localCurrentPath);
+}
+
+function navigateLocalToPath(path) {
+    if (!path || isLoadingLocalFiles) return;
+    localCurrentPath = path;
+    document.getElementById('localCurrentPath').value = localCurrentPath;
+    listLocalFiles(localCurrentPath);
+}
+
+function navigateLocalUp() {
+    if (isLoadingLocalFiles) return;
+    const parent = getLocalParentPath(localCurrentPath);
+    localCurrentPath = parent;
+    document.getElementById('localCurrentPath').value = localCurrentPath;
+    listLocalFiles(localCurrentPath);
+}
+
+function refreshLocalFiles() {
+    listLocalFiles(localCurrentPath);
+}
+
+async function createLocalFolderPrompt() {
+    const folderName = prompt("请输入新建本地文件夹的名称：");
+    if (!folderName) return;
+    const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+    const fullPath = localCurrentPath + sep + folderName;
+    try {
+        const result = JSON.parse(await window.pywebview.api.create_local_directory(fullPath));
+        if (result.success) {
+            refreshLocalFiles();
+        } else {
+            alert("创建文件夹失败: " + result.error);
+        }
+    } catch(e) {
+        alert("发生错误: " + e.message);
+    }
+}
+
+function showLocalRenameModal(fileName, filePath) {
+    isRenameLocal = true;
+    localRenameOldPath = filePath;
+    renameTarget = fileName;
+    const modal = document.getElementById('renameModal');
+    const input = document.getElementById('renameInput');
+
+    input.value = fileName;
+    modal.style.display = 'flex';
+
+    setTimeout(() => {
+        input.focus();
+        if (fileName.includes('.')) {
+            const dotIndex = fileName.lastIndexOf('.');
+            input.setSelectionRange(0, dotIndex);
+        } else {
+            input.select();
+        }
+    }, 100);
+
+    input.onkeyup = (e) => {
+        if (e.key === 'Enter') {
+            confirmRename();
+        } else if (e.key === 'Escape') {
+            closeRenameModal();
+        }
+    };
+}
+
+async function downloadFileToLocalPath(remotePath, fileName) {
+    const sep = localCurrentPath.endsWith('\\') ? '' : '\\';
+    const savePath = localCurrentPath + sep + fileName;
+    
+    try {
+        const infoResult = await window.pywebview.api.get_file_info(currentSessionId, remotePath);
+        const infoResponse = JSON.parse(infoResult);
+        const fileSize = infoResponse.success ? infoResponse.info.size : 0;
+
+        const progressNotification = showDownloadProgressWithCancel(fileName, fileSize);
+        const downloadId = 'drag_dl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+        const startResult = await window.pywebview.api.start_direct_download_with_progress(currentSessionId, remotePath, savePath, downloadId);
+        const startResponse = JSON.parse(startResult);
+
+        if (!startResponse.success) {
+            if (progressNotification && progressNotification.parentNode) {
+                progressNotification.parentNode.removeChild(progressNotification);
+            }
+            alert(`下载启动失败: ${startResponse.error}`);
+            return;
+        }
+
+        const progressInterval = setInterval(async () => {
+            try {
+                const progressResult = await window.pywebview.api.get_download_progress(currentSessionId, downloadId);
+                const progress = JSON.parse(progressResult);
+
+                if (progress.status === 'downloading' && progress.total > 0) {
+                    updateDownloadProgress(progress.downloaded, progress.total);
+                } else if (progress.status === 'completed') {
+                    clearInterval(progressInterval);
+                    updateDownloadProgress(progress.downloaded || fileSize, progress.total || fileSize);
+
+                    setTimeout(() => {
+                        if (progressNotification && progressNotification.parentNode) {
+                            progressNotification.parentNode.removeChild(progressNotification);
+                        }
+                    }, 1500);
+
+                    showSuccessNotification(`已下载至 ${savePath}`);
+                    refreshLocalFiles();
+                } else if (progress.status === 'error') {
+                    clearInterval(progressInterval);
+                    if (progressNotification.parentNode) {
+                        progressNotification.parentNode.removeChild(progressNotification);
+                    }
+                    alert(`下载失败: ${progress.error || '未知错误'}`);
+                } else if (progress.status === 'cancelled') {
+                    clearInterval(progressInterval);
+                    if (progressNotification.parentNode) {
+                        progressNotification.parentNode.removeChild(progressNotification);
+                    }
+                }
+            } catch (error) {
+                console.error('轮询下载进度出错:', error);
+                clearInterval(progressInterval);
+                if (progressNotification.parentNode) {
+                    progressNotification.parentNode.removeChild(progressNotification);
+                }
+            }
+        }, 100);
+
+    } catch (error) {
+        console.error('下载出错:', error);
+        alert('下载失败: ' + error.message);
+    }
+}
+
+async function uploadFileFromPath(localPath, fileName) {
+    if (!currentSessionId || !sessions[currentSessionId]) {
+        alert('请先连接服务器');
+        return;
+    }
+    const remotePath = currentPath.endsWith('/') ?
+        currentPath + fileName :
+        currentPath + '/' + fileName;
+    
+    uploadQueue.push({ localPath, remotePath, fileName });
+
+    if (!isProcessingUploads) {
+        processUploadQueue();
+    }
+}
+
+function setupSftpDragAndDrop() {
+    const localContainer = document.getElementById('localFileListContainer');
+    const remoteContainer = document.getElementById('fileListContainer');
+    if (!localContainer || !remoteContainer) return;
+
+    remoteContainer.ondragover = (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    };
+    
+    remoteContainer.ondrop = async (e) => {
+        e.preventDefault();
+        try {
+            const dataStr = e.dataTransfer.getData('text/plain');
+            if (dataStr) {
+                const dragData = JSON.parse(dataStr);
+                if (dragData && dragData.source === 'local') {
+                    await uploadFileFromPath(dragData.path, dragData.name);
+                    return;
+                }
+            }
+        } catch(err) {}
+        
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleFileSelect({ target: { files: e.dataTransfer.files } });
+        }
+    };
+    
+    localContainer.ondragover = (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    };
+    
+    localContainer.ondrop = async (e) => {
+        e.preventDefault();
+        try {
+            const dataStr = e.dataTransfer.getData('text/plain');
+            if (dataStr) {
+                const dragData = JSON.parse(dataStr);
+                if (dragData && dragData.source === 'remote') {
+                    await downloadFileToLocalPath(dragData.path, dragData.name);
+                    return;
+                }
+            }
+        } catch(err) {
+            console.error("Local container drop error:", err);
+        }
+    };
+}
+
+function toggleJumpHostFields() {
+    const fields = document.getElementById('jumpHostFields');
+    const chevron = document.getElementById('jumpHostChevron');
+    if (fields.style.display === 'none') {
+        fields.style.display = 'block';
+        chevron.textContent = '▼';
+    } else {
+        fields.style.display = 'none';
+        chevron.textContent = '▶';
+    }
+}
+
+function updateSplitScreenHighlight() {
+    Object.keys(sessions).forEach(id => {
+        const el = sessions[id].terminalElement;
+        if (el) {
+            if (isSplitMode && id === currentSessionId) {
+                el.classList.add('active-split');
+            } else {
+                el.classList.remove('active-split');
+            }
+        }
+    });
+}
+
+// ==========================================================================
+// 3D Topology Full-Screen Background Rendering and Control (LdySSH v2.0)
+// ==========================================================================
+let topoViewer = null;
+
+function initBackgroundTopology() {
+    if (topoViewer) return;
+    const container = document.getElementById('threejsBackground');
+    const termContainer = document.querySelector('.terminal-container');
+    if (!container || !termContainer || typeof THREE === 'undefined' || typeof THREE.OrbitControls === 'undefined') {
+        setTimeout(initBackgroundTopology, 100);
+        return;
+    }
+    try {
+        topoViewer = new TopologyViewer('threejsBackground');
+        topoViewer.init();
+        topoViewer.animate();
+        console.log("3D Background Topology successfully initialized.");
+    } catch (e) {
+        console.error("Failed to initialize 3D topology:", e);
+        topoViewer = null;
+        setTimeout(initBackgroundTopology, 1000);
+    }
+}
+
+class TopologyViewer {
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.controls = null;
+        this.nodes = [];
+        this.lines = [];
+        this.animationFrameId = null;
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
+        this.starfields = [];
+        this.gateway = null;
+        this.sunAtmosphere = null;
+        this.sunParticles = null;
+        this.orbits = [];
+    }
+
+    createSunGlowTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+        grad.addColorStop(0, 'rgba(255, 248, 220, 1.0)');
+        grad.addColorStop(0.18, 'rgba(255, 140, 0, 0.85)');
+        grad.addColorStop(0.5, 'rgba(220, 45, 0, 0.2)');
+        grad.addColorStop(1, 'rgba(220, 45, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 128, 128);
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createSunTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        
+        // 金黄红底色
+        ctx.fillStyle = '#ff3300';
+        ctx.fillRect(0, 0, 512, 256);
+        
+        // 渲染斑驳的日冕火焰和太阳黑子细节
+        for (let i = 0; i < 40; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 256;
+            const r = 15 + Math.random() * 35;
+            const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+            grad.addColorStop(0, 'rgba(255, 230, 0, 0.95)');
+            grad.addColorStop(0.5, 'rgba(255, 90, 0, 0.55)');
+            grad.addColorStop(1, 'rgba(255, 0, 0, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // 加上一些黑子斑点
+        ctx.fillStyle = 'rgba(50, 5, 0, 0.45)';
+        for (let i = 0; i < 15; i++) {
+            ctx.beginPath();
+            ctx.arc(Math.random() * 512, Math.random() * 256, 3 + Math.random() * 7, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        return tex;
+    }
+
+    createEarthTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        
+        // 渐变海洋底色
+        const oceanGrad = ctx.createLinearGradient(0, 0, 0, 256);
+        oceanGrad.addColorStop(0, '#0a1d37');
+        oceanGrad.addColorStop(0.5, '#0d2240');
+        oceanGrad.addColorStop(1, '#0a1d37');
+        ctx.fillStyle = oceanGrad;
+        ctx.fillRect(0, 0, 512, 256);
+        
+        // 陆地板块生成（画6大主要大陆板块和一些微小岛屿）
+        const continents = [
+            // 亚洲、欧洲、非洲主体
+            { x: 260, y: 100, rx: 95, ry: 55, rot: -0.1 },
+            { x: 280, y: 145, rx: 50, ry: 40, rot: 0.15 },
+            // 美洲板块
+            { x: 120, y: 95, rx: 55, ry: 45, rot: 0.2 },
+            { x: 145, y: 170, rx: 42, ry: 58, rot: -0.1 },
+            // 澳大利亚板块
+            { x: 380, y: 180, rx: 32, ry: 22, rot: 0.05 },
+            // 格陵兰岛
+            { x: 180, y: 45, rx: 25, ry: 15, rot: -0.2 }
+        ];
+
+        // 陆地基底
+        continents.forEach(c => {
+            ctx.fillStyle = '#1b5e20'; // 深绿森林底色
+            ctx.beginPath();
+            ctx.ellipse(c.x, c.y, c.rx, c.ry, c.rot, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 渲染起伏的斑驳高原/山脉（土黄/褐色）
+            ctx.fillStyle = '#7d6608';
+            for (let s = 0; s < 12; s++) {
+                const sx = c.x + (Math.random() - 0.5) * c.rx * 1.2;
+                const sy = c.y + (Math.random() - 0.5) * c.ry * 1.2;
+                const sr = 6 + Math.random() * 15;
+                ctx.beginPath();
+                ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // 陆地边缘的浅绿色浅滩/大陆架过渡
+            ctx.fillStyle = '#2e7d32';
+            for (let s = 0; s < 8; s++) {
+                const sx = c.x + (Math.random() - 0.5) * c.rx * 1.4;
+                const sy = c.y + (Math.random() - 0.5) * c.ry * 1.4;
+                const sr = 3 + Math.random() * 7;
+                ctx.beginPath();
+                ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
+
+        // 绘制南北极盖 (白色冰川)
+        ctx.fillStyle = 'rgba(240, 245, 255, 0.95)';
+        // 北极
+        ctx.beginPath();
+        ctx.ellipse(256, 12, 180, 22, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // 南极
+        ctx.beginPath();
+        ctx.ellipse(256, 244, 210, 25, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createCloudTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 512, 256);
+        
+        // 用柔和半透明白色画气旋云层
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+        for (let i = 0; i < 30; i++) {
+            const cx = Math.random() * 512;
+            const cy = 25 + Math.random() * 206;
+            const rx = 35 + Math.random() * 95;
+            const ry = 8 + Math.random() * 18;
+            const rot = (Math.random() - 0.5) * 0.12;
+            
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, rx, ry, rot, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 气旋风暴中心 (画螺旋感)
+            if (Math.random() < 0.25) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+                ctx.beginPath();
+                ctx.arc(cx, cy, rx * 0.35, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+            }
+        }
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createJupiterTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ad825c';
+        ctx.fillRect(0, 0, 512, 256);
+        
+        // 绘制木星极其复杂的云层带
+        const colors = [
+            '#592c14', '#754425', '#995f3b', '#b38864', 
+            '#cca687', '#ebd7c5', '#52341d', '#ebd5c0'
+        ];
+        
+        let curY = 0;
+        while (curY < 256) {
+            const h = 6 + Math.random() * 15;
+            ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+            ctx.fillRect(0, curY, 512, h);
+            
+            // 在边界处画波浪扰动 (气态云层的涡流感)
+            if (Math.random() < 0.6) {
+                ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+                ctx.beginPath();
+                for (let x = 0; x <= 512; x += 10) {
+                    const waveY = curY + Math.sin(x * 0.08) * 3;
+                    ctx.lineTo(x, waveY);
+                }
+                ctx.lineTo(512, curY + h);
+                ctx.lineTo(0, curY + h);
+                ctx.closePath();
+                ctx.fill();
+            }
+            curY += h;
+        }
+        
+        // 绘制“大红斑” Great Red Spot (多层漩涡感)
+        const rx = 340;
+        const ry = 165;
+        // 1. 深红外圈漩涡
+        ctx.fillStyle = 'rgba(128, 25, 12, 0.95)';
+        ctx.beginPath();
+        ctx.ellipse(rx, ry, 32, 17, 0.06, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 2. 鲜红中圈
+        ctx.fillStyle = '#c62828';
+        ctx.beginPath();
+        ctx.ellipse(rx - 1, ry, 24, 12, 0.06, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 3. 橙红核心
+        ctx.fillStyle = '#ff7043';
+        ctx.beginPath();
+        ctx.ellipse(rx - 2, ry - 1, 14, 7, 0.06, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 4. 白色气流卷纹绕过红斑
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(rx, ry, 40, Math.PI, Math.PI * 1.8);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(rx, ry, 36, 0, Math.PI * 0.8);
+        ctx.stroke();
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createSaturnTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#e2cfa7';
+        ctx.fillRect(0, 0, 256, 128);
+        
+        // 柔和条纹
+        const colors = ['#cca672', '#ecd9bd', '#dbbe97', '#ebdcb9', '#dbb888'];
+        ctx.globalAlpha = 0.6;
+        for (let y = 0; y < 128; y += 5 + Math.random() * 8) {
+            const h = 5 + Math.random() * 10;
+            ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+            ctx.fillRect(0, y, 256, h);
+        }
+        ctx.globalAlpha = 1.0;
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createSaturnRingTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 16;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 256, 16);
+        
+        // 绘制不同宽度、颜色和透明度的同心线。X轴是半径方向。
+        for (let x = 0; x < 256; x += 1 + Math.random() * 3) {
+            const w = 1 + Math.random() * 3;
+            // 环缝（卡西尼环缝）
+            if (x > 140 && x < 155 && Math.random() < 0.85) {
+                continue; 
+            }
+            const alpha = 0.12 + Math.random() * 0.65;
+            // 呈现出米黄与浅灰尘埃的混合质感
+            ctx.fillStyle = `rgba(${225 + Math.floor(Math.random() * 20)}, ${200 + Math.floor(Math.random() * 15)}, ${160 + Math.floor(Math.random() * 20)}, ${alpha})`;
+            ctx.fillRect(x, 0, w, 16);
+        }
+        
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        return tex;
+    }
+
+    createNeptuneTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#2b5fcb'; // 幽蓝色
+        ctx.fillRect(0, 0, 256, 128);
+        
+        // 渐变气流带
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+        for (let i = 0; i < 8; i++) {
+            ctx.fillRect(0, Math.random() * 128, 256, 5 + Math.random() * 8);
+        }
+
+        // 大暗斑 (Great Dark Spot)
+        ctx.fillStyle = '#132860';
+        ctx.beginPath();
+        ctx.ellipse(170, 75, 18, 10, 0.08, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 大暗斑周围的白色亮条纹 (甲烷云)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+        ctx.lineWidth = 1.0;
+        ctx.beginPath();
+        ctx.arc(170, 75, 23, Math.PI * 0.9, Math.PI * 1.6);
+        ctx.stroke();
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createMarsTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#b24a25'; // 火星红褐色底色
+        ctx.fillRect(0, 0, 256, 128);
+        
+        // 铁锈深褐色风化纹理
+        ctx.fillStyle = '#803013';
+        for (let i = 0; i < 15; i++) {
+            ctx.beginPath();
+            ctx.arc(Math.random() * 256, Math.random() * 128, 12 + Math.random() * 24, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 橙红色沙丘暗影
+        ctx.fillStyle = '#cd643d';
+        for (let i = 0; i < 10; i++) {
+            ctx.beginPath();
+            ctx.arc(Math.random() * 256, Math.random() * 128, 6 + Math.random() * 12, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 两极冰盖 (干冰与水冰)
+        ctx.fillStyle = '#fdfdfd';
+        // 北极盖
+        ctx.beginPath();
+        ctx.ellipse(128, 3, 30, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // 南极盖
+        ctx.beginPath();
+        ctx.ellipse(128, 125, 25, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createMercuryTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#6d737a'; // 灰色底色
+        ctx.fillRect(0, 0, 256, 128);
+        
+        // 暗斑
+        ctx.fillStyle = '#555a60';
+        for (let i = 0; i < 20; i++) {
+            ctx.beginPath();
+            ctx.arc(Math.random() * 256, Math.random() * 128, 8 + Math.random() * 16, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 环形山陨石坑 (带偏置阴影和喷射条纹)
+        for (let i = 0; i < 25; i++) {
+            const cx = Math.random() * 256;
+            const cy = Math.random() * 128;
+            const r = 3 + Math.random() * 8;
+            
+            // 坑沿的暗部
+            ctx.fillStyle = 'rgba(40, 42, 45, 0.7)';
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 坑底偏置的亮部 (立体光影)
+            ctx.fillStyle = 'rgba(160, 170, 180, 0.5)';
+            ctx.beginPath();
+            ctx.arc(cx - r * 0.15, cy - r * 0.15, r * 0.85, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 较亮的辐射条纹线
+            if (r > 6 && Math.random() < 0.4) {
+                ctx.strokeStyle = 'rgba(200, 205, 210, 0.25)';
+                ctx.lineWidth = 0.8;
+                const rays = 5 + Math.floor(Math.random() * 5);
+                for (let k = 0; k < rays; k++) {
+                    const angle = (k / rays) * Math.PI * 2 + Math.random() * 0.5;
+                    const len = r * (1.5 + Math.random() * 2);
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy);
+                    ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+                    ctx.stroke();
+                }
+            }
+        }
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createVenusTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#e3cc9a'; // 金星米黄/奶油底色
+        ctx.fillRect(0, 0, 256, 128);
+        
+        // 金星大气的微弱漩涡和横条纹
+        const colors = ['#cca362', '#ebd2a2', '#d6b885', '#e9dcbf'];
+        ctx.globalAlpha = 0.55;
+        for (let y = 0; y < 128; y += 4 + Math.random() * 6) {
+            const h = 4 + Math.random() * 8;
+            ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+            ctx.fillRect(0, y, 256, h);
+        }
+        ctx.globalAlpha = 1.0;
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    init() {
+        if (!this.container) return;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        // Hide inner glowing border and dark overlay immediately on workbench load
+        const termContainer = document.querySelector('.terminal-container');
+        if (termContainer) {
+            termContainer.classList.add('in-workbench');
+        }
+
+        // 1. Scene & Camera
+        this.scene = new THREE.Scene();
+        this.scene.fog = new THREE.FogExp2(0x050608, 0.005);
+        this.camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1500);
+        this.camera.position.set(0, 75, 130); // 抬高相机，提供更好的星盘俯瞰视角
+
+        // 2. WebGL Renderer
+        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        this.renderer.setSize(width, height);
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.container.innerHTML = '';
+        this.container.appendChild(this.renderer.domElement);
+
+        // 3. Orbit Controls (Bound to document.body for global dragging, including transparent panel areas)
+        if (typeof THREE.OrbitControls !== 'undefined') {
+            this.controls = new THREE.OrbitControls(this.camera, document.body);
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.05;
+            this.controls.enableZoom = false; // Disable zoom to prevent scroll issues
+            this.controls.enablePan = false;  // Disable panning to focus on center
+            this.controls.maxPolarAngle = Math.PI / 2 - 0.02; // Prevent camera underfloor
+            this.controls.minDistance = 30; // 限制拉近
+            this.controls.maxDistance = 350; // 限制拉远
+        }
+
+        // Custom Title Bar Drag Handling & Event Isolation (保留原窗口拖拽)
+        const titleBar = document.querySelector('.title-bar');
+        if (titleBar) {
+            const handleDrag = (e) => {
+                if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                    return;
+                }
+                if (window.chrome && window.chrome.webview) {
+                    window.chrome.webview.postMessage(JSON.stringify({
+                        id: 'drag',
+                        action: 'window_drag',
+                        args: []
+                    }));
+                }
+                e.stopPropagation();
+            };
+
+            ['mousedown', 'pointerdown', 'touchstart'].forEach(evt => {
+                titleBar.addEventListener(evt, (e) => {
+                    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                        return;
+                    }
+                    if (evt === 'mousedown') {
+                        handleDrag(e);
+                    } else {
+                        e.stopPropagation();
+                    }
+                }, { capture: true });
+            });
+        }
+
+        // 4. Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
+        this.scene.add(ambientLight);
+        // 点光源，模拟太阳光，照亮整个星盘天体
+        const sunLight = new THREE.PointLight(0xffaa44, 2.5, 400);
+        sunLight.position.set(0, 0, 0);
+        this.scene.add(sunLight);
+
+        // 5. Starfield Background (多层不同颜色、密度的尘埃星空效果)
+        this.starfields = [];
+        const starParams = [
+            { count: 300, size: 1.6, color: 0x00f2fe, speed: 0.0003, radius: 400 },
+            { count: 800, size: 1.0, color: 0x7928ca, speed: 0.00015, radius: 600 },
+            { count: 1500, size: 0.7, color: 0xffffff, speed: 0.00008, radius: 800 }
+        ];
+        starParams.forEach(param => {
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsPositions = new Float32Array(param.count * 3);
+            for (let i = 0; i < param.count * 3; i++) {
+                starsPositions[i] = (Math.random() - 0.5) * param.radius;
+            }
+            starsGeometry.setAttribute('position', new THREE.BufferAttribute(starsPositions, 3));
+            const starsMaterial = new THREE.PointsMaterial({
+                color: param.color,
+                size: param.size,
+                sizeAttenuation: true,
+                transparent: true,
+                opacity: 0.8
+            });
+            const points = new THREE.Points(starsGeometry, starsMaterial);
+            this.scene.add(points);
+            this.starfields.push({ points, speed: param.speed });
+        });
+
+        // 6. Build Grid and Connections
+        this.buildTopology();
+
+        // 7. Event listeners
+        this.onResizeHandler = this.onWindowResize.bind(this);
+        this.onClickHandler = this.onDocumentClick.bind(this);
+        window.addEventListener('resize', this.onResizeHandler);
+        this.renderer.domElement.addEventListener('click', this.onClickHandler);
+    }
+
+    buildTopology() {
+        // Clear existing nodes/lines/gateways/orbits/sun components
+        if (this.gateway) {
+            this.scene.remove(this.gateway);
+            if (this.gateway.geometry) this.gateway.geometry.dispose();
+            if (this.gateway.material) this.gateway.material.dispose();
+            this.gateway = null;
+        }
+        if (this.sunAtmosphere) {
+            this.scene.remove(this.sunAtmosphere);
+            if (this.sunAtmosphere.geometry) this.sunAtmosphere.geometry.dispose();
+            if (this.sunAtmosphere.material) this.sunAtmosphere.material.dispose();
+            this.sunAtmosphere = null;
+        }
+        if (this.sunParticles) {
+            this.scene.remove(this.sunParticles);
+            if (this.sunParticles.geometry) this.sunParticles.geometry.dispose();
+            if (this.sunParticles.material) this.sunParticles.material.dispose();
+            this.sunParticles = null;
+        }
+
+        this.nodes.forEach(n => {
+            this.scene.remove(n.mesh);
+            if (n.mesh.geometry) n.mesh.geometry.dispose();
+            if (n.mesh.material) n.mesh.material.dispose();
+            
+            // Dispose child layers if any
+            n.mesh.traverse(child => {
+                if (child !== n.mesh) {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                }
+            });
+        });
+        this.lines.forEach(l => {
+            this.scene.remove(l);
+            if (l.geometry) l.geometry.dispose();
+            if (l.material) l.material.dispose();
+        });
+        this.orbits.forEach(o => {
+            this.scene.remove(o);
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) o.material.dispose();
+        });
+        this.nodes = [];
+        this.lines = [];
+        this.orbits = [];
+
+        // 1. Glowing Sun Core (使用 BasicMaterial 避免自发光体被阴影遮挡变暗)
+        const gatewayGeo = new THREE.SphereGeometry(5.0, 32, 32);
+        const sunTex = this.createSunTexture();
+        const gatewayMat = new THREE.MeshBasicMaterial({
+            map: sunTex,
+            transparent: true,
+            opacity: 0.98
+        });
+        this.gateway = new THREE.Mesh(gatewayGeo, gatewayMat);
+        this.gateway.position.set(0, 0, 0);
+        this.scene.add(this.gateway);
+
+        // 2. Sun Outer Atmosphere Layer (日冕柔和边缘发光层，代替丑陋线框)
+        const atmosGeo = new THREE.SphereGeometry(5.4, 32, 32);
+        const atmosMat = new THREE.MeshBasicMaterial({
+            color: 0xff5500,
+            transparent: true,
+            opacity: 0.22,
+            blending: THREE.AdditiveBlending,
+            side: THREE.BackSide
+        });
+        this.sunAtmosphere = new THREE.Mesh(atmosGeo, atmosMat);
+        this.sunAtmosphere.position.set(0, 0, 0);
+        this.scene.add(this.sunAtmosphere);
+
+        // 3. Sun Glow Sprite (径向渐变外圈漫反射光晕，消除刺眼突变)
+        const sunGlowTex = this.createSunGlowTexture();
+        const sunGlowMat = new THREE.SpriteMaterial({
+            map: sunGlowTex,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+            opacity: 0.85
+        });
+        this.sunParticles = new THREE.Sprite(sunGlowMat);
+        this.sunParticles.scale.set(30, 30, 1);
+        this.scene.add(this.sunParticles);
+
+        // Get actual connections
+        const actualConnections = savedConnectionsCache || [];
+        
+        // Define 7 core planetary configurations (simulating solar system)
+        const planetConfigs = [
+            { name: '水星', r: 1.2, color: 0x8899a6, emissive: 0x111622, shininess: 80, orbitR: 22, speed: 0.0055, incline: 0.08 },
+            { name: '金星', r: 1.6, color: 0xe3bb76, emissive: 0x221a11, shininess: 50, orbitR: 30, speed: 0.0042, incline: -0.05 },
+            { name: '地球', r: 1.8, color: 0x1b72e8, emissive: 0x052244, shininess: 100, orbitR: 38, speed: 0.0034, incline: 0.12, isEarth: true },
+            { name: '火星', r: 1.4, color: 0xc1440e, emissive: 0x331105, shininess: 20, orbitR: 46, speed: 0.0028, incline: -0.10 },
+            { name: '木星', r: 2.6, color: 0xb07f35, emissive: 0x221a05, shininess: 30, orbitR: 55, speed: 0.0022, incline: 0.06 },
+            { name: '土星', r: 2.3, color: 0xe2bf7d, emissive: 0x222211, shininess: 30, orbitR: 64, speed: 0.0016, incline: -0.08, hasRing: true },
+            { name: '海王星', r: 2.0, color: 0x4b70dd, emissive: 0x051133, shininess: 70, orbitR: 72, speed: 0.0011, incline: 0.15 }
+        ];
+
+        const numPlanets = Math.max(7, actualConnections.length);
+
+        for (let i = 0; i < numPlanets; i++) {
+            const conn = actualConnections[i];
+            const isVirtual = !conn;
+
+            let cfg;
+            if (i < 7) {
+                cfg = planetConfigs[i];
+            } else {
+                // Dynamically append outer orbits if connections > 7
+                const orbitR = 72 + (i - 6) * 9;
+                const speed = 0.012 / Math.sqrt(orbitR);
+                const incline = (i % 2 === 0 ? 0.08 : -0.08) + (Math.random() - 0.5) * 0.04;
+                const r = 1.6 + Math.random() * 0.8;
+                
+                const randomHue = Math.random();
+                let color = 0x4facfe;
+                if (randomHue < 0.25) color = 0xff3366;
+                else if (randomHue < 0.5) color = 0x33ff99;
+                else if (randomHue < 0.75) color = 0xffcc33;
+                else color = 0xa855f7;
+
+                cfg = {
+                    name: '外圈行星-' + (i + 1),
+                    r: r,
+                    color: color,
+                    emissive: 0x111122,
+                    shininess: 40,
+                    orbitR: orbitR,
+                    speed: speed,
+                    incline: incline
+                };
+            }
+
+            // 3. Draw Orbit Ring
+            const points = [];
+            const segments = 128;
+            for (let s = 0; s <= segments; s++) {
+                const theta = (s / segments) * Math.PI * 2;
+                const ox = cfg.orbitR * Math.cos(theta);
+                const oy = cfg.orbitR * Math.sin(theta) * Math.sin(cfg.incline);
+                const oz = cfg.orbitR * Math.sin(theta) * Math.cos(cfg.incline);
+                points.push(new THREE.Vector3(ox, oy, oz));
+            }
+            const orbitGeo = new THREE.BufferGeometry().setFromPoints(points);
+            const orbitMat = new THREE.LineBasicMaterial({
+                color: isVirtual ? 0x00f2fe : 0x4facfe,
+                transparent: true,
+                opacity: isVirtual ? 0.05 : 0.12,
+                depthWrite: false
+            });
+            const orbitLine = new THREE.LineLoop(orbitGeo, orbitMat);
+            this.scene.add(orbitLine);
+            this.orbits.push(orbitLine);
+
+            // 4. Planet Sphere
+            const nodeGeo = new THREE.SphereGeometry(cfg.r, 32, 32); 
+            let color = cfg.color;
+            let emissive = cfg.emissive;
+            let mapTex = null;
+            let specularColor = 0x222222;
+            let shininess = cfg.shininess;
+
+            if (isVirtual) {
+                // Virtual placeholder planets render as beautiful crystal clear cyan spheres
+                color = 0x00f2fe;
+                emissive = 0x001122;
+            } else {
+                // Assign procedural generated textures based on planet identity
+                if (i === 0) mapTex = this.createMercuryTexture();
+                else if (i === 1) mapTex = this.createVenusTexture();
+                else if (i === 2) {
+                    mapTex = this.createEarthTexture(); 
+                    specularColor = 0x444444;
+                    shininess = 60;
+                }
+                else if (i === 3) mapTex = this.createMarsTexture();
+                else if (i === 4) mapTex = this.createJupiterTexture();
+                else if (i === 5) mapTex = this.createSaturnTexture();
+                else if (i === 6) mapTex = this.createNeptuneTexture();
+                else mapTex = this.createNeptuneTexture();
+            }
+
+            const nodeMat = new THREE.MeshPhongMaterial({
+                color: color,
+                map: mapTex, // 必须映射贴图！
+                emissive: emissive,
+                specular: specularColor,
+                shininess: shininess,
+                transparent: isVirtual,
+                opacity: isVirtual ? 0.28 : 1.0
+            });
+
+            const nodeMesh = new THREE.Mesh(nodeGeo, nodeMat);
+
+            // Special planetary system: Saturn Rings (精致同心砂砾质感星环)
+            if (cfg.hasRing) {
+                const ringGeo = new THREE.RingGeometry(cfg.r * 1.4, cfg.r * 2.3, 64);
+                const ringTex = this.createSaturnRingTexture();
+                const ringMat = new THREE.MeshBasicMaterial({
+                    map: ringTex,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.82,
+                    depthWrite: false
+                });
+                const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+                ringMesh.rotateX(Math.PI / 2);
+                nodeMesh.add(ringMesh); // 自动跟随公转自转
+            }
+
+            // Special planetary system: Earth Clouds & Atmosphere (去除了丑陋的多面体线框)
+            if (cfg.isEarth) {
+                // Cloud layer mesh overlay (柔和白色半透明气流云层，非 wireframe)
+                const cloudGeo = new THREE.SphereGeometry(cfg.r * 1.05, 32, 32);
+                const cloudMat = new THREE.MeshPhongMaterial({
+                    map: this.createCloudTexture(),
+                    transparent: true,
+                    opacity: 0.38,
+                    depthWrite: false
+                });
+                const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+                cloudMesh.userData = { isCloud: true };
+                nodeMesh.add(cloudMesh);
+                nodeMesh.userData.cloudMesh = cloudMesh;
+
+                // Atmosphere refraction glow (边缘天蓝色大气透亮层)
+                const glowGeo = new THREE.SphereGeometry(cfg.r * 1.15, 32, 32);
+                const glowMat = new THREE.MeshBasicMaterial({
+                    color: 0x00aaff,
+                    transparent: true,
+                    opacity: 0.15,
+                    side: THREE.BackSide
+                });
+                const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+                nodeMesh.add(glowMesh);
+            }
+
+            // Assign random initial phase
+            const initialPhase = Math.random() * Math.PI * 2;
+            const px = cfg.orbitR * Math.cos(initialPhase);
+            const py = cfg.orbitR * Math.sin(initialPhase) * Math.sin(cfg.incline);
+            const pz = cfg.orbitR * Math.sin(initialPhase) * Math.cos(cfg.incline);
+            nodeMesh.position.set(px, py, pz);
+
+            nodeMesh.userData = {
+                key: isVirtual ? ('virtual_' + i) : conn.key,
+                ip: isVirtual ? ('Virtual-Planet-0' + (i + 1)) : conn.hostname,
+                name: isVirtual ? ('未配置行星-' + (i + 1)) : (conn.name || conn.hostname),
+                isVirtual: isVirtual
+            };
+
+            this.scene.add(nodeMesh);
+
+            // 5. Connection beam (polar light ray)
+            const linePoints = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(px, py, pz)];
+            const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
+            const lineMat = new THREE.LineBasicMaterial({
+                color: isVirtual ? 0x00f2fe : 0x4facfe,
+                transparent: true,
+                opacity: isVirtual ? 0.06 : 0.24
+            });
+            const line = new THREE.Line(lineGeo, lineMat);
+            this.scene.add(line);
+            this.lines.push(line);
+
+            this.nodes.push({
+                mesh: nodeMesh,
+                ip: isVirtual ? null : conn.hostname,
+                key: isVirtual ? null : conn.key,
+                isVirtual: isVirtual,
+                orbitR: cfg.orbitR,
+                speed: cfg.speed,
+                incline: cfg.incline,
+                phase: initialPhase,
+                line: line,
+                originalColor: color,
+                originalEmissive: emissive
+            });
+        }
+    }
+
+    animate() {
+        this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
+        if (this.controls) this.controls.update();
+
+        // 1. 太阳表面流动与自转 (利用 UV 移动创造不断喷涌流出的岩浆效果)
+        if (this.gateway) {
+            this.gateway.rotation.y += 0.0006;
+            if (this.gateway.material && this.gateway.material.map) {
+                this.gateway.material.map.offset.x += 0.0004;
+                this.gateway.material.map.offset.y += 0.0001;
+            }
+        }
+        if (this.sunAtmosphere) {
+            this.sunAtmosphere.rotation.y -= 0.0003;
+        }
+        if (this.sunParticles) {
+            this.sunParticles.rotation.z += 0.0002; // 光晕精灵平面缓慢自转，消除刺眼抖动
+        }
+
+        // 2. 多层星空极慢旋转
+        this.starfields.forEach(sf => {
+            if (sf.points) {
+                sf.points.rotation.y += sf.speed;
+            }
+        });
+
+        // 3. 行星自转与公转
+        this.nodes.forEach((n, idx) => {
+            if (n.mesh) {
+                // 行星自转
+                n.mesh.rotation.y += 0.008;
+
+                // 地球云层与大气的不同速度浮动自转
+                n.mesh.traverse(child => {
+                    if (child.userData && child.userData.isCloud) {
+                        child.rotation.y += 0.005; // 云层比地球本体稍快
+                        child.rotation.x += 0.001;
+                    }
+                });
+
+                // 公转相位累加
+                n.phase += n.speed;
+
+                // 计算更新后的公转位置
+                const x = n.orbitR * Math.cos(n.phase);
+                const y = n.orbitR * Math.sin(n.phase) * Math.sin(n.incline);
+                const z = n.orbitR * Math.sin(n.phase) * Math.cos(n.incline);
+
+                n.mesh.position.set(x, y, z);
+
+                // 行星轻微、柔和的呼吸尺寸感 (消除生硬的剧烈跳动)
+                const pulse = 1.0 + 0.012 * Math.sin(Date.now() * 0.0008 + idx);
+                n.mesh.scale.set(pulse, pulse, pulse);
+
+                // 4. 更新动态连接光轨
+                if (n.line) {
+                    const positions = n.line.geometry.attributes.position.array;
+                    positions[3] = x;
+                    positions[4] = y;
+                    positions[5] = z;
+                    n.line.geometry.attributes.position.needsUpdate = true;
+                }
+            }
+        });
+
+        if (this.renderer && this.scene && this.camera) {
+            this.renderer.render(this.scene, this.camera);
+        }
+    }
+
+    stop() {
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+        window.removeEventListener('resize', this.onResizeHandler);
+        if (this.renderer && this.renderer.domElement) {
+            this.renderer.domElement.removeEventListener('click', this.onClickHandler);
+        }
+    }
+
+    onWindowResize() {
+        if (!this.container || !this.camera || !this.renderer) return;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        this.camera.aspect = width / height;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(width, height);
+    }
+
+    onDocumentClick(event) {
+        if (event.target.tagName !== 'CANVAS') return;
+
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+        
+        // Match both planets and their child meshes (rings, clouds, land meshes)
+        const targetObjects = [];
+        this.nodes.forEach(n => {
+            if (n.mesh) {
+                targetObjects.push(n.mesh);
+                n.mesh.traverse(child => {
+                    if (child !== n.mesh) {
+                        targetObjects.push(child);
+                    }
+                });
+            }
+        });
+
+        const intersects = this.raycaster.intersectObjects(targetObjects);
+
+        if (intersects.length > 0) {
+            const selectedMesh = intersects[0].object;
+            
+            // Check if child elements clicked (rings, clouds, land lattices)
+            let targetMesh = selectedMesh;
+            if (!selectedMesh.userData || selectedMesh.userData.key === undefined) {
+                if (selectedMesh.parent && selectedMesh.parent.userData && selectedMesh.parent.userData.key !== undefined) {
+                    targetMesh = selectedMesh.parent;
+                }
+            }
+            
+            if (targetMesh.userData.isVirtual) {
+                console.log("Clicked virtual placeholder planet");
+                return;
+            }
+
+            const connKey = targetMesh.userData.key;
+            console.log("Selected planetary host in 3D backdrop:", targetMesh.userData.ip);
+            
+            if (connKey) {
+                quickConnect(connKey);
+            }
+        }
+    }
+}
+
+window.updateNodeDelay = function(ip, delay, status) {
+    if (!topoViewer || !topoViewer.nodes) return;
+    const node = topoViewer.nodes.find(n => n.ip === ip);
+    if (node && node.mesh) {
+        let color = node.originalColor;
+        let emissive = node.originalEmissive;
+        let lineOpacity = 0.24;
+        let lineColor = 0x4facfe;
+
+        if (status === 'disconnected') {
+            color = 0x555555;      // Dead slate grey
+            emissive = 0x221111;   // Weak red emissive
+            lineColor = 0xff3366;  // Red connection line
+            lineOpacity = 0.12;
+        } else if (delay > 150) {
+            color = 0xffaa00;      // Warning orange
+            emissive = 0x331100;
+            lineColor = 0xffaa00;
+            lineOpacity = 0.45;
+        } else if (delay > 50) {
+            color = 0xffff33;      // Moderate yellow
+            emissive = 0x222200;
+            lineColor = 0xffff33;
+            lineOpacity = 0.38;
+        } else {
+            // Healthy connection: Use planet's beautiful native color, green connection line
+            lineColor = 0x00ff88;
+            lineOpacity = 0.32;
+        }
+        
+        node.mesh.material.color.setHex(color);
+        node.mesh.material.emissive.setHex(emissive);
+        
+        if (node.line) {
+            node.line.material.color.setHex(lineColor);
+            node.line.material.opacity = lineOpacity;
+        }
+        console.log(`Updated 3D planetary node ${ip} latency: ${delay}ms, status: ${status}`);
+    }
+};
+
+// Initialize background 3D immediately
+initBackgroundTopology();
+
