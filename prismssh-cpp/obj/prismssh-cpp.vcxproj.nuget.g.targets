@@ -2,7 +2,8 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ImportGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
     <Import Project="$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\rmt_zlib.targets" Condition="Exists('$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\rmt_zlib.targets')" />
-    <Import Project="$(NuGetPackageRoot)rmt_libssh2_wincng\1.8.0\build\native\rmt_libssh2_wincng.targets" Condition="Exists('$(NuGetPackageRoot)rmt_libssh2_wincng\1.8.0\build\native\rmt_libssh2_wincng.targets')" />
+    <Import Project="$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\rmt_openssl.targets" Condition="Exists('$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\rmt_openssl.targets')" />
+    <Import Project="$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\rmt_libssh2.targets" Condition="Exists('$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\rmt_libssh2.targets')" />
     <Import Project="$(NuGetPackageRoot)nlohmann.json\3.11.2\build\native\nlohmann.json.targets" Condition="Exists('$(NuGetPackageRoot)nlohmann.json\3.11.2\build\native\nlohmann.json.targets')" />
     <Import Project="$(NuGetPackageRoot)microsoft.web.webview2\1.0.2210.55\build\native\Microsoft.Web.WebView2.targets" Condition="Exists('$(NuGetPackageRoot)microsoft.web.webview2\1.0.2210.55\build\native\Microsoft.Web.WebView2.targets')" />
   </ImportGroup>

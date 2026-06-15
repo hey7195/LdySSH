@@ -13,7 +13,6 @@
         "packagesPath": "C:\\Users\\28391\\.nuget\\packages\\",
         "outputPath": "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\obj\\",
         "projectStyle": "PackageReference",
-        "skipContentFileWrite": true,
         "UsingMicrosoftNETSdk": false,
         "configFilePaths": [
           "C:\\Users\\28391\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -26,6 +25,7 @@
         },
         "frameworks": {
           "native": {
+            "targetAlias": "native",
             "projectReferences": {}
           }
         },
@@ -37,6 +37,7 @@
       },
       "frameworks": {
         "native": {
+          "targetAlias": "native",
           "dependencies": {
             "Microsoft.Web.WebView2": {
               "target": "Package",
@@ -46,11 +47,25 @@
               "target": "Package",
               "version": "[3.11.2, )"
             },
-            "rmt_libssh2_wincng": {
+            "rmt_libssh2": {
               "target": "Package",
               "version": "[1.8.0, )"
             }
           }
+        }
+      },
+      "runtimes": {
+        "win": {
+          "#import": []
+        },
+        "win-arm64": {
+          "#import": []
+        },
+        "win-x64": {
+          "#import": []
+        },
+        "win-x86": {
+          "#import": []
         }
       }
     }

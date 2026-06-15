@@ -7885,22 +7885,15 @@ let topoViewer = null;
 function toggleWorkbenchActive(active) {
     if (active) {
         document.body.classList.add('workbench-active');
-        const bg = document.getElementById('threejsBackground');
-        if (bg) {
-            bg.style.pointerEvents = 'auto';
-        }
-        if (topoViewer && topoViewer.controls) {
-            topoViewer.controls.enabled = true;
-        }
     } else {
         document.body.classList.remove('workbench-active');
-        const bg = document.getElementById('threejsBackground');
-        if (bg) {
-            bg.style.pointerEvents = 'none';
-        }
-        if (topoViewer && topoViewer.controls) {
-            topoViewer.controls.enabled = false;
-        }
+    }
+    const bg = document.getElementById('threejsBackground');
+    if (bg) {
+        bg.style.pointerEvents = 'auto';
+    }
+    if (topoViewer && topoViewer.controls) {
+        topoViewer.controls.enabled = true;
     }
 }
 
@@ -8388,9 +8381,9 @@ class TopologyViewer {
         this.container.innerHTML = '';
         this.container.appendChild(this.renderer.domElement);
 
-        // 3. Orbit Controls (Bound to document.body for global dragging, including transparent panel areas)
+        // 3. Orbit Controls (Bound to WebGL canvas for event isolation)
         if (typeof THREE.OrbitControls !== 'undefined') {
-            this.controls = new THREE.OrbitControls(this.camera, document.body);
+            this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
             this.controls.enableDamping = true;
             this.controls.dampingFactor = 0.05;
             this.controls.enableZoom = false; // Disable zoom to prevent scroll issues

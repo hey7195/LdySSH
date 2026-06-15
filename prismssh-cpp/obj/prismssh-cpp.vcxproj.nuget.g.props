@@ -14,9 +14,11 @@
   </ItemGroup>
   <ImportGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
     <Import Project="$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\rmt_zlib.props" Condition="Exists('$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\rmt_zlib.props')" />
-    <Import Project="$(NuGetPackageRoot)rmt_libssh2_wincng\1.8.0\build\native\rmt_libssh2_wincng.props" Condition="Exists('$(NuGetPackageRoot)rmt_libssh2_wincng\1.8.0\build\native\rmt_libssh2_wincng.props')" />
+    <Import Project="$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\rmt_openssl.props" Condition="Exists('$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\rmt_openssl.props')" />
+    <Import Project="$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\rmt_libssh2.props" Condition="Exists('$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\rmt_libssh2.props')" />
   </ImportGroup>
   <PropertyGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <Pkgrmt_openssl Condition=" '$(Pkgrmt_openssl)' == '' ">C:\Users\28391\.nuget\packages\rmt_openssl\1.1.0.3</Pkgrmt_openssl>
     <PkgMicrosoft_Web_WebView2 Condition=" '$(PkgMicrosoft_Web_WebView2)' == '' ">C:\Users\28391\.nuget\packages\microsoft.web.webview2\1.0.2210.55</PkgMicrosoft_Web_WebView2>
   </PropertyGroup>
 </Project>

@@ -1,1 +1,6 @@
 C:\雷电\GPT\ssh\prismssh-cpp\main.cpp;C:\雷电\GPT\ssh\prismssh-cpp\prismssh-cpp\x64\Release\main.obj
+C:\雷电\GPT\ssh\prismssh-cpp\session.cpp;C:\雷电\GPT\ssh\prismssh-cpp\prismssh-cpp\x64\Release\session.obj
+C:\雷电\GPT\ssh\prismssh-cpp\ssh_session.cpp;C:\雷电\GPT\ssh\prismssh-cpp\prismssh-cpp\x64\Release\ssh_session.obj
+C:\雷电\GPT\ssh\prismssh-cpp\crypto_utils.cpp;C:\雷电\GPT\ssh\prismssh-cpp\prismssh-cpp\x64\Release\crypto_utils.obj
+C:\雷电\GPT\ssh\prismssh-cpp\sftp_worker.cpp;C:\雷电\GPT\ssh\prismssh-cpp\prismssh-cpp\x64\Release\sftp_worker.obj
+C:\雷电\GPT\ssh\prismssh-cpp\chatgpt_subwindow.cpp;C:\雷电\GPT\ssh\prismssh-cpp\prismssh-cpp\x64\Release\chatgpt_subwindow.obj

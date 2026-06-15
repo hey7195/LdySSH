@@ -2893,6 +2893,7 @@ function showConnectionsHome() {
     const home = document.getElementById('welcomeScreen');
     if (home) home.style.display = 'block';
     renderConnectionsHome();
+    toggleWorkbenchActive(true);
 }
 
 function filterSavedConnections() {
@@ -3794,7 +3795,8 @@ async function connect() {
                 username,
                 name: connectionName,
                 connected: true,
-                connectionParams: connectionParams
+                connectionParams: connectionParams,
+                connectTime: Date.now()
             };
 
             // Create terminal (this will update the sessions object)
@@ -4423,10 +4425,8 @@ async function pollSessionOutput(sessionId) {
                             }
                         }
                         
-                        // Real-time SFTP Sync from Terminal Screen Prompt (delayed to allow Xterm render)
-                        setTimeout(() => {
-                            syncSftpFromTerminalPrompt(sessionId);
-                        }, 80);
+                        // Real-time SFTP Sync from Terminal Screen Prompt (debounced to prevent main thread blocking)
+                        triggerSftpSyncDebounced(sessionId);
                         
                         // Smart cd command detection fallback to sync SFTP when OSC 7 is not configured on remote host
                         if (sessionId.startsWith('ssh_') && filtered) {
@@ -4554,9 +4554,7 @@ window.handlePushOutput = function(sessionId, base64Output) {
                     }
                 }
                 
-                setTimeout(() => {
-                    syncSftpFromTerminalPrompt(sessionId);
-                }, 80);
+                triggerSftpSyncDebounced(sessionId);
                 
                 if (sessionId.startsWith('ssh_') && filtered) {
                     const cdRegex = /(?:^|\r?\n|;)\s*cd\s+([^\r\n;&\s]+)/g;
@@ -4742,9 +4740,11 @@ window.showWorkbench = function() {
     }
 
     updateUIForCurrentSession();
+    toggleWorkbenchActive(true);
 };
 
 function switchToSession(sessionId) {
+    toggleWorkbenchActive(false);
     const termContainer = document.querySelector('.terminal-container');
     if (termContainer) {
         termContainer.classList.remove('in-workbench');
@@ -6905,9 +6905,28 @@ function handleTerminalSearch(e) {
     }
 }
 
+let sftpSyncTimers = {};
+function triggerSftpSyncDebounced(sessionId) {
+    if (sftpSyncTimers[sessionId]) {
+        clearTimeout(sftpSyncTimers[sessionId]);
+    }
+    sftpSyncTimers[sessionId] = setTimeout(() => {
+        syncSftpFromTerminalPrompt(sessionId);
+        delete sftpSyncTimers[sessionId];
+    }, 120);
+}
+
 // Real-time SFTP Sync from Terminal Screen Prompt
 function syncSftpFromTerminalPrompt(sessionId) {
     if (!sessionId.startsWith('ssh_') || !currentTerminal) return;
+    
+    // Avoid early path sniffing/sftp syncing in the first 5 seconds of session connection
+    // to prevent blocking the WebView main thread during SSH/SFTP handshake lockup in C++
+    const session = sessions[sessionId];
+    if (session && session.connectTime && (Date.now() - session.connectTime < 5000)) {
+        return;
+    }
+
     try {
         const term = currentTerminal;
         const buffer = term.buffer.active;
@@ -7056,6 +7075,7 @@ function cancelActiveZmodem() {
     cleanupZmodem(term);
 }
 
+let zmodemWarned = false;
 function getZmodemSentinel(sessionId) {
     let zmodemLib = null;
     if (typeof zmodem !== 'undefined') {
@@ -7065,7 +7085,10 @@ function getZmodemSentinel(sessionId) {
     }
     
     if (!zmodemLib) {
-        console.warn('zmodem.js is not loaded.');
+        if (!zmodemWarned) {
+            console.warn('zmodem.js is not loaded.');
+            zmodemWarned = true;
+        }
         return null;
     }
     
@@ -7859,6 +7882,21 @@ function updateSplitScreenHighlight() {
 // ==========================================================================
 let topoViewer = null;
 
+function toggleWorkbenchActive(active) {
+    if (active) {
+        document.body.classList.add('workbench-active');
+    } else {
+        document.body.classList.remove('workbench-active');
+    }
+    const bg = document.getElementById('threejsBackground');
+    if (bg) {
+        bg.style.pointerEvents = 'auto';
+    }
+    if (topoViewer && topoViewer.controls) {
+        topoViewer.controls.enabled = true;
+    }
+}
+
 function initBackgroundTopology() {
     if (topoViewer) return;
     const container = document.getElementById('threejsBackground');
@@ -7872,6 +7910,11 @@ function initBackgroundTopology() {
         topoViewer.init();
         topoViewer.animate();
         console.log("3D Background Topology successfully initialized.");
+        if (!currentSessionId) {
+            toggleWorkbenchActive(true);
+        } else {
+            toggleWorkbenchActive(false);
+        }
     } catch (e) {
         console.error("Failed to initialize 3D topology:", e);
         topoViewer = null;
@@ -7896,6 +7939,8 @@ class TopologyViewer {
         this.sunAtmosphere = null;
         this.sunParticles = null;
         this.orbits = [];
+        this.lastFrameTime = 0;
+        this.fpsInterval = 1000 / 30; // Limit WebGL backdrop rendering to 30 FPS to save CPU/GPU resource
     }
 
     createSunGlowTexture() {
@@ -8336,9 +8381,9 @@ class TopologyViewer {
         this.container.innerHTML = '';
         this.container.appendChild(this.renderer.domElement);
 
-        // 3. Orbit Controls (Bound to document.body for global dragging, including transparent panel areas)
+        // 3. Orbit Controls (Bound to WebGL canvas for event isolation)
         if (typeof THREE.OrbitControls !== 'undefined') {
-            this.controls = new THREE.OrbitControls(this.camera, document.body);
+            this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
             this.controls.enableDamping = true;
             this.controls.dampingFactor = 0.05;
             this.controls.enableZoom = false; // Disable zoom to prevent scroll issues
@@ -8707,6 +8752,16 @@ class TopologyViewer {
 
     animate() {
         this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
+        
+        const now = performance.now();
+        const elapsed = now - this.lastFrameTime;
+        
+        if (elapsed < this.fpsInterval) {
+            return;
+        }
+        
+        this.lastFrameTime = now - (elapsed % this.fpsInterval);
+
         if (this.controls) this.controls.update();
 
         // 1. 太阳表面流动与自转 (利用 UV 移动创造不断喷涌流出的岩浆效果)
