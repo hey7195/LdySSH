@@ -8016,47 +8016,76 @@ class TopologyViewer {
         this.nodes = [];
         this.lines = [];
 
-        // Central Gateway Node (Small glowing core instead of giant wireframe)
-        const gatewayGeo = new THREE.SphereGeometry(1.2, 16, 16);
-        const gatewayMat = new THREE.MeshBasicMaterial({
-            color: 0x00f2fe
+        // Central Gateway Node (Classic large glowing digital grid sphere)
+        const gatewayGeo = new THREE.SphereGeometry(4.8, 32, 32);
+        const gatewayMat = new THREE.MeshPhongMaterial({
+            color: 0x00f2fe,
+            emissive: 0x002233,
+            shininess: 50,
+            wireframe: true
         });
         this.gateway = new THREE.Mesh(gatewayGeo, gatewayMat);
         this.gateway.position.set(0, 0, 0);
         this.scene.add(this.gateway);
 
-        // Use saved connections cache
-        const connections = savedConnectionsCache || [];
-        if (connections.length === 0) return;
+        // Get actual connections
+        const actualConnections = savedConnectionsCache || [];
+        const renderList = [...actualConnections];
+        
+        // If actual connections are less than 4, pad with virtual nodes to keep visual balance
+        if (renderList.length < 4) {
+            const virtualCount = 4 - renderList.length;
+            for (let i = 0; i < virtualCount; i++) {
+                renderList.push({
+                    key: 'virtual_' + i,
+                    hostname: 'Virtual-Node-0' + (i + 1),
+                    name: '探测节点-0' + (i + 1),
+                    isVirtual: true
+                });
+            }
+        }
 
-        connections.forEach((conn, index) => {
-            const angle = (index / connections.length) * Math.PI * 2;
-            const radius = 30 + Math.random() * 5;
+        renderList.forEach((conn, index) => {
+            const angle = (index / renderList.length) * Math.PI * 2;
+            const radius = 32 + Math.random() * 4;
             const x = Math.cos(angle) * radius;
             const z = Math.sin(angle) * radius;
-            const y = (Math.random() - 0.5) * 6;
+            const y = (Math.random() - 0.5) * 5;
 
-            // Host spherical node (smaller, more aesthetic)
-            const nodeGeo = new THREE.SphereGeometry(0.9, 16, 16);
+            // Host spherical node (classic large glowing sphere)
+            const nodeGeo = new THREE.SphereGeometry(2.0, 16, 16);
+            let color = 0x00ff88; // Active green
+            let emissive = 0x002211;
+            
+            if (conn.isVirtual) {
+                color = 0x4facfe; // Blue for virtual placeholder
+                emissive = 0x001122;
+            }
+
             const nodeMat = new THREE.MeshPhongMaterial({
-                color: 0x00ff88, // Default green
-                emissive: 0x002211,
+                color: color,
+                emissive: emissive,
                 shininess: 30
             });
             const nodeMesh = new THREE.Mesh(nodeGeo, nodeMat);
             nodeMesh.position.set(x, y, z);
-            nodeMesh.userData = { key: conn.key, ip: conn.hostname, name: conn.name || conn.hostname };
+            nodeMesh.userData = { 
+                key: conn.key, 
+                ip: conn.hostname, 
+                name: conn.name || conn.hostname,
+                isVirtual: !!conn.isVirtual
+            };
             this.scene.add(nodeMesh);
 
             this.nodes.push({ mesh: nodeMesh, ip: conn.hostname, key: conn.key });
 
-            // Connection Lines (fainter, more sci-fi)
+            // Connection Lines (beautiful glowing thin line)
             const points = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(x, y, z)];
             const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
             const lineMat = new THREE.LineBasicMaterial({
-                color: 0x4facfe,
+                color: conn.isVirtual ? 0x00f2fe : 0x4facfe,
                 transparent: true,
-                opacity: 0.1
+                opacity: 0.22
             });
             const line = new THREE.Line(lineGeo, lineMat);
             this.scene.add(line);
