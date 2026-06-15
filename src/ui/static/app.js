@@ -3574,7 +3574,7 @@ function getTerminalTheme() {
     if (getCurrentThemeName() === 'gold') {
         return {
             background: 'transparent',
-            foreground: '#e5e9ed',
+            foreground: '#f5f7fa',
             cursor: '#d5dbe2',
             selectionBackground: 'rgba(255, 217, 102, 0.5)',
             black: '#090b0d',
@@ -3592,31 +3592,31 @@ function getTerminalTheme() {
             brightBlue: '#94bdff',
             brightMagenta: '#e5b3ff',
             brightCyan: '#9cf1e7',
-            brightWhite: '#fffaf0'
+            brightWhite: '#ffffff'
         };
     }
 
     return {
         background: '#00000000',
-        foreground: '#a9b1d6',
+        foreground: '#f8f8f2',
         cursor: '#70a5eb',
         selectionBackground: 'rgba(122, 162, 247, 0.5)',
         black: '#15161e',
-        red: '#f7768e',
+        red: '#ff757f',
         green: '#9ece6a',
-        yellow: '#e0af68',
+        yellow: '#ffc777',
         blue: '#7aa2f7',
         magenta: '#bb9af7',
         cyan: '#7dcfff',
-        white: '#a9b1d6',
-        brightBlack: '#414868',
-        brightRed: '#f7768e',
-        brightGreen: '#9ece6a',
-        brightYellow: '#e0af68',
-        brightBlue: '#7aa2f7',
-        brightMagenta: '#bb9af7',
-        brightCyan: '#7dcfff',
-        brightWhite: '#c0caf5'
+        white: '#e3e6ee',
+        brightBlack: '#565f89',
+        brightRed: '#ff757f',
+        brightGreen: '#c3e88d',
+        brightYellow: '#ffc777',
+        brightBlue: '#89ddff',
+        brightMagenta: '#c099ff',
+        brightCyan: '#b4f9ff',
+        brightWhite: '#ffffff'
     };
 }
 
@@ -4079,7 +4079,7 @@ function createTerminalForSession(sessionId, hostname) {
             fontSize: 14,
             fontFamily: '"SF Mono", Consolas, "Liberation Mono", Menlo, Courier, monospace',
             fontWeight: 'normal',
-            fontWeightBold: 'normal',
+            fontWeightBold: 'bold',
             theme: getTerminalTheme(),
             scrollback: TERMINAL_SCROLLBACK,
             convertEol: true,
