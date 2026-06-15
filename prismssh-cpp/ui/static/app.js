@@ -7895,6 +7895,420 @@ class TopologyViewer {
         this.gateway = null;
     }
 
+    createSunGlowTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+        grad.addColorStop(0, 'rgba(255, 248, 220, 1.0)');
+        grad.addColorStop(0.18, 'rgba(255, 140, 0, 0.85)');
+        grad.addColorStop(0.5, 'rgba(220, 45, 0, 0.2)');
+        grad.addColorStop(1, 'rgba(220, 45, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 128, 128);
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createSunTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        
+        // 金黄红底色
+        ctx.fillStyle = '#ff3300';
+        ctx.fillRect(0, 0, 512, 256);
+        
+        // 渲染斑驳的日冕火焰和太阳黑子细节
+        for (let i = 0; i < 40; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 256;
+            const r = 15 + Math.random() * 35;
+            const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+            grad.addColorStop(0, 'rgba(255, 230, 0, 0.95)');
+            grad.addColorStop(0.5, 'rgba(255, 90, 0, 0.55)');
+            grad.addColorStop(1, 'rgba(255, 0, 0, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // 加上一些黑子斑点
+        ctx.fillStyle = 'rgba(50, 5, 0, 0.45)';
+        for (let i = 0; i < 15; i++) {
+            ctx.beginPath();
+            ctx.arc(Math.random() * 512, Math.random() * 256, 3 + Math.random() * 7, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        return tex;
+    }
+
+    createEarthTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        
+        // 渐变海洋底色
+        const oceanGrad = ctx.createLinearGradient(0, 0, 0, 256);
+        oceanGrad.addColorStop(0, '#0a1d37');
+        oceanGrad.addColorStop(0.5, '#0d2240');
+        oceanGrad.addColorStop(1, '#0a1d37');
+        ctx.fillStyle = oceanGrad;
+        ctx.fillRect(0, 0, 512, 256);
+        
+        // 陆地板块生成（画6大主要大陆板块和一些微小岛屿）
+        const continents = [
+            // 亚洲、欧洲、非洲主体
+            { x: 260, y: 100, rx: 95, ry: 55, rot: -0.1 },
+            { x: 280, y: 145, rx: 50, ry: 40, rot: 0.15 },
+            // 美洲板块
+            { x: 120, y: 95, rx: 55, ry: 45, rot: 0.2 },
+            { x: 145, y: 170, rx: 42, ry: 58, rot: -0.1 },
+            // 澳大利亚板块
+            { x: 380, y: 180, rx: 32, ry: 22, rot: 0.05 },
+            // 格陵兰岛
+            { x: 180, y: 45, rx: 25, ry: 15, rot: -0.2 }
+        ];
+
+        // 陆地基底
+        continents.forEach(c => {
+            ctx.fillStyle = '#1b5e20'; // 深绿森林底色
+            ctx.beginPath();
+            ctx.ellipse(c.x, c.y, c.rx, c.ry, c.rot, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 渲染起伏的斑驳高原/山脉（土黄/褐色）
+            ctx.fillStyle = '#7d6608';
+            for (let s = 0; s < 12; s++) {
+                const sx = c.x + (Math.random() - 0.5) * c.rx * 1.2;
+                const sy = c.y + (Math.random() - 0.5) * c.ry * 1.2;
+                const sr = 6 + Math.random() * 15;
+                ctx.beginPath();
+                ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // 陆地边缘的浅绿色浅滩/大陆架过渡
+            ctx.fillStyle = '#2e7d32';
+            for (let s = 0; s < 8; s++) {
+                const sx = c.x + (Math.random() - 0.5) * c.rx * 1.4;
+                const sy = c.y + (Math.random() - 0.5) * c.ry * 1.4;
+                const sr = 3 + Math.random() * 7;
+                ctx.beginPath();
+                ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
+
+        // 绘制南北极盖 (白色冰川)
+        ctx.fillStyle = 'rgba(240, 245, 255, 0.95)';
+        // 北极
+        ctx.beginPath();
+        ctx.ellipse(256, 12, 180, 22, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // 南极
+        ctx.beginPath();
+        ctx.ellipse(256, 244, 210, 25, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createCloudTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 512, 256);
+        
+        // 用柔和半透明白色画气旋云层
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+        for (let i = 0; i < 30; i++) {
+            const cx = Math.random() * 512;
+            const cy = 25 + Math.random() * 206;
+            const rx = 35 + Math.random() * 95;
+            const ry = 8 + Math.random() * 18;
+            const rot = (Math.random() - 0.5) * 0.12;
+            
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, rx, ry, rot, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 气旋风暴中心 (画螺旋感)
+            if (Math.random() < 0.25) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+                ctx.beginPath();
+                ctx.arc(cx, cy, rx * 0.35, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+            }
+        }
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createJupiterTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ad825c';
+        ctx.fillRect(0, 0, 512, 256);
+        
+        // 绘制木星极其复杂的云层带
+        const colors = [
+            '#592c14', '#754425', '#995f3b', '#b38864', 
+            '#cca687', '#ebd7c5', '#52341d', '#ebd5c0'
+        ];
+        
+        let curY = 0;
+        while (curY < 256) {
+            const h = 6 + Math.random() * 15;
+            ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+            ctx.fillRect(0, curY, 512, h);
+            
+            // 在边界处画波浪扰动 (气态云层的涡流感)
+            if (Math.random() < 0.6) {
+                ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+                ctx.beginPath();
+                for (let x = 0; x <= 512; x += 10) {
+                    const waveY = curY + Math.sin(x * 0.08) * 3;
+                    ctx.lineTo(x, waveY);
+                }
+                ctx.lineTo(512, curY + h);
+                ctx.lineTo(0, curY + h);
+                ctx.closePath();
+                ctx.fill();
+            }
+            curY += h;
+        }
+        
+        // 绘制“大红斑” Great Red Spot (多层漩涡感)
+        const rx = 340;
+        const ry = 165;
+        // 1. 深红外圈漩涡
+        ctx.fillStyle = 'rgba(128, 25, 12, 0.95)';
+        ctx.beginPath();
+        ctx.ellipse(rx, ry, 32, 17, 0.06, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 2. 鲜红中圈
+        ctx.fillStyle = '#c62828';
+        ctx.beginPath();
+        ctx.ellipse(rx - 1, ry, 24, 12, 0.06, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 3. 橙红核心
+        ctx.fillStyle = '#ff7043';
+        ctx.beginPath();
+        ctx.ellipse(rx - 2, ry - 1, 14, 7, 0.06, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 4. 白色气流卷纹绕过红斑
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(rx, ry, 40, Math.PI, Math.PI * 1.8);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(rx, ry, 36, 0, Math.PI * 0.8);
+        ctx.stroke();
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createSaturnTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#e2cfa7';
+        ctx.fillRect(0, 0, 256, 128);
+        
+        // 柔和条纹
+        const colors = ['#cca672', '#ecd9bd', '#dbbe97', '#ebdcb9', '#dbb888'];
+        ctx.globalAlpha = 0.6;
+        for (let y = 0; y < 128; y += 5 + Math.random() * 8) {
+            const h = 5 + Math.random() * 10;
+            ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+            ctx.fillRect(0, y, 256, h);
+        }
+        ctx.globalAlpha = 1.0;
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createSaturnRingTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 16;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 256, 16);
+        
+        // 绘制不同宽度、颜色和透明度的同心线。X轴是半径方向。
+        for (let x = 0; x < 256; x += 1 + Math.random() * 3) {
+            const w = 1 + Math.random() * 3;
+            // 环缝（卡西尼环缝）
+            if (x > 140 && x < 155 && Math.random() < 0.85) {
+                continue; 
+            }
+            const alpha = 0.12 + Math.random() * 0.65;
+            // 呈现出米黄与浅灰尘埃的混合质感
+            ctx.fillStyle = `rgba(${225 + Math.floor(Math.random() * 20)}, ${200 + Math.floor(Math.random() * 15)}, ${160 + Math.floor(Math.random() * 20)}, ${alpha})`;
+            ctx.fillRect(x, 0, w, 16);
+        }
+        
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        return tex;
+    }
+
+    createNeptuneTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#2b5fcb'; // 幽蓝色
+        ctx.fillRect(0, 0, 256, 128);
+        
+        // 渐变气流带
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+        for (let i = 0; i < 8; i++) {
+            ctx.fillRect(0, Math.random() * 128, 256, 5 + Math.random() * 8);
+        }
+
+        // 大暗斑 (Great Dark Spot)
+        ctx.fillStyle = '#132860';
+        ctx.beginPath();
+        ctx.ellipse(170, 75, 18, 10, 0.08, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 大暗斑周围的白色亮条纹 (甲烷云)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+        ctx.lineWidth = 1.0;
+        ctx.beginPath();
+        ctx.arc(170, 75, 23, Math.PI * 0.9, Math.PI * 1.6);
+        ctx.stroke();
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createMarsTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#b24a25'; // 火星红褐色底色
+        ctx.fillRect(0, 0, 256, 128);
+        
+        // 铁锈深褐色风化纹理
+        ctx.fillStyle = '#803013';
+        for (let i = 0; i < 15; i++) {
+            ctx.beginPath();
+            ctx.arc(Math.random() * 256, Math.random() * 128, 12 + Math.random() * 24, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 橙红色沙丘暗影
+        ctx.fillStyle = '#cd643d';
+        for (let i = 0; i < 10; i++) {
+            ctx.beginPath();
+            ctx.arc(Math.random() * 256, Math.random() * 128, 6 + Math.random() * 12, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 两极冰盖 (干冰与水冰)
+        ctx.fillStyle = '#fdfdfd';
+        // 北极盖
+        ctx.beginPath();
+        ctx.ellipse(128, 3, 30, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // 南极盖
+        ctx.beginPath();
+        ctx.ellipse(128, 125, 25, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createMercuryTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#6d737a'; // 灰色底色
+        ctx.fillRect(0, 0, 256, 128);
+        
+        // 暗斑
+        ctx.fillStyle = '#555a60';
+        for (let i = 0; i < 20; i++) {
+            ctx.beginPath();
+            ctx.arc(Math.random() * 256, Math.random() * 128, 8 + Math.random() * 16, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 环形山陨石坑 (带偏置阴影和喷射条纹)
+        for (let i = 0; i < 25; i++) {
+            const cx = Math.random() * 256;
+            const cy = Math.random() * 128;
+            const r = 3 + Math.random() * 8;
+            
+            // 坑沿的暗部
+            ctx.fillStyle = 'rgba(40, 42, 45, 0.7)';
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 坑底偏置的亮部 (立体光影)
+            ctx.fillStyle = 'rgba(160, 170, 180, 0.5)';
+            ctx.beginPath();
+            ctx.arc(cx - r * 0.15, cy - r * 0.15, r * 0.85, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 较亮的辐射条纹线
+            if (r > 6 && Math.random() < 0.4) {
+                ctx.strokeStyle = 'rgba(200, 205, 210, 0.25)';
+                ctx.lineWidth = 0.8;
+                const rays = 5 + Math.floor(Math.random() * 5);
+                for (let k = 0; k < rays; k++) {
+                    const angle = (k / rays) * Math.PI * 2 + Math.random() * 0.5;
+                    const len = r * (1.5 + Math.random() * 2);
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy);
+                    ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+                    ctx.stroke();
+                }
+            }
+        }
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    createVenusTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#e3cc9a'; // 金星米黄/奶油底色
+        ctx.fillRect(0, 0, 256, 128);
+        
+        // 金星大气的微弱漩涡和横条纹
+        const colors = ['#cca362', '#ebd2a2', '#d6b885', '#e9dcbf'];
+        ctx.globalAlpha = 0.55;
+        for (let y = 0; y < 128; y += 4 + Math.random() * 6) {
+            const h = 4 + Math.random() * 8;
+            ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+            ctx.fillRect(0, y, 256, h);
+        }
+        ctx.globalAlpha = 1.0;
+        return new THREE.CanvasTexture(canvas);
+    }
+
     init() {
         if (!this.container) return;
         const width = window.innerWidth;
@@ -7908,15 +8322,15 @@ class TopologyViewer {
 
         // 1. Scene & Camera
         this.scene = new THREE.Scene();
-        this.scene.fog = new THREE.FogExp2(0x050608, 0.006);
-        this.camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-        this.camera.position.set(0, 45, 95);
+        this.scene.fog = new THREE.FogExp2(0x050608, 0.005);
+        this.camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1500);
+        this.camera.position.set(0, 75, 130); // 抬高相机，提供更好的星盘俯瞰视角
 
         // 2. WebGL Renderer
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         this.renderer.setSize(width, height);
         this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.container.innerHTML = ''; // Clear container
+        this.container.innerHTML = '';
         this.container.appendChild(this.renderer.domElement);
 
         // 3. Orbit Controls (Bound to document.body for global dragging, including transparent panel areas)
@@ -7927,9 +8341,11 @@ class TopologyViewer {
             this.controls.enableZoom = false; // Disable zoom to prevent scroll issues
             this.controls.enablePan = false;  // Disable panning to focus on center
             this.controls.maxPolarAngle = Math.PI / 2 - 0.02; // Prevent camera underfloor
+            this.controls.minDistance = 30; // 限制拉近
+            this.controls.maxDistance = 350; // 限制拉远
         }
 
-        // Custom Title Bar Drag Handling & Event Isolation
+        // Custom Title Bar Drag Handling & Event Isolation (保留原窗口拖拽)
         const titleBar = document.querySelector('.title-bar');
         if (titleBar) {
             const handleDrag = (e) => {
@@ -7946,7 +8362,6 @@ class TopologyViewer {
                 e.stopPropagation();
             };
 
-            // Prevent OrbitControls (on body) from capturing title bar drag and calling preventDefault()
             ['mousedown', 'pointerdown', 'touchstart'].forEach(evt => {
                 titleBar.addEventListener(evt, (e) => {
                     if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
@@ -7962,60 +8377,38 @@ class TopologyViewer {
         }
 
         // 4. Lights
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
         this.scene.add(ambientLight);
-        const dirLight = new THREE.DirectionalLight(0x00f2fe, 1.5);
-        dirLight.position.set(20, 50, 20);
-        this.scene.add(dirLight);
+        // 点光源，模拟太阳光，照亮整个星盘天体
+        const sunLight = new THREE.PointLight(0xffaa44, 2.5, 400);
+        sunLight.position.set(0, 0, 0);
+        this.scene.add(sunLight);
 
-        // 5. Dual-Color Nebula Starfield
+        // 5. Starfield Background (多层不同颜色、密度的尘埃星空效果)
         this.starfields = [];
-        
-        // Group 1: Cyan Nebula Disk
-        const starsGeo1 = new THREE.BufferGeometry();
-        const count1 = 2000;
-        const pos1 = new Float32Array(count1 * 3);
-        for (let i = 0; i < count1; i++) {
-            const theta = Math.random() * Math.PI * 2;
-            const r = 15 + Math.random() * 150;
-            pos1[i * 3] = Math.cos(theta) * r + (Math.random() - 0.5) * 8;
-            pos1[i * 3 + 1] = (Math.random() - 0.5) * 12; // thin disk
-            pos1[i * 3 + 2] = Math.sin(theta) * r + (Math.random() - 0.5) * 8;
-        }
-        starsGeo1.setAttribute('position', new THREE.BufferAttribute(pos1, 3));
-        const starMat1 = new THREE.PointsMaterial({
-            color: 0x00f2fe,
-            size: 0.8,
-            sizeAttenuation: true,
-            transparent: true,
-            opacity: 0.5
+        const starParams = [
+            { count: 300, size: 1.6, color: 0x00f2fe, speed: 0.0003, radius: 400 },
+            { count: 800, size: 1.0, color: 0x7928ca, speed: 0.00015, radius: 600 },
+            { count: 1500, size: 0.7, color: 0xffffff, speed: 0.00008, radius: 800 }
+        ];
+        starParams.forEach(param => {
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsPositions = new Float32Array(param.count * 3);
+            for (let i = 0; i < param.count * 3; i++) {
+                starsPositions[i] = (Math.random() - 0.5) * param.radius;
+            }
+            starsGeometry.setAttribute('position', new THREE.BufferAttribute(starsPositions, 3));
+            const starsMaterial = new THREE.PointsMaterial({
+                color: param.color,
+                size: param.size,
+                sizeAttenuation: true,
+                transparent: true,
+                opacity: 0.8
+            });
+            const points = new THREE.Points(starsGeometry, starsMaterial);
+            this.scene.add(points);
+            this.starfields.push({ points, speed: param.speed });
         });
-        const starfield1 = new THREE.Points(starsGeo1, starMat1);
-        this.scene.add(starfield1);
-        this.starfields.push({ points: starfield1, speed: 0.0003 });
-
-        // Group 2: Purple Nebula Belt (slanted)
-        const starsGeo2 = new THREE.BufferGeometry();
-        const count2 = 2000;
-        const pos2 = new Float32Array(count2 * 3);
-        for (let i = 0; i < count2; i++) {
-            const theta = Math.random() * Math.PI * 2;
-            const r = 25 + Math.random() * 180;
-            pos2[i * 3] = Math.cos(theta) * r;
-            pos2[i * 3 + 1] = (Math.random() - 0.5) * 25 + (pos2[i * 3] * 0.08); // slanted
-            pos2[i * 3 + 2] = Math.sin(theta) * r;
-        }
-        starsGeo2.setAttribute('position', new THREE.BufferAttribute(pos2, 3));
-        const starMat2 = new THREE.PointsMaterial({
-            color: 0xa855f7, // Purple
-            size: 0.9,
-            sizeAttenuation: true,
-            transparent: true,
-            opacity: 0.4
-        });
-        const starfield2 = new THREE.Points(starsGeo2, starMat2);
-        this.scene.add(starfield2);
-        this.starfields.push({ points: starfield2, speed: -0.0002 }); // rotates opposite
 
         // 6. Build Grid and Connections
         this.buildTopology();
@@ -8025,118 +8418,352 @@ class TopologyViewer {
         this.onClickHandler = this.onDocumentClick.bind(this);
         window.addEventListener('resize', this.onResizeHandler);
         this.renderer.domElement.addEventListener('click', this.onClickHandler);
-
     }
 
     buildTopology() {
-        // Clear existing nodes/lines/gateways
+        // Clear existing nodes/lines/gateways/orbits/sun components
         if (this.gateway) {
             this.scene.remove(this.gateway);
             if (this.gateway.geometry) this.gateway.geometry.dispose();
             if (this.gateway.material) this.gateway.material.dispose();
             this.gateway = null;
         }
+        if (this.sunAtmosphere) {
+            this.scene.remove(this.sunAtmosphere);
+            if (this.sunAtmosphere.geometry) this.sunAtmosphere.geometry.dispose();
+            if (this.sunAtmosphere.material) this.sunAtmosphere.material.dispose();
+            this.sunAtmosphere = null;
+        }
+        if (this.sunParticles) {
+            this.scene.remove(this.sunParticles);
+            if (this.sunParticles.geometry) this.sunParticles.geometry.dispose();
+            if (this.sunParticles.material) this.sunParticles.material.dispose();
+            this.sunParticles = null;
+        }
+
         this.nodes.forEach(n => {
             this.scene.remove(n.mesh);
             if (n.mesh.geometry) n.mesh.geometry.dispose();
             if (n.mesh.material) n.mesh.material.dispose();
+            
+            // Dispose child layers if any
+            n.mesh.traverse(child => {
+                if (child !== n.mesh) {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                }
+            });
         });
         this.lines.forEach(l => {
             this.scene.remove(l);
             if (l.geometry) l.geometry.dispose();
             if (l.material) l.material.dispose();
         });
+        this.orbits.forEach(o => {
+            this.scene.remove(o);
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) o.material.dispose();
+        });
         this.nodes = [];
         this.lines = [];
+        this.orbits = [];
 
-        // Central Gateway Node (Classic large glowing digital grid sphere)
-        const gatewayGeo = new THREE.SphereGeometry(4.8, 32, 32);
-        const gatewayMat = new THREE.MeshPhongMaterial({
-            color: 0x00f2fe,
-            emissive: 0x002233,
-            shininess: 50,
-            wireframe: true
+        // 1. Glowing Sun Core (使用 BasicMaterial 避免自发光体被阴影遮挡变暗)
+        const gatewayGeo = new THREE.SphereGeometry(5.0, 32, 32);
+        const sunTex = this.createSunTexture();
+        const gatewayMat = new THREE.MeshBasicMaterial({
+            map: sunTex,
+            transparent: true,
+            opacity: 0.98
         });
         this.gateway = new THREE.Mesh(gatewayGeo, gatewayMat);
         this.gateway.position.set(0, 0, 0);
         this.scene.add(this.gateway);
 
+        // 2. Sun Outer Atmosphere Layer (日冕柔和边缘发光层，代替丑陋线框)
+        const atmosGeo = new THREE.SphereGeometry(5.4, 32, 32);
+        const atmosMat = new THREE.MeshBasicMaterial({
+            color: 0xff5500,
+            transparent: true,
+            opacity: 0.22,
+            blending: THREE.AdditiveBlending,
+            side: THREE.BackSide
+        });
+        this.sunAtmosphere = new THREE.Mesh(atmosGeo, atmosMat);
+        this.sunAtmosphere.position.set(0, 0, 0);
+        this.scene.add(this.sunAtmosphere);
+
+        // 3. Sun Glow Sprite (径向渐变外圈漫反射光晕，消除刺眼突变)
+        const sunGlowTex = this.createSunGlowTexture();
+        const sunGlowMat = new THREE.SpriteMaterial({
+            map: sunGlowTex,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+            opacity: 0.85
+        });
+        this.sunParticles = new THREE.Sprite(sunGlowMat);
+        this.sunParticles.scale.set(30, 30, 1);
+        this.scene.add(this.sunParticles);
+
         // Get actual connections
         const actualConnections = savedConnectionsCache || [];
-        const renderList = [...actualConnections];
         
-        // If actual connections are less than 4, pad with virtual nodes to keep visual balance
-        if (renderList.length < 4) {
-            const virtualCount = 4 - renderList.length;
-            for (let i = 0; i < virtualCount; i++) {
-                renderList.push({
-                    key: 'virtual_' + i,
-                    hostname: 'Virtual-Node-0' + (i + 1),
-                    name: '探测节点-0' + (i + 1),
-                    isVirtual: true
-                });
+        // Define 7 core planetary configurations (simulating solar system)
+        const planetConfigs = [
+            { name: '水星', r: 1.2, color: 0x8899a6, emissive: 0x111622, shininess: 80, orbitR: 22, speed: 0.0055, incline: 0.08 },
+            { name: '金星', r: 1.6, color: 0xe3bb76, emissive: 0x221a11, shininess: 50, orbitR: 30, speed: 0.0042, incline: -0.05 },
+            { name: '地球', r: 1.8, color: 0x1b72e8, emissive: 0x052244, shininess: 100, orbitR: 38, speed: 0.0034, incline: 0.12, isEarth: true },
+            { name: '火星', r: 1.4, color: 0xc1440e, emissive: 0x331105, shininess: 20, orbitR: 46, speed: 0.0028, incline: -0.10 },
+            { name: '木星', r: 2.6, color: 0xb07f35, emissive: 0x221a05, shininess: 30, orbitR: 55, speed: 0.0022, incline: 0.06 },
+            { name: '土星', r: 2.3, color: 0xe2bf7d, emissive: 0x222211, shininess: 30, orbitR: 64, speed: 0.0016, incline: -0.08, hasRing: true },
+            { name: '海王星', r: 2.0, color: 0x4b70dd, emissive: 0x051133, shininess: 70, orbitR: 72, speed: 0.0011, incline: 0.15 }
+        ];
+
+        const numPlanets = Math.max(7, actualConnections.length);
+
+        for (let i = 0; i < numPlanets; i++) {
+            const conn = actualConnections[i];
+            const isVirtual = !conn;
+
+            let cfg;
+            if (i < 7) {
+                cfg = planetConfigs[i];
+            } else {
+                // Dynamically append outer orbits if connections > 7
+                const orbitR = 72 + (i - 6) * 9;
+                const speed = 0.012 / Math.sqrt(orbitR);
+                const incline = (i % 2 === 0 ? 0.08 : -0.08) + (Math.random() - 0.5) * 0.04;
+                const r = 1.6 + Math.random() * 0.8;
+                
+                const randomHue = Math.random();
+                let color = 0x4facfe;
+                if (randomHue < 0.25) color = 0xff3366;
+                else if (randomHue < 0.5) color = 0x33ff99;
+                else if (randomHue < 0.75) color = 0xffcc33;
+                else color = 0xa855f7;
+
+                cfg = {
+                    name: '外圈行星-' + (i + 1),
+                    r: r,
+                    color: color,
+                    emissive: 0x111122,
+                    shininess: 40,
+                    orbitR: orbitR,
+                    speed: speed,
+                    incline: incline
+                };
             }
-        }
 
-        renderList.forEach((conn, index) => {
-            const angle = (index / renderList.length) * Math.PI * 2;
-            const radius = 32 + Math.random() * 4;
-            const x = Math.cos(angle) * radius;
-            const z = Math.sin(angle) * radius;
-            const y = (Math.random() - 0.5) * 5;
+            // 3. Draw Orbit Ring
+            const points = [];
+            const segments = 128;
+            for (let s = 0; s <= segments; s++) {
+                const theta = (s / segments) * Math.PI * 2;
+                const ox = cfg.orbitR * Math.cos(theta);
+                const oy = cfg.orbitR * Math.sin(theta) * Math.sin(cfg.incline);
+                const oz = cfg.orbitR * Math.sin(theta) * Math.cos(cfg.incline);
+                points.push(new THREE.Vector3(ox, oy, oz));
+            }
+            const orbitGeo = new THREE.BufferGeometry().setFromPoints(points);
+            const orbitMat = new THREE.LineBasicMaterial({
+                color: isVirtual ? 0x00f2fe : 0x4facfe,
+                transparent: true,
+                opacity: isVirtual ? 0.05 : 0.12,
+                depthWrite: false
+            });
+            const orbitLine = new THREE.LineLoop(orbitGeo, orbitMat);
+            this.scene.add(orbitLine);
+            this.orbits.push(orbitLine);
 
-            // Host spherical node (classic large glowing sphere)
-            const nodeGeo = new THREE.SphereGeometry(2.0, 16, 16);
-            let color = 0x00ff88; // Active green
-            let emissive = 0x002211;
-            
-            if (conn.isVirtual) {
-                color = 0x4facfe; // Blue for virtual placeholder
+            // 4. Planet Sphere
+            const nodeGeo = new THREE.SphereGeometry(cfg.r, 32, 32); 
+            let color = cfg.color;
+            let emissive = cfg.emissive;
+            let mapTex = null;
+            let specularColor = 0x222222;
+            let shininess = cfg.shininess;
+
+            if (isVirtual) {
+                // Virtual placeholder planets render as beautiful crystal clear cyan spheres
+                color = 0x00f2fe;
                 emissive = 0x001122;
+            } else {
+                // Assign procedural generated textures based on planet identity
+                if (i === 0) mapTex = this.createMercuryTexture();
+                else if (i === 1) mapTex = this.createVenusTexture();
+                else if (i === 2) {
+                    mapTex = this.createEarthTexture(); 
+                    specularColor = 0x444444;
+                    shininess = 60;
+                }
+                else if (i === 3) mapTex = this.createMarsTexture();
+                else if (i === 4) mapTex = this.createJupiterTexture();
+                else if (i === 5) mapTex = this.createSaturnTexture();
+                else if (i === 6) mapTex = this.createNeptuneTexture();
+                else mapTex = this.createNeptuneTexture();
             }
 
             const nodeMat = new THREE.MeshPhongMaterial({
                 color: color,
+                map: mapTex, // 必须映射贴图！
                 emissive: emissive,
-                shininess: 30
+                specular: specularColor,
+                shininess: shininess,
+                transparent: isVirtual,
+                opacity: isVirtual ? 0.28 : 1.0
             });
+
             const nodeMesh = new THREE.Mesh(nodeGeo, nodeMat);
-            nodeMesh.position.set(x, y, z);
-            nodeMesh.userData = { 
-                key: conn.key, 
-                ip: conn.hostname, 
-                name: conn.name || conn.hostname,
-                isVirtual: !!conn.isVirtual
+
+            // Special planetary system: Saturn Rings (精致同心砂砾质感星环)
+            if (cfg.hasRing) {
+                const ringGeo = new THREE.RingGeometry(cfg.r * 1.4, cfg.r * 2.3, 64);
+                const ringTex = this.createSaturnRingTexture();
+                const ringMat = new THREE.MeshBasicMaterial({
+                    map: ringTex,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.82,
+                    depthWrite: false
+                });
+                const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+                ringMesh.rotateX(Math.PI / 2);
+                nodeMesh.add(ringMesh); // 自动跟随公转自转
+            }
+
+            // Special planetary system: Earth Clouds & Atmosphere (去除了丑陋的多面体线框)
+            if (cfg.isEarth) {
+                // Cloud layer mesh overlay (柔和白色半透明气流云层，非 wireframe)
+                const cloudGeo = new THREE.SphereGeometry(cfg.r * 1.05, 32, 32);
+                const cloudMat = new THREE.MeshPhongMaterial({
+                    map: this.createCloudTexture(),
+                    transparent: true,
+                    opacity: 0.38,
+                    depthWrite: false
+                });
+                const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+                cloudMesh.userData = { isCloud: true };
+                nodeMesh.add(cloudMesh);
+                nodeMesh.userData.cloudMesh = cloudMesh;
+
+                // Atmosphere refraction glow (边缘天蓝色大气透亮层)
+                const glowGeo = new THREE.SphereGeometry(cfg.r * 1.15, 32, 32);
+                const glowMat = new THREE.MeshBasicMaterial({
+                    color: 0x00aaff,
+                    transparent: true,
+                    opacity: 0.15,
+                    side: THREE.BackSide
+                });
+                const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+                nodeMesh.add(glowMesh);
+            }
+
+            // Assign random initial phase
+            const initialPhase = Math.random() * Math.PI * 2;
+            const px = cfg.orbitR * Math.cos(initialPhase);
+            const py = cfg.orbitR * Math.sin(initialPhase) * Math.sin(cfg.incline);
+            const pz = cfg.orbitR * Math.sin(initialPhase) * Math.cos(cfg.incline);
+            nodeMesh.position.set(px, py, pz);
+
+            nodeMesh.userData = {
+                key: isVirtual ? ('virtual_' + i) : conn.key,
+                ip: isVirtual ? ('Virtual-Planet-0' + (i + 1)) : conn.hostname,
+                name: isVirtual ? ('未配置行星-' + (i + 1)) : (conn.name || conn.hostname),
+                isVirtual: isVirtual
             };
+
             this.scene.add(nodeMesh);
 
-            this.nodes.push({ mesh: nodeMesh, ip: conn.hostname, key: conn.key });
-
-            // Connection Lines (beautiful glowing thin line)
-            const points = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(x, y, z)];
-            const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+            // 5. Connection beam (polar light ray)
+            const linePoints = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(px, py, pz)];
+            const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
             const lineMat = new THREE.LineBasicMaterial({
-                color: conn.isVirtual ? 0x00f2fe : 0x4facfe,
+                color: isVirtual ? 0x00f2fe : 0x4facfe,
                 transparent: true,
-                opacity: 0.22
+                opacity: isVirtual ? 0.06 : 0.24
             });
             const line = new THREE.Line(lineGeo, lineMat);
             this.scene.add(line);
             this.lines.push(line);
-        });
+
+            this.nodes.push({
+                mesh: nodeMesh,
+                ip: isVirtual ? null : conn.hostname,
+                key: isVirtual ? null : conn.key,
+                isVirtual: isVirtual,
+                orbitR: cfg.orbitR,
+                speed: cfg.speed,
+                incline: cfg.incline,
+                phase: initialPhase,
+                line: line,
+                originalColor: color,
+                originalEmissive: emissive
+            });
+        }
     }
 
     animate() {
         this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
         if (this.controls) this.controls.update();
-        
-        // Starfield and gateway auto-rotations removed to respect user drag-only control
-        
-        // Slowly rotate whole node structure slightly
+
+        // 1. 太阳表面流动与自转 (利用 UV 移动创造不断喷涌流出的岩浆效果)
+        if (this.gateway) {
+            this.gateway.rotation.y += 0.0006;
+            if (this.gateway.material && this.gateway.material.map) {
+                this.gateway.material.map.offset.x += 0.0004;
+                this.gateway.material.map.offset.y += 0.0001;
+            }
+        }
+        if (this.sunAtmosphere) {
+            this.sunAtmosphere.rotation.y -= 0.0003;
+        }
+        if (this.sunParticles) {
+            this.sunParticles.rotation.z += 0.0002; // 光晕精灵平面缓慢自转，消除刺眼抖动
+        }
+
+        // 2. 多层星空极慢旋转
+        this.starfields.forEach(sf => {
+            if (sf.points) {
+                sf.points.rotation.y += sf.speed;
+            }
+        });
+
+        // 3. 行星自转与公转
         this.nodes.forEach((n, idx) => {
             if (n.mesh) {
-                const pulse = 1 + 0.05 * Math.sin(Date.now() * 0.002 + idx);
+                // 行星自转
+                n.mesh.rotation.y += 0.008;
+
+                // 地球云层与大气的不同速度浮动自转
+                n.mesh.traverse(child => {
+                    if (child.userData && child.userData.isCloud) {
+                        child.rotation.y += 0.005; // 云层比地球本体稍快
+                        child.rotation.x += 0.001;
+                    }
+                });
+
+                // 公转相位累加
+                n.phase += n.speed;
+
+                // 计算更新后的公转位置
+                const x = n.orbitR * Math.cos(n.phase);
+                const y = n.orbitR * Math.sin(n.phase) * Math.sin(n.incline);
+                const z = n.orbitR * Math.sin(n.phase) * Math.cos(n.incline);
+
+                n.mesh.position.set(x, y, z);
+
+                // 行星轻微、柔和的呼吸尺寸感 (消除生硬的剧烈跳动)
+                const pulse = 1.0 + 0.012 * Math.sin(Date.now() * 0.0008 + idx);
                 n.mesh.scale.set(pulse, pulse, pulse);
+
+                // 4. 更新动态连接光轨
+                if (n.line) {
+                    const positions = n.line.geometry.attributes.position.array;
+                    positions[3] = x;
+                    positions[4] = y;
+                    positions[5] = z;
+                    n.line.geometry.attributes.position.needsUpdate = true;
+                }
             }
         });
 
@@ -8166,7 +8793,6 @@ class TopologyViewer {
     }
 
     onDocumentClick(event) {
-        // Double check clicks only on the canvas backdrop, not on DOM panels
         if (event.target.tagName !== 'CANVAS') return;
 
         const rect = this.renderer.domElement.getBoundingClientRect();
@@ -8174,12 +8800,40 @@ class TopologyViewer {
         this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
         this.raycaster.setFromCamera(this.mouse, this.camera);
-        const intersects = this.raycaster.intersectObjects(this.nodes.map(n => n.mesh));
+        
+        // Match both planets and their child meshes (rings, clouds, land meshes)
+        const targetObjects = [];
+        this.nodes.forEach(n => {
+            if (n.mesh) {
+                targetObjects.push(n.mesh);
+                n.mesh.traverse(child => {
+                    if (child !== n.mesh) {
+                        targetObjects.push(child);
+                    }
+                });
+            }
+        });
+
+        const intersects = this.raycaster.intersectObjects(targetObjects);
 
         if (intersects.length > 0) {
             const selectedMesh = intersects[0].object;
-            const connKey = selectedMesh.userData.key;
-            console.log("Selected node in 3D background:", selectedMesh.userData.ip);
+            
+            // Check if child elements clicked (rings, clouds, land lattices)
+            let targetMesh = selectedMesh;
+            if (!selectedMesh.userData || selectedMesh.userData.key === undefined) {
+                if (selectedMesh.parent && selectedMesh.parent.userData && selectedMesh.parent.userData.key !== undefined) {
+                    targetMesh = selectedMesh.parent;
+                }
+            }
+            
+            if (targetMesh.userData.isVirtual) {
+                console.log("Clicked virtual placeholder planet");
+                return;
+            }
+
+            const connKey = targetMesh.userData.key;
+            console.log("Selected planetary host in 3D backdrop:", targetMesh.userData.ip);
             
             if (connKey) {
                 quickConnect(connKey);
@@ -8192,23 +8846,40 @@ window.updateNodeDelay = function(ip, delay, status) {
     if (!topoViewer || !topoViewer.nodes) return;
     const node = topoViewer.nodes.find(n => n.ip === ip);
     if (node && node.mesh) {
-        let color = 0x00ff88; // Green
-        let emissive = 0x002211;
-        
+        let color = node.originalColor;
+        let emissive = node.originalEmissive;
+        let lineOpacity = 0.24;
+        let lineColor = 0x4facfe;
+
         if (status === 'disconnected') {
-            color = 0xff3333; // Red
-            emissive = 0x440000;
+            color = 0x555555;      // Dead slate grey
+            emissive = 0x221111;   // Weak red emissive
+            lineColor = 0xff3366;  // Red connection line
+            lineOpacity = 0.12;
         } else if (delay > 150) {
-            color = 0xffaa00; // Orange
-            emissive = 0x332200;
+            color = 0xffaa00;      // Warning orange
+            emissive = 0x331100;
+            lineColor = 0xffaa00;
+            lineOpacity = 0.45;
         } else if (delay > 50) {
-            color = 0xffff33; // Yellow
+            color = 0xffff33;      // Moderate yellow
             emissive = 0x222200;
+            lineColor = 0xffff33;
+            lineOpacity = 0.38;
+        } else {
+            // Healthy connection: Use planet's beautiful native color, green connection line
+            lineColor = 0x00ff88;
+            lineOpacity = 0.32;
         }
         
         node.mesh.material.color.setHex(color);
         node.mesh.material.emissive.setHex(emissive);
-        console.log(`Updated 3D node ${ip} latency: ${delay}ms, status: ${status}`);
+        
+        if (node.line) {
+            node.line.material.color.setHex(lineColor);
+            node.line.material.opacity = lineOpacity;
+        }
+        console.log(`Updated 3D planetary node ${ip} latency: ${delay}ms, status: ${status}`);
     }
 };
 
