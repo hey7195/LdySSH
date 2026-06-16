@@ -8607,7 +8607,6 @@ function updateSplitScreenHighlight() {
 // ==========================================================================
 // 3D Topology Full-Screen Background Rendering and Control (LdySSH v2.0)
 // ==========================================================================
-let topoViewer = null;
 
 function toggleWorkbenchActive(active) {
     if (active) {
