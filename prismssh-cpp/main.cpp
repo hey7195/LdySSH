@@ -405,6 +405,30 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
+        else if (action == "update_connection_group") {
+            NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
+            std::string keyToUpdate = args[0].get<std::string>();
+            std::string newGroup = args[1].get<std::string>();
+            std::wstring configDir = GetConfigDirectory();
+            std::wstring connPath = configDir + L"\\connections.json";
+            
+            std::string connData = ReadConnectionConfigWithRecovery(connPath);
+            bool updated = false;
+            if (!connData.empty()) {
+                nlohmann::json conns = nlohmann::json::parse(connData);
+                if (conns.contains(keyToUpdate)) {
+                    conns[keyToUpdate]["group"] = newGroup;
+                    BackupConnectionConfig(connPath);
+                    WriteUtf8ToFile(connPath, conns.dump(2));
+                    updated = true;
+                }
+            }
+            
+            nlohmann::json retObj;
+            retObj["success"] = updated;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "get_command_library") {
             NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
             std::wstring configDir = GetConfigDirectory();
@@ -1570,6 +1594,15 @@ LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     hInst = hInstance;
     libssh2_init(0);
+
+    // Auto-detect and launch Python AI Backend services in background (daemon mode)
+    if (GetFileAttributesW(L"prismssh.py") != INVALID_FILE_ATTRIBUTES) {
+        ShellExecuteW(NULL, L"open", L"pythonw.exe", L"prismssh.py --backend-only", NULL, SW_HIDE);
+    } else if (GetFileAttributesW(L"..\\prismssh.py") != INVALID_FILE_ATTRIBUTES) {
+        ShellExecuteW(NULL, L"open", L"pythonw.exe", L"..\\prismssh.py --backend-only", NULL, SW_HIDE);
+    } else if (GetFileAttributesW(L"..\\..\\..\\prismssh.py") != INVALID_FILE_ATTRIBUTES) {
+        ShellExecuteW(NULL, L"open", L"pythonw.exe", L"..\\..\\..\\prismssh.py --backend-only", NULL, SW_HIDE);
+    }
 
     WNDCLASSEX wcex;
     wcex.cbSize = sizeof(WNDCLASSEX);

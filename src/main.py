@@ -69,9 +69,14 @@ def start_hermes_webui_server(logger):
         if platform.system() == "Windows":
             creationflags = 0x08000000  # CREATE_NO_WINDOW
             
+        import os
+        env = os.environ.copy()
+        env["HERMES_WEBUI_PORT"] = "61356"
+
         hermes_process = subprocess.Popen(
             [sys.executable, str(server_script)],
             cwd=str(hermes_dir),
+            env=env,
             creationflags=creationflags
         )
         logger.info(f"Hermes WebUI Server started successfully (PID: {hermes_process.pid})")
@@ -169,21 +174,39 @@ def load_html_template() -> str:
 
 def main():
     """Main application entry point."""
-    try:
-        start_ai_agent_server()
-    except Exception as e:
-        print(f"Failed to start AI Agent Server: {e}")
-    
+    import argparse
+    parser = argparse.ArgumentParser(description="PrismSSH Backend / Client")
+    parser.add_argument("--backend-only", action="store_true", help="Start only backend services (no GUI window)")
+    args, unknown = parser.parse_known_args()
+
     # Initialize configuration
     config = Config()
     
     # Setup logging
     logger_instance = Logger(config.log_file)
     logger = Logger.get_logger(__name__)
-    
+
+    try:
+        start_ai_agent_server()
+    except Exception as e:
+        print(f"Failed to start AI Agent Server: {e}")
+
     # Start Hermes WebUI Server
     start_hermes_webui_server(logger)
     
+    if args.backend_only:
+        logger.info("=== LdySSH Backend Only Mode (Daemon) Started ===")
+        try:
+            import time
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            stop_hermes_webui_server(logger)
+            logger.info("=== LdySSH Backend Only Mode Stopped ===")
+        sys.exit(0)
+
     logger.info("=== LdySSH Starting ===")
     logger.info(f"Config directory: {config.config_dir}")
     logger.info(f"Encryption available: {os.path.exists(config.key_file) if hasattr(config, 'key_file') else 'Unknown'}")
