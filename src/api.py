@@ -1560,7 +1560,7 @@ class PrismSSHAPI:
             import webview
             webview.create_window(
                 title="🔮 Hermes AI Copilot 工作站",
-                url="http://localhost:61356",
+                url="https://ldyssh.local/hermes/index.html",
                 width=1200,
                 height=800
             )

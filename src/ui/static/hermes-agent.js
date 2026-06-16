@@ -157,6 +157,6 @@ window.popHermesWindow = function() {
     } else {
         console.error("Pywebview API not available");
         // 兜底在新浏览器标签页中打开
-        window.open("http://localhost:61356", "_blank");
+        window.open("https://ldyssh.local/hermes/index.html", "_blank");
     }
 };
