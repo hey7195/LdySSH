@@ -20,11 +20,13 @@ try:
     from .config import Config
     from .logger import Logger
     from .api import PrismSSHAPI
+    from .ai_agent import start_ai_agent_server
 except ImportError:
     # Fallback to absolute imports when running as script
     from config import Config
     from logger import Logger
     from api import PrismSSHAPI
+    from ai_agent import start_ai_agent_server
 
 
 def load_html_template() -> str:
@@ -75,9 +77,11 @@ def load_html_template() -> str:
         
         # Load JavaScript
         js_content = ""
-        if js_path.exists():
-            with open(js_path, 'r', encoding='utf-8') as f:
-                js_content = f.read()
+        for js_file in ["core-topology.js", "app.js", "hermes-agent.js"]:
+            full_js_path = base_dir / "ui" / "static" / js_file
+            if full_js_path.exists():
+                with open(full_js_path, 'r', encoding='utf-8') as f:
+                    js_content += f.read() + "\n\n"
         
         # Embed CSS and JS into the HTML
         html_content = html_content.replace(
@@ -98,7 +102,10 @@ def load_html_template() -> str:
 
 def main():
     """Main application entry point."""
-    pass # Removed print("PrismSSH Starting...")
+    try:
+        start_ai_agent_server()
+    except Exception as e:
+        print(f"Failed to start AI Agent Server: {e}")
     
     # Initialize configuration
     config = Config()

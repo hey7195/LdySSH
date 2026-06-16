@@ -541,7 +541,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ace.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ext-modelist.js"></script>
 
+    <script src="static/core-topology.js?v=1017"></script>
     <script src="static/app.js?v=1017"></script>
+    <script src="static/hermes-agent.js?v=1017"></script>
         </div>
     </div>
 
@@ -629,6 +631,62 @@
             <button class="topo-menu-btn edit" onclick="handleTopoMenu('edit')" title="编辑主机">⚙️</button>
             <button class="topo-menu-btn remove" onclick="handleTopoMenu('remove')" title="移除主机">🗑️</button>
             <button class="topo-menu-btn create" onclick="handleTopoMenu('create')" title="新建主机">➕</button>
+        </div>
+    </div>
+
+    <!-- 🔮 Hermes AI Copilot 侧栏与安全审批组件 -->
+    <div id="hermesDrawer" class="hermes-drawer collapsed">
+        <div class="drawer-header">
+            <div class="drawer-header-left">
+                <span class="hermes-title-icon">🔮</span>
+                <h3>Hermes AI Copilot</h3>
+                <div class="status-indicator">
+                    <span id="hermesStatusDot" class="status-dot offline"></span>
+                    <span id="hermesStatusText" class="status-text">AI 离线 (重连中...)</span>
+                </div>
+            </div>
+            <div class="drawer-header-right">
+                <select id="hermesRoleSelect" class="hermes-select">
+                    <option value="devops">📁 运维助手</option>
+                    <option value="secops">🛡️ 安全审计</option>
+                    <option value="coder">⚡ 脚本大师</option>
+                </select>
+                <button class="close-drawer-btn" onclick="toggleHermesDrawer()">×</button>
+            </div>
+        </div>
+        <div class="hermes-chat-container">
+            <div id="hermesChatLog" class="chat-log"></div>
+            <div id="hermesThinkingLoader" class="thinking-loader" style="display:none;">
+                <span class="thinking-dot"></span>
+                <span class="thinking-dot"></span>
+                <span class="thinking-dot"></span>
+                <span style="margin-left: 8px; color: #38bdf8; font-size: 11px;">Hermes 正在思考和组织命令...</span>
+            </div>
+            <div class="chat-input-wrapper">
+                <input type="text" id="hermesInput" placeholder="输入运维指令, 如 '帮我连接到 Windows 服务器'..." autocomplete="off" />
+                <button id="hermesSendBtn" class="send-btn">🚀</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI 唤起浮动按钮 -->
+    <button id="hermesOpenBtn" class="hermes-open-btn" onclick="toggleHermesDrawer()" title="呼出 Hermes AI 助手">🔮</button>
+
+    <!-- AI 工具安全审批弹窗 (AI 安全气囊) -->
+    <div id="hermesApproveModal" class="hermes-approve-modal" style="display:none;">
+        <div class="approve-content">
+            <div class="approve-header">
+                <span class="approve-shield">🛡️</span>
+                <h3 id="approveActionTitle">AI 敏感指令授权申请</h3>
+            </div>
+            <div class="approve-body">
+                <p style="margin: 0 0 10px 0; color: #94a3b8; font-size: 13px;">请仔细审查以下由 AI 智能体提交的自动控制请求：</p>
+                <div id="approveActionDesc" class="approve-desc"></div>
+            </div>
+            <div class="approve-footer">
+                <button id="hermesApproveNo" class="approve-btn reject">拒绝执行</button>
+                <button id="hermesApproveYes" class="approve-btn accept">授权执行</button>
+            </div>
         </div>
     </div>
 
