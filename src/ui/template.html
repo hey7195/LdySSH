@@ -640,32 +640,14 @@
             <div class="drawer-header-left">
                 <span class="hermes-title-icon">🔮</span>
                 <h3>Hermes AI Copilot</h3>
-                <div class="status-indicator">
-                    <span id="hermesStatusDot" class="status-dot offline"></span>
-                    <span id="hermesStatusText" class="status-text">AI 离线 (重连中...)</span>
-                </div>
             </div>
             <div class="drawer-header-right">
-                <select id="hermesRoleSelect" class="hermes-select">
-                    <option value="devops">📁 运维助手</option>
-                    <option value="secops">🛡️ 安全审计</option>
-                    <option value="coder">⚡ 脚本大师</option>
-                </select>
+                <button class="pop-window-btn" onclick="popHermesWindow()" title="在新窗口中展开完整工作站">↗</button>
                 <button class="close-drawer-btn" onclick="toggleHermesDrawer()">×</button>
             </div>
         </div>
-        <div class="hermes-chat-container">
-            <div id="hermesChatLog" class="chat-log"></div>
-            <div id="hermesThinkingLoader" class="thinking-loader" style="display:none;">
-                <span class="thinking-dot"></span>
-                <span class="thinking-dot"></span>
-                <span class="thinking-dot"></span>
-                <span style="margin-left: 8px; color: #38bdf8; font-size: 11px;">Hermes 正在思考和组织命令...</span>
-            </div>
-            <div class="chat-input-wrapper">
-                <input type="text" id="hermesInput" placeholder="输入运维指令, 如 '帮我连接到 Windows 服务器'..." autocomplete="off" />
-                <button id="hermesSendBtn" class="send-btn">🚀</button>
-            </div>
+        <div class="hermes-iframe-container" style="flex-grow: 1; width: 100%; height: calc(100% - 50px); background: #0c0d14;">
+            <iframe id="hermesIframe" src="http://localhost:61356" style="width: 100%; height: 100%; border: none;"></iframe>
         </div>
     </div>
 

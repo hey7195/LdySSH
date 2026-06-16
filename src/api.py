@@ -1553,6 +1553,22 @@ class PrismSSHAPI:
             self.logger.error(f"API: Error opening local file {file_path}: {e}")
             return json.dumps({'success': False, 'error': str(e)})
 
+    def pop_hermes_window(self):
+        """Pop a new standalone window to show the complete Hermes WebUI."""
+        try:
+            self.logger.info("API: Spawning standalone Hermes WebUI window")
+            import webview
+            webview.create_window(
+                title="🔮 Hermes AI Copilot 工作站",
+                url="http://localhost:61356",
+                width=1200,
+                height=800
+            )
+            return json.dumps({'success': True})
+        except Exception as e:
+            self.logger.error(f"API: Failed to spawn standalone Hermes window: {e}")
+            return json.dumps({'success': False, 'error': str(e)})
+
     def cleanup(self):
         """Cleanup resources on shutdown."""
         self.logger.info("API: Cleaning up resources")

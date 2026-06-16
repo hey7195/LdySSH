@@ -29,6 +29,73 @@ except ImportError:
     from ai_agent import start_ai_agent_server
 
 
+import subprocess
+
+hermes_process = None
+
+def ensure_hermes_dependencies(logger):
+    try:
+        import yaml
+        import cryptography
+        logger.info("Hermes dependencies (pyyaml, cryptography) are already satisfied.")
+    except ImportError:
+        logger.info("Hermes dependencies missing. Auto installing...")
+        try:
+            # 静默安装最小依赖
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml", "cryptography"])
+            logger.info("Hermes dependencies installed successfully.")
+        except Exception as e:
+            logger.error(f"Failed to install Hermes dependencies: {e}")
+
+def start_hermes_webui_server(logger):
+    global hermes_process
+    ensure_hermes_dependencies(logger)
+    
+    if hasattr(sys, '_MEIPASS'):
+        base_dir = Path(sys._MEIPASS)
+    else:
+        base_dir = Path(__file__).parent
+        
+    hermes_dir = base_dir / "upstream-hermes-webui"
+    server_script = hermes_dir / "server.py"
+    
+    if not server_script.exists():
+        logger.error(f"Hermes WebUI server script not found at {server_script}")
+        return
+        
+    try:
+        logger.info(f"Starting Hermes WebUI Server from {hermes_dir}...")
+        creationflags = 0
+        if platform.system() == "Windows":
+            creationflags = 0x08000000  # CREATE_NO_WINDOW
+            
+        hermes_process = subprocess.Popen(
+            [sys.executable, str(server_script)],
+            cwd=str(hermes_dir),
+            creationflags=creationflags
+        )
+        logger.info(f"Hermes WebUI Server started successfully (PID: {hermes_process.pid})")
+    except Exception as e:
+        logger.error(f"Failed to start Hermes WebUI Server: {e}")
+
+def stop_hermes_webui_server(logger):
+    global hermes_process
+    if hermes_process:
+        try:
+            logger.info(f"Terminating Hermes WebUI Server (PID: {hermes_process.pid})...")
+            hermes_process.terminate()
+            hermes_process.wait(timeout=3)
+            logger.info("Hermes WebUI Server stopped.")
+        except Exception as e:
+            logger.error(f"Error stopping Hermes WebUI Server: {e}")
+            try:
+                hermes_process.kill()
+                logger.info("Hermes WebUI Server killed.")
+            except:
+                pass
+        hermes_process = None
+
+
 def load_html_template() -> str:
     """Load the HTML template and embed CSS/JS."""
     if hasattr(sys, '_MEIPASS'):
@@ -114,6 +181,9 @@ def main():
     logger_instance = Logger(config.log_file)
     logger = Logger.get_logger(__name__)
     
+    # Start Hermes WebUI Server
+    start_hermes_webui_server(logger)
+    
     logger.info("=== LdySSH Starting ===")
     logger.info(f"Config directory: {config.config_dir}")
     logger.info(f"Encryption available: {os.path.exists(config.key_file) if hasattr(config, 'key_file') else 'Unknown'}")
@@ -165,6 +235,7 @@ def main():
         # Register cleanup on window close
         def on_window_closed():
             logger.info("Window closed, cleaning up...")
+            stop_hermes_webui_server(logger)
             api.cleanup()
 
         # Start the GUI
@@ -176,6 +247,10 @@ def main():
         sys.exit(1)
     finally:
         # Cleanup
+        try:
+            stop_hermes_webui_server(logger)
+        except:
+            pass
         try:
             api.cleanup()
         except:
