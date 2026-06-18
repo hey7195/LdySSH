@@ -47,9 +47,141 @@ def ensure_hermes_dependencies(logger):
         except Exception as e:
             logger.error(f"Failed to install Hermes dependencies: {e}")
 
+def setup_local_ollama(logger):
+    import urllib.request
+    import json
+    import subprocess
+    import shutil
+    import platform
+    import time
+    import os
+    import threading
+    
+    ollama_url = "http://127.0.0.1:11434"
+    ollama_running = False
+    
+    # 1. 尝试检测是否已经运行
+    try:
+        req = urllib.request.Request(f"{ollama_url}/api/tags")
+        with urllib.request.urlopen(req, timeout=2) as response:
+            if response.status == 200:
+                ollama_running = True
+                logger.info("Ollama is already running locally.")
+    except Exception:
+        pass
+
+    # 2. 如果没有运行，尝试在 Windows 上自动拉起 Ollama
+    if not ollama_running and platform.system() == "Windows":
+        local_app_data = os.getenv("LOCALAPPDATA", "")
+        paths_to_check = []
+        if local_app_data:
+            paths_to_check.append(Path(local_app_data) / "Programs" / "Ollama" / "ollama app.exe")
+            paths_to_check.append(Path(local_app_data) / "Programs" / "Ollama" / "ollama.exe")
+        
+        ollama_in_path = shutil.which("ollama")
+        if ollama_in_path:
+            paths_to_check.append(Path(ollama_in_path))
+
+        ollama_bin = None
+        for p in paths_to_check:
+            if p.exists():
+                ollama_bin = p
+                break
+                
+        if ollama_bin:
+            logger.info(f"Ollama found at {ollama_bin}. Launching in background...")
+            try:
+                subprocess.Popen([str(ollama_bin), "serve"], creationflags=0x08000000)
+                for _ in range(10):
+                    time.sleep(0.5)
+                    try:
+                        with urllib.request.urlopen(f"{ollama_url}/api/tags", timeout=1) as resp:
+                            if resp.status == 200:
+                                ollama_running = True
+                                logger.info("Ollama successfully launched and verified.")
+                                break
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.error(f"Failed to launch Ollama: {e}")
+        else:
+            logger.warning("Ollama executable not found in PATH or standard AppData folders.")
+
+    # 3. 检查并拉取默认轻量大模型
+    selected_model = "qwen2.5:1.5b"
+    
+    if ollama_running:
+        try:
+            with urllib.request.urlopen(f"{ollama_url}/api/tags", timeout=2) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                models = [m['name'] for m in data.get('models', [])]
+                
+                if models:
+                    if any("qwen2.5:1.5b" in m or "qwen2.5-coder:1.5b" in m for m in models):
+                        selected_model = "qwen2.5:1.5b"
+                    elif any("qwen2.5" in m for m in models):
+                        selected_model = next(m for m in models if "qwen2.5" in m)
+                    elif any("llama3" in m for m in models):
+                        selected_model = next(m for m in models if "llama3" in m)
+                    else:
+                        selected_model = models[0]
+                    logger.info(f"Detected existing Ollama model: {selected_model}")
+                else:
+                    logger.info(f"No models found in Ollama. Automatically pulling {selected_model} in background...")
+                    def pull_model():
+                        try:
+                            subprocess.run(["ollama", "pull", selected_model], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+                            logger.info(f"Ollama model {selected_model} pulled successfully.")
+                        except Exception as e:
+                            logger.error(f"Failed to pull Ollama model: {e}")
+                    threading.Thread(target=pull_model, daemon=True).start()
+        except Exception as e:
+            logger.error(f"Error querying Ollama tags: {e}")
+    else:
+        logger.warning("Ollama is not running. Skip model auto-pull.")
+
+    # 4. 写入预配置的 config.yaml 和 settings.json 到专属的 HERMES_HOME
+    hermes_home = Path.home() / ".prismssh" / "hermes_home"
+    hermes_home.mkdir(parents=True, exist_ok=True)
+    
+    config_yaml_path = hermes_home / "config.yaml"
+    settings_json_path = hermes_home / "webui" / "settings.json"
+    
+    config_content = f"""model:
+  provider: ollama
+  name: {selected_model}
+providers:
+  ollama:
+    api_key: ""
+    base_url: http://localhost:11434/v1
+"""
+    try:
+        config_yaml_path.write_text(config_content, encoding="utf-8")
+        logger.info(f"Wrote pre-configured config.yaml referencing model: {selected_model}")
+    except Exception as e:
+        logger.error(f"Failed to write config.yaml: {e}")
+        
+    settings_content = f"""{{
+  "onboarding_completed": true,
+  "default_model": "{selected_model}",
+  "default_provider": "ollama"
+}}"""
+    try:
+        settings_json_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_json_path.write_text(settings_content, encoding="utf-8")
+        logger.info("Wrote pre-configured settings.json with onboarding_completed=true")
+    except Exception as e:
+        logger.error(f"Failed to write settings.json: {e}")
+
 def start_hermes_webui_server(logger):
     global hermes_process
     ensure_hermes_dependencies(logger)
+    
+    # 自动初始化配置本地 Ollama 属性
+    try:
+        setup_local_ollama(logger)
+    except Exception as e:
+        logger.error(f"Failed to auto-configure local Ollama: {e}")
     
     if hasattr(sys, '_MEIPASS'):
         base_dir = Path(sys._MEIPASS)
@@ -74,6 +206,7 @@ def start_hermes_webui_server(logger):
         import os
         env = os.environ.copy()
         env["HERMES_WEBUI_PORT"] = "61356"
+        env["HERMES_HOME"] = str(Path.home() / ".prismssh" / "hermes_home")
 
         # Redirect stdout/stderr to help diagnostic
         log_dir = Path.home() / ".prismssh"
