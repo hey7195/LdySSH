@@ -75,11 +75,19 @@ def start_hermes_webui_server(logger):
         env = os.environ.copy()
         env["HERMES_WEBUI_PORT"] = "61356"
 
+        # Redirect stdout/stderr to help diagnostic
+        log_dir = Path.home() / ".prismssh"
+        log_dir.mkdir(exist_ok=True)
+        log_file_path = log_dir / "hermes_server_debug.log"
+        log_file = open(log_file_path, "a", encoding="utf-8")
+
         hermes_process = subprocess.Popen(
             [sys.executable, str(server_script)],
             cwd=str(hermes_dir),
             env=env,
-            creationflags=creationflags
+            creationflags=creationflags,
+            stdout=log_file,
+            stderr=log_file
         )
         logger.info(f"Hermes WebUI Server started successfully (PID: {hermes_process.pid})")
     except Exception as e:
