@@ -53,10 +53,12 @@ def start_hermes_webui_server(logger):
     
     if hasattr(sys, '_MEIPASS'):
         base_dir = Path(sys._MEIPASS)
+        hermes_dir = base_dir / "upstream-hermes-webui"
     else:
-        base_dir = Path(__file__).parent
-        
-    hermes_dir = base_dir / "upstream-hermes-webui"
+        parent_dir = Path(__file__).parent.parent
+        hermes_dir = parent_dir / "upstream-hermes-webui"
+        if not hermes_dir.exists():
+            hermes_dir = Path(__file__).parent / "upstream-hermes-webui"
     server_script = hermes_dir / "server.py"
     
     if not server_script.exists():

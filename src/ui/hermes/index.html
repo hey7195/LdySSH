@@ -31,38 +31,94 @@
 <script>window.__HERMES_CONFIG__={maxUploadBytes:10485760,csrfToken:""};</script>
 <script>(function(){
   var cfg=window.__HERMES_CONFIG__||{},token=cfg.csrfToken||'';
-  if(!token||!window.fetch)return;
   var originalFetch=window.fetch.bind(window);
+
+  function rewriteUrl(input) {
+    var urlStr = "";
+    var isRequestObj = false;
+    if (typeof input === 'string') {
+      urlStr = input;
+    } else if (input instanceof URL) {
+      urlStr = input.href;
+    } else if (input && typeof input.url === 'string') {
+      urlStr = input.url;
+      isRequestObj = true;
+    } else {
+      return input;
+    }
+
+    try {
+      var absoluteUrl = new URL(urlStr, document.baseURI || location.href);
+      if (absoluteUrl.origin === location.origin) {
+        var pathname = absoluteUrl.pathname;
+        if (pathname.indexOf('/api/') !== -1 || pathname.endsWith('/health') || pathname.indexOf('/health?') !== -1) {
+          absoluteUrl.protocol = "http:";
+          absoluteUrl.host = "127.0.0.1:61356";
+          if (pathname.indexOf('/hermes/') === 0) {
+            absoluteUrl.pathname = pathname.substring(7);
+          }
+          if (isRequestObj) {
+            return new Request(absoluteUrl.href, input);
+          } else {
+            return absoluteUrl.href;
+          }
+        }
+      }
+    } catch(e) {}
+    return input;
+  }
+
   function sameOriginUnsafe(input,init){
+    if (!token) return false;
     var method=((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
     if(!/^(POST|PUT|PATCH|DELETE)$/.test(method))return false;
     try{
       var raw=(typeof input==='string'||input instanceof URL)?input:(input&&input.url)||'';
       var url=new URL(raw,document.baseURI||location.href);
-      if(url.origin!==location.origin)return false;
+      if(url.origin!==location.origin && url.host !== "127.0.0.1:61356")return false;
       return !/\/api\/(auth\/login|csp-report)$/.test(url.pathname);
     }catch(_){return false;}
   }
-  window.fetch=function(input,init){
-    if(sameOriginUnsafe(input,init)){
-      var opts=init?Object.assign({},init):{};
-      var headers=new Headers(opts.headers!==undefined?opts.headers:((input&&input.headers)||{}));
-      if(!headers.has('X-Hermes-CSRF-Token'))headers.set('X-Hermes-CSRF-Token',token);
-      opts.headers=headers;
-      return originalFetch(input,opts);
+
+  if (window.fetch) {
+    window.fetch=function(input,init){
+      input = rewriteUrl(input);
+      if(sameOriginUnsafe(input,init)){
+        var opts=init?Object.assign({},init):{};
+        var headers=new Headers(opts.headers!==undefined?opts.headers:((input&&input.headers)||{}));
+        if(!headers.has('X-Hermes-CSRF-Token'))headers.set('X-Hermes-CSRF-Token',token);
+        opts.headers=headers;
+        return originalFetch(input,opts);
+      }
+      return originalFetch(input,init);
+    };
+  }
+
+  if (window.EventSource) {
+    var OriginalEventSource = window.EventSource;
+    window.EventSource = function(url, options) {
+      var rewritten = rewriteUrl(url);
+      return new OriginalEventSource(rewritten, options);
+    };
+    for (var key in OriginalEventSource) {
+      if (OriginalEventSource.hasOwnProperty(key)) {
+        window.EventSource[key] = OriginalEventSource[key];
+      }
     }
-    return originalFetch(input,init);
-  };
+  }
+
   if(navigator.sendBeacon){
     var originalBeacon=navigator.sendBeacon.bind(navigator);
     navigator.sendBeacon=function(url,data){
       try{
-        if(sameOriginUnsafe(url,{method:'POST'})){
+        var rewritten = rewriteUrl(url);
+        if(sameOriginUnsafe(rewritten,{method:'POST'})){
           var headers={'X-Hermes-CSRF-Token':token};
           if(data&&data.type)headers['Content-Type']=data.type;
-          originalFetch(url,{method:'POST',credentials:'include',headers:headers,body:data,keepalive:true});
+          originalFetch(rewritten,{method:'POST',credentials:'include',headers:headers,body:data,keepalive:true});
           return true;
         }
+        return originalBeacon(rewritten,data);
       }catch(_){}
       return originalBeacon(url,data);
     };
@@ -1056,10 +1112,7 @@
             </div>
             <div class="settings-field">
               <label for="settingsModel" data-i18n="settings_label_model">Default Model</label>
-              <div class="model-advanced-row">
-                <select id="settingsModel" style="width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px"></select>
-                <button type="button" id="mainAdvancedBtn" class="model-advanced-btn" title="Advanced options" aria-label="Advanced options for main model"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-              </div>
+              <select id="settingsModel" style="width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px"></select>
               <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_model">Used for new conversations. Existing conversations keep their selected model.</div>
             </div>
             <div class="settings-field">
@@ -1159,9 +1212,7 @@
               </label>
               <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_notifications">Show a system notification when a response completes while the app is in the background.</div>
               <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
-                <span id="notificationPermissionButtonWrap" style="display:inline-flex">
-                  <button type="button" class="sm-btn" id="notificationPermissionButton" onclick="requestNotificationPermission()" style="padding:5px 10px;font-size:12px" data-i18n="notifications_enable_btn">Enable notifications</button>
-                </span>
+                <button type="button" class="sm-btn" onclick="requestNotificationPermission()" style="padding:5px 10px;font-size:12px" data-i18n="notifications_enable_btn">Enable notifications</button>
                 <button type="button" class="sm-btn" onclick="sendBrowserNotification('Hermes test','Notifications are ready.',{force:true});" style="padding:5px 10px;font-size:12px" data-i18n="notifications_test_btn">Send test</button>
                 <span id="notificationPermissionStatus" style="font-size:11px;color:var(--muted)"></span>
               </div>
@@ -1643,6 +1694,5 @@
   </div>
   <div id="outlinePanel"></div>
 </div>
-<script src="static/ldyssh-bridge.js"></script>
 </body>
 </html>
