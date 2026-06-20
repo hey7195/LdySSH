@@ -21,12 +21,14 @@ try:
     from .logger import Logger
     from .api import PrismSSHAPI
     from .ai_agent import start_ai_agent_server
+    from .local_llm import start_local_llm_backend, stop_local_llm_backend
 except ImportError:
     # Fallback to absolute imports when running as script
     from config import Config
     from logger import Logger
     from api import PrismSSHAPI
     from ai_agent import start_ai_agent_server
+    from local_llm import start_local_llm_backend, stop_local_llm_backend
 
 
 import subprocess
@@ -47,125 +49,42 @@ def ensure_hermes_dependencies(logger):
         except Exception as e:
             logger.error(f"Failed to install Hermes dependencies: {e}")
 
-def setup_local_ollama(logger):
-    import urllib.request
-    import json
-    import subprocess
-    import shutil
-    import platform
-    import time
-    import os
-    import threading
-    
-    ollama_url = "http://127.0.0.1:11434"
-    ollama_running = False
-    
-    # 1. 尝试检测是否已经运行
+def setup_local_llm_backend(logger):
+    """
+    Auto configures local standalone LLM backend config and triggers asset downloading/launch.
+    """
     try:
-        req = urllib.request.Request(f"{ollama_url}/api/tags")
-        with urllib.request.urlopen(req, timeout=2) as response:
-            if response.status == 200:
-                ollama_running = True
-                logger.info("Ollama is already running locally.")
-    except Exception:
-        pass
-
-    # 2. 如果没有运行，尝试在 Windows 上自动拉起 Ollama
-    if not ollama_running and platform.system() == "Windows":
-        local_app_data = os.getenv("LOCALAPPDATA", "")
-        paths_to_check = []
-        if local_app_data:
-            paths_to_check.append(Path(local_app_data) / "Programs" / "Ollama" / "ollama app.exe")
-            paths_to_check.append(Path(local_app_data) / "Programs" / "Ollama" / "ollama.exe")
+        # Start local LLM background server (or Mock API server)
+        start_local_llm_backend()
+    except Exception as e:
+        logger.error(f"Failed to start local LLM backend: {e}")
         
-        ollama_in_path = shutil.which("ollama")
-        if ollama_in_path:
-            paths_to_check.append(Path(ollama_in_path))
-
-        ollama_bin = None
-        for p in paths_to_check:
-            if p.exists():
-                ollama_bin = p
-                break
-                
-        if ollama_bin:
-            logger.info(f"Ollama found at {ollama_bin}. Launching in background...")
-            try:
-                subprocess.Popen([str(ollama_bin), "serve"], creationflags=0x08000000)
-                for _ in range(10):
-                    time.sleep(0.5)
-                    try:
-                        with urllib.request.urlopen(f"{ollama_url}/api/tags", timeout=1) as resp:
-                            if resp.status == 200:
-                                ollama_running = True
-                                logger.info("Ollama successfully launched and verified.")
-                                break
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.error(f"Failed to launch Ollama: {e}")
-        else:
-            logger.warning("Ollama executable not found in PATH or standard AppData folders.")
-
-    # 3. 检查并拉取默认轻量大模型
-    selected_model = "qwen2.5:1.5b"
-    
-    if ollama_running:
-        try:
-            with urllib.request.urlopen(f"{ollama_url}/api/tags", timeout=2) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                models = [m['name'] for m in data.get('models', [])]
-                
-                if models:
-                    if any("qwen2.5:1.5b" in m or "qwen2.5-coder:1.5b" in m for m in models):
-                        selected_model = "qwen2.5:1.5b"
-                    elif any("qwen2.5" in m for m in models):
-                        selected_model = next(m for m in models if "qwen2.5" in m)
-                    elif any("llama3" in m for m in models):
-                        selected_model = next(m for m in models if "llama3" in m)
-                    else:
-                        selected_model = models[0]
-                    logger.info(f"Detected existing Ollama model: {selected_model}")
-                else:
-                    logger.info(f"No models found in Ollama. Automatically pulling {selected_model} in background...")
-                    def pull_model():
-                        try:
-                            subprocess.run(["ollama", "pull", selected_model], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
-                            logger.info(f"Ollama model {selected_model} pulled successfully.")
-                        except Exception as e:
-                            logger.error(f"Failed to pull Ollama model: {e}")
-                    threading.Thread(target=pull_model, daemon=True).start()
-        except Exception as e:
-            logger.error(f"Error querying Ollama tags: {e}")
-    else:
-        logger.warning("Ollama is not running. Skip model auto-pull.")
-
-    # 4. 写入预配置的 config.yaml 和 settings.json 到专属的 HERMES_HOME
+    # Write pre-configured config.yaml and settings.json targeting port 61357 (OpenAI API)
     hermes_home = Path.home() / ".prismssh" / "hermes_home"
     hermes_home.mkdir(parents=True, exist_ok=True)
     
     config_yaml_path = hermes_home / "config.yaml"
     settings_json_path = hermes_home / "webui" / "settings.json"
     
-    config_content = f"""model:
-  provider: ollama
-  name: {selected_model}
+    config_content = """model:
+  provider: openai
+  name: qwen2.5-coder-1.5b-instruct
 providers:
-  ollama:
-    api_key: ""
-    base_url: http://localhost:11434/v1
+  openai:
+    api_key: sk-local-prismssh
+    base_url: http://127.0.0.1:61357/v1
 """
     try:
         config_yaml_path.write_text(config_content, encoding="utf-8")
-        logger.info(f"Wrote pre-configured config.yaml referencing model: {selected_model}")
+        logger.info("Wrote pre-configured config.yaml referencing local llama-server via OpenAI API")
     except Exception as e:
         logger.error(f"Failed to write config.yaml: {e}")
         
-    settings_content = f"""{{
+    settings_content = """{
   "onboarding_completed": true,
-  "default_model": "{selected_model}",
-  "default_provider": "ollama"
-}}"""
+  "default_model": "qwen2.5-coder-1.5b-instruct",
+  "default_provider": "openai"
+}"""
     try:
         settings_json_path.parent.mkdir(parents=True, exist_ok=True)
         settings_json_path.write_text(settings_content, encoding="utf-8")
@@ -177,11 +96,11 @@ def start_hermes_webui_server(logger):
     global hermes_process
     ensure_hermes_dependencies(logger)
     
-    # 自动初始化配置本地 Ollama 属性
+    # Start local LLM backend and setup config
     try:
-        setup_local_ollama(logger)
+        setup_local_llm_backend(logger)
     except Exception as e:
-        logger.error(f"Failed to auto-configure local Ollama: {e}")
+        logger.error(f"Failed to auto-configure local LLM: {e}")
     
     if hasattr(sys, '_MEIPASS'):
         base_dir = Path(sys._MEIPASS)
@@ -228,6 +147,13 @@ def start_hermes_webui_server(logger):
 
 def stop_hermes_webui_server(logger):
     global hermes_process
+    
+    # Clean up local LLM processes
+    try:
+        stop_local_llm_backend()
+    except Exception as e:
+        logger.error(f"Error stopping local LLM backend: {e}")
+
     if hermes_process:
         try:
             logger.info(f"Terminating Hermes WebUI Server (PID: {hermes_process.pid})...")
