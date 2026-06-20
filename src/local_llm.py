@@ -108,10 +108,10 @@ def download_and_extract_engine(bin_dir: Path):
     
     # Mirror list for high speed downloads in China / Global
     urls = [
-        "https://mirror.ghproxy.com/https://github.com/ggerganov/llama.cpp/releases/download/b3152/llama-b3152-bin-win-msvc-x64.zip",
-        "https://ghfast.top/https://github.com/ggerganov/llama.cpp/releases/download/b3152/llama-b3152-bin-win-msvc-x64.zip",
-        "https://ghproxy.net/https://github.com/ggerganov/llama.cpp/releases/download/b3152/llama-b3152-bin-win-msvc-x64.zip",
-        "https://github.com/ggerganov/llama.cpp/releases/download/b3152/llama-b3152-bin-win-msvc-x64.zip"
+        "https://mirror.ghproxy.com/https://github.com/ggml-org/llama.cpp/releases/download/b3152/llama-b3152-bin-win-avx2-x64.zip",
+        "https://ghfast.top/https://github.com/ggml-org/llama.cpp/releases/download/b3152/llama-b3152-bin-win-avx2-x64.zip",
+        "https://ghproxy.net/https://github.com/ggml-org/llama.cpp/releases/download/b3152/llama-b3152-bin-win-avx2-x64.zip",
+        "https://github.com/ggml-org/llama.cpp/releases/download/b3152/llama-b3152-bin-win-avx2-x64.zip"
     ]
     
     def update_eng_progress(p):
