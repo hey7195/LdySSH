@@ -5240,7 +5240,7 @@ input[type="checkbox"] {
     border: none !important;
     background: transparent !important;
     padding: 1px !important;
-    border-radius: 8px !important;
+    border-radius: 12px !important;
     overflow: hidden !important;
     box-sizing: border-box !important;
     width: 100vw !important;
@@ -5268,7 +5268,7 @@ input[type="checkbox"] {
     position: relative !important;
     z-index: 1 !important;
     background: transparent !important;
-    border-radius: 7px !important;
+    border-radius: 11px !important;
     box-sizing: border-box !important;
     width: 100% !important;
     height: 100% !important;

@@ -1641,6 +1641,16 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         return 1;
     }
 
+    // Enable Windows 11 rounded corners for custom borderless window
+    #ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+    #define DWMWA_WINDOW_CORNER_PREFERENCE 33
+    #endif
+    #ifndef DWMWCP_ROUND
+    #define DWMWCP_ROUND 2
+    #endif
+    DWORD dwCornerPreference = DWMWCP_ROUND;
+    DwmSetWindowAttribute(hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, &dwCornerPreference, sizeof(dwCornerPreference));
+
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
 
