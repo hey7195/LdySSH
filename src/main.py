@@ -317,7 +317,8 @@ def main():
             js_api=api,
             width=config.window_width,
             height=config.window_height,
-            min_size=(config.window_min_width, config.window_min_height)
+            min_size=(config.window_min_width, config.window_min_height),
+            resizable=True
         )
         logger.info("WebView window created")
 
