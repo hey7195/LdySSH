@@ -668,6 +668,9 @@ function ansiColorToCss(code) {
 
 // Tool panel functions
 function openTool(toolName) {
+    if (typeof window.exitSpecialViews === 'function') {
+        window.exitSpecialViews();
+    }
     // Check if we have an active session (AI and webfav tools are exempt from this check)
     if (toolName !== 'ai' && toolName !== 'webfav') {
         if (!currentSessionId || !sessions[currentSessionId]) {
@@ -5430,6 +5433,9 @@ async function reconnectSession(oldSessionId) {
 }
 
 window.showWorkbench = function() {
+    if (typeof window.exitSpecialViews === 'function') {
+        window.exitSpecialViews();
+    }
     // 回到主机工作台时，自动关闭右侧栏面板，释放被占用的屏幕空间，防止布局错乱
     closeToolPanel();
 
@@ -5465,6 +5471,9 @@ window.showWorkbench = function() {
 };
 
 function switchToSession(sessionId) {
+    if (typeof window.exitSpecialViews === 'function') {
+        window.exitSpecialViews();
+    }
     toggleWorkbenchActive(false);
     const termContainer = document.querySelector('.terminal-container');
     if (termContainer) {
@@ -6681,6 +6690,9 @@ function clearConnectionForm() {
 }
 
 function openNewConnectionForm(focusField = 'hostname', clearForm = false) {
+    if (typeof window.exitSpecialViews === 'function') {
+        window.exitSpecialViews();
+    }
     setSshSidebarVisible(true);
     if (clearForm) clearConnectionForm();
 
@@ -9159,6 +9171,48 @@ window.exitDevToolsView = function() {
         devtools.classList.remove('fade-in');
     }
     window.stopTimestampPolling();
+};
+
+window.exitSpecialViews = function() {
+    let changed = false;
+    const webfav = document.getElementById('webfavContainer');
+    if (webfav && webfav.style.display !== 'none') {
+        webfav.style.display = 'none';
+        webfav.classList.remove('fade-in');
+        changed = true;
+    }
+    const devtools = document.getElementById('devtoolsContainer');
+    if (devtools && devtools.style.display !== 'none') {
+        devtools.style.display = 'none';
+        devtools.classList.remove('fade-in');
+        window.stopTimestampPolling();
+        changed = true;
+    }
+    
+    if (changed) {
+        // 恢复原本中间面板显示（如有活跃会话则显示终端，否则回到工作台）
+        if (currentSessionId && sessions[currentSessionId]) {
+            const wrapper = document.getElementById('terminalWrapper');
+            if (wrapper) wrapper.style.display = isSplitMode ? 'flex' : 'block';
+            document.getElementById('welcomeScreen').style.display = 'none';
+            const termContainer = document.querySelector('.terminal-container');
+            if (termContainer) termContainer.classList.remove('in-workbench');
+            toggleWorkbenchActive(false);
+        } else {
+            document.getElementById('welcomeScreen').style.display = 'block';
+            const wrapper = document.getElementById('terminalWrapper');
+            if (wrapper) wrapper.style.display = 'none';
+            const termContainer = document.querySelector('.terminal-container');
+            if (termContainer) termContainer.classList.add('in-workbench');
+            toggleWorkbenchActive(true);
+        }
+        
+        // 恢复左侧高亮按钮为 SSH
+        document.querySelectorAll('.activity-item').forEach(item => {
+            item.classList.remove('active', 'tool-active');
+        });
+        document.getElementById('activitySsh')?.classList.add('active');
+    }
 };
 
 // 2. 左侧分类与搜索过滤
