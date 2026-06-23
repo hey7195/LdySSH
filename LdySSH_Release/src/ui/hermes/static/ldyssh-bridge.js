@@ -116,8 +116,7 @@
         characterData: true
     });
 
-    // 页面完全载入后做一次全面预扫并加载大模型中文进度状态横幅
-    window.addEventListener('DOMContentLoaded', () => {
+    function initBridge() {
         scanForCommands();
 
         // 注入大模型下载/就绪指示横幅 CSS 样式
@@ -129,7 +128,7 @@
                 left: 0;
                 width: 100%;
                 height: 38px;
-                background: rgba(15, 23, 42, 0.88);
+                background: rgba(15, 23, 42, 0.9);
                 backdrop-filter: blur(8px);
                 -webkit-backdrop-filter: blur(8px);
                 border-bottom: 1px solid rgba(168, 85, 247, 0.45);
@@ -219,13 +218,12 @@
         };
 
         let checkInterval = null;
-        let successiveFails = 0;
 
         async function checkStatus() {
             try {
-                const res = await fetch('status.json');
+                const res = await fetch('status.json?t=' + Date.now());
                 if (!res.ok) {
-                    showReadyState();
+                    showConnectingState();
                     return;
                 }
                 const data = await res.json();
@@ -237,11 +235,10 @@
                 } else if (data.status === 'downloading') {
                     showDownloadingState(data.progress_engine, data.progress_model, data.speed);
                 } else {
-                    showReadyState();
+                    showConnectingState();
                 }
             } catch (err) {
-                // status.json not available, assuming LLM backend is fully loaded and ready
-                showReadyState();
+                showConnectingState();
             }
         }
 
@@ -251,7 +248,7 @@
             if (badge && text) {
                 badge.className = 'ldyssh-llm-badge';
                 badge.innerText = 'AI 连接中';
-                text.innerHTML = '正在连接本地大模型推理引擎... 若是首次打开，后台正在自动为您补全环境依赖。';
+                text.innerHTML = '正在连接本地大模型推理引擎... 如果是首次开启，后台正在自动为您下载环境依赖（约 1GB）。';
             }
         }
 
@@ -283,11 +280,11 @@
                 badge.innerText = '本地 AI 已就绪';
                 text.innerHTML = '🟢 本地离线 Qwen2.5 物理大模型已就绪！<b>💡 提示：点击左侧聊天大区上方的 “+” 按钮新建会话，即可与离线 AI 展开对话！</b>';
             }
-            // 就绪 6 秒后自动收起
+            // 就绪 8 秒后自动收起
             setTimeout(() => {
                 banner.classList.add('hidden');
                 document.body.classList.add('banner-closed');
-            }, 6000);
+            }, 8000);
             
             if (checkInterval) {
                 clearInterval(checkInterval);
@@ -297,5 +294,11 @@
 
         checkInterval = setInterval(checkStatus, 2000);
         checkStatus();
-    });
+    }
+
+    if (document.readyState === 'loading') {
+        window.addEventListener('DOMContentLoaded', initBridge);
+    } else {
+        initBridge();
+    }
 })();
