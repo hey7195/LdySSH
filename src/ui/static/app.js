@@ -693,6 +693,13 @@ function openTool(toolName) {
         clearSystemMonitorRefresh();
     }
 
+    if (currentTool === 'webfav' && toolName !== 'webfav') {
+        if (!currentSessionId) {
+            const welcome = document.getElementById('welcomeScreen');
+            if (welcome) welcome.style.display = 'block';
+        }
+    }
+
     // Reset tool activity buttons
     document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands, #aiIcon, #webfavIcon').forEach(icon => {
         icon.classList.remove('active', 'tool-active');
@@ -738,6 +745,10 @@ function openTool(toolName) {
     } else if (toolName === 'webfav') {
         document.getElementById('webfavPanel').classList.add('active');
         document.getElementById('webfavIcon').classList.add('active', 'tool-active');
+        if (!currentSessionId) {
+            const welcome = document.getElementById('welcomeScreen');
+            if (welcome) welcome.style.display = 'none';
+        }
         loadWebFavorites();
     } else if (toolName === 'ai') {
         document.getElementById('aiPanel').classList.add('active');
@@ -788,6 +799,12 @@ function closeToolPanel() {
     }
 
     clearSystemMonitorRefresh();
+    if (currentTool === 'webfav') {
+        if (!currentSessionId) {
+            const welcome = document.getElementById('welcomeScreen');
+            if (welcome) welcome.style.display = 'block';
+        }
+    }
     currentTool = null;
     document.getElementById('rightSidebar')?.classList.remove('open');
     document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands, #aiIcon, #webfavIcon').forEach(icon => {

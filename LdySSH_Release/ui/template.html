@@ -9,7 +9,7 @@
     <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
     <script src="https://unpkg.com/@xterm/addon-webgl@0.16.0/lib/addon-webgl.js"></script>
     <script src="https://unpkg.com/@xterm/addon-search@0.15.0/lib/addon-search.js"></script>
-    <link rel="stylesheet" href="static/styles.css?v=1014">
+    <link rel="stylesheet" href="static/styles.css?v=1018">
     <script src="static/lib/three.min.js"></script>
     <script src="static/lib/OrbitControls.js"></script>
     <style>
@@ -246,6 +246,7 @@
             <button class="activity-item" id="monitorIcon" type="button" title="&#31995;&#32479;&#30417;&#25511;" onclick="openTool('monitor')"><span>MON</span></button>
             <button class="activity-item" id="activityLocalCmd" type="button" title="新建本地终端" onclick="createLocalSession()"><span>L-CMD</span></button>
             <button class="activity-item openai-activity" id="aiIcon" type="button" title="OpenAI 助手" onclick="openTool('ai')"><span>AI</span></button>
+            <button class="activity-item" id="webfavIcon" type="button" title="WEB收藏" onclick="openTool('webfav')"><span>WEB</span></button>
             <button class="activity-item activity-settings" id="highlightIcon" type="button" title="&#39640;&#20142;" onclick="openTool('highlight')"><span>HL</span></button>
         </div>
 
@@ -490,6 +491,32 @@
                 <div class="tool-content" id="aiSubWindowPlaceholder" style="flex: 1; position: relative; width: 100%; height: 100%; background: transparent; padding: 0; margin: 0; overflow: hidden;">
                 </div>
             </div>
+            
+            <div class="tool-panel" id="webfavPanel">
+                <div class="tool-header">
+                    <div class="tool-title"><span class="cyber-text">WEB 自定义收藏</span></div>
+                    <svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </div>
+                <div class="tool-content webfav-content" style="display: flex; flex-direction: column; height: calc(100% - 50px); padding: 15px; box-sizing: border-box; overflow-y: auto;">
+                    <!-- 添加卡片表单 -->
+                    <div class="webfav-add-form" style="margin-bottom: 20px; background: rgba(255,255,255,0.02); border: 1px solid rgba(0,242,254,0.15); padding: 15px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+                        <div style="font-size: 13px; font-weight: bold; color: #00f2fe; margin-bottom: 12px; text-shadow: 0 0 5px rgba(0,242,254,0.5);">添加自定义卡片</div>
+                        <div style="margin-bottom: 10px;">
+                            <input type="text" id="webfavTitleInput" placeholder="输入标签名称 (如: 百度)" style="width: 100%; box-sizing: border-box; padding: 10px 12px; background: rgba(10,10,12,0.85); border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; color: #fff; font-size: 13px; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#00f2fe'" onblur="this.style.borderColor='rgba(0,242,254,0.25)'" />
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <input type="text" id="webfavUrlInput" placeholder="输入网页 URL (如: https://www.baidu.com)" style="width: 100%; box-sizing: border-box; padding: 10px 12px; background: rgba(10,10,12,0.85); border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; color: #fff; font-size: 13px; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#00f2fe'" onblur="this.style.borderColor='rgba(0,242,254,0.25)'" />
+                        </div>
+                        <button class="ai-msg-cmd-btn" style="width: 100%; padding: 10px; background: linear-gradient(135deg, #00f2fe, #4facfe); border: none; border-radius: 6px; color: #0b0d19; font-weight: bold; cursor: pointer; text-shadow: none; box-shadow: 0 0 10px rgba(0,242,254,0.3); transition: transform 0.1s, box-shadow 0.2s;" onmouseover="this.style.boxShadow='0 0 18px rgba(0,242,254,0.6)'" onmouseout="this.style.boxShadow='0 0 10px rgba(0,242,254,0.3)'" onclick="addWebFavorite()">添加卡片</button>
+                    </div>
+                    <!-- 卡片网格展示 -->
+                    <div id="webfavCardsGrid" class="webfav-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; flex: 1;">
+                        <!-- 由JS动态渲染 -->
+                    </div>
+                </div>
+            </div>
         </div>
 
             </div>
@@ -541,7 +568,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ace.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ext-modelist.js"></script>
 
-    <script src="static/app.js?v=1017"></script>
+    <script src="static/core-topology.js?v=1018"></script>
+    <script src="static/app.js?v=1018"></script>
+    <script src="static/hermes-agent.js?v=1018"></script>
         </div>
     </div>
 
@@ -597,6 +626,31 @@
         </div>
     </div>
 
+    <!-- 全局全息卫星 HUD (方案 C) -->
+    <div id="topoSatelliteOrbit" class="topo-satellite-orbit" style="display:none; position:fixed; z-index: 10008; pointer-events: none;">
+        <div class="satellite-node">
+            <div id="topoSatelliteIcon" class="satellite-body">🐧</div>
+            <div class="satellite-hud">
+                <div class="hud-line"></div>
+                <div class="hud-card">
+                    <div id="topoSatelliteOs" class="hud-title">OS: Ubuntu 22.04</div>
+                    <div id="topoSatellitePing" class="hud-status">PING: 14ms</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 霓虹焦点边框 (方案三) -->
+    <div id="topoFocusFrame" class="topo-focus-frame" style="display:none; position:fixed; z-index: 10009; pointer-events: none;">
+        <div class="topo-focus-frame-inner">
+            <div class="focus-bracket top-left"></div>
+            <div class="focus-bracket top-right"></div>
+            <div class="focus-bracket bottom-left"></div>
+            <div class="focus-bracket bottom-right"></div>
+            <div class="focus-scanner"></div>
+        </div>
+    </div>
+
     <!-- 3D行星引力环悬浮交互菜单 -->
     <div id="topoHoverMenu" class="topo-hover-menu" style="display:none; position:fixed; z-index: 10010; pointer-events: auto;">
         <div class="topo-hover-menu-inner">
@@ -604,6 +658,44 @@
             <button class="topo-menu-btn edit" onclick="handleTopoMenu('edit')" title="编辑主机">⚙️</button>
             <button class="topo-menu-btn remove" onclick="handleTopoMenu('remove')" title="移除主机">🗑️</button>
             <button class="topo-menu-btn create" onclick="handleTopoMenu('create')" title="新建主机">➕</button>
+        </div>
+    </div>
+
+    <!-- 🔮 Hermes AI Copilot 侧栏与安全审批组件 -->
+    <div id="hermesDrawer" class="hermes-drawer collapsed">
+        <div class="drawer-header">
+            <div class="drawer-header-left">
+                <span class="hermes-title-icon">🔮</span>
+                <h3>Hermes AI Copilot</h3>
+            </div>
+            <div class="drawer-header-right">
+                <button class="pop-window-btn" onclick="popHermesWindow()" title="在新窗口中展开完整工作站">↗</button>
+                <button class="close-drawer-btn" onclick="toggleHermesDrawer()">×</button>
+            </div>
+        </div>
+        <div class="hermes-iframe-container" style="flex-grow: 1; width: 100%; height: calc(100% - 50px); background: #0c0d14;">
+            <iframe id="hermesIframe" src="https://ldyssh.local/hermes/index.html" style="width: 100%; height: 100%; border: none;"></iframe>
+        </div>
+    </div>
+
+    <!-- AI 唤起浮动按钮 -->
+    <button id="hermesOpenBtn" class="hermes-open-btn" onclick="toggleHermesDrawer()" title="呼出 Hermes AI 助手">🔮</button>
+
+    <!-- AI 工具安全审批弹窗 (AI 安全气囊) -->
+    <div id="hermesApproveModal" class="hermes-approve-modal" style="display:none;">
+        <div class="approve-content">
+            <div class="approve-header">
+                <span class="approve-shield">🛡️</span>
+                <h3 id="approveActionTitle">AI 敏感指令授权申请</h3>
+            </div>
+            <div class="approve-body">
+                <p style="margin: 0 0 10px 0; color: #94a3b8; font-size: 13px;">请仔细审查以下由 AI 智能体提交的自动控制请求：</p>
+                <div id="approveActionDesc" class="approve-desc"></div>
+            </div>
+            <div class="approve-footer">
+                <button id="hermesApproveNo" class="approve-btn reject">拒绝执行</button>
+                <button id="hermesApproveYes" class="approve-btn accept">授权执行</button>
+            </div>
         </div>
     </div>
 

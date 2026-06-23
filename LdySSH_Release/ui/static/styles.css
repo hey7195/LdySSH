@@ -6540,6 +6540,830 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     display: none !important;
 }
 
+/* ==========================================================================
+   LdySSH v2.1 - Neon Focus Frame (霓虹焦点边框 - 方案三)
+   ========================================================================== */
+.topo-focus-frame {
+    width: 90px;
+    height: 90px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    opacity: 0;
+}
+
+.topo-focus-frame.active {
+    opacity: 1;
+}
+
+/* 焦点框的圆环轨道与自旋转 */
+.topo-focus-frame-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 1px dashed rgba(0, 242, 254, 0.25);
+    box-sizing: border-box;
+    animation: focusRotate 12s linear infinite;
+}
+
+/* 虚拟行星状态下，霓虹焦点框配色切换为粉红/红色 */
+.topo-focus-frame.is-virtual-planet .topo-focus-frame-inner {
+    border-color: rgba(244, 63, 94, 0.25);
+}
+
+/* 四角准星括号 */
+.focus-bracket {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-color: #00f2fe;
+    border-style: solid;
+    border-width: 0;
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 0 8px rgba(0, 242, 254, 0.5);
+}
+
+.topo-focus-frame.is-virtual-planet .focus-bracket {
+    border-color: #f43f5e;
+    box-shadow: 0 0 8px rgba(244, 63, 94, 0.5);
+}
+
+.focus-bracket.top-left {
+    top: -4px;
+    left: -4px;
+    border-top-width: 2px;
+    border-left-width: 2px;
+}
+
+.focus-bracket.top-right {
+    top: -4px;
+    right: -4px;
+    border-top-width: 2px;
+    border-right-width: 2px;
+}
+
+.focus-bracket.bottom-left {
+    bottom: -4px;
+    left: -4px;
+    border-bottom-width: 2px;
+    border-left-width: 2px;
+}
+
+.focus-bracket.bottom-right {
+    bottom: -4px;
+    right: -4px;
+    border-bottom-width: 2px;
+    border-right-width: 2px;
+}
+
+/* 激活时，外角准星微微向内回缩，产生咬合的科技感动效 */
+.topo-focus-frame.active .focus-bracket.top-left { transform: translate(3px, 3px); }
+.topo-focus-frame.active .focus-bracket.top-right { transform: translate(-3px, 3px); }
+.topo-focus-frame.active .focus-bracket.bottom-left { transform: translate(3px, -3px); }
+.topo-focus-frame.active .focus-bracket.bottom-right { transform: translate(-3px, -3px); }
+
+/* 雷达扫描效果 */
+.focus-scanner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 50%, rgba(0, 242, 254, 0.1) 85%, rgba(0, 242, 254, 0.3) 100%);
+    mask: radial-gradient(circle, transparent 48%, black 49%);
+    -webkit-mask: radial-gradient(circle, transparent 48%, black 49%);
+    animation: radarScan 3s linear infinite;
+    pointer-events: none;
+}
+
+.topo-focus-frame.is-virtual-planet .focus-scanner {
+    background: conic-gradient(from 0deg, transparent 50%, rgba(244, 63, 94, 0.1) 85%, rgba(244, 63, 94, 0.3) 100%);
+}
+
+@keyframes focusRotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes radarScan {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   LdySSH v2.1 - 方案 B & 方案 C 真实客户端样式
+   ========================================================================== */
+.topo-satellite-orbit {
+    width: 160px;
+    height: 160px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.35s ease, border-color 0.35s ease;
+}
+
+.topo-satellite-orbit.active {
+    opacity: 1;
+    border: 1px dashed rgba(56, 189, 248, 0.12);
+    animation: satelliteRotate 16s linear infinite;
+}
+
+/* 虚拟占位行星状态配色切换为粉红/红色 */
+.topo-satellite-orbit.is-virtual-planet.active {
+    border-color: rgba(244, 63, 94, 0.12);
+}
+
+.satellite-node {
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    top: -12px;
+    left: calc(50% - 12px);
+    pointer-events: auto;
+}
+
+.satellite-body {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid #00f2fe;
+    box-shadow: 0 0 8px rgba(0, 242, 254, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    animation: satelliteCounterRotate 16s linear infinite;
+}
+
+.topo-satellite-orbit.is-virtual-planet .satellite-body {
+    border-color: #f43f5e;
+    box-shadow: 0 0 8px rgba(244, 63, 94, 0.6);
+}
+
+@keyframes satelliteRotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes satelliteCounterRotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(-360deg); }
+}
+
+.satellite-hud {
+    position: absolute;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) scale(0);
+    transform-origin: bottom center;
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    opacity: 0;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.topo-satellite-orbit.active.hud-visible .satellite-hud {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+    transition-delay: 0.25s;
+}
+
+.hud-line {
+    width: 1px;
+    height: 12px;
+    background: linear-gradient(to top, #00f2fe, transparent);
+    margin-top: 2px;
+}
+
+.topo-satellite-orbit.is-virtual-planet .hud-line {
+    background: linear-gradient(to top, #f43f5e, transparent);
+}
+
+.hud-card {
+    background: rgba(10, 15, 24, 0.88);
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(0, 242, 254, 0.35);
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    white-space: nowrap;
+    color: #fff;
+    font-family: monospace;
+    font-size: 9px;
+    text-align: center;
+}
+
+.topo-satellite-orbit.is-virtual-planet .hud-card {
+    border-color: rgba(244, 63, 94, 0.35);
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.2);
+}
+
+.hud-title {
+    color: #38bdf8;
+    font-weight: bold;
+}
+
+.topo-satellite-orbit.is-virtual-planet .hud-title {
+    color: #f43f5e;
+}
+
+.hud-status {
+    color: #00ff88;
+    margin-top: 1px;
+}
+
+/* 方案 B：2D 霓虹焦点框时空坍缩激活动画 (Warp) */
+.topo-focus-frame.active.warp-active {
+    animation: warpFocusGlow 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes warpFocusGlow {
+    0% { transform: translate(-50%, -50%) scale(0); filter: brightness(3.5); opacity: 0; }
+    60% { transform: translate(-50%, -50%) scale(1.15); filter: brightness(2.2); opacity: 1; }
+    100% { transform: translate(-50%, -50%) scale(1); filter: brightness(1); opacity: 1; }
+}
+
+/* ==========================================================================
+   LdySSH v2.5 - Hermes AI Copilot 侧栏与安全审批面板样式
+   ========================================================================== */
+
+/* AI Drawer 容器 */
+.hermes-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 380px;
+    height: 100vh;
+    background: rgba(10, 12, 18, 0.88);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-left: 2px solid rgba(0, 242, 254, 0.25);
+    box-shadow: -10px 0 40px rgba(0, 0, 0, 0.7);
+    z-index: 10005;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hermes-drawer.collapsed {
+    transform: translateX(384px);
+}
+
+/* 抽屉头部 */
+.hermes-drawer .drawer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    background: rgba(18, 20, 28, 0.9);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.drawer-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hermes-title-icon {
+    font-size: 18px;
+    filter: drop-shadow(0 0 5px rgba(0, 242, 254, 0.6));
+    animation: hermesGlow 3s ease-in-out infinite alternate;
+}
+
+.hermes-drawer .drawer-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #00f2fe, #4facfe);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 0 15px rgba(0, 242, 254, 0.25);
+}
+
+.drawer-header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.hermes-select {
+    background: #0f141c;
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-size: 11px;
+    outline: none;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.hermes-select option {
+    background: #0f141c;
+    color: #fff;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: 6px;
+}
+
+.status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-dot.online {
+    background: #00ff88;
+    box-shadow: 0 0 6px #00ff88;
+}
+
+.status-dot.offline {
+    background: #ff3366;
+    box-shadow: 0 0 6px #ff3366;
+}
+
+.status-text {
+    font-size: 9px;
+    color: #64748b;
+    font-family: monospace;
+}
+
+/* 浮动唤起按钮 */
+.hermes-open-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(0, 242, 254, 0.2), rgba(79, 172, 254, 0.2));
+    border: 2px solid rgba(0, 242, 254, 0.6);
+    color: #00f2fe;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 0 20px rgba(0, 242, 254, 0.4), inset 0 0 10px rgba(0, 242, 254, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10004;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.hermes-open-btn:hover {
+    transform: scale(1.1) rotate(15deg);
+    box-shadow: 0 0 30px rgba(0, 242, 254, 0.7), inset 0 0 15px rgba(0, 242, 254, 0.4);
+    border-color: #00f2fe;
+}
+
+/* 对话区 */
+.hermes-chat-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 16px;
+    gap: 12px;
+}
+
+.chat-log {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-right: 4px;
+}
+
+.chat-msg {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    animation: msgFadeIn 0.3s ease forwards;
+}
+
+.msg-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.chat-msg.assistant .msg-icon {
+    border-color: rgba(0, 242, 254, 0.4);
+    background: rgba(0, 242, 254, 0.05);
+    box-shadow: 0 0 8px rgba(0, 242, 254, 0.15);
+}
+
+.msg-bubble {
+    background: rgba(30, 41, 59, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #e2e8f0;
+    max-width: 85%;
+    word-break: break-word;
+}
+
+.chat-msg.user {
+    flex-direction: row-reverse;
+}
+
+.chat-msg.user .msg-bubble {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: rgba(56, 189, 248, 0.3);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.05);
+}
+
+.chat-msg.system {
+    justify-content: center;
+}
+
+.chat-msg.system .msg-icon {
+    display: none;
+}
+
+.chat-msg.system .msg-bubble {
+    background: rgba(15, 23, 42, 0.7);
+    border-color: rgba(244, 63, 94, 0.2);
+    color: #94a3b8;
+    text-align: center;
+    max-width: 95%;
+    border-radius: 8px;
+    font-size: 11px;
+    padding: 6px 12px;
+}
+
+.msg-bubble code {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    padding: 2px 5px;
+    color: #38bdf8;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+/* 输入框 */
+.chat-input-wrapper {
+    display: flex;
+    gap: 8px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 6px 10px;
+    align-items: center;
+}
+
+.chat-input-wrapper input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 12px;
+    outline: none;
+    padding: 4px 0;
+}
+
+.chat-input-wrapper .send-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    transition: transform 0.2s;
+    color: #38bdf8;
+}
+
+.chat-input-wrapper .send-btn:hover {
+    transform: scale(1.15) translateX(1px);
+}
+
+.chat-input-wrapper .send-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+/* 思考中动画 */
+.thinking-loader {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-left: 38px;
+    animation: msgFadeIn 0.3s ease;
+}
+
+.thinking-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #38bdf8;
+    animation: thinkingBounce 1.4s infinite ease-in-out both;
+}
+
+.thinking-dot:nth-child(1) { animation-delay: -0.32s; }
+.thinking-dot:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes thinkingBounce {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1.0); }
+}
+
+@keyframes msgFadeIn {
+    0% { opacity: 0; transform: translateY(8px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes hermesGlow {
+    0% { filter: drop-shadow(0 0 4px rgba(0, 242, 254, 0.4)); }
+    100% { filter: drop-shadow(0 0 12px rgba(0, 242, 254, 0.8)); }
+}
+
+/* AI 审批模态弹窗 (AI 安全气囊) */
+.hermes-approve-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(5, 7, 10, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: 100100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.hermes-approve-modal.active {
+    opacity: 1;
+}
+
+.approve-content {
+    background: linear-gradient(135deg, #0f172a 0%, #020617 100%);
+    border: 2px solid rgba(56, 189, 248, 0.5);
+    box-shadow: 0 0 30px rgba(56, 189, 248, 0.3), 0 20px 50px rgba(0,0,0,0.9);
+    border-radius: 12px;
+    width: 90%;
+    max-width: 460px;
+    padding: 24px;
+    color: #fff;
+    transform: scale(0.9) translateY(20px);
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.hermes-approve-modal.active .approve-content {
+    transform: scale(1.0) translateY(0);
+}
+
+.approve-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 14px;
+    margin-bottom: 16px;
+}
+
+.approve-shield {
+    font-size: 24px;
+    filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.6));
+}
+
+.approve-header h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: #38bdf8;
+    letter-spacing: 0.5px;
+}
+
+.approve-body {
+    margin-bottom: 24px;
+}
+
+.approve-desc {
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: #e2e8f0;
+    line-height: 1.6;
+}
+
+.approve-cmd-block {
+    background: #020617 !important;
+    border: 1px solid rgba(244, 63, 94, 0.2) !important;
+    padding: 10px !important;
+    border-radius: 6px;
+    margin-top: 8px;
+    overflow-x: auto;
+}
+
+.approve-cmd-block code {
+    color: #f43f5e !important;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.approve-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.approve-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.approve-btn.reject {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #cbd5e1;
+}
+
+.approve-btn.reject:hover {
+    background: rgba(244, 63, 94, 0.15);
+    border-color: rgba(244, 63, 94, 0.4);
+    color: #f43f5e;
+}
+
+.approve-btn.accept {
+    background: linear-gradient(135deg, #00f2fe, #4facfe);
+    color: #0f172a;
+    box-shadow: 0 0 12px rgba(0, 242, 254, 0.3);
+}
+
+.approve-btn.accept:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 20px rgba(0, 242, 254, 0.6);
+}
+
+.pop-window-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 1.1rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    margin-right: 12px;
+    transition: color 0.2s, transform 0.2s;
+}
+.pop-window-btn:hover {
+    color: #00f2fe;
+    transform: scale(1.1);
+}
+
+/* WEB Custom Favorites Dashboard Styles */
+.webfav-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 15px;
+    padding: 5px 2px;
+}
+
+.webfav-card {
+    position: relative;
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    padding: 15px 12px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 85px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.webfav-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, rgba(0, 242, 254, 0.1), rgba(121, 40, 202, 0.1));
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 0;
+}
+
+.webfav-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(0, 242, 254, 0.5);
+    box-shadow: 0 8px 25px rgba(0, 242, 254, 0.25), 
+                0 0 15px rgba(121, 40, 202, 0.15), 
+                inset 0 0 12px rgba(0, 242, 254, 0.1);
+}
+
+.webfav-card:hover::before {
+    opacity: 1;
+}
+
+.webfav-card-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.webfav-card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.2s ease;
+}
+
+.webfav-card:hover .webfav-card-title {
+    color: #00f2fe;
+}
+
+.webfav-card-url {
+    font-size: 11px;
+    color: #64748b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: monospace;
+}
+
+.webfav-card:hover .webfav-card-url {
+    color: #94a3b8;
+}
+
+.webfav-card-delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.2s ease;
+    z-index: 2;
+}
+
+.webfav-card:hover .webfav-card-delete {
+    opacity: 1;
+}
+
+.webfav-card-delete:hover {
+    background: #f43f5e;
+    color: #fff;
+    border-color: #f43f5e;
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.8);
+    transform: scale(1.1);
+}
+
 
 
 
