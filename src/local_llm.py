@@ -455,10 +455,11 @@ def start_local_llm_backend():
     global download_thread, download_status
     app_dir = get_app_dir()
     llama_exe = app_dir / "bin" / "llama-server.exe"
+    llama_dll = app_dir / "bin" / "llama.dll"
     model_file = app_dir / "models" / "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
     
     # If already downloaded, launch directly
-    if llama_exe.exists() and model_file.exists():
+    if llama_exe.exists() and llama_dll.exists() and model_file.exists():
         logger.info("Local LLM assets are present. Directly launching llama-server.")
         with status_lock:
             download_status = "completed"
