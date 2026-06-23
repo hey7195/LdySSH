@@ -8879,6 +8879,58 @@ window.handleBatchGroupChange = async function(value) {
 
 // ==================== WEB Favorites Dashboard Functions ====================
 
+window.showWebFavoritesView = function() {
+    // 1. 隐藏终端
+    const termWrapper = document.getElementById('terminalWrapper');
+    if (termWrapper) termWrapper.style.display = 'none';
+    
+    // 2. 隐藏工作台
+    const welcome = document.getElementById('welcomeScreen');
+    if (welcome) welcome.style.display = 'none';
+    
+    // 3. 关闭右侧侧边栏面板（如果有打开的）
+    closeToolPanel();
+    
+    // 4. 隐藏开发者工具箱（如果开着）
+    const devtools = document.getElementById('devtoolsContainer');
+    if (devtools) {
+        devtools.style.display = 'none';
+        devtools.classList.remove('fade-in');
+    }
+    
+    // 5. 激活左侧 WEB 按钮的高亮，清除其他
+    document.querySelectorAll('.activity-item').forEach(item => {
+        item.classList.remove('active', 'tool-active');
+    });
+    document.getElementById('webfavIcon')?.classList.add('active');
+    
+    // 6. 显示收藏主屏
+    const webfav = document.getElementById('webfavContainer');
+    if (webfav) {
+        webfav.style.display = 'block';
+        setTimeout(() => {
+            webfav.classList.add('fade-in');
+        }, 10);
+    }
+    
+    // 7. 加载数据
+    window.loadWebFavorites();
+};
+
+window.openAddWebFavModal = function() {
+    const modal = document.getElementById('addWebFavModal');
+    if (modal) {
+        document.getElementById('webfavTitleInput').value = '';
+        document.getElementById('webfavUrlInput').value = '';
+        modal.style.display = 'flex';
+    }
+};
+
+window.closeAddWebFavModal = function() {
+    const modal = document.getElementById('addWebFavModal');
+    if (modal) modal.style.display = 'none';
+};
+
 window.loadWebFavorites = async function() {
     const grid = document.getElementById('webfavCardsGrid');
     if (!grid) return;
@@ -8891,7 +8943,13 @@ window.loadWebFavorites = async function() {
         }
         
         const response = await window.pywebview.api.get_web_favorites();
-        const favorites = JSON.parse(response);
+        let favorites = [];
+        try {
+            const parsed = JSON.parse(response);
+            favorites = Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            favorites = [];
+        }
         
         if (favorites.length === 0) {
             grid.innerHTML = '<div style="color: #64748b; font-size: 13px; grid-column: 1/-1; text-align: center; padding: 40px 20px;">暂无自定义卡片，在上方添加一个吧！</div>';
@@ -8964,6 +9022,7 @@ window.addWebFavorite = async function() {
         if (res.success) {
             titleInput.value = '';
             urlInput.value = '';
+            window.closeAddWebFavModal();
             showToast('添加自定义卡片成功！', 'success');
             await window.loadWebFavorites();
         } else {
