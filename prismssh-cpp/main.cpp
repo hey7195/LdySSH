@@ -1879,10 +1879,34 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             return 0;
         }
         break;
+    case WM_NCHITTEST: {
+        POINT pt = { (int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam) };
+        ScreenToClient(hWnd, &pt);
+        RECT rect;
+        GetClientRect(hWnd, &rect);
+        const int border = 8; // border detection zone
+        bool left = pt.x < border;
+        bool right = pt.x > rect.right - border;
+        bool top = pt.y < border;
+        bool bottom = pt.y > rect.bottom - border;
+        if (top && left) return HTTOPLEFT;
+        if (top && right) return HTTOPRIGHT;
+        if (bottom && left) return HTBOTTOMLEFT;
+        if (bottom && right) return HTBOTTOMRIGHT;
+        if (left) return HTLEFT;
+        if (right) return HTRIGHT;
+        if (top) return HTTOP;
+        if (bottom) return HTBOTTOM;
+        return HTCLIENT;
+    }
     case WM_SIZE:
         if (webviewController != nullptr) {
             RECT bounds;
             GetClientRect(hWnd, &bounds);
+            // Shrink client area slightly to let parent window receive mouse moves on borders for WM_NCHITTEST
+            bounds.left += 4;
+            bounds.right -= 4;
+            bounds.bottom -= 4;
             webviewController->put_Bounds(bounds);
         }
         if (chatgptHWnd != NULL && IsWindowVisible(chatgptHWnd)) {
