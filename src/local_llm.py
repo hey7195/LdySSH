@@ -517,11 +517,27 @@ def start_local_llm_backend():
     """
     Start the local LLM system: Either launch llama-server directly or launch mock status server + download thread.
     """
-    global download_status
-    logger.info("Local LLM autostart has been completely disabled to prevent high CPU utilization.")
-    with status_lock:
-        download_status = "disabled"
-    update_ui_status_file()
+    global download_thread, download_status
+    app_dir = get_app_dir()
+    llama_exe = app_dir / "bin" / "llama-server.exe"
+    llama_dll = app_dir / "bin" / "llama.dll"
+    model_file = app_dir / "models" / "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+    
+    # If already downloaded, launch directly
+    if llama_exe.exists() and llama_dll.exists() and model_file.exists():
+        logger.info("Local LLM assets are present. Directly launching llama-server.")
+        with status_lock:
+            download_status = "completed"
+        update_ui_status_file()
+        start_real_llama_server()
+    else:
+        logger.info("Local LLM assets are missing. Launching Mock API and download thread.")
+        # Start Mock HTTP Server first to satisfy frontend requests
+        start_mock_api_server()
+        
+        # Start download thread
+        download_thread = threading.Thread(target=download_worker, daemon=True)
+        download_thread.start()
 
 def stop_local_llm_backend():
     """

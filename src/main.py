@@ -1,6 +1,16 @@
 """Main application entry point for PrismSSH."""
 
 import sys
+if sys.platform == "win32":
+    import subprocess
+    _original_popen_init = subprocess.Popen.__init__
+    def _patched_popen_init(self, *args, **kwargs):
+        cflags = kwargs.get("creationflags", 0)
+        cflags |= 0x08000000  # CREATE_NO_WINDOW
+        kwargs["creationflags"] = cflags
+        _original_popen_init(self, *args, **kwargs)
+    subprocess.Popen.__init__ = _patched_popen_init
+
 import os
 import platform
 import json
