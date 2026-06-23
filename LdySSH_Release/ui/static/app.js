@@ -828,15 +828,38 @@ function closeToolPanel() {
 // SFTP Functions
 async function initializeSFTP() {
     const username = sessions[currentSessionId].username;
-    currentPath = username === 'root' ? '/root' : '/home/' + username;
-    document.getElementById('currentPath').value = currentPath;
-    await listFiles(currentPath);
 
     // 初始化本地文件浏览器
     localCurrentPath = 'C:\\';
     document.getElementById('localCurrentPath').value = localCurrentPath;
     await listLocalFiles(localCurrentPath);
     setupSftpDragAndDrop();
+
+    // 自动降级路径：主目录 -> 堡垒机虚拟目录 -> 根目录
+    let defaultPaths = [
+        username === 'root' ? '/root' : '/home/' + username,
+        '/Default',
+        '/'
+    ];
+    defaultPaths = [...new Set(defaultPaths)]; // 去重
+
+    let loaded = false;
+    for (let path of defaultPaths) {
+        currentPath = path;
+        document.getElementById('currentPath').value = currentPath;
+        const success = await listFiles(currentPath);
+        if (success) {
+            loaded = true;
+            break;
+        }
+    }
+
+    if (!loaded) {
+        const fileList = document.getElementById('fileList');
+        if (fileList) {
+            fileList.innerHTML = '<div class="empty-message">文件加载失败，请检查远程路径或连接权限</div>';
+        }
+    }
 }
 
 function navigateToPath(path) {
@@ -850,7 +873,7 @@ async function listFiles(path) {
     // Prevent multiple simultaneous requests
     if (isLoadingFiles) {
         // console.log('Already loading files, please wait...');
-        return;
+        return false;
     }
 
     isLoadingFiles = true;
@@ -869,7 +892,7 @@ async function listFiles(path) {
         if (!result.success) {
             console.error('Failed to list directory:', result.error);
             fileList.innerHTML = '<div class="empty-message">文件加载失败</div>';
-            return;
+            return false;
         }
 
         fileList.innerHTML = '';
@@ -945,10 +968,12 @@ async function listFiles(path) {
 
         // Scroll to top after loading
         fileList.scrollTop = 0;
+        return true;
 
     } catch (error) {
         console.error('Error listing files:', error);
         fileList.innerHTML = '<div class="empty-message">文件加载失败</div>';
+        return false;
     } finally {
         // Hide loading state
         isLoadingFiles = false;
