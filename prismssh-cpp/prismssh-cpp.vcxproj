@@ -96,6 +96,9 @@
     <ClInclude Include="ui_assets.hpp" />
   </ItemGroup>
   <ItemGroup>
+    <ResourceCompile Include="resources.rc" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2210.55" />
     <PackageReference Include="nlohmann.json" Version="3.11.2" />
     <PackageReference Include="rmt_libssh2" Version="1.8.0" />

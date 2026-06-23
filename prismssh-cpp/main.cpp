@@ -46,6 +46,7 @@ using Microsoft::WRL::Callback;
 
 #define WM_POST_WEB_MESSAGE (WM_USER + 101)
 #define WM_TOPOLOGY_HEARTBEAT_UPDATE (WM_USER + 102)
+#define IDI_APP_ICON 101
 
 // Global variables
 HINSTANCE hInst;
@@ -1611,12 +1612,12 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     wcex.cbClsExtra = 0;
     wcex.cbWndExtra = 0;
     wcex.hInstance = hInstance;
-    wcex.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
+    wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
     wcex.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wcex.lpszMenuName = NULL;
     wcex.lpszClassName = _T("LdySSHCppWindowClass");
-    wcex.hIconSm = LoadIcon(wcex.hInstance, IDI_APPLICATION);
+    wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
 
     if (!RegisterClassEx(&wcex)) {
         MessageBox(NULL, _T("Call to RegisterClassEx failed!"), _T("LdySSH C++"), 0);
