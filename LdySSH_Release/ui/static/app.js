@@ -8888,6 +8888,15 @@ window.showWebFavoritesView = function() {
     const welcome = document.getElementById('welcomeScreen');
     if (welcome) welcome.style.display = 'none';
     
+    // 确保 terminal-container 拥有 in-workbench 类以隐藏背景遮罩
+    const termContainer = document.querySelector('.terminal-container');
+    if (termContainer) {
+        termContainer.classList.add('in-workbench');
+    }
+    
+    // 激活全局 3D 背景交互
+    toggleWorkbenchActive(true);
+    
     // 3. 关闭右侧侧边栏面板（如果有打开的）
     closeToolPanel();
     
@@ -8917,18 +8926,41 @@ window.showWebFavoritesView = function() {
     window.loadWebFavorites();
 };
 
-window.openAddWebFavModal = function() {
-    const modal = document.getElementById('addWebFavModal');
-    if (modal) {
-        document.getElementById('webfavTitleInput').value = '';
-        document.getElementById('webfavUrlInput').value = '';
-        modal.style.display = 'flex';
+window.toggleAddWebFavPanel = function() {
+    const panel = document.getElementById('webfavAddPanel');
+    if (!panel) return;
+    const isOpen = panel.classList.contains('open');
+    if (isOpen) {
+        panel.style.maxHeight = '0px';
+        panel.style.opacity = '0';
+        panel.style.borderWidth = '0px';
+        panel.style.marginBottom = '0px';
+        panel.classList.remove('open');
+    } else {
+        // 清空并展开
+        const titleInput = document.getElementById('webfavTitleInput');
+        const urlInput = document.getElementById('webfavUrlInput');
+        if (titleInput) titleInput.value = '';
+        if (urlInput) urlInput.value = '';
+        
+        panel.style.maxHeight = (panel.scrollHeight + 40) + 'px';
+        panel.style.opacity = '1';
+        panel.style.borderWidth = '1px';
+        panel.style.marginBottom = '20px';
+        panel.classList.add('open');
+        setTimeout(() => {
+            if (titleInput) titleInput.focus();
+        }, 150);
     }
 };
 
+// 保持 API 兼容
+window.openAddWebFavModal = window.toggleAddWebFavPanel;
 window.closeAddWebFavModal = function() {
-    const modal = document.getElementById('addWebFavModal');
-    if (modal) modal.style.display = 'none';
+    const panel = document.getElementById('webfavAddPanel');
+    if (panel && panel.classList.contains('open')) {
+        window.toggleAddWebFavPanel();
+    }
 };
 
 window.loadWebFavorites = async function() {
