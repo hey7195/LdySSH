@@ -9,7 +9,7 @@
     <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
     <script src="https://unpkg.com/@xterm/addon-webgl@0.16.0/lib/addon-webgl.js"></script>
     <script src="https://unpkg.com/@xterm/addon-search@0.15.0/lib/addon-search.js"></script>
-    <link rel="stylesheet" href="static/styles.css?v=1018">
+    <link rel="stylesheet" href="static/styles.css?v=1019">
     <script src="static/lib/three.min.js"></script>
     <script src="static/lib/OrbitControls.js"></script>
     <style>
@@ -329,16 +329,35 @@
                 <div class="terminal-section">
                     <div class="terminal-container">
                         <!-- WEB 收藏导航全屏主屏幕 -->
-                        <div id="webfavContainer" class="webfav-main-screen" style="display: none; width: 100%; height: 100%; padding: 40px; box-sizing: border-box; overflow-y: auto; background: rgba(10, 10, 12, 0.4); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); position: relative; z-index: 100; pointer-events: auto;">
+                        <div id="webfavContainer" class="webfav-main-screen" style="display: none; width: 100%; height: 100%; padding: 40px; box-sizing: border-box; overflow-y: auto; background: transparent; position: relative; z-index: 100; pointer-events: auto;">
                             <div class="webfav-main-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 1px solid rgba(0, 242, 254, 0.2); padding-bottom: 20px;">
                                 <div>
                                     <h2 style="margin: 0; font-size: 22px; color: #00f2fe; text-shadow: 0 0 10px rgba(0, 242, 254, 0.5); font-weight: 600; font-family: 'Inter', sans-serif;">🌐 WEB 自定义收藏导航</h2>
                                     <p style="margin: 6px 0 0 0; color: #64748b; font-size: 13px;">快速访问您常用的网页 and 运维管理系统</p>
                                 </div>
-                                <button class="webfav-add-btn" style="background: linear-gradient(135deg, #00f2fe, #4facfe); border: none; padding: 10px 20px; border-radius: 8px; color: #0b0d19; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 0 15px rgba(0, 242, 254, 0.3); font-size: 13px; transition: transform 0.1s; width: auto !important; height: auto !important; min-width: 120px; flex-shrink: 0;" onclick="window.openAddWebFavModal()">
+                                <button class="webfav-add-btn" style="background: linear-gradient(135deg, #00f2fe, #4facfe); border: none; padding: 10px 20px; border-radius: 8px; color: #0b0d19; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 0 15px rgba(0, 242, 254, 0.3); font-size: 13px; transition: transform 0.1s; width: auto !important; height: auto !important; min-width: 120px; flex-shrink: 0;" onclick="window.toggleAddWebFavPanel()">
                                     <span>➕</span> 添加收藏卡片
                                 </button>
                             </div>
+                            
+                            <!-- 沉浸式折叠添加卡片面板 -->
+                            <div id="webfavAddPanel" class="webfav-add-panel" style="max-height: 0; overflow: hidden; opacity: 0; transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, margin-bottom 0.3s ease; background: rgba(15, 23, 42, 0.4); border: 0px solid rgba(0, 242, 254, 0.2); border-radius: 8px; margin-bottom: 0; box-shadow: 0 4px 20px rgba(0,0,0,0.4); pointer-events: auto; position: relative; z-index: 110;">
+                                <div style="padding: 20px; display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
+                                    <div style="flex: 1; min-width: 180px;">
+                                        <label style="display: block; margin-bottom: 6px; font-size: 12px; color: #94a3b8;">卡片名称</label>
+                                        <input type="text" id="webfavTitleInput" placeholder="输入标签名称 (如: 百度)" style="width: 100%; box-sizing: border-box; padding: 10px 12px; background: rgba(10,10,12,0.85); border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; color: #fff; font-size: 13px; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#00f2fe'" onblur="this.style.borderColor='rgba(0,242,254,0.25)'" />
+                                    </div>
+                                    <div style="flex: 2; min-width: 250px;">
+                                        <label style="display: block; margin-bottom: 6px; font-size: 12px; color: #94a3b8;">网页链接 (URL)</label>
+                                        <input type="text" id="webfavUrlInput" placeholder="输入网页 URL (如: https://www.baidu.com)" style="width: 100%; box-sizing: border-box; padding: 10px 12px; background: rgba(10,10,12,0.85); border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; color: #fff; font-size: 13px; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#00f2fe'" onblur="this.style.borderColor='rgba(0,242,254,0.25)'" />
+                                    </div>
+                                    <div style="display: flex; gap: 10px; flex-shrink: 0;">
+                                        <button class="webfav-add-btn" style="background: rgba(255,255,255,0.06); color: #fff; border: 1px solid rgba(255,255,255,0.12); padding: 9px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; width: auto !important; height: auto !important;" onclick="window.toggleAddWebFavPanel()">取消</button>
+                                        <button class="webfav-add-btn" style="background: linear-gradient(135deg, #00f2fe, #4facfe); border: none; padding: 9px 22px; border-radius: 6px; color: #0b0d19; font-weight: bold; cursor: pointer; font-size: 13px; box-shadow: 0 0 10px rgba(0,242,254,0.2); width: auto !important; height: auto !important;" onclick="window.addWebFavorite()">确定添加</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
                             <div id="webfavCardsGrid" class="webfav-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; padding-bottom: 40px;">
                                 <!-- 卡片由 JS 动态渲染 -->
                             </div>
@@ -559,9 +578,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ace.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ext-modelist.js"></script>
 
-    <script src="static/core-topology.js?v=1018"></script>
-    <script src="static/app.js?v=1018"></script>
-    <script src="static/hermes-agent.js?v=1018"></script>
+    <script src="static/core-topology.js?v=1019"></script>
+    <script src="static/app.js?v=1019"></script>
+    <script src="static/hermes-agent.js?v=1019"></script>
         </div>
     </div>
 
@@ -584,28 +603,7 @@
             </div>
         </div>
     </div>
-    
-    <!-- 添加自定义网页卡片模态框 -->
-    <div id="addWebFavModal" class="modal" style="display:none; z-index: 3000; justify-content: center; align-items: center;">
-        <div class="modal-content" style="background: linear-gradient(135deg, #1e1e2e 0%, #0f0f16 100%); border: 1px solid rgba(0, 242, 254, 0.3); border-radius: 12px; padding: 25px; max-width: 420px; width: 90%; color: #fff; box-shadow: 0 10px 40px rgba(0,0,0,0.8);">
-            <h3 style="margin-top:0; font-size:16px; color:#00f2fe; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:15px; text-shadow: 0 0 10px rgba(0,242,254,0.3);">🌐 添加自定义网页收藏</h3>
-            
-            <div class="form-group" style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 6px; font-size: 12px; color: #94a3b8;">卡片名称</label>
-                <input type="text" id="webfavTitleInput" placeholder="输入标签名称 (如: 百度)" style="width: 100%; box-sizing: border-box; padding: 10px 12px; background: rgba(10,10,12,0.85); border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; color: #fff; font-size: 13px; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#00f2fe'" onblur="this.style.borderColor='rgba(0,242,254,0.25)'" />
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label style="display: block; margin-bottom: 6px; font-size: 12px; color: #94a3b8;">网页链接 (URL)</label>
-                <input type="text" id="webfavUrlInput" placeholder="输入网页 URL (如: https://www.baidu.com)" style="width: 100%; box-sizing: border-box; padding: 10px 12px; background: rgba(10,10,12,0.85); border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; color: #fff; font-size: 13px; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#00f2fe'" onblur="this.style.borderColor='rgba(0,242,254,0.25)'" />
-            </div>
-            
-            <div style="display: flex; justify-content: flex-end; gap: 10px;">
-                <button class="connect-btn" style="background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.15); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;" onclick="window.closeAddWebFavModal()">取消</button>
-                <button class="connect-btn" style="background: linear-gradient(135deg, #00f2fe, #4facfe); border: none; padding: 8px 20px; border-radius: 6px; color: #0b0d19; font-weight: bold; cursor: pointer; font-size: 13px; box-shadow: 0 0 10px rgba(0,242,254,0.3);" onclick="window.addWebFavorite()">添加</button>
-            </div>
-        </div>
-    </div>
+
     <div id="customPromptModal" class="modal" style="display:none; z-index: 4000;">
         <div class="modal-content" style="background: linear-gradient(135deg, #1e1e2e 0%, #0f0f16 100%); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 20px; max-width: 400px; width: 90%; color: #fff; box-shadow: 0 10px 40px rgba(0,0,0,0.8);">
             <h3 id="customPromptTitle" style="margin-top:0; font-size:16px; color:#38bdf8; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:15px;">输入内容</h3>
