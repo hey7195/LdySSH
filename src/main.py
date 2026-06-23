@@ -105,11 +105,13 @@ def start_hermes_webui_server(logger):
     if hasattr(sys, '_MEIPASS'):
         base_dir = Path(sys._MEIPASS)
         hermes_dir = base_dir / "upstream-hermes-webui"
+        parent_dir = base_dir
     else:
         parent_dir = Path(__file__).parent.parent
         hermes_dir = parent_dir / "upstream-hermes-webui"
         if not hermes_dir.exists():
             hermes_dir = Path(__file__).parent / "upstream-hermes-webui"
+            parent_dir = Path(__file__).parent
     server_script = hermes_dir / "server.py"
     
     if not server_script.exists():
@@ -126,6 +128,7 @@ def start_hermes_webui_server(logger):
         env = os.environ.copy()
         env["HERMES_WEBUI_PORT"] = "61356"
         env["HERMES_HOME"] = str(Path.home() / ".prismssh" / "hermes_home")
+        env["HERMES_WEBUI_DEFAULT_WORKSPACE"] = str(parent_dir.resolve())
 
         # Redirect stdout/stderr to help diagnostic
         log_dir = Path.home() / ".prismssh"

@@ -230,6 +230,8 @@
                 
                 if (data.status === 'completed') {
                     showReadyState();
+                } else if (data.status === 'disabled') {
+                    showDisabledState();
                 } else if (data.status === 'failed') {
                     showErrorState(data.error || '下载失败');
                 } else if (data.status === 'downloading') {
@@ -281,6 +283,26 @@
                 text.innerHTML = '🟢 本地离线 Qwen2.5 物理大模型已就绪！<b>💡 提示：点击左侧聊天大区上方的 “+” 按钮新建会话，即可与离线 AI 展开对话！</b>';
             }
             // 就绪 8 秒后自动收起
+            setTimeout(() => {
+                banner.classList.add('hidden');
+                document.body.classList.add('banner-closed');
+            }, 8000);
+            
+            if (checkInterval) {
+                clearInterval(checkInterval);
+                checkInterval = null;
+            }
+        }
+
+        function showDisabledState() {
+            const badge = document.getElementById('llmBadge');
+            const text = document.getElementById('llmText');
+            if (badge && text) {
+                badge.className = 'ldyssh-llm-badge';
+                badge.style.background = 'rgba(255,255,255,0.15)';
+                badge.innerText = '本地 AI 已禁用';
+                text.innerHTML = '⚙️ 本地离线 AI 大模型服务已禁用（以节约您的 CPU/内存资源）。请点击左侧齿轮 “Settings” 配置远程 API Key 进行使用。';
+            }
             setTimeout(() => {
                 banner.classList.add('hidden');
                 document.body.classList.add('banner-closed');

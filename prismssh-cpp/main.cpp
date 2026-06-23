@@ -51,6 +51,7 @@ using Microsoft::WRL::Callback;
 // Global variables
 HINSTANCE hInst;
 HWND hWnd;
+HANDLE hJob = NULL;
 ComPtr<ICoreWebView2Controller> webviewController;
 ComPtr<ICoreWebView2> webviewWindow;
 ComPtr<ICoreWebView2Environment> webviewEnv;
@@ -1592,17 +1593,64 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
+void LaunchPythonBackend(const wchar_t* scriptPath) {
+    // Lazy-initialize the Job Object once
+    if (hJob == NULL) {
+        hJob = CreateJobObjectW(NULL, NULL);
+        if (hJob != NULL) {
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = { 0 };
+            jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+        }
+    }
+
+    std::wstring cmd = L"pythonw.exe \"";
+    cmd += scriptPath;
+    cmd += L"\" --backend-only";
+
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+
+    ZeroMemory(&pi, sizeof(pi));
+
+    // Search and run pythonw.exe in background with no command prompt window
+    BOOL success = CreateProcessW(
+        NULL,
+        &cmd[0],
+        NULL,
+        NULL,
+        FALSE,
+        CREATE_NO_WINDOW,
+        NULL,
+        NULL,
+        &si,
+        &pi
+    );
+
+    if (success) {
+        if (hJob != NULL) {
+            AssignProcessToJobObject(hJob, pi.hProcess);
+        }
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+}
+
 int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     hInst = hInstance;
     libssh2_init(0);
 
     // Auto-detect and launch Python AI Backend services in background (daemon mode)
     if (GetFileAttributesW(L"prismssh.py") != INVALID_FILE_ATTRIBUTES) {
-        ShellExecuteW(NULL, L"open", L"pythonw.exe", L"prismssh.py --backend-only", NULL, SW_HIDE);
+        LaunchPythonBackend(L"prismssh.py");
     } else if (GetFileAttributesW(L"..\\prismssh.py") != INVALID_FILE_ATTRIBUTES) {
-        ShellExecuteW(NULL, L"open", L"pythonw.exe", L"..\\prismssh.py --backend-only", NULL, SW_HIDE);
+        LaunchPythonBackend(L"..\\prismssh.py");
     } else if (GetFileAttributesW(L"..\\..\\..\\prismssh.py") != INVALID_FILE_ATTRIBUTES) {
-        ShellExecuteW(NULL, L"open", L"pythonw.exe", L"..\\..\\..\\prismssh.py --backend-only", NULL, SW_HIDE);
+        LaunchPythonBackend(L"..\\..\\..\\prismssh.py");
     }
 
     WNDCLASSEX wcex;
@@ -1950,6 +1998,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
     case WM_DESTROY:
+        if (hJob != NULL) {
+            CloseHandle(hJob); // Terminates all processes associated with the job
+            hJob = NULL;
+        }
         globalSessionManager.Cleanup();
         CleanupEditMappings();
         PostQuitMessage(0);
