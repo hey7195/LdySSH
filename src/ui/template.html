@@ -246,6 +246,7 @@
             <button class="activity-item" id="monitorIcon" type="button" title="&#31995;&#32479;&#30417;&#25511;" onclick="openTool('monitor')"><span>MON</span></button>
             <button class="activity-item" id="activityLocalCmd" type="button" title="新建本地终端" onclick="createLocalSession()"><span>L-CMD</span></button>
             <button class="activity-item openai-activity" id="aiIcon" type="button" title="OpenAI 助手" onclick="openTool('ai')"><span>AI</span></button>
+            <button class="activity-item" id="webfavIcon" type="button" title="WEB收藏" onclick="openTool('webfav')"><span>WEB</span></button>
             <button class="activity-item activity-settings" id="highlightIcon" type="button" title="&#39640;&#20142;" onclick="openTool('highlight')"><span>HL</span></button>
         </div>
 
@@ -488,6 +489,32 @@
                     <svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </div>
                 <div class="tool-content" id="aiSubWindowPlaceholder" style="flex: 1; position: relative; width: 100%; height: 100%; background: transparent; padding: 0; margin: 0; overflow: hidden;">
+                </div>
+            </div>
+            
+            <div class="tool-panel" id="webfavPanel">
+                <div class="tool-header">
+                    <div class="tool-title"><span class="cyber-text">WEB 自定义收藏</span></div>
+                    <svg class="tool-close" onclick="closeToolPanel()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </div>
+                <div class="tool-content webfav-content" style="display: flex; flex-direction: column; height: calc(100% - 50px); padding: 15px; box-sizing: border-box; overflow-y: auto;">
+                    <!-- 添加卡片表单 -->
+                    <div class="webfav-add-form" style="margin-bottom: 20px; background: rgba(255,255,255,0.02); border: 1px solid rgba(0,242,254,0.15); padding: 15px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+                        <div style="font-size: 13px; font-weight: bold; color: #00f2fe; margin-bottom: 12px; text-shadow: 0 0 5px rgba(0,242,254,0.5);">添加自定义卡片</div>
+                        <div style="margin-bottom: 10px;">
+                            <input type="text" id="webfavTitleInput" placeholder="输入标签名称 (如: 百度)" style="width: 100%; box-sizing: border-box; padding: 10px 12px; background: rgba(10,10,12,0.85); border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; color: #fff; font-size: 13px; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#00f2fe'" onblur="this.style.borderColor='rgba(0,242,254,0.25)'" />
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <input type="text" id="webfavUrlInput" placeholder="输入网页 URL (如: https://www.baidu.com)" style="width: 100%; box-sizing: border-box; padding: 10px 12px; background: rgba(10,10,12,0.85); border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; color: #fff; font-size: 13px; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#00f2fe'" onblur="this.style.borderColor='rgba(0,242,254,0.25)'" />
+                        </div>
+                        <button class="ai-msg-cmd-btn" style="width: 100%; padding: 10px; background: linear-gradient(135deg, #00f2fe, #4facfe); border: none; border-radius: 6px; color: #0b0d19; font-weight: bold; cursor: pointer; text-shadow: none; box-shadow: 0 0 10px rgba(0,242,254,0.3); transition: transform 0.1s, box-shadow 0.2s;" onmouseover="this.style.boxShadow='0 0 18px rgba(0,242,254,0.6)'" onmouseout="this.style.boxShadow='0 0 10px rgba(0,242,254,0.3)'" onclick="addWebFavorite()">添加卡片</button>
+                    </div>
+                    <!-- 卡片网格展示 -->
+                    <div id="webfavCardsGrid" class="webfav-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; flex: 1;">
+                        <!-- 由JS动态渲染 -->
+                    </div>
                 </div>
             </div>
         </div>

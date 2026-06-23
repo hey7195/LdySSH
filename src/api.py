@@ -1569,6 +1569,105 @@ class PrismSSHAPI:
             self.logger.error(f"API: Failed to spawn standalone Hermes window: {e}")
             return json.dumps({'success': False, 'error': str(e)})
 
+    def get_web_favorites(self) -> str:
+        """Load and return web favorites from JSON file."""
+        try:
+            import os
+            fav_path = os.path.join(self.config.config_dir, "web_favorites.json")
+            if not os.path.exists(fav_path):
+                self.config.ensure_config_dir()
+                with open(fav_path, 'w', encoding='utf-8') as f:
+                    json.dump([], f, indent=4)
+                return json.dumps([])
+            
+            with open(fav_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return json.dumps(data)
+        except Exception as e:
+            self.logger.error(f"API: Error loading web favorites: {e}")
+            return json.dumps([])
+
+    def add_web_favorite(self, title: str, url: str) -> str:
+        """Add a web favorite to the JSON list."""
+        try:
+            import os
+            import uuid
+            
+            # Simple URL format normalization (ensure protocol)
+            normalized_url = url.strip()
+            if not (normalized_url.startswith("http://") or normalized_url.startswith("https://")):
+                normalized_url = "https://" + normalized_url
+
+            fav_path = os.path.join(self.config.config_dir, "web_favorites.json")
+            if not os.path.exists(fav_path):
+                self.config.ensure_config_dir()
+                favorites = []
+            else:
+                with open(fav_path, 'r', encoding='utf-8') as f:
+                    favorites = json.load(f)
+            
+            new_fav = {
+                "id": str(uuid.uuid4()),
+                "title": title.strip(),
+                "url": normalized_url
+            }
+            favorites.append(new_fav)
+            
+            with open(fav_path, 'w', encoding='utf-8') as f:
+                json.dump(favorites, f, indent=4)
+                
+            return json.dumps({"success": True, "favorite": new_fav})
+        except Exception as e:
+            self.logger.error(f"API: Error adding web favorite: {e}")
+            return json.dumps({"success": False, "error": str(e)})
+
+    def delete_web_favorite(self, fav_id: str) -> str:
+        """Delete a web favorite by ID."""
+        try:
+            import os
+            fav_path = os.path.join(self.config.config_dir, "web_favorites.json")
+            if not os.path.exists(fav_path):
+                return json.dumps({"success": False, "error": "No favorites found"})
+                
+            with open(fav_path, 'r', encoding='utf-8') as f:
+                favorites = json.load(f)
+                
+            new_favorites = [fav for fav in favorites if fav.get("id") != fav_id]
+            
+            with open(fav_path, 'w', encoding='utf-8') as f:
+                json.dump(new_favorites, f, indent=4)
+                
+            return json.dumps({"success": True})
+        except Exception as e:
+            self.logger.error(f"API: Error deleting web favorite {fav_id}: {e}")
+            return json.dumps({"success": False, "error": str(e)})
+
+    def open_in_external_browser(self, url: str) -> str:
+        """Open target URL in external system browser (Google Chrome default)."""
+        try:
+            import webbrowser
+            # Normalize URL
+            normalized_url = url.strip()
+            if not (normalized_url.startswith("http://") or normalized_url.startswith("https://")):
+                normalized_url = "https://" + normalized_url
+            
+            self.logger.info(f"API: Request to open URL in external browser: {normalized_url}")
+            
+            # Start a separate thread so it doesn't block the UI
+            def _open():
+                # Prefer google-chrome if possible, otherwise default
+                try:
+                    chrome = webbrowser.get('chrome')
+                    chrome.open(normalized_url)
+                except Exception:
+                    webbrowser.open(normalized_url)
+            
+            threading.Thread(target=_open, daemon=True).start()
+            return json.dumps({"success": True})
+        except Exception as e:
+            self.logger.error(f"API: Failed to open URL {url}: {e}")
+            return json.dumps({"success": False, "error": str(e)})
+
     def cleanup(self):
         """Cleanup resources on shutdown."""
         self.logger.info("API: Cleaning up resources")

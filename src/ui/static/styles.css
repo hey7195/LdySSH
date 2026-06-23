@@ -7243,6 +7243,127 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     transform: scale(1.1);
 }
 
+/* WEB Custom Favorites Dashboard Styles */
+.webfav-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 15px;
+    padding: 5px 2px;
+}
+
+.webfav-card {
+    position: relative;
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    padding: 15px 12px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 85px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.webfav-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, rgba(0, 242, 254, 0.1), rgba(121, 40, 202, 0.1));
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 0;
+}
+
+.webfav-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(0, 242, 254, 0.5);
+    box-shadow: 0 8px 25px rgba(0, 242, 254, 0.25), 
+                0 0 15px rgba(121, 40, 202, 0.15), 
+                inset 0 0 12px rgba(0, 242, 254, 0.1);
+}
+
+.webfav-card:hover::before {
+    opacity: 1;
+}
+
+.webfav-card-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.webfav-card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.2s ease;
+}
+
+.webfav-card:hover .webfav-card-title {
+    color: #00f2fe;
+}
+
+.webfav-card-url {
+    font-size: 11px;
+    color: #64748b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: monospace;
+}
+
+.webfav-card:hover .webfav-card-url {
+    color: #94a3b8;
+}
+
+.webfav-card-delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.2s ease;
+    z-index: 2;
+}
+
+.webfav-card:hover .webfav-card-delete {
+    opacity: 1;
+}
+
+.webfav-card-delete:hover {
+    background: #f43f5e;
+    color: #fff;
+    border-color: #f43f5e;
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.8);
+    transform: scale(1.1);
+}
+
 
 
 

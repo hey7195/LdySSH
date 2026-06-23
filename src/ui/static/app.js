@@ -63,7 +63,8 @@ let sidebarWidths = {
     monitor: '380px',
     portForward: '380px',
     highlight: '380px',
-    ai: '400px'
+    ai: '400px',
+    webfav: '380px'
 };
 
 let currentSessionId = null;
@@ -667,8 +668,8 @@ function ansiColorToCss(code) {
 
 // Tool panel functions
 function openTool(toolName) {
-    // Check if we have an active session (AI tool is exempt from this check)
-    if (toolName !== 'ai') {
+    // Check if we have an active session (AI and webfav tools are exempt from this check)
+    if (toolName !== 'ai' && toolName !== 'webfav') {
         if (!currentSessionId || !sessions[currentSessionId]) {
             closeToolPanel();
             alert('请先连接服务器');
@@ -693,7 +694,7 @@ function openTool(toolName) {
     }
 
     // Reset tool activity buttons
-    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands, #aiIcon').forEach(icon => {
+    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands, #aiIcon, #webfavIcon').forEach(icon => {
         icon.classList.remove('active', 'tool-active');
     });
 
@@ -734,6 +735,10 @@ function openTool(toolName) {
         initializePortForwarding();
     } else if (toolName === 'highlight') {
         renderHighlightRules();
+    } else if (toolName === 'webfav') {
+        document.getElementById('webfavPanel').classList.add('active');
+        document.getElementById('webfavIcon').classList.add('active', 'tool-active');
+        loadWebFavorites();
     } else if (toolName === 'ai') {
         document.getElementById('aiPanel').classList.add('active');
         document.getElementById('aiIcon').classList.add('active', 'tool-active');
@@ -785,7 +790,7 @@ function closeToolPanel() {
     clearSystemMonitorRefresh();
     currentTool = null;
     document.getElementById('rightSidebar')?.classList.remove('open');
-    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands, #aiIcon').forEach(icon => {
+    document.querySelectorAll('#sftpIcon, #portForwardIcon, #monitorIcon, #highlightIcon, #activityCommands, #aiIcon, #webfavIcon').forEach(icon => {
         icon.classList.remove('active', 'tool-active');
     });
     document.querySelectorAll('.tool-panel').forEach(panel => {
@@ -8853,4 +8858,132 @@ window.handleBatchGroupChange = async function(value) {
     
     // 重新载入和刷新
     await loadSavedConnections();
+};
+
+// ==================== WEB Favorites Dashboard Functions ====================
+
+window.loadWebFavorites = async function() {
+    const grid = document.getElementById('webfavCardsGrid');
+    if (!grid) return;
+    grid.innerHTML = '<div style="color: #64748b; font-size: 13px; grid-column: 1/-1; text-align: center; padding: 20px;">正在加载网页卡片...</div>';
+    
+    try {
+        if (!window.pywebview || !window.pywebview.api) {
+            grid.innerHTML = '<div style="color: #ef4444; font-size: 13px; grid-column: 1/-1; text-align: center; padding: 20px;">系统接口未就绪</div>';
+            return;
+        }
+        
+        const response = await window.pywebview.api.get_web_favorites();
+        const favorites = JSON.parse(response);
+        
+        if (favorites.length === 0) {
+            grid.innerHTML = '<div style="color: #64748b; font-size: 13px; grid-column: 1/-1; text-align: center; padding: 40px 20px;">暂无自定义卡片，在上方添加一个吧！</div>';
+            return;
+        }
+        
+        grid.innerHTML = '';
+        favorites.forEach(fav => {
+            const card = document.createElement('div');
+            card.className = 'webfav-card';
+            card.onclick = () => window.openWebFavorite(fav.url);
+            
+            // Delete button
+            const delBtn = document.createElement('div');
+            delBtn.className = 'webfav-card-delete';
+            delBtn.innerHTML = '×';
+            delBtn.title = '删除此卡片';
+            delBtn.onclick = (e) => {
+                e.stopPropagation(); // 阻止触发 card.onclick
+                window.deleteWebFavorite(fav.id, fav.title);
+            };
+            
+            // Content container
+            const content = document.createElement('div');
+            content.className = 'webfav-card-content';
+            
+            // Title
+            const titleEl = document.createElement('div');
+            titleEl.className = 'webfav-card-title';
+            titleEl.textContent = fav.title;
+            
+            // URL info
+            const urlEl = document.createElement('div');
+            urlEl.className = 'webfav-card-url';
+            urlEl.textContent = fav.url.replace(/^https?:\/\//i, '');
+            
+            content.appendChild(titleEl);
+            content.appendChild(urlEl);
+            
+            card.appendChild(delBtn);
+            card.appendChild(content);
+            grid.appendChild(card);
+        });
+    } catch (e) {
+        console.error('Error loading web favorites:', e);
+        grid.innerHTML = '<div style="color: #ef4444; font-size: 13px; grid-column: 1/-1; text-align: center; padding: 20px;">加载卡片失败</div>';
+    }
+};
+
+window.addWebFavorite = async function() {
+    const titleInput = document.getElementById('webfavTitleInput');
+    const urlInput = document.getElementById('webfavUrlInput');
+    if (!titleInput || !urlInput) return;
+    
+    const title = titleInput.value.trim();
+    const url = urlInput.value.trim();
+    
+    if (!title) {
+        alert('请输入标签名称！');
+        return;
+    }
+    if (!url) {
+        alert('请输入网页 URL 地址！');
+        return;
+    }
+    
+    try {
+        const response = await window.pywebview.api.add_web_favorite(title, url);
+        const res = JSON.parse(response);
+        if (res.success) {
+            titleInput.value = '';
+            urlInput.value = '';
+            showToast('添加自定义卡片成功！', 'success');
+            await window.loadWebFavorites();
+        } else {
+            alert('添加失败: ' + res.error);
+        }
+    } catch (e) {
+        console.error('Error adding web favorite:', e);
+        alert('添加失败，请重试');
+    }
+};
+
+window.deleteWebFavorite = async function(favId, title) {
+    if (!confirm(`确定要删除卡片 "${title}" 吗？`)) {
+        return;
+    }
+    
+    try {
+        const response = await window.pywebview.api.delete_web_favorite(favId);
+        const res = JSON.parse(response);
+        if (res.success) {
+            showToast('删除卡片成功！', 'success');
+            await window.loadWebFavorites();
+        } else {
+            alert('删除失败: ' + res.error);
+        }
+    } catch (e) {
+        console.error('Error deleting web favorite:', e);
+        alert('删除失败，请重试');
+    }
+};
+
+window.openWebFavorite = async function(url) {
+    try {
+        await window.pywebview.api.open_in_external_browser(url);
+    } catch (e) {
+        console.error('Error opening URL in browser:', e);
+        // Fallback: 如果 pywebview api 出错，在当前或新窗口打开
+        window.open(url, '_blank');
+    }
 };
