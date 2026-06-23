@@ -1781,7 +1781,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                                     uiPath.c_str(),
                                     COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW
                                 );
-                                webviewWindow->OpenDevToolsWindow();
+                                // webviewWindow->OpenDevToolsWindow();
                                 webviewWindow->Navigate(L"https://ldyssh.local/template.html");
                                 std::thread(TopologyHeartbeatLoop).detach();
                             } else {
@@ -1846,7 +1846,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                                 }
                             }
 
-                            webviewWindow->OpenDevToolsWindow();
+                            // webviewWindow->OpenDevToolsWindow();
                             webviewWindow->NavigateToString(html.c_str());
                             std::thread(TopologyHeartbeatLoop).detach();
                         }

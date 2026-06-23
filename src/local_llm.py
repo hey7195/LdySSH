@@ -134,19 +134,21 @@ def download_and_extract_engine(bin_dir: Path):
     if not success:
         raise last_err or Exception("All engine download URLs failed")
         
-    logger.info("Extracting llama-server.exe from zip...")
+    logger.info("Extracting llama-server.exe and dynamic libraries from zip...")
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        found = False
+        found_server = False
         for file_info in zip_ref.infolist():
-            if file_info.filename.endswith("llama-server.exe"):
-                # Extract file contents directly to destination
+            filename = os.path.basename(file_info.filename)
+            if not filename:
+                continue
+            if filename.endswith("llama-server.exe") or filename.endswith(".dll"):
                 data = zip_ref.read(file_info.filename)
-                dest_file = bin_dir / "llama-server.exe"
+                dest_file = bin_dir / filename
                 dest_file.write_bytes(data)
-                found = True
-                logger.info(f"Successfully extracted llama-server.exe to {dest_file}")
-                break
-        if not found:
+                logger.info(f"Successfully extracted {filename} to {dest_file}")
+                if filename.endswith("llama-server.exe"):
+                    found_server = True
+        if not found_server:
             raise Exception("llama-server.exe not found inside the downloaded zip archive")
             
     # Clean up temp file
@@ -188,10 +190,11 @@ def download_worker():
         
         # 1. Download engine
         llama_exe = bin_dir / "llama-server.exe"
-        if not llama_exe.exists():
+        llama_dll = bin_dir / "llama.dll"
+        if not llama_exe.exists() or not llama_dll.exists():
             with status_lock:
                 download_status = "downloading"
-            logger.info("Engine llama-server.exe not found. Starting download...")
+            logger.info("Engine llama-server.exe or llama.dll not found. Starting download...")
             download_and_extract_engine(bin_dir)
         else:
             with status_lock:
