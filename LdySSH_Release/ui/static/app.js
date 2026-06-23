@@ -9095,3 +9095,675 @@ window.openWebFavorite = async function(url) {
         window.open(url, '_blank');
     }
 };
+
+// ==========================================================================
+// LdySSH v2.5 - Developers Toolbox (DevToys Replica) Controller & Tools Logic
+// ==========================================================================
+let devtoolsTimestampInterval = null;
+let devtoolsActiveCategory = 'all';
+let devtoolsActivePanelId = null;
+
+// 1. 视图切换与星空背景控制
+window.toggleDevToolsView = function() {
+    // 隐藏终端
+    const termWrapper = document.getElementById('terminalWrapper');
+    if (termWrapper) termWrapper.style.display = 'none';
+    
+    // 隐藏工作台
+    const welcome = document.getElementById('welcomeScreen');
+    if (welcome) welcome.style.display = 'none';
+    
+    // 隐藏 WEB 收藏夹
+    const webfav = document.getElementById('webfavContainer');
+    if (webfav) {
+        webfav.style.display = 'none';
+        webfav.classList.remove('fade-in');
+    }
+    
+    // 关闭右侧侧边栏面板
+    closeToolPanel();
+    
+    // 激活左侧活动栏 TOOLS 按钮高亮，清除其他
+    document.querySelectorAll('.activity-item').forEach(item => {
+        item.classList.remove('active', 'tool-active');
+    });
+    document.getElementById('devtoolsIcon')?.classList.add('active');
+    
+    // 确保 terminal-container 拥有 in-workbench 类以隐藏背景遮罩，露出 WebGL 星空
+    const termContainer = document.querySelector('.terminal-container');
+    if (termContainer) {
+        termContainer.classList.add('in-workbench');
+    }
+    
+    // 激活全局 3D 星空背景交互与 controls
+    toggleWorkbenchActive(true);
+    
+    // 显示工具箱主屏
+    const devtools = document.getElementById('devtoolsContainer');
+    if (devtools) {
+        devtools.style.display = 'block';
+        setTimeout(() => {
+            devtools.classList.add('fade-in');
+        }, 10);
+    }
+    
+    // 自动初始化时间戳定时器
+    window.startTimestampPolling();
+};
+
+// 退出工具箱
+window.exitDevToolsView = function() {
+    const devtools = document.getElementById('devtoolsContainer');
+    if (devtools) {
+        devtools.style.display = 'none';
+        devtools.classList.remove('fade-in');
+    }
+    window.stopTimestampPolling();
+};
+
+// 2. 左侧分类与搜索过滤
+window.switchDevtoolsTab = function(category) {
+    devtoolsActiveCategory = category;
+    
+    // 切换左侧按钮 active 类
+    const sidebar = document.querySelector('.devtools-sidebar');
+    if (sidebar) {
+        sidebar.querySelectorAll('.devtools-nav-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+    }
+    
+    // 激活对应按钮
+    const targetBtn = Array.from(document.querySelectorAll('.devtools-nav-btn')).find(btn => 
+        btn.getAttribute('onclick').includes(`'${category}'`)
+    );
+    if (targetBtn) targetBtn.classList.add('active');
+    
+    // 返回卡片列表页
+    window.backToDevtoolsList();
+    
+    // 过滤卡片
+    window.filterDevtools();
+};
+
+window.filterDevtools = function() {
+    const searchVal = (document.getElementById('devtoolsSearch')?.value || '').trim().toLowerCase();
+    const cards = document.querySelectorAll('.devtools-card');
+    
+    cards.forEach(card => {
+        const cat = card.getAttribute('data-category');
+        const title = card.querySelector('.devtools-card-title').textContent.toLowerCase();
+        const desc = card.querySelector('.devtools-card-desc').textContent.toLowerCase();
+        
+        const matchesCategory = (devtoolsActiveCategory === 'all' || cat === devtoolsActiveCategory);
+        const matchesSearch = (!searchVal || title.includes(searchVal) || desc.includes(searchVal));
+        
+        if (matchesCategory && matchesSearch) {
+            card.style.display = 'flex';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+};
+
+// 3. 打开详情面板与返回
+window.openDevtoolPanel = function(panelId) {
+    devtoolsActivePanelId = panelId;
+    
+    // 隐藏列表网格，显示详情大区
+    document.getElementById('devtoolsGrid').style.display = 'none';
+    const panelsContainer = document.getElementById('devtoolsPanels');
+    panelsContainer.style.display = 'block';
+    
+    // 隐藏所有面板，只显示当前面板
+    panelsContainer.querySelectorAll('.tool-detail-panel').forEach(p => {
+        p.style.display = 'none';
+    });
+    
+    const targetPanel = document.getElementById(`toolPanel_${panelId}`);
+    if (targetPanel) {
+        targetPanel.style.display = 'flex';
+    }
+    
+    // 各自面板的打开初始化工作
+    if (panelId === 'json') {
+        document.getElementById('jsonInput').focus();
+    } else if (panelId === 'regex') {
+        window.runRegexTest();
+    } else if (panelId === 'base64') {
+        // 初始化拖拽域
+        const dropZone = document.getElementById('base64DropZone');
+        if (dropZone && !dropZone.dataset.bound) {
+            dropZone.dataset.bound = "true";
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('dragover');
+            });
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) {
+                    window.encodeFileToBase64(e.dataTransfer.files[0]);
+                }
+            });
+        }
+    }
+};
+
+window.backToDevtoolsList = function() {
+    devtoolsActivePanelId = null;
+    document.getElementById('devtoolsPanels').style.display = 'none';
+    document.getElementById('devtoolsGrid').style.display = 'block';
+};
+
+// 通用辅助函数
+window.copyText = function(textareaId) {
+    const el = document.getElementById(textareaId);
+    if (!el || !el.value) return;
+    el.select();
+    document.execCommand('copy');
+    showToast('已复制到剪贴板！', 'success');
+};
+
+window.copyInputValue = function(inputId) {
+    const el = document.getElementById(inputId);
+    if (!el || !el.value) return;
+    el.select();
+    document.execCommand('copy');
+    showToast('已复制到剪贴板！', 'success');
+};
+
+// ==================== 🛠️ 7 个小工具具体业务实现 ====================
+
+// 1. JSON 格式化与校验
+window.validateJsonRealtime = function() {
+    const val = document.getElementById('jsonInput').value.trim();
+    const hint = document.getElementById('jsonErrorHint');
+    if (!val) {
+        hint.textContent = '';
+        return;
+    }
+    try {
+        JSON.parse(val);
+        hint.textContent = '✓ JSON 格式合法';
+        hint.style.color = '#10b981';
+    } catch (e) {
+        hint.textContent = '✗ ' + e.message;
+        hint.style.color = '#f43f5e';
+    }
+};
+
+window.formatJson = function(spaces) {
+    const input = document.getElementById('jsonInput').value.trim();
+    const output = document.getElementById('jsonOutput');
+    const hint = document.getElementById('jsonErrorHint');
+    if (!input) return;
+    try {
+        const obj = JSON.parse(input);
+        output.value = JSON.stringify(obj, null, spaces);
+        hint.textContent = '✓ 格式化成功';
+        hint.style.color = '#10b981';
+    } catch (e) {
+        output.value = '';
+        hint.textContent = '✗ 格式化失败: ' + e.message;
+        hint.style.color = '#f43f5e';
+    }
+};
+
+window.minifyJson = function() {
+    const input = document.getElementById('jsonInput').value.trim();
+    const output = document.getElementById('jsonOutput');
+    const hint = document.getElementById('jsonErrorHint');
+    if (!input) return;
+    try {
+        const obj = JSON.parse(input);
+        output.value = JSON.stringify(obj);
+        hint.textContent = '✓ 压缩成功';
+        hint.style.color = '#10b981';
+    } catch (e) {
+        output.value = '';
+        hint.textContent = '✗ 压缩失败: ' + e.message;
+        hint.style.color = '#f43f5e';
+    }
+};
+
+// 2. Base64 编解码
+window.toggleBase64Mode = function(mode) {
+    if (mode === 'text') {
+        document.getElementById('base64TextSection').style.display = 'flex';
+        document.getElementById('base64ImageSection').style.display = 'none';
+    } else {
+        document.getElementById('base64TextSection').style.display = 'none';
+        document.getElementById('base64ImageSection').style.display = 'flex';
+    }
+};
+
+window.base64Encode = function() {
+    const raw = document.getElementById('base64RawInput').value;
+    const cipher = document.getElementById('base64CipherOutput');
+    try {
+        // 使用 encodeURIComponent 兼容 UTF-8 多字节字符的 Base64 编码
+        cipher.value = btoa(encodeURIComponent(raw).replace(/%([0-9A-F]{2})/g, function(match, p1) {
+            return String.fromCharCode('0x' + p1);
+        }));
+    } catch (e) {
+        alert('编码失败: ' + e.message);
+    }
+};
+
+window.base64Decode = function() {
+    const cipher = document.getElementById('base64CipherOutput').value.trim();
+    const raw = document.getElementById('base64RawInput');
+    try {
+        raw.value = decodeURIComponent(atob(cipher).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+    } catch (e) {
+        alert('解码失败，请确认密文为合法的 Base64 字符串！');
+    }
+};
+
+window.handleBase64FileSelect = function(e) {
+    const file = e.target.files[0];
+    if (file) {
+        window.encodeFileToBase64(file);
+    }
+};
+
+window.encodeFileToBase64 = function(file) {
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+        const base64Str = evt.target.result;
+        document.getElementById('base64ImgOutput').value = base64Str;
+        
+        // 显示预览
+        const preview = document.getElementById('base64ImgPreview');
+        const container = document.getElementById('base64ImgPreviewContainer');
+        if (preview && container) {
+            preview.src = base64Str;
+            container.style.display = 'block';
+        }
+    };
+    reader.readAsDataURL(file);
+};
+
+// 3. 哈希散列生成器 (MD5 纯算法实现 + Web Crypto SHA API)
+window.generateHashes = async function() {
+    const val = document.getElementById('hashInput').value;
+    const md5El = document.getElementById('hash_md5');
+    const sha1El = document.getElementById('hash_sha1');
+    const sha256El = document.getElementById('hash_sha256');
+    const sha512El = document.getElementById('hash_sha512');
+    
+    if (!val) {
+        md5El.value = '';
+        sha1El.value = '';
+        sha256El.value = '';
+        sha512El.value = '';
+        return;
+    }
+    
+    // MD5
+    md5El.value = window.calcMd5(val);
+    
+    // SHA 异步计算
+    try {
+        sha1El.value = await window.calcSubtleHash('SHA-1', val);
+        sha256El.value = await window.calcSubtleHash('SHA-256', val);
+        sha512El.value = await window.calcSubtleHash('SHA-512', val);
+    } catch (e) {
+        console.error('Hash calculation error:', e);
+    }
+};
+
+window.calcSubtleHash = async function(algo, text) {
+    const msgUint8 = new TextEncoder().encode(text);
+    const hashBuffer = await crypto.subtle.digest(algo, msgUint8);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+};
+
+// 纯 JS 精简 MD5 函数
+window.calcMd5 = function(string) {
+    function rotateLeft(lValue, iShiftBits) {
+        return (lValue << iShiftBits) | (lValue >>> (32 - iShiftBits));
+    }
+    function addUnsigned(lX, lY) {
+        var lX4, lY4, lX8, lY8, lResult;
+        lX8 = (lX & 0x80000000);
+        lY8 = (lY & 0x80000000);
+        lX4 = (lX & 0x40000000);
+        lY4 = (lY & 0x40000000);
+        lResult = (lX & 0x3FFFFFFF) + (lY & 0x3FFFFFFF);
+        if (lX4 & lY4) return (lResult ^ 0x80000000 ^ lX8 ^ lY8);
+        if (lX4 | lY4) {
+            if (lResult & 0x40000000) return (lResult ^ 0xC0000000 ^ lX8 ^ lY8);
+            return (lResult ^ 0x40000000 ^ lX8 ^ lY8);
+        }
+        return (lResult ^ lX8 ^ lY8);
+    }
+    function F(x, y, z) { return (x & y) | ((~x) & z); }
+    function G(x, y, z) { return (x & z) | (y & (~z)); }
+    function H(x, y, z) { return (x ^ y ^ z); }
+    function I(x, y, z) { return (y ^ (x | (~z))); }
+    function FF(a, b, c, d, x, s, ac) {
+        a = addUnsigned(a, addUnsigned(addUnsigned(F(b, c, d), x), ac));
+        return addUnsigned(rotateLeft(a, s), b);
+    }
+    function GG(a, b, c, d, x, s, ac) {
+        a = addUnsigned(a, addUnsigned(addUnsigned(G(b, c, d), x), ac));
+        return addUnsigned(rotateLeft(a, s), b);
+    }
+    function HH(a, b, c, d, x, s, ac) {
+        a = addUnsigned(a, addUnsigned(addUnsigned(H(b, c, d), x), ac));
+        return addUnsigned(rotateLeft(a, s), b);
+    }
+    function II(a, b, c, d, x, s, ac) {
+        a = addUnsigned(a, addUnsigned(addUnsigned(I(b, c, d), x), ac));
+        return addUnsigned(rotateLeft(a, s), b);
+    }
+    var lWordCount, lMessageLength = string.length;
+    var lNumberOfWords_temp1 = lMessageLength + 8;
+    var lNumberOfWords_temp2 = (lNumberOfWords_temp1 - (lNumberOfWords_temp1 % 64)) / 64;
+    var lNumberOfWords = (lNumberOfWords_temp2 + 1) * 16;
+    var lWordArray = Array(lNumberOfWords - 1);
+    var lBytePosition = 0, lByteCount = 0;
+    while (lByteCount < lMessageLength) {
+        lWordCount = (lByteCount - (lByteCount % 4)) / 4;
+        lBytePosition = (lByteCount % 4) * 8;
+        lWordArray[lWordCount] = (lWordArray[lWordCount] | (string.charCodeAt(lByteCount) << lBytePosition));
+        lByteCount++;
+    }
+    lWordCount = (lByteCount - (lByteCount % 4)) / 4;
+    lBytePosition = (lByteCount % 4) * 8;
+    lWordArray[lWordCount] = lWordArray[lWordCount] | (0x80 << lBytePosition);
+    lWordArray[lNumberOfWords - 2] = lMessageLength << 3;
+    lWordArray[lNumberOfWords - 1] = lMessageLength >>> 29;
+    
+    var x = lWordArray, k, AA, BB, CC, DD, a = 0x67452301, b = 0xEFCDAB89, c = 0x98BADCFE, d = 0x10325476;
+    var S11 = 7, S12 = 12, S13 = 17, S14 = 22;
+    var S21 = 5, S22 = 9, S23 = 14, S24 = 20;
+    var S31 = 4, S32 = 11, S33 = 16, S34 = 23;
+    var S41 = 6, S42 = 10, S43 = 15, S44 = 21;
+    
+    for (k = 0; k < x.length; k += 16) {
+        AA = a; BB = b; CC = c; DD = d;
+        a = FF(a, b, c, d, x[k + 0], S11, 0xD76AA478); d = FF(d, a, b, c, x[k + 1], S12, 0xE8C7B756); c = FF(c, d, a, b, x[k + 2], S13, 0x242070DB); b = FF(b, c, d, a, x[k + 3], S14, 0xC1BDCEEE);
+        a = FF(a, b, c, d, x[k + 4], S11, 0xF57C0FAF); d = FF(d, a, b, c, x[k + 5], S12, 0x4787C62A); c = FF(c, d, a, b, x[k + 6], S13, 0xA8304613); b = FF(b, c, d, a, x[k + 7], S14, 0xFD469501);
+        a = FF(a, b, c, d, x[k + 8], S11, 0x698098D8); d = FF(d, a, b, c, x[k + 9], S12, 0x8B44F7AF); c = FF(c, d, a, b, x[k + 10], S13, 0xFFFF5BB1); b = FF(b, c, d, a, x[k + 11], S14, 0x895CD7BE);
+        a = FF(a, b, c, d, x[k + 12], S11, 0x6B901122); d = FF(d, a, b, c, x[k + 13], S12, 0xFD987193); c = FF(c, d, a, b, x[k + 14], S13, 0xA679438E); b = FF(b, c, d, a, x[k + 15], S14, 0x49B40821);
+        a = GG(a, b, c, d, x[k + 1], S21, 0xF61E2562); d = GG(d, a, b, c, x[k + 6], S22, 0xC040B340); c = GG(c, d, a, b, x[k + 11], S23, 0x265E5A51); b = GG(b, c, d, a, x[k + 0], S24, 0xE9B6C7AA);
+        a = GG(a, b, c, d, x[k + 5], S21, 0xD62F105D); d = GG(d, a, b, c, x[k + 10], S22, 0x2441453); c = GG(c, d, a, b, x[k + 15], S23, 0xD8A1E681); b = GG(b, c, d, a, x[k + 4], S24, 0xE7D3FBC8);
+        a = GG(a, b, c, d, x[k + 9], S21, 0x21E1CDE6); d = GG(d, a, b, c, x[k + 14], S22, 0xC33707D6); c = GG(c, d, a, b, x[k + 3], S23, 0xF4D50D87); b = GG(b, c, d, a, x[k + 8], S24, 0x455A14ED);
+        a = GG(a, b, c, d, x[k + 13], S21, 0xA9E3E905); d = GG(d, a, b, c, x[k + 2], S22, 0xFCEFA3F8); c = GG(c, d, a, b, x[k + 7], S23, 0x676F02D9); b = GG(b, c, d, a, x[k + 12], S24, 0x8D2A4C8A);
+        a = HH(a, b, c, d, x[k + 5], S31, 0xFFFA3942); d = HH(d, a, b, c, x[k + 8], S32, 0x8771F681); c = HH(c, d, a, b, x[k + 11], S33, 0x6D9D6122); b = HH(b, c, d, a, x[k + 14], S34, 0xFDE5380C);
+        a = HH(a, b, c, d, x[k + 1], S31, 0xA4BEEA44); d = HH(d, a, b, c, x[k + 4], S32, 0x4BDECFA9); c = HH(c, d, a, b, x[k + 7], S33, 0xF6BB4B60); b = HH(b, c, d, a, x[k + 10], S34, 0xBEBFBC70);
+        a = HH(a, b, c, d, x[k + 13], S31, 0x289B7EC6); d = HH(d, a, b, c, x[k + 0], S32, 0xEAA127FA); c = HH(c, d, a, b, x[k + 3], S33, 0xD4EF3085); b = HH(b, c, d, a, x[k + 6], S34, 0x4881D05);
+        a = HH(a, b, c, d, x[k + 9], S31, 0xD9D4D039); d = HH(d, a, b, c, x[k + 12], S32, 0xE6DB99E5); c = HH(c, d, a, b, x[k + 15], S33, 0x1FA27CF8); b = HH(b, c, d, a, x[k + 2], S34, 0xC4AC5665);
+        a = II(a, b, c, d, x[k + 0], S41, 0xF4292244); d = II(d, a, b, c, x[k + 7], S42, 0x432AFF97); c = II(c, d, a, b, x[k + 14], S43, 0xAB9423A7); b = II(b, c, d, a, x[k + 5], S44, 0xFC93A039);
+        a = II(a, b, c, d, x[k + 12], S41, 0x655B59C3); d = II(d, a, b, c, x[k + 3], S42, 0x8F0CCC92); c = II(c, d, a, b, x[k + 10], S43, 0xFFEFF47D); b = II(b, c, d, a, x[k + 1], S44, 0x85845DD1);
+        a = II(a, b, c, d, x[k + 8], S41, 0x6FA87E4F); d = II(d, a, b, c, x[k + 15], S42, 0xFE2CE6E0); c = II(c, d, a, b, x[k + 6], S43, 0xA3014314); b = II(b, c, d, a, x[k + 13], S44, 0x4E0811A1);
+        a = II(a, b, c, d, x[k + 4], S41, 0xF7537E82); d = II(d, a, b, c, x[k + 11], S42, 0xBD3AF235); c = II(c, d, a, b, x[k + 2], S43, 0x2AD7D2BB); b = II(b, c, d, a, x[k + 9], S44, 0xEB86D391);
+        a = addUnsigned(a, AA); b = addUnsigned(b, BB); c = addUnsigned(c, CC); d = addUnsigned(d, DD);
+    }
+    
+    function wordToHex(lValue) {
+        var WordToHexValue = "", WordToHexValue_temp = "", lByte, lCount;
+        for (lCount = 0; lCount <= 3; lCount++) {
+            lByte = (lValue >>> (lCount * 8)) & 255;
+            WordToHexValue_temp = "0" + lByte.toString(16);
+            WordToHexValue = WordToHexValue + WordToHexValue_temp.substr(WordToHexValue_temp.length - 2, 2);
+        }
+        return WordToHexValue;
+    }
+    return (wordToHex(a) + wordToHex(b) + wordToHex(c) + wordToHex(d)).toLowerCase();
+};
+
+// 4. 时间戳转换器
+window.startTimestampPolling = function() {
+    if (devtoolsTimestampInterval) return;
+    const currentEl = document.getElementById('currentTimestampSec');
+    // 先立刻跑一次
+    if (currentEl) currentEl.textContent = Math.floor(Date.now() / 1000);
+    devtoolsTimestampInterval = setInterval(() => {
+        if (currentEl) {
+            currentEl.textContent = Math.floor(Date.now() / 1000);
+        }
+    }, 1000);
+};
+
+window.stopTimestampPolling = function() {
+    if (devtoolsTimestampInterval) {
+        clearInterval(devtoolsTimestampInterval);
+        devtoolsTimestampInterval = null;
+    }
+    const btn = document.getElementById('btnPauseTimestamp');
+    if (btn) btn.textContent = '暂停';
+};
+
+window.toggleTimestampPolling = function() {
+    const btn = document.getElementById('btnPauseTimestamp');
+    if (devtoolsTimestampInterval) {
+        window.stopTimestampPolling();
+        if (btn) btn.textContent = '开始';
+    } else {
+        window.startTimestampPolling();
+        if (btn) btn.textContent = '暂停';
+    }
+};
+
+window.copyCurrentTimestamp = function() {
+    const val = document.getElementById('currentTimestampSec').textContent;
+    const tempTextarea = document.createElement('textarea');
+    tempTextarea.value = val;
+    document.body.appendChild(tempTextarea);
+    tempTextarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(tempTextarea);
+    showToast('时间戳已复制！', 'success');
+};
+
+window.convertTimestampToDate = function() {
+    const tsInput = document.getElementById('tsToConvert').value.trim();
+    const unit = document.getElementById('tsUnit').value;
+    const resultInput = document.getElementById('tsDateResult');
+    if (!tsInput) return;
+    
+    let ms = parseInt(tsInput, 10);
+    if (isNaN(ms)) {
+        alert('时间戳必须是数字！');
+        return;
+    }
+    if (unit === 's') {
+        ms *= 1000;
+    }
+    
+    try {
+        const d = new Date(ms);
+        if (d.toString() === 'Invalid Date') {
+            resultInput.value = '无效的时间戳';
+            return;
+        }
+        // 格式化为本地 YYYY-MM-DD HH:mm:ss
+        const padding = (n) => (n < 10 ? '0' + n : n);
+        const dateStr = d.getFullYear() + '-' + padding(d.getMonth() + 1) + '-' + padding(d.getDate()) + ' ' + 
+                        padding(d.getHours()) + ':' + padding(d.getMinutes()) + ':' + padding(d.getSeconds());
+        resultInput.value = dateStr;
+    } catch (e) {
+        resultInput.value = '转换出错: ' + e.message;
+    }
+};
+
+window.fillCurrentDate = function() {
+    const padding = (n) => (n < 10 ? '0' + n : n);
+    const d = new Date();
+    document.getElementById('dateToConvert').value = 
+        d.getFullYear() + '-' + padding(d.getMonth() + 1) + '-' + padding(d.getDate()) + ' ' + 
+        padding(d.getHours()) + ':' + padding(d.getMinutes()) + ':' + padding(d.getSeconds());
+};
+
+window.convertDateToTimestamp = function() {
+    const dateStr = document.getElementById('dateToConvert').value.trim();
+    const secResult = document.getElementById('dateResultSec');
+    const msResult = document.getElementById('dateResultMs');
+    if (!dateStr) return;
+    
+    try {
+        const standardDateStr = dateStr.replace(/-/g, '/');
+        const d = new Date(standardDateStr);
+        if (d.toString() === 'Invalid Date') {
+            secResult.value = '无效的日期格式';
+            msResult.value = '无效的日期格式';
+            return;
+        }
+        const ms = d.getTime();
+        secResult.value = Math.floor(ms / 1000);
+        msResult.value = ms;
+    } catch (e) {
+        secResult.value = '转换失败';
+        msResult.value = '转换失败';
+    }
+};
+
+// 5. URL 编解码
+window.urlEncode = function() {
+    const raw = document.getElementById('urlRawInput').value;
+    const output = document.getElementById('urlEncodedOutput');
+    try {
+        output.value = encodeURIComponent(raw);
+    } catch (e) {
+        alert('编码失败: ' + e.message);
+    }
+};
+
+window.urlDecode = function() {
+    const encoded = document.getElementById('urlEncodedOutput').value;
+    const output = document.getElementById('urlRawInput');
+    try {
+        output.value = decodeURIComponent(encoded);
+    } catch (e) {
+        alert('解码失败: ' + e.message);
+    }
+};
+
+// 6. UUID 生成器
+window.generateUuids = function() {
+    const count = parseInt(document.getElementById('uuidCount').value, 10) || 1;
+    const isUpper = document.getElementById('uuidCase').value === 'upper';
+    const noHyphens = document.getElementById('uuidHyphen').value === 'no';
+    const brackets = document.getElementById('uuidBrackets').value;
+    
+    let uuids = [];
+    for (let i = 0; i < Math.min(count, 500); i++) {
+        let uuid = window.crypto.randomUUID ? window.crypto.randomUUID() : window.generateGuidFallback();
+        
+        if (noHyphens) {
+            uuid = uuid.replace(/-/g, '');
+        }
+        if (isUpper) {
+            uuid = uuid.toUpperCase();
+        } else {
+            uuid = uuid.toLowerCase();
+        }
+        if (brackets === 'braces') {
+            uuid = '{' + uuid + '}';
+        } else if (brackets === 'brackets') {
+            uuid = '[' + uuid + ']';
+        }
+        uuids.push(uuid);
+    }
+    document.getElementById('uuidOutput').value = uuids.join('\n');
+};
+
+window.generateGuidFallback = function() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+};
+
+// 7. 正则表达式测试
+window.runRegexTest = function() {
+    const pattern = document.getElementById('regexPattern').value;
+    const flags = document.getElementById('regexFlags').value;
+    const text = document.getElementById('regexTextInput').value;
+    const output = document.getElementById('regexHighlightOutput');
+    
+    if (!pattern || !text) {
+        output.textContent = text;
+        return;
+    }
+    
+    try {
+        const regex = new RegExp(pattern, flags);
+        let matchCount = 0;
+        let lastIndex = -1;
+        const htmlParts = [];
+        let cursor = 0;
+        const isGlobal = flags.includes('g');
+        
+        if (isGlobal) {
+            let match;
+            while ((match = regex.exec(text)) !== null) {
+                if (regex.lastIndex === lastIndex) {
+                    regex.lastIndex++;
+                }
+                lastIndex = regex.lastIndex;
+                
+                const matchIndex = match.index;
+                const matchLen = match[0].length;
+                
+                if (matchLen === 0) {
+                    if (regex.lastIndex >= text.length) break;
+                    continue;
+                }
+                
+                if (matchIndex > cursor) {
+                    htmlParts.push(escapeHtml(text.substring(cursor, matchIndex)));
+                }
+                
+                const matchClass = (matchCount % 2 === 0) ? 'devtools-regex-match' : 'devtools-regex-match-even';
+                htmlParts.push(`<span class="${matchClass}">${escapeHtml(match[0])}</span>`);
+                
+                cursor = matchIndex + matchLen;
+                matchCount++;
+                
+                if (matchCount > 1500) {
+                    htmlParts.push('<span style="color: #ef4444;"> [更多匹配被截断...]</span>');
+                    break;
+                }
+            }
+        } else {
+            const match = regex.exec(text);
+            if (match) {
+                const matchIndex = match.index;
+                const matchLen = match[0].length;
+                if (matchIndex > cursor) {
+                    htmlParts.push(escapeHtml(text.substring(cursor, matchIndex)));
+                }
+                htmlParts.push(`<span class="devtools-regex-match">${escapeHtml(match[0])}</span>`);
+                cursor = matchIndex + matchLen;
+            }
+        }
+        
+        if (cursor < text.length) {
+            htmlParts.push(escapeHtml(text.substring(cursor)));
+        }
+        
+        output.innerHTML = htmlParts.join('');
+    } catch (e) {
+        output.innerHTML = `<span style="color: #f43f5e; font-weight: bold;">正则表达式错误: ${escapeHtml(e.message)}</span>`;
+    }
+};
+
+function escapeHtml(text) {
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}

@@ -9,7 +9,7 @@
     <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
     <script src="https://unpkg.com/@xterm/addon-webgl@0.16.0/lib/addon-webgl.js"></script>
     <script src="https://unpkg.com/@xterm/addon-search@0.15.0/lib/addon-search.js"></script>
-    <link rel="stylesheet" href="static/styles.css?v=1019">
+    <link rel="stylesheet" href="static/styles.css?v=1020">
     <script src="static/lib/three.min.js"></script>
     <script src="static/lib/OrbitControls.js"></script>
     <style>
@@ -247,6 +247,7 @@
             <button class="activity-item" id="activityLocalCmd" type="button" title="新建本地终端" onclick="createLocalSession()"><span>L-CMD</span></button>
             <button class="activity-item openai-activity" id="aiIcon" type="button" title="OpenAI 助手" onclick="openTool('ai')"><span>AI</span></button>
             <button class="activity-item" id="webfavIcon" type="button" title="WEB收藏" onclick="window.showWebFavoritesView()"><span>WEB</span></button>
+            <button class="activity-item" id="devtoolsIcon" type="button" title="开发者工具箱" onclick="window.toggleDevToolsView()"><span>TOOLS</span></button>
             <button class="activity-item activity-settings" id="highlightIcon" type="button" title="&#39640;&#20142;" onclick="openTool('highlight')"><span>HL</span></button>
         </div>
 
@@ -362,6 +363,402 @@
                                 <!-- 卡片由 JS 动态渲染 -->
                             </div>
                         </div>
+                        
+                        <!-- 开发者工具箱全屏主屏幕 -->
+                        <div id="devtoolsContainer" class="devtools-main-screen" style="display: none; width: 100%; height: 100%; box-sizing: border-box; background: transparent; position: relative; z-index: 100; pointer-events: auto;">
+                            <div class="devtools-wrapper" style="display: flex; height: 100%; width: 100%; gap: 20px; padding: 25px; box-sizing: border-box;">
+                                
+                                <!-- 左侧分类导航 -->
+                                <div class="devtools-sidebar" style="width: 190px; flex-shrink: 0; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 15px; display: flex; flex-direction: column; gap: 8px;">
+                                    <div style="font-size: 15px; font-weight: bold; color: #00f2fe; margin-bottom: 12px; padding-left: 8px; text-shadow: 0 0 8px rgba(0,242,254,0.4);">🛠️ 开发者工具</div>
+                                    <div style="margin-bottom: 12px; position: relative;">
+                                        <input type="text" id="devtoolsSearch" placeholder="搜索工具..." style="width: 100%; box-sizing: border-box; padding: 8px 10px; background: rgba(10,10,12,0.8); border: 1px solid rgba(0,242,254,0.2); border-radius: 6px; color: #fff; font-size: 12px; outline: none;" oninput="window.filterDevtools()" />
+                                    </div>
+                                    <button class="devtools-nav-btn active" onclick="window.switchDevtoolsTab('all')">🌟 所有工具</button>
+                                    <button class="devtools-nav-btn" onclick="window.switchDevtoolsTab('format')">📝 格式化</button>
+                                    <button class="devtools-nav-btn" onclick="window.switchDevtoolsTab('codec')">🔐 编解码</button>
+                                    <button class="devtools-nav-btn" onclick="window.switchDevtoolsTab('generator')">🧮 生成器</button>
+                                    <button class="devtools-nav-btn" onclick="window.switchDevtoolsTab('security')">🛡️ 安全与校验</button>
+                                    <button class="devtools-nav-btn" onclick="window.switchDevtoolsTab('text')">⚙️ 文本与正则</button>
+                                </div>
+                                
+                                <!-- 右侧大区 -->
+                                <div class="devtools-main-content" style="flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%;">
+                                    
+                                    <!-- 1. 平铺工具卡片列表 -->
+                                    <div id="devtoolsGrid" class="devtools-grid-container" style="flex: 1; overflow-y: auto; display: block; padding-right: 5px;">
+                                        <div class="devtools-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 20px;">
+                                            
+                                            <!-- 卡片 1: JSON 格式化与校验 -->
+                                            <div class="devtools-card" data-category="format" onclick="window.openDevtoolPanel('json')">
+                                                <div class="devtools-card-icon">🖨️</div>
+                                                <div class="devtools-card-title">JSON 格式化 & 校验</div>
+                                                <div class="devtools-card-desc">美化、压缩 JSON，并检测语法错误</div>
+                                            </div>
+                                            
+                                            <!-- 卡片 2: Base64 编解码 -->
+                                            <div class="devtools-card" data-category="codec" onclick="window.openDevtoolPanel('base64')">
+                                                <div class="devtools-card-icon">🔑</div>
+                                                <div class="devtools-card-title">Base64 编解码</div>
+                                                <div class="devtools-card-desc">对文本或图像进行 Base64 编码与解码</div>
+                                            </div>
+                                            
+                                            <!-- 卡片 3: 哈希生成器 -->
+                                            <div class="devtools-card" data-category="security" onclick="window.openDevtoolPanel('hash')">
+                                                <div class="devtools-card-icon">🔒</div>
+                                                <div class="devtools-card-title">哈希散列生成器</div>
+                                                <div class="devtools-card-desc">计算 MD5, SHA-1, SHA-256/512 哈希值</div>
+                                            </div>
+                                            
+                                            <!-- 卡片 4: 时间戳转换 -->
+                                            <div class="devtools-card" data-category="codec" onclick="window.openDevtoolPanel('timestamp')">
+                                                <div class="devtools-card-icon">⏱️</div>
+                                                <div class="devtools-card-title">时间戳转换器</div>
+                                                <div class="devtools-card-desc">Epoch 时间戳与可读日期的双向互转</div>
+                                            </div>
+                                            
+                                            <!-- 卡片 5: URL 编解码 -->
+                                            <div class="devtools-card" data-category="codec" onclick="window.openDevtoolPanel('url')">
+                                                <div class="devtools-card-icon">🌐</div>
+                                                <div class="devtools-card-title">URL 编解码器</div>
+                                                <div class="devtools-card-desc">将 URL 的特殊字符进行转义和还原</div>
+                                            </div>
+                                            
+                                            <!-- 卡片 6: UUID 生成器 -->
+                                            <div class="devtools-card" data-category="generator" onclick="window.openDevtoolPanel('uuid')">
+                                                <div class="devtools-card-icon">🆔</div>
+                                                <div class="devtools-card-title">UUID 生成器</div>
+                                                <div class="devtools-card-desc">批量生成随机的符合规范的 UUID</div>
+                                            </div>
+                                            
+                                            <!-- 卡片 7: 正则测试 -->
+                                            <div class="devtools-card" data-category="text" onclick="window.openDevtoolPanel('regex')">
+                                                <div class="devtools-card-icon">⚙️</div>
+                                                <div class="devtools-card-title">正则表达式测试</div>
+                                                <div class="devtools-card-desc">实时匹配、分析和验证您的正则表达式</div>
+                                            </div>
+                                            
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- 2. 工具详情面板区 -->
+                                    <div id="devtoolsPanels" style="flex: 1; display: none; min-height: 0; background: rgba(15, 23, 42, 0.35); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 20px; box-sizing: border-box; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+                                        
+                                        <!-- JSON 格式化面板 -->
+                                        <div id="toolPanel_json" class="tool-detail-panel" style="display: none; height: 100%; flex-direction: column;">
+                                            <div class="tool-panel-header">
+                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                    <button class="devtools-back-btn" onclick="window.backToDevtoolsList()">⬅ 返回</button>
+                                                    <span class="tool-panel-title">JSON 格式化 & 校验</span>
+                                                </div>
+                                                <div style="display: flex; gap: 8px;">
+                                                    <button class="devtools-action-btn" onclick="window.formatJson(4)">美化 (4空格)</button>
+                                                    <button class="devtools-action-btn" onclick="window.formatJson(2)">美化 (2空格)</button>
+                                                    <button class="devtools-action-btn" onclick="window.minifyJson()">压缩单行</button>
+                                                    <button class="devtools-action-btn" onclick="window.copyText('jsonOutput')">复制结果</button>
+                                                </div>
+                                            </div>
+                                            <div style="flex: 1; display: flex; gap: 15px; min-height: 0; margin-top: 15px;">
+                                                <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                    <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">输入 JSON 文本</div>
+                                                    <textarea id="jsonInput" class="devtools-textarea" placeholder="在此粘贴您的 JSON 代码..." oninput="window.validateJsonRealtime()"></textarea>
+                                                    <div id="jsonErrorHint" style="color: #f43f5e; font-size: 12px; margin-top: 5px; height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></div>
+                                                </div>
+                                                <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                    <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">格式化结果</div>
+                                                    <textarea id="jsonOutput" class="devtools-textarea readonly" readonly placeholder="输出结果..."></textarea>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Base64 面板 -->
+                                        <div id="toolPanel_base64" class="tool-detail-panel" style="display: none; height: 100%; flex-direction: column;">
+                                            <div class="tool-panel-header">
+                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                    <button class="devtools-back-btn" onclick="window.backToDevtoolsList()">⬅ 返回</button>
+                                                    <span class="tool-panel-title">Base64 编解码</span>
+                                                </div>
+                                                <div class="devtools-radio-group">
+                                                    <label><input type="radio" name="base64Type" value="text" checked onclick="window.toggleBase64Mode('text')" /> 文本编解码</label>
+                                                    <label><input type="radio" name="base64Type" value="image" onclick="window.toggleBase64Mode('image')" /> 图片转 Base64</label>
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- 文本模式 -->
+                                            <div id="base64TextSection" style="flex: 1; display: flex; flex-direction: column; min-height: 0; margin-top: 15px;">
+                                                <div style="flex: 1; display: flex; gap: 15px; min-height: 0;">
+                                                    <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                        <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">普通文本</div>
+                                                        <textarea id="base64RawInput" class="devtools-textarea" placeholder="输入普通文本..."></textarea>
+                                                    </div>
+                                                    <div style="width: 80px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: center; gap: 10px; align-items: center;">
+                                                        <button class="devtools-action-btn" style="width: 100%;" onclick="window.base64Encode()">编码 ➔</button>
+                                                        <button class="devtools-action-btn" style="width: 100%;" onclick="window.base64Decode()">⬅ 解码</button>
+                                                    </div>
+                                                    <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                        <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">Base64 密文</div>
+                                                        <textarea id="base64CipherOutput" class="devtools-textarea" placeholder="输入或输出 Base64 密文..."></textarea>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- 图片模式 -->
+                                            <div id="base64ImageSection" style="display: none; flex: 1; flex-direction: column; min-height: 0; margin-top: 15px;">
+                                                <div style="flex: 1; display: flex; gap: 15px; min-height: 0;">
+                                                    <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                        <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">拖入或选择图片</div>
+                                                        <div id="base64DropZone" class="devtools-drop-zone" onclick="document.getElementById('base64FileInput').click()">
+                                                            <div style="font-size: 32px; margin-bottom: 10px;">📁</div>
+                                                            <div style="font-size: 13px;">点击或拖拽图片到此区域</div>
+                                                            <div style="font-size: 11px; opacity: 0.5; margin-top: 4px;">支持 PNG, JPG, WEBP, GIF, SVG 等</div>
+                                                            <input type="file" id="base64FileInput" style="display: none;" accept="image/*" onchange="window.handleBase64FileSelect(event)" />
+                                                        </div>
+                                                        <div id="base64ImgPreviewContainer" style="display: none; margin-top: 10px; text-align: center; background: rgba(0,0,0,0.2); border-radius: 6px; padding: 10px; border: 1px solid rgba(255,255,255,0.05);">
+                                                            <img id="base64ImgPreview" style="max-height: 120px; max-width: 100%; border-radius: 4px; box-shadow: 0 4px 10px rgba(0,0,0,0.4);" />
+                                                        </div>
+                                                    </div>
+                                                    <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                                            <span style="font-size: 12px; color: #94a3b8;">Base64 字符串</span>
+                                                            <button class="devtools-action-btn" onclick="window.copyText('base64ImgOutput')">复制</button>
+                                                        </div>
+                                                        <textarea id="base64ImgOutput" class="devtools-textarea readonly" readonly placeholder="Base64 数据将在此生成..."></textarea>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- 哈希生成器面板 -->
+                                        <div id="toolPanel_hash" class="tool-detail-panel" style="display: none; height: 100%; flex-direction: column;">
+                                            <div class="tool-panel-header">
+                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                    <button class="devtools-back-btn" onclick="window.backToDevtoolsList()">⬅ 返回</button>
+                                                    <span class="tool-panel-title">哈希散列生成器</span>
+                                                </div>
+                                            </div>
+                                            <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; margin-top: 15px; gap: 15px; overflow-y: auto; padding-right: 5px;">
+                                                <div>
+                                                    <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">输入文本</div>
+                                                    <textarea id="hashInput" class="devtools-textarea" style="height: 90px;" placeholder="在此输入需要计算哈希的明文..." oninput="window.generateHashes()"></textarea>
+                                                </div>
+                                                
+                                                <div style="display: flex; flex-direction: column; gap: 12px;">
+                                                    <div>
+                                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                                            <span style="font-size: 11px; font-weight: bold; color: #a855f7;">MD5</span>
+                                                            <button class="devtools-hash-copy-btn" onclick="window.copyInputValue('hash_md5')">复制</button>
+                                                        </div>
+                                                        <input type="text" id="hash_md5" class="devtools-hash-input" readonly placeholder="等待输入..." />
+                                                    </div>
+                                                    <div>
+                                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                                            <span style="font-size: 11px; font-weight: bold; color: #00f2fe;">SHA-1</span>
+                                                            <button class="devtools-hash-copy-btn" onclick="window.copyInputValue('hash_sha1')">复制</button>
+                                                        </div>
+                                                        <input type="text" id="hash_sha1" class="devtools-hash-input" readonly placeholder="等待输入..." />
+                                                    </div>
+                                                    <div>
+                                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                                            <span style="font-size: 11px; font-weight: bold; color: #4facfe;">SHA-256</span>
+                                                            <button class="devtools-hash-copy-btn" onclick="window.copyInputValue('hash_sha256')">复制</button>
+                                                        </div>
+                                                        <input type="text" id="hash_sha256" class="devtools-hash-input" readonly placeholder="等待输入..." />
+                                                    </div>
+                                                    <div>
+                                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                                            <span style="font-size: 11px; font-weight: bold; color: #10b981;">SHA-512</span>
+                                                            <button class="devtools-hash-copy-btn" onclick="window.copyInputValue('hash_sha512')">复制</button>
+                                                        </div>
+                                                        <input type="text" id="hash_sha512" class="devtools-hash-input" readonly placeholder="等待输入..." />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- 时间戳转换器面板 -->
+                                        <div id="toolPanel_timestamp" class="tool-detail-panel" style="display: none; height: 100%; flex-direction: column;">
+                                            <div class="tool-panel-header">
+                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                    <button class="devtools-back-btn" onclick="window.backToDevtoolsList()">⬅ 返回</button>
+                                                    <span class="tool-panel-title">时间戳转换器</span>
+                                                </div>
+                                            </div>
+                                            <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; margin-top: 15px; gap: 20px; overflow-y: auto;">
+                                                
+                                                <!-- 实时时间戳 -->
+                                                <div style="background: rgba(0, 0, 0, 0.2); border: 1px dashed rgba(0, 242, 254, 0.3); border-radius: 8px; padding: 15px; display: flex; justify-content: space-between; align-items: center;">
+                                                    <div>
+                                                        <span style="font-size: 12px; color: #94a3b8;">当前 UNIX 时间戳 (秒):</span>
+                                                        <span id="currentTimestampSec" style="font-family: monospace; font-size: 18px; font-weight: bold; color: #00f2fe; margin-left: 10px; text-shadow: 0 0 8px rgba(0,242,254,0.4);">1784918400</span>
+                                                    </div>
+                                                    <div style="display: flex; gap: 8px;">
+                                                        <button class="devtools-action-btn" id="btnPauseTimestamp" onclick="window.toggleTimestampPolling()">暂停</button>
+                                                        <button class="devtools-action-btn" onclick="window.copyCurrentTimestamp()">复制</button>
+                                                    </div>
+                                                </div>
+                                                
+                                                <!-- 双向转换区 -->
+                                                <div style="display: flex; flex-direction: column; gap: 15px;">
+                                                    
+                                                    <!-- 时间戳转可读时间 -->
+                                                    <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 15px;">
+                                                        <div style="font-size: 13px; font-weight: bold; color: #fff; margin-bottom: 10px;">🕒 时间戳 ➔ 北京时间</div>
+                                                        <div style="display: flex; gap: 10px; align-items: center;">
+                                                            <input type="text" id="tsToConvert" placeholder="例如: 1784918400" class="devtools-hash-input" style="flex: 1; margin: 0; height: 34px;" />
+                                                            <select id="tsUnit" style="height: 34px; background: #0f141c; color: #fff; border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; padding: 0 8px; outline: none;">
+                                                                <option value="s">秒 (s)</option>
+                                                                <option value="ms">毫秒 (ms)</option>
+                                                            </select>
+                                                            <button class="devtools-action-btn" style="height: 34px; line-height: 34px; padding: 0 20px;" onclick="window.convertTimestampToDate()">转换</button>
+                                                        </div>
+                                                        <div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
+                                                            <span style="font-size: 12px; color: #94a3b8;">北京时间 (GMT+8):</span>
+                                                            <input type="text" id="tsDateResult" readonly class="devtools-hash-input" style="flex: 1; margin: 0; height: 32px; background: rgba(0,0,0,0.15);" />
+                                                            <button class="devtools-hash-copy-btn" onclick="window.copyInputValue('tsDateResult')">复制</button>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <!-- 可读时间转时间戳 -->
+                                                    <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 15px;">
+                                                        <div style="font-size: 13px; font-weight: bold; color: #fff; margin-bottom: 10px;">🕒 北京时间 ➔ 时间戳</div>
+                                                        <div style="display: flex; gap: 10px; align-items: center;">
+                                                            <input type="text" id="dateToConvert" placeholder="例如: 2026-06-23 18:00:00" class="devtools-hash-input" style="flex: 1; margin: 0; height: 34px;" />
+                                                            <button class="devtools-action-btn" style="height: 34px;" onclick="window.fillCurrentDate()">填入当前</button>
+                                                            <button class="devtools-action-btn" style="height: 34px; line-height: 34px; padding: 0 20px;" onclick="window.convertDateToTimestamp()">转换</button>
+                                                        </div>
+                                                        <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+                                                            <div style="display: flex; align-items: center; gap: 10px;">
+                                                                <span style="font-size: 12px; color: #94a3b8; width: 80px; flex-shrink: 0;">秒时间戳:</span>
+                                                                <input type="text" id="dateResultSec" readonly class="devtools-hash-input" style="flex: 1; margin: 0; height: 30px; background: rgba(0,0,0,0.15);" />
+                                                                <button class="devtools-hash-copy-btn" onclick="window.copyInputValue('dateResultSec')">复制</button>
+                                                            </div>
+                                                            <div style="display: flex; align-items: center; gap: 10px;">
+                                                                <span style="font-size: 12px; color: #94a3b8; width: 80px; flex-shrink: 0;">毫秒时间戳:</span>
+                                                                <input type="text" id="dateResultMs" readonly class="devtools-hash-input" style="flex: 1; margin: 0; height: 30px; background: rgba(0,0,0,0.15);" />
+                                                                <button class="devtools-hash-copy-btn" onclick="window.copyInputValue('dateResultMs')">复制</button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- URL 编解码面板 -->
+                                        <div id="toolPanel_url" class="tool-detail-panel" style="display: none; height: 100%; flex-direction: column;">
+                                            <div class="tool-panel-header">
+                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                    <button class="devtools-back-btn" onclick="window.backToDevtoolsList()">⬅ 返回</button>
+                                                    <span class="tool-panel-title">URL 编解码器</span>
+                                                </div>
+                                            </div>
+                                            <div style="flex: 1; display: flex; gap: 15px; min-height: 0; margin-top: 15px;">
+                                                <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                    <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">原始字符</div>
+                                                    <textarea id="urlRawInput" class="devtools-textarea" placeholder="输入未编码的 URL 或普通文本..."></textarea>
+                                                </div>
+                                                <div style="width: 80px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: center; gap: 10px; align-items: center;">
+                                                    <button class="devtools-action-btn" style="width: 100%;" onclick="window.urlEncode()">编码 ➔</button>
+                                                    <button class="devtools-action-btn" style="width: 100%;" onclick="window.urlDecode()">⬅ 解码</button>
+                                                </div>
+                                                <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                    <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">URL 编码后</div>
+                                                    <textarea id="urlEncodedOutput" class="devtools-textarea" placeholder="编码后的 URL..."></textarea>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- UUID 生成器面板 -->
+                                        <div id="toolPanel_uuid" class="tool-detail-panel" style="display: none; height: 100%; flex-direction: column;">
+                                            <div class="tool-panel-header">
+                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                    <button class="devtools-back-btn" onclick="window.backToDevtoolsList()">⬅ 返回</button>
+                                                    <span class="tool-panel-title">UUID 生成器</span>
+                                                </div>
+                                                <div style="display: flex; gap: 8px;">
+                                                    <button class="devtools-action-btn" onclick="window.generateUuids()">批量生成</button>
+                                                    <button class="devtools-action-btn" onclick="window.copyText('uuidOutput')">复制全部</button>
+                                                </div>
+                                            </div>
+                                            <div style="flex: 1; display: flex; gap: 20px; min-height: 0; margin-top: 15px;">
+                                                
+                                                <!-- 设置栏 -->
+                                                <div style="width: 220px; flex-shrink: 0; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 15px;">
+                                                    <div style="font-size: 13px; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 6px;">生成配置</div>
+                                                    <div>
+                                                        <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">生成数量</label>
+                                                        <input type="number" id="uuidCount" value="10" min="1" max="500" class="devtools-hash-input" style="margin: 0; width: 100%; height: 30px;" />
+                                                    </div>
+                                                    <div>
+                                                        <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">大小写</label>
+                                                        <select id="uuidCase" style="width: 100%; height: 30px; background: #0f141c; color: #fff; border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; padding: 0 8px; outline: none;">
+                                                            <option value="lower">小写 (lower)</option>
+                                                            <option value="upper">大写 (UPPER)</option>
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">连字符 (`-`)</label>
+                                                        <select id="uuidHyphen" style="width: 100%; height: 30px; background: #0f141c; color: #fff; border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; padding: 0 8px; outline: none;">
+                                                            <option value="yes">带连字符 (Default)</option>
+                                                            <option value="no">无连字符 (Clean)</option>
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">包围方式</label>
+                                                        <select id="uuidBrackets" style="width: 100%; height: 30px; background: #0f141c; color: #fff; border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; padding: 0 8px; outline: none;">
+                                                            <option value="none">无包围 (Plain)</option>
+                                                            <option value="braces">大括号 `{...}`</option>
+                                                            <option value="brackets">中括号 `[...]`</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                
+                                                <!-- 结果展示区 -->
+                                                <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                    <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">生成的 UUID 列表</div>
+                                                    <textarea id="uuidOutput" class="devtools-textarea readonly" readonly placeholder="点击批量生成按钮生成 UUID..."></textarea>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- 正则测试面板 -->
+                                        <div id="toolPanel_regex" class="tool-detail-panel" style="display: none; height: 100%; flex-direction: column;">
+                                            <div class="tool-panel-header">
+                                                <div style="display: flex; align-items: center; gap: 10px;">
+                                                    <button class="devtools-back-btn" onclick="window.backToDevtoolsList()">⬅ 返回</button>
+                                                    <span class="tool-panel-title">正则表达式测试</span>
+                                                </div>
+                                            </div>
+                                            <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; margin-top: 15px; gap: 12px;">
+                                                
+                                                <!-- 表达式与修饰符 -->
+                                                <div style="display: flex; gap: 10px; align-items: center;">
+                                                    <span style="font-size: 18px; color: #00f2fe; font-family: monospace; font-weight: bold; margin-right: 5px;">/</span>
+                                                    <input type="text" id="regexPattern" placeholder="输入正则表达式内容 (例如: [a-zA-Z]+)" class="devtools-hash-input" style="flex: 1; margin: 0; height: 36px; font-family: monospace;" oninput="window.runRegexTest()" />
+                                                    <span style="font-size: 18px; color: #00f2fe; font-family: monospace; font-weight: bold; margin-left: 5px;">/</span>
+                                                    <input type="text" id="regexFlags" placeholder="修饰符 (如: g, i, m)" value="g" class="devtools-hash-input" style="width: 100px; margin: 0; height: 36px; font-family: monospace;" oninput="window.runRegexTest()" />
+                                                </div>
+                                                
+                                                <!-- 输入与高亮预览对开 -->
+                                                <div style="flex: 1; display: flex; gap: 15px; min-height: 0;">
+                                                    <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                        <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">测试目标文本</div>
+                                                        <textarea id="regexTextInput" class="devtools-textarea" placeholder="在此粘贴或输入需要匹配的文本..." oninput="window.runRegexTest()"></textarea>
+                                                    </div>
+                                                    <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+                                                        <div style="margin-bottom: 5px; font-size: 12px; color: #94a3b8;">匹配高亮预览</div>
+                                                        <div id="regexHighlightOutput" class="devtools-highlight-container" style="flex: 1; box-sizing: border-box; padding: 12px; background: rgba(10,10,12,0.85); border: 1px solid rgba(0,242,254,0.25); border-radius: 6px; color: #fff; font-size: 13px; font-family: monospace; overflow-y: auto; white-space: pre-wrap; word-break: break-all;"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                    </div>
+                                    
+                                </div>
+                            </div>
+                        </div>
+                        
                         <div id="welcomeScreen" class="welcome-screen connections-home">
                             <div class="home-watermark">
                                 <div class="welcome-rocket" style="font-size: 72px; margin-bottom: 20px; user-select: none; animation: rocketHue 4s linear infinite;">
@@ -578,9 +975,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ace.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ext-modelist.js"></script>
 
-    <script src="static/core-topology.js?v=1019"></script>
-    <script src="static/app.js?v=1019"></script>
-    <script src="static/hermes-agent.js?v=1019"></script>
+    <script src="static/core-topology.js?v=1020"></script>
+    <script src="static/app.js?v=1020"></script>
+    <script src="static/hermes-agent.js?v=1020"></script>
         </div>
     </div>
 
