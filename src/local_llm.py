@@ -35,6 +35,41 @@ def get_app_dir() -> Path:
     else:
         return Path(__file__).parent.parent
 
+def get_ui_hermes_dir() -> Path:
+    app_dir = get_app_dir()
+    p1 = app_dir / "ui" / "hermes"
+    if p1.exists():
+        return p1
+    p2 = app_dir / "src" / "ui" / "hermes"
+    if p2.exists():
+        return p2
+    return p1 # fallback
+
+def update_ui_status_file():
+    try:
+        hermes_dir = get_ui_hermes_dir()
+        hermes_dir.mkdir(parents=True, exist_ok=True)
+        status_file = hermes_dir / "status.json"
+        
+        with status_lock:
+            status = download_status
+            err = download_error
+            prog_eng = download_progress_engine
+            prog_mod = download_progress_model
+            speed = download_speed_text
+            
+        res = {
+            "success": True,
+            "status": status,
+            "progress_engine": prog_eng,
+            "progress_model": prog_mod,
+            "speed": speed,
+            "error": err
+        }
+        status_file.write_text(json.dumps(res), encoding='utf-8')
+    except Exception as e:
+        logger.error(f"Failed to write status.json: {e}")
+
 def is_port_in_use(port: int) -> bool:
     """
     Check if a local TCP port is currently in use.
@@ -118,6 +153,7 @@ def download_and_extract_engine(bin_dir: Path):
         global download_progress_engine
         with status_lock:
             download_progress_engine = p
+        update_ui_status_file()
             
     success = False
     last_err = None
@@ -170,6 +206,7 @@ def download_model(models_dir: Path):
         global download_progress_model
         with status_lock:
             download_progress_model = p
+        update_ui_status_file()
             
     logger.info(f"Downloading model from ModelScope: {model_url}")
     download_file_with_progress(model_url, dest_path, update_model_progress)
@@ -194,26 +231,31 @@ def download_worker():
         if not llama_exe.exists() or not llama_dll.exists():
             with status_lock:
                 download_status = "downloading"
+            update_ui_status_file()
             logger.info("Engine llama-server.exe or llama.dll not found. Starting download...")
             download_and_extract_engine(bin_dir)
         else:
             with status_lock:
                 download_progress_engine = 100.0
+            update_ui_status_file()
                 
         # 2. Download model
         model_file = models_dir / "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
         if not model_file.exists():
             with status_lock:
                 download_status = "downloading"
+            update_ui_status_file()
             logger.info("Model GGUF file not found. Starting download...")
             download_model(models_dir)
         else:
             with status_lock:
                 download_progress_model = 100.0
+            update_ui_status_file()
                 
         # 3. Mark completed
         with status_lock:
             download_status = "completed"
+        update_ui_status_file()
         logger.info("All local LLM assets verified successfully. Transitioning to real llama-server...")
         
         # Shutdown Mock server
@@ -230,6 +272,7 @@ def download_worker():
         with status_lock:
             download_status = "failed"
             download_error = str(e)
+        update_ui_status_file()
 
 # ── Mock HTTP Server ────────────────────────────────────────────────────────
 
@@ -485,6 +528,7 @@ def start_local_llm_backend():
         logger.info("Local LLM assets are present. Directly launching llama-server.")
         with status_lock:
             download_status = "completed"
+        update_ui_status_file()
         start_real_llama_server()
     else:
         logger.info("Local LLM assets are missing. Launching Mock API and download thread.")

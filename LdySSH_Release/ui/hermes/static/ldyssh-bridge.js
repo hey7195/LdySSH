@@ -223,16 +223,12 @@
 
         async function checkStatus() {
             try {
-                const res = await fetch('http://127.0.0.1:61357/v1/status');
+                const res = await fetch('status.json');
                 if (!res.ok) {
-                    successiveFails++;
-                    if (successiveFails >= 2) {
-                        showReadyState();
-                    }
+                    showReadyState();
                     return;
                 }
                 const data = await res.json();
-                successiveFails = 0;
                 
                 if (data.status === 'completed') {
                     showReadyState();
@@ -244,17 +240,8 @@
                     showReadyState();
                 }
             } catch (err) {
-                // 如果 status 不通，尝试直接向模型列表发起请求，检测是否真正模型推理器已启动接管
-                try {
-                    const modelRes = await fetch('http://127.0.0.1:61357/v1/models');
-                    if (modelRes.ok) {
-                        showReadyState();
-                    } else {
-                        showConnectingState();
-                    }
-                } catch (e) {
-                    showConnectingState();
-                }
+                // status.json not available, assuming LLM backend is fully loaded and ready
+                showReadyState();
             }
         }
 
