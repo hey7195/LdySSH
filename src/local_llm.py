@@ -314,33 +314,37 @@ class MockOpenAIServer(BaseHTTPRequestHandler):
             
             self.send_sse_chunk(init_msg)
             
-            for _ in range(120): # Loop for max 240 seconds
-                with status_lock:
-                    status = download_status
-                    err = download_error
-                    prog_eng = download_progress_engine
-                    prog_mod = download_progress_model
-                    speed = download_speed_text
-                    
-                if status == "completed":
-                    finish_msg = "\n\n🎉 **本地推理引擎和模型已自动下载并集成成功！**\n正在拉起本地高性能推理服务器（约 2 秒），您可以重新发送您的提问，即可正常开始对话！"
-                    self.send_sse_chunk(finish_msg)
-                    break
-                elif status == "failed":
-                    err_msg = f"\n\n❌ **本地 AI 服务集成失败**：{err}\n您可以检查网络连接并尝试重新启动软件。"
-                    self.send_sse_chunk(err_msg)
-                    break
-                else:
-                    progress_line = (
-                        f"⏳ **实时进度更新**：\n"
-                        f" - 🎯 AI 推理引擎 (llama-server.exe): {prog_eng:.1f}%\n"
-                        f" - 🧠 1.5B 物理模型 (Qwen2.5-Coder): {prog_mod:.1f}% ({speed})\n\n"
-                    )
-                    try:
-                        self.send_sse_chunk(progress_line)
-                    except Exception:
-                        break # client disconnected
-                time.sleep(2.0)
+            with status_lock:
+                status = download_status
+                err = download_error
+                prog_eng = download_progress_engine
+                prog_mod = download_progress_model
+                speed = download_speed_text
+                
+            if status == "completed":
+                finish_msg = (
+                    "🎉 **本地推理引擎和模型已自动下载并集成成功！**\n"
+                    "正在拉起本地高性能推理服务器（约 2 秒），您可以重新发送您的提问，即可开始对话！"
+                )
+                self.send_sse_chunk(finish_msg)
+            elif status == "failed":
+                err_msg = f"❌ **本地 AI 服务集成失败**：{err}\n您可以检查网络连接并尝试重新启动软件。"
+                self.send_sse_chunk(err_msg)
+            else:
+                # Instant response with current progress, preventing proxy timeout issues
+                init_msg = (
+                    "【🔮 本地 AI 首次集成中】\n"
+                    "您好！为了实现‘双击开箱即用’且完全离线运行（无需您安装 Ollama 软件），我们正在自动为您部署本地推理引擎（llama-server.exe）与 1.5B 物理大模型（约 1.05 GB）。\n\n"
+                )
+                self.send_sse_chunk(init_msg)
+                
+                progress_line = (
+                    f"⏳ **实时进度**：\n"
+                    f" - 🎯 AI 推理引擎 (llama-server.exe): **{prog_eng:.1f}%**\n"
+                    f" - 🧠 1.5B 物理模型 (Qwen2.5-Coder): **{prog_mod:.1f}%** ({speed})\n\n"
+                    "💡 *下载正在后台快速进行。请您在 5-10 秒后发送任意字符（例如 '.'）重新查询最新进度，集成完毕后即可正常对话！*"
+                )
+                self.send_sse_chunk(progress_line)
                 
             try:
                 self.wfile.write(b"data: [DONE]\n\n")
