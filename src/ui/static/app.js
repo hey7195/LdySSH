@@ -2822,12 +2822,16 @@ function getConnectionDisplayParts(connection) {
 
 function updateHomeConnectionSummary(filteredCount = null) {
     const summary = document.getElementById('homeConnectionSummary');
+    const cleanBtn = document.getElementById('cleanNewConnectionBtn');
     if (!summary) return;
 
     const total = savedConnectionsCache.length;
     if (total === 0) {
-        summary.textContent = '暂无保存主机，可从左侧新建连接。';
+        summary.textContent = '暂无保存主机，可直接新建连接。';
+        if (cleanBtn) cleanBtn.style.display = 'inline-flex';
         return;
+    } else {
+        if (cleanBtn) cleanBtn.style.display = 'none';
     }
 
     if (filteredCount !== null && filteredCount !== total) {
@@ -2924,7 +2928,7 @@ function renderConnectionsHome() {
         }
     }
     container.innerHTML = '';
-    empty.style.display = connections.length === 0 ? 'block' : 'none';
+    empty.style.display = 'none';
     updateHomeConnectionSummary(connections.length);
 
     connections.forEach(conn => {

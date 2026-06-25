@@ -7665,6 +7665,36 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     box-shadow: 0 0 6px rgba(16,185,129,0.3);
 }
 
+.clean-new-connection-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 14px;
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #00f2fe;
+    background: rgba(0, 242, 254, 0.08);
+    border: 1px solid rgba(0, 242, 254, 0.3);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    outline: none;
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.05);
+}
+
+.clean-new-connection-btn:hover {
+    background: rgba(0, 242, 254, 0.2);
+    border-color: rgba(0, 242, 254, 0.6);
+    box-shadow: 0 0 15px rgba(0, 242, 254, 0.2);
+    transform: translateY(-1px);
+}
+
+.clean-new-connection-btn:active {
+    transform: translateY(1px);
+}
+
 
 
 
