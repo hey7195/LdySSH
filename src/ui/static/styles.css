@@ -7682,6 +7682,7 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:foc
     transition: all 0.25s ease;
     outline: none;
     box-shadow: 0 0 10px rgba(0, 242, 254, 0.05);
+    pointer-events: auto !important;
 }
 
 .clean-new-connection-btn:hover {
