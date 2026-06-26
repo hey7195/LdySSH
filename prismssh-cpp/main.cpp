@@ -284,6 +284,22 @@ bool OpenLocalFile(const std::wstring& filePath) {
     return ((INT_PTR)res > 32);
 }
 
+std::string GenerateWebFavoriteId() {
+    GUID guid;
+    if (SUCCEEDED(CoCreateGuid(&guid))) {
+        wchar_t buffer[39] = { 0 };
+        if (StringFromGUID2(guid, buffer, 39) > 0) {
+            std::wstring value(buffer);
+            if (value.size() >= 38 && value.front() == L'{' && value.back() == L'}') {
+                value = value.substr(1, value.size() - 2);
+            }
+            return Utf16ToUtf8(value);
+        }
+    }
+
+    auto ticks = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    return "fav_" + std::to_string(ticks) + "_" + std::to_string(GetCurrentProcessId());
+}
 // API router and handler
 void HandleApiCall(const std::string& reqId, const std::string& action, const nlohmann::json& args) {
     nlohmann::json response;
@@ -428,6 +444,119 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             
             nlohmann::json retObj;
             retObj["success"] = updated;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "get_web_favorites") {
+            NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
+            std::wstring configDir = GetConfigDirectory();
+            if (!configDir.empty()) {
+                CreateDirectoryW(configDir.c_str(), NULL);
+            }
+            std::wstring favPath = configDir + L"\\web_favorites.json";
+            std::string favData = ReadFileToUtf8(favPath);
+            nlohmann::json favorites = nlohmann::json::array();
+            if (!favData.empty()) {
+                try {
+                    favorites = nlohmann::json::parse(favData);
+                    if (!favorites.is_array()) {
+                        favorites = nlohmann::json::array();
+                    }
+                } catch (...) {
+                    favorites = nlohmann::json::array();
+                }
+            } else {
+                WriteUtf8ToFile(favPath, favorites.dump(4));
+            }
+            response["status"] = "success";
+            response["result"] = favorites.dump();
+        }
+        else if (action == "add_web_favorite") {
+            NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
+            std::string title = args.size() > 0 ? TrimString(args[0].get<std::string>()) : "";
+            std::string url = args.size() > 1 ? TrimString(args[1].get<std::string>()) : "";
+            nlohmann::json retObj;
+
+            if (title.empty() || url.empty()) {
+                retObj["success"] = false;
+                retObj["error"] = "Title and URL are required";
+            } else {
+                if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
+                    url = "https://" + url;
+                }
+
+                std::wstring configDir = GetConfigDirectory();
+                if (!configDir.empty()) {
+                    CreateDirectoryW(configDir.c_str(), NULL);
+                }
+                std::wstring favPath = configDir + L"\\web_favorites.json";
+                std::string favData = ReadFileToUtf8(favPath);
+                nlohmann::json favorites = nlohmann::json::array();
+                if (!favData.empty()) {
+                    try {
+                        favorites = nlohmann::json::parse(favData);
+                        if (!favorites.is_array()) {
+                            favorites = nlohmann::json::array();
+                        }
+                    } catch (...) {
+                        favorites = nlohmann::json::array();
+                    }
+                }
+
+                nlohmann::json favorite;
+                favorite["id"] = GenerateWebFavoriteId();
+                favorite["title"] = title;
+                favorite["url"] = url;
+                favorites.push_back(favorite);
+
+                bool success = WriteUtf8ToFile(favPath, favorites.dump(4));
+                retObj["success"] = success;
+                if (success) {
+                    retObj["favorite"] = favorite;
+                } else {
+                    retObj["error"] = "Failed to save web favorite";
+                }
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "delete_web_favorite") {
+            NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
+            std::string favId = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::wstring configDir = GetConfigDirectory();
+            std::wstring favPath = configDir + L"\\web_favorites.json";
+            std::string favData = ReadFileToUtf8(favPath);
+            nlohmann::json retObj;
+
+            if (favData.empty()) {
+                retObj["success"] = false;
+                retObj["error"] = "No favorites found";
+            } else {
+                nlohmann::json favorites = nlohmann::json::array();
+                try {
+                    favorites = nlohmann::json::parse(favData);
+                    if (!favorites.is_array()) {
+                        favorites = nlohmann::json::array();
+                    }
+                } catch (...) {
+                    favorites = nlohmann::json::array();
+                }
+
+                nlohmann::json newFavorites = nlohmann::json::array();
+                for (const auto& favorite : favorites) {
+                    if (!favorite.contains("id") || favorite["id"].get<std::string>() != favId) {
+                        newFavorites.push_back(favorite);
+                    }
+                }
+
+                bool success = WriteUtf8ToFile(favPath, newFavorites.dump(4));
+                retObj["success"] = success;
+                if (!success) {
+                    retObj["error"] = "Failed to delete web favorite";
+                }
+            }
+
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
