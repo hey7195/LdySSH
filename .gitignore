@@ -2,4 +2,5 @@
 .superpowers/
 frontend/dist/
 frontend/node_modules/
+frontend/.vite-dev*.log
 tests/test_connections.json.bak.*
