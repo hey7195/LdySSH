@@ -6,6 +6,22 @@
   --app-text: #0f172a;
   --app-muted: #64748b;
   --app-line: #d9e2ef;
+  --panel-bg: #ffffff;
+  --subtle-bg: #f8fafc;
+  --terminal-bg: #ffffff;
+  --terminal-text: #1f2937;
+}
+
+.app-root[data-theme="dark"] {
+  color-scheme: dark;
+  --app-bg: #0f172a;
+  --app-text: #e5e7eb;
+  --app-muted: #94a3b8;
+  --app-line: #334155;
+  --panel-bg: #111827;
+  --subtle-bg: #1e293b;
+  --terminal-bg: #111827;
+  --terminal-text: #e5e7eb;
 }
 
 * {
@@ -54,8 +70,37 @@ textarea {
 }
 
 .terminal-shell {
-  background: #111827;
-  color: #e5e7eb;
+  background: var(--terminal-bg);
+  color: var(--terminal-text);
+}
+
+.app-root[data-theme="dark"] .bg-white,
+.app-root[data-theme="dark"] .bg-slate-50,
+.app-root[data-theme="dark"] .bg-\[\#eef2f7\],
+.app-root[data-theme="dark"] .bg-\[\#f6f8fb\] {
+  background-color: var(--panel-bg) !important;
+}
+
+.app-root[data-theme="dark"] .bg-slate-100 {
+  background-color: var(--subtle-bg) !important;
+}
+
+.app-root[data-theme="dark"] .text-slate-950,
+.app-root[data-theme="dark"] .text-slate-900,
+.app-root[data-theme="dark"] .text-slate-800,
+.app-root[data-theme="dark"] .text-slate-700 {
+  color: var(--app-text) !important;
+}
+
+.app-root[data-theme="dark"] .text-slate-600,
+.app-root[data-theme="dark"] .text-slate-500,
+.app-root[data-theme="dark"] .text-slate-400 {
+  color: var(--app-muted) !important;
+}
+
+.app-root[data-theme="dark"] .border-slate-200,
+.app-root[data-theme="dark"] .border-slate-300 {
+  border-color: var(--app-line) !important;
 }
 
 .pywebview-drag-region {

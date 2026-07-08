@@ -33,8 +33,17 @@ import {
 import { Button, EmptyState, Input, Panel } from "./components/ui";
 import { cn } from "./lib/utils";
 import { nativeBridge, type ConnectParams, type NativeResult, type SavedConnection } from "./lib/bridge";
+import {
+  DEFAULT_HIGHLIGHT_RULES,
+  THEMES,
+  applyHighlightRules,
+  getTerminalTheme,
+  getThemeAttribute,
+  type HighlightRule,
+  type ThemeMode
+} from "./lib/terminalSettings";
 
-type Tool = "ssh" | "cmd" | "sftp" | "pf" | "monitor" | "local" | "ai";
+type Tool = "ssh" | "cmd" | "sftp" | "pf" | "monitor" | "local" | "ai" | "settings";
 type AiTool = "codex" | "hermes";
 
 interface SessionTab {
@@ -54,6 +63,12 @@ interface ConnectionForm {
   save: boolean;
 }
 
+interface AiQuote {
+  id: string;
+  sourceTitle: string;
+  text: string;
+}
+
 const tools: Array<{ id: Tool; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "ssh", label: "SSH", icon: Server },
   { id: "cmd", label: "CMD", icon: Command },
@@ -61,7 +76,8 @@ const tools: Array<{ id: Tool; label: string; icon: React.ComponentType<{ classN
   { id: "pf", label: "PF", icon: Shield },
   { id: "monitor", label: "MON", icon: Monitor },
   { id: "local", label: "L-CMD", icon: Terminal },
-  { id: "ai", label: "AI", icon: Bot }
+  { id: "ai", label: "AI", icon: Bot },
+  { id: "settings", label: "设置", icon: Settings }
 ];
 
 const emptyForm: ConnectionForm = {
@@ -83,6 +99,9 @@ export function App() {
   const [connectOpen, setConnectOpen] = useState(false);
   const [form, setForm] = useState<ConnectionForm>(emptyForm);
   const [connectError, setConnectError] = useState("");
+  const [theme, setTheme] = useState<ThemeMode>("light");
+  const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(DEFAULT_HIGHLIGHT_RULES);
+  const [aiQuotes, setAiQuotes] = useState<AiQuote[]>([]);
 
   useEffect(() => {
     void refreshConnections();
@@ -182,9 +201,48 @@ export function App() {
     }
   }
 
+  function addAiQuote(text: string, sourceTitle: string) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const quote: AiQuote = {
+      id: crypto.randomUUID?.() || `quote_${Date.now()}`,
+      sourceTitle,
+      text: trimmed
+    };
+    setAiQuotes((current) => [quote, ...current].slice(0, 8));
+    setActiveTool("ai");
+  }
+
+  function toggleHighlightRule(ruleId: string) {
+    setHighlightRules((current) =>
+      current.map((rule) => (rule.id === ruleId ? { ...rule, enabled: !rule.enabled } : rule))
+    );
+  }
+
+  function addHighlightRule(rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) {
+    if (!rule.name.trim() || !rule.pattern.trim()) return;
+    setHighlightRules((current) => [
+      ...current,
+      {
+        id: `custom_${Date.now()}`,
+        name: rule.name.trim(),
+        pattern: rule.pattern.trim(),
+        flags: "gi",
+        enabled: true,
+        scope: "terminal",
+        foreground: rule.foreground,
+        priority: 100 + current.length
+      }
+    ]);
+  }
+
   return (
-    <div className="h-screen w-screen overflow-hidden bg-[var(--app-bg)] text-slate-950">
-      <div className="grid h-full grid-cols-[54px_244px_minmax(0,1fr)] grid-rows-[36px_minmax(0,1fr)] border border-slate-200 bg-[#f6f8fb]">
+    <div
+      data-testid="app-root"
+      data-theme={getThemeAttribute(theme)}
+      className="app-root h-screen w-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]"
+    >
+      <div className="grid h-full grid-cols-[54px_244px_minmax(0,1fr)] grid-rows-[36px_minmax(0,1fr)] border border-[var(--app-line)] bg-[var(--app-bg)]">
         <TitleBar />
         <ActivityRail activeTool={activeTool} onChange={setActiveTool} />
         <HostSidebar
@@ -216,12 +274,24 @@ export function App() {
             <TerminalWorkspace
               sessions={sessions}
               activeSessionId={activeSessionId}
+              theme={theme}
+              highlightRules={highlightRules}
               onActivate={setActiveSessionId}
               onClose={closeTab}
               onCreateLocal={openLocalSession}
+              onAddAiQuote={addAiQuote}
             />
           )}
-          {activeTool === "ai" && <AiWorkspacePanel activeSession={activeSession} />}
+          {activeTool === "ai" && <AiWorkspacePanel activeSession={activeSession} quotes={aiQuotes} />}
+          {activeTool === "settings" && (
+            <SettingsPanel
+              theme={theme}
+              highlightRules={highlightRules}
+              onThemeChange={setTheme}
+              onToggleHighlightRule={toggleHighlightRule}
+              onAddHighlightRule={addHighlightRule}
+            />
+          )}
         </main>
       </div>
 
@@ -531,15 +601,21 @@ function Metric({
 function TerminalWorkspace({
   sessions,
   activeSessionId,
+  theme,
+  highlightRules,
   onActivate,
   onClose,
-  onCreateLocal
+  onCreateLocal,
+  onAddAiQuote
 }: {
   sessions: SessionTab[];
   activeSessionId: string;
+  theme: ThemeMode;
+  highlightRules: HighlightRule[];
   onActivate: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
   onCreateLocal: () => void;
+  onAddAiQuote: (text: string, sourceTitle: string) => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
 
@@ -577,7 +653,12 @@ function TerminalWorkspace({
           <Menu className="h-4 w-4" />
         </Button>
       </div>
-      <TerminalSurface activeSession={activeSession} />
+      <TerminalSurface
+        activeSession={activeSession}
+        theme={theme}
+        highlightRules={highlightRules}
+        onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
+      />
       <div className="flex items-center gap-3 border-t border-slate-200 bg-slate-50 px-5 text-xs text-slate-500">
         <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500" : "bg-slate-300")} />
         <span>{activeSession ? "已连接" : "未连接"}</span>
@@ -587,12 +668,23 @@ function TerminalWorkspace({
   );
 }
 
-function TerminalSurface({ activeSession }: { activeSession?: SessionTab }) {
+function TerminalSurface({
+  activeSession,
+  theme,
+  highlightRules,
+  onAddAiQuote
+}: {
+  activeSession?: SessionTab;
+  theme: ThemeMode;
+  highlightRules: HighlightRule[];
+  onAddAiQuote: (text: string) => void;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const decoderRef = useRef<TextDecoder | null>(null);
   const activeIdRef = useRef("");
+  const [selectedText, setSelectedText] = useState("");
 
   useEffect(() => {
     activeIdRef.current = activeSession?.id || "";
@@ -602,18 +694,14 @@ function TerminalSurface({ activeSession }: { activeSession?: SessionTab }) {
     const container = containerRef.current;
     if (!container || !activeSession) return;
 
+    setSelectedText("");
     terminalRef.current?.dispose();
     const terminal = new XTerm({
       cursorBlink: true,
       fontFamily: "Cascadia Mono, Consolas, monospace",
       fontSize: 13,
       lineHeight: 1.25,
-      theme: {
-        background: "#111827",
-        foreground: "#e5e7eb",
-        cursor: "#93c5fd",
-        selectionBackground: "#334155"
-      }
+      theme: getTerminalTheme(theme)
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -625,6 +713,9 @@ function TerminalSurface({ activeSession }: { activeSession?: SessionTab }) {
     decoderRef.current = new TextDecoder("utf-8");
     terminal.onData((data) => {
       void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(data)));
+    });
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      setSelectedText(terminal.getSelection().trim());
     });
 
     terminalRef.current = terminal;
@@ -641,27 +732,28 @@ function TerminalSurface({ activeSession }: { activeSession?: SessionTab }) {
     const interval = window.setInterval(async () => {
       const result = await nativeBridge.getOutput(activeSession.id);
       if (result.output) {
-        terminal.write(decodeTerminalOutput(result.output, decoderRef));
+        terminal.write(applyHighlightRules(decodeTerminalOutput(result.output, decoderRef), highlightRules));
       }
     }, 160);
 
     return () => {
       window.clearInterval(interval);
       observer.disconnect();
+      selectionDisposable.dispose();
       terminal.dispose();
     };
-  }, [activeSession?.id]);
+  }, [activeSession?.id, highlightRules, theme]);
 
   useEffect(() => {
     window.handlePushOutput = (sessionId, data) => {
       if (sessionId === activeIdRef.current) {
-        terminalRef.current?.write(decodeTerminalOutput(data, decoderRef));
+        terminalRef.current?.write(applyHighlightRules(decodeTerminalOutput(data, decoderRef), highlightRules));
       }
     };
     return () => {
       window.handlePushOutput = undefined;
     };
-  }, []);
+  }, [highlightRules]);
 
   if (!activeSession) {
     return (
@@ -674,7 +766,23 @@ function TerminalSurface({ activeSession }: { activeSession?: SessionTab }) {
     );
   }
 
-  return <div ref={containerRef} className="terminal-shell h-full min-h-0 overflow-hidden" />;
+  return (
+    <div className="terminal-shell relative h-full min-h-0 overflow-hidden">
+      <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
+      {selectedText && (
+        <button
+          className="absolute right-5 top-4 inline-flex h-8 items-center gap-2 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs font-semibold text-[var(--app-text)] shadow-lg hover:bg-[var(--subtle-bg)]"
+          onClick={() => {
+            onAddAiQuote(selectedText);
+            setSelectedText("");
+          }}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          添加到对话
+        </button>
+      )}
+    </div>
+  );
 }
 
 function decodeTerminalOutput(base64: string, decoderRef: React.MutableRefObject<TextDecoder | null>) {
@@ -814,7 +922,115 @@ function PortForwardPanel({ activeSession }: { activeSession?: SessionTab }) {
   );
 }
 
-function AiWorkspacePanel({ activeSession }: { activeSession?: SessionTab }) {
+function SettingsPanel({
+  theme,
+  highlightRules,
+  onThemeChange,
+  onToggleHighlightRule,
+  onAddHighlightRule
+}: {
+  theme: ThemeMode;
+  highlightRules: HighlightRule[];
+  onThemeChange: (theme: ThemeMode) => void;
+  onToggleHighlightRule: (ruleId: string) => void;
+  onAddHighlightRule: (rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) => void;
+}) {
+  const [draft, setDraft] = useState({ name: "", pattern: "", foreground: "#2563eb" });
+
+  function addRule() {
+    onAddHighlightRule(draft);
+    setDraft({ name: "", pattern: "", foreground: "#2563eb" });
+  }
+
+  return (
+    <div className="h-full overflow-auto bg-[var(--app-bg)] px-8 py-8">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-6">
+          <h1 className="text-2xl font-semibold text-[var(--app-text)]">设置</h1>
+          <p className="mt-1 text-sm text-[var(--app-muted)]">管理界面主题、终端高亮和 AI 引用行为。</p>
+        </div>
+
+        <div className="grid grid-cols-[320px_minmax(0,1fr)] gap-4">
+          <Panel title="外观主题">
+            <div className="grid grid-cols-2 gap-2">
+              {THEMES.map((mode) => (
+                <button
+                  key={mode}
+                  className={cn(
+                    "h-10 rounded-md border text-sm font-semibold transition-colors",
+                    theme === mode
+                      ? "border-blue-300 bg-blue-50 text-blue-700"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  )}
+                  onClick={() => onThemeChange(mode)}
+                >
+                  {mode === "light" ? "浅色" : "深色"}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 rounded-md border border-[var(--app-line)] bg-[var(--subtle-bg)] p-3">
+              <div className="text-xs font-semibold text-[var(--app-muted)]">终端预览</div>
+              <pre className="mt-2 rounded-md bg-[var(--terminal-bg)] p-3 text-xs leading-5 text-[var(--terminal-text)]">
+                ERROR ssh failed at 10.0.0.8{"\n"}WARN retry in 300ms
+              </pre>
+            </div>
+          </Panel>
+
+          <Panel title="终端正则高亮">
+            <div className="mb-4 grid grid-cols-[180px_minmax(0,1fr)_120px_92px] gap-2">
+              <Input
+                value={draft.name}
+                placeholder="规则名称"
+                onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+              />
+              <Input
+                value={draft.pattern}
+                placeholder="正则表达式"
+                onChange={(event) => setDraft((current) => ({ ...current, pattern: event.target.value }))}
+              />
+              <Input
+                value={draft.foreground}
+                placeholder="#2563eb"
+                onChange={(event) => setDraft((current) => ({ ...current, foreground: event.target.value }))}
+              />
+              <Button onClick={addRule}>添加规则</Button>
+            </div>
+
+            <div className="space-y-2">
+              {highlightRules.map((rule) => (
+                <div
+                  key={rule.id}
+                  className="grid grid-cols-[170px_minmax(0,1fr)_86px] items-center gap-3 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="h-3 w-3 rounded-full" style={{ backgroundColor: rule.foreground }} />
+                      <span className="truncate text-sm font-semibold text-[var(--app-text)]">{rule.name}</span>
+                      {rule.system && (
+                        <span className="rounded bg-[var(--subtle-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--app-muted)]">
+                          默认
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--app-muted)]">{rule.enabled ? "已启用" : "已停用"}</div>
+                  </div>
+                  <code className="truncate rounded bg-[var(--subtle-bg)] px-2 py-1 text-xs text-[var(--app-muted)]">
+                    {rule.pattern}
+                  </code>
+                  <Button variant="outline" className="h-8" onClick={() => onToggleHighlightRule(rule.id)}>
+                    {rule.enabled ? "停用" : "启用"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AiWorkspacePanel({ activeSession, quotes }: { activeSession?: SessionTab; quotes: AiQuote[] }) {
   const [selectedTool, setSelectedTool] = useState<AiTool>("codex");
   const [prompt, setPrompt] = useState("");
   const isCodex = selectedTool === "codex";
@@ -911,6 +1127,9 @@ function AiWorkspacePanel({ activeSession }: { activeSession?: SessionTab }) {
 
         <div className="min-h-0 overflow-auto bg-slate-50 px-4 py-4">
           <div className="space-y-3">
+            {quotes.map((quote) => (
+              <AiQuoteCard key={quote.id} quote={quote} />
+            ))}
             <AiMessage role="user">帮我分析当前终端错误，并给出下一步处理建议。</AiMessage>
             <AiMessage role="assistant">
               {isCodex
@@ -940,6 +1159,20 @@ function AiWorkspacePanel({ activeSession }: { activeSession?: SessionTab }) {
           </div>
         </footer>
       </aside>
+    </div>
+  );
+}
+
+function AiQuoteCard({ quote }: { quote: AiQuote }) {
+  return (
+    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-blue-700">
+        <MessageSquare className="h-3.5 w-3.5" />
+        来自 {quote.sourceTitle} 的终端引用
+      </div>
+      <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md border border-blue-100 bg-white p-2 text-xs leading-5 text-slate-800">
+        {quote.text}
+      </pre>
     </div>
   );
 }
