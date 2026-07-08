@@ -1,0 +1,31 @@
+{
+  "name": "ldyssh-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build && node scripts/sync-ui.mjs",
+    "typecheck": "tsc -b",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "latest",
+    "@tailwindcss/vite": "latest",
+    "@xterm/addon-fit": "latest",
+    "@xterm/xterm": "latest",
+    "clsx": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "tailwind-merge": "latest",
+    "tailwindcss": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "latest",
+    "vite": "^5.4.21"
+  }
+}

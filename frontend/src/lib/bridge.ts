@@ -1,0 +1,121 @@
+import { parseMaybeJson } from "./utils";
+
+type NativeApi = Record<string, (...args: unknown[]) => Promise<unknown>>;
+
+declare global {
+  interface Window {
+    pywebview?: { api?: NativeApi };
+    chrome?: {
+      webview?: {
+        postMessage: (message: string) => void;
+        addEventListener?: (type: "message", handler: (event: MessageEvent) => void) => void;
+      };
+    };
+    windowMinimize?: () => void;
+    windowMaximize?: () => void;
+    windowClose?: () => void;
+    handlePushOutput?: (sessionId: string, data: string) => void;
+  }
+}
+
+async function callNativeRaw(action: string, ...args: unknown[]) {
+  if (window.pywebview?.api?.[action]) {
+    return window.pywebview.api[action](...args);
+  }
+
+  if (window.chrome?.webview?.postMessage) {
+    const id = `react_${Math.random().toString(36).slice(2)}`;
+    window.chrome.webview.postMessage(JSON.stringify({ id, action, args }));
+  }
+
+  return null;
+}
+
+export async function callNative<T>(action: string, fallback: T, ...args: unknown[]): Promise<T> {
+  const result = await callNativeRaw(action, ...args);
+  return parseMaybeJson<T>(result, fallback);
+}
+
+export async function callNativeText(action: string, ...args: unknown[]): Promise<string> {
+  const result = await callNativeRaw(action, ...args);
+  return typeof result === "string" ? result : "";
+}
+
+export const nativeBridge = {
+  minimize() {
+    window.windowMinimize?.();
+  },
+  maximize() {
+    window.windowMaximize?.();
+  },
+  close() {
+    window.windowClose?.();
+  },
+  drag() {
+    void callNative("window_drag", null);
+  },
+  createSession() {
+    return callNativeText("create_session");
+  },
+  createLocalSession() {
+    return callNativeText("create_local_session");
+  },
+  getSavedConnections() {
+    return callNative<Record<string, SavedConnection>>("get_saved_connections", {});
+  },
+  connect(sessionId: string, params: ConnectParams) {
+    return callNative<{ success: boolean; error?: string }>("connect", { success: false }, sessionId, JSON.stringify(params));
+  },
+  sendInput(sessionId: string, data: string) {
+    return callNative<{ success: boolean }>("send_input", { success: false }, sessionId, data);
+  },
+  sendInputBase64(sessionId: string, data: string) {
+    return callNative<{ success: boolean }>("send_input_base64", { success: false }, sessionId, data);
+  },
+  getOutput(sessionId: string) {
+    return callNative<{ output?: string }>("get_output", {}, sessionId);
+  },
+  resizeTerminal(sessionId: string, cols: number, rows: number) {
+    return callNative<{ success: boolean }>("resize_terminal", { success: false }, sessionId, cols, rows);
+  },
+  getSystemInfo(sessionId: string) {
+    return callNative<NativeResult>("get_system_info", { success: false, error: "Session not found" }, sessionId);
+  },
+  getSystemStats(sessionId: string) {
+    return callNative<NativeResult>("get_system_stats", { success: false, error: "Session not found" }, sessionId);
+  },
+  getProcessList(sessionId: string) {
+    return callNative<NativeResult>("get_process_list", { success: false, error: "Session not found" }, sessionId);
+  },
+  getDiskUsage(sessionId: string) {
+    return callNative<NativeResult>("get_disk_usage", { success: false, error: "Session not found" }, sessionId);
+  },
+  getNetworkInfo(sessionId: string) {
+    return callNative<NativeResult>("get_network_info", { success: false, error: "Session not found" }, sessionId);
+  }
+};
+
+export interface SavedConnection {
+  name?: string;
+  hostname?: string;
+  port?: number;
+  username?: string;
+  group?: string;
+  keyPath?: string;
+}
+
+export interface ConnectParams {
+  name?: string;
+  hostname: string;
+  port: number;
+  username: string;
+  password?: string;
+  keyPath?: string;
+  save?: boolean;
+}
+
+export interface NativeResult {
+  success: boolean;
+  error?: string;
+  [key: string]: unknown;
+}

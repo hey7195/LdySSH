@@ -1,1 +1,5 @@
 *.pyc
+.superpowers/
+frontend/dist/
+frontend/node_modules/
+tests/test_connections.json.bak.*
