@@ -4,7 +4,10 @@ import json
 import socket
 import time
 import threading
+import base64
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Dict, Any
 
 # Handle imports - try relative first, then absolute
@@ -202,7 +205,80 @@ class PrismSSHAPI:
         except Exception as e:
             self.logger.error(f"API: Error loading saved connections: {e}")
             return json.dumps([])
-    
+
+    def get_command_library(self) -> str:
+        """Load the quick command library."""
+        try:
+            path = Path(self.config.config_dir) / "command_library.json"
+            if not path.exists():
+                return json.dumps({'success': True, 'folders': []})
+            with path.open("r", encoding="utf-8") as f:
+                folders = json.load(f)
+            return json.dumps({'success': True, 'folders': folders})
+        except Exception as e:
+            self.logger.error(f"API: Error loading command library: {e}")
+            return json.dumps({'success': False, 'folders': [], 'error': str(e)})
+
+    def save_command_library(self, payload: str) -> str:
+        """Persist the quick command library."""
+        try:
+            self.config.ensure_config_dir()
+            path = Path(self.config.config_dir) / "command_library.json"
+            folders = json.loads(payload)
+            with path.open("w", encoding="utf-8") as f:
+                json.dump(folders, f, ensure_ascii=False, indent=2)
+            return json.dumps({'success': True})
+        except Exception as e:
+            self.logger.error(f"API: Error saving command library: {e}")
+            return json.dumps({'success': False, 'error': str(e)})
+
+    def run_codex(self, payload: str) -> str:
+        """Run Codex CLI for the AI panel."""
+        try:
+            params = json.loads(payload)
+            command = (params.get("command") or "codex").strip() or "codex"
+            working_directory = (params.get("workingDirectory") or str(Path.cwd())).strip() or str(Path.cwd())
+            prompt = params.get("prompt") or ""
+            if not prompt:
+                return json.dumps({
+                    'success': False,
+                    'exitCode': 1,
+                    'error': 'Prompt is empty',
+                    'commandPreview': f'{command} exec -C {working_directory} <prompt>'
+                })
+
+            result = subprocess.run(
+                [command, "exec", "-C", working_directory, "-"],
+                cwd=working_directory,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120
+            )
+            output = (result.stdout or "") + (result.stderr or "")
+            return json.dumps({
+                'success': result.returncode == 0,
+                'output': output,
+                'error': "" if result.returncode == 0 else output,
+                'exitCode': result.returncode,
+                'timedOut': False,
+                'commandPreview': f'{command} exec -C {working_directory} <prompt>'
+            })
+        except subprocess.TimeoutExpired as e:
+            output = ((e.stdout or "") + (e.stderr or ""))
+            return json.dumps({
+                'success': False,
+                'output': output,
+                'error': 'Codex execution timed out',
+                'exitCode': 124,
+                'timedOut': True
+            })
+        except Exception as e:
+            self.logger.error(f"API: Error running Codex: {e}")
+            return json.dumps({'success': False, 'error': str(e), 'exitCode': 1})
+
     def delete_saved_connection(self, key: str) -> str:
         """Delete a saved connection."""
         try:
@@ -220,6 +296,16 @@ class PrismSSHAPI:
             return json.dumps({'success': success})
         except Exception as e:
             self.logger.error(f"API: Error sending input to session {session_id}: {e}")
+            return json.dumps({'success': False, 'error': str(e)})
+
+    def send_input_base64(self, session_id: str, data: str) -> str:
+        """Send base64-encoded input to terminal."""
+        try:
+            decoded = base64.b64decode(data).decode("utf-8", errors="replace")
+            success = self.session_manager.send_input(session_id, decoded)
+            return json.dumps({'success': success})
+        except Exception as e:
+            self.logger.error(f"API: Error sending base64 input to session {session_id}: {e}")
             return json.dumps({'success': False, 'error': str(e)})
     
     def get_output(self, session_id: str) -> str:

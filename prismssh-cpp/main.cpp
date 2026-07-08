@@ -300,6 +300,192 @@ std::string GenerateWebFavoriteId() {
     auto ticks = std::chrono::high_resolution_clock::now().time_since_epoch().count();
     return "fav_" + std::to_string(ticks) + "_" + std::to_string(GetCurrentProcessId());
 }
+
+struct ProcessRunResult {
+    bool success = false;
+    bool timedOut = false;
+    DWORD exitCode = 1;
+    std::string output;
+    std::string error;
+};
+
+std::wstring QuoteProcessArgument(const std::wstring& value) {
+    if (value.empty()) {
+        return L"\"\"";
+    }
+
+    bool needsQuote = false;
+    for (wchar_t ch : value) {
+        if (ch == L' ' || ch == L'\t' || ch == L'\n' || ch == L'\v' || ch == L'"') {
+            needsQuote = true;
+            break;
+        }
+    }
+    if (!needsQuote) {
+        return value;
+    }
+
+    std::wstring quoted = L"\"";
+    size_t backslashes = 0;
+    for (wchar_t ch : value) {
+        if (ch == L'\\') {
+            ++backslashes;
+        } else if (ch == L'"') {
+            quoted.append(backslashes * 2 + 1, L'\\');
+            quoted.push_back(ch);
+            backslashes = 0;
+        } else {
+            quoted.append(backslashes, L'\\');
+            backslashes = 0;
+            quoted.push_back(ch);
+        }
+    }
+    quoted.append(backslashes * 2, L'\\');
+    quoted.push_back(L'"');
+    return quoted;
+}
+
+std::string ReadAvailablePipe(HANDLE readPipe) {
+    std::string output;
+    char buffer[4096];
+    DWORD available = 0;
+
+    while (PeekNamedPipe(readPipe, NULL, 0, NULL, &available, NULL) && available > 0) {
+        DWORD bytesRead = 0;
+        DWORD toRead = std::min<DWORD>((DWORD)sizeof(buffer), available);
+        if (!ReadFile(readPipe, buffer, toRead, &bytesRead, NULL) || bytesRead == 0) {
+            break;
+        }
+        output.append(buffer, buffer + bytesRead);
+        available = 0;
+    }
+
+    return output;
+}
+
+ProcessRunResult RunHiddenProcessCapture(
+    const std::wstring& commandLine,
+    const std::wstring& workingDirectory,
+    const std::string& stdinData,
+    DWORD timeoutMs
+) {
+    ProcessRunResult result;
+
+    SECURITY_ATTRIBUTES sa = { 0 };
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE readPipe = NULL;
+    HANDLE writePipe = NULL;
+    if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) {
+        result.error = "CreatePipe failed: " + std::to_string(GetLastError());
+        return result;
+    }
+    SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
+
+    HANDLE inputRead = NULL;
+    HANDLE inputWrite = NULL;
+    HANDLE nullInput = INVALID_HANDLE_VALUE;
+    if (!stdinData.empty()) {
+        if (!CreatePipe(&inputRead, &inputWrite, &sa, 0)) {
+            result.error = "CreatePipe stdin failed: " + std::to_string(GetLastError());
+            CloseHandle(readPipe);
+            CloseHandle(writePipe);
+            return result;
+        }
+        SetHandleInformation(inputWrite, HANDLE_FLAG_INHERIT, 0);
+    } else {
+        nullInput = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    }
+
+    STARTUPINFOW si = { 0 };
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    si.hStdOutput = writePipe;
+    si.hStdError = writePipe;
+    si.hStdInput = inputRead ? inputRead : (nullInput != INVALID_HANDLE_VALUE ? nullInput : GetStdHandle(STD_INPUT_HANDLE));
+
+    PROCESS_INFORMATION pi = { 0 };
+    std::vector<wchar_t> commandBuffer(commandLine.begin(), commandLine.end());
+    commandBuffer.push_back(L'\0');
+
+    BOOL created = CreateProcessW(
+        NULL,
+        commandBuffer.data(),
+        NULL,
+        NULL,
+        TRUE,
+        CREATE_NO_WINDOW,
+        NULL,
+        workingDirectory.empty() ? NULL : workingDirectory.c_str(),
+        &si,
+        &pi
+    );
+
+    if (writePipe) CloseHandle(writePipe);
+    if (nullInput && nullInput != INVALID_HANDLE_VALUE) CloseHandle(nullInput);
+    if (inputRead) CloseHandle(inputRead);
+
+    if (!created) {
+        result.error = "CreateProcessW failed: " + std::to_string(GetLastError());
+        if (inputWrite) CloseHandle(inputWrite);
+        CloseHandle(readPipe);
+        return result;
+    }
+
+    std::thread stdinThread;
+    if (inputWrite) {
+        stdinThread = std::thread([inputWrite, stdinData]() {
+            const char* data = stdinData.data();
+            size_t remaining = stdinData.size();
+            while (remaining > 0) {
+                DWORD chunk = (DWORD)std::min<size_t>(remaining, 32768);
+                DWORD written = 0;
+                if (!WriteFile(inputWrite, data, chunk, &written, NULL) || written == 0) {
+                    break;
+                }
+                data += written;
+                remaining -= written;
+            }
+            CloseHandle(inputWrite);
+        });
+    }
+
+    ULONGLONG startTick = GetTickCount64();
+    while (true) {
+        result.output += ReadAvailablePipe(readPipe);
+
+        DWORD waitResult = WaitForSingleObject(pi.hProcess, 50);
+        if (waitResult == WAIT_OBJECT_0) {
+            break;
+        }
+        if (GetTickCount64() - startTick > timeoutMs) {
+            result.timedOut = true;
+            result.error = "Codex execution timed out";
+            TerminateProcess(pi.hProcess, 124);
+            WaitForSingleObject(pi.hProcess, 1000);
+            break;
+        }
+    }
+
+    result.output += ReadAvailablePipe(readPipe);
+    DWORD exitCode = 1;
+    if (GetExitCodeProcess(pi.hProcess, &exitCode)) {
+        result.exitCode = exitCode;
+    }
+    result.success = !result.timedOut && result.exitCode == 0;
+
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(readPipe);
+    if (stdinThread.joinable()) {
+        stdinThread.join();
+    }
+
+    return result;
+}
+
 // API router and handler
 void HandleApiCall(const std::string& reqId, const std::string& action, const nlohmann::json& args) {
     nlohmann::json response;
@@ -590,6 +776,53 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             
             nlohmann::json retObj;
             retObj["success"] = success;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "run_codex") {
+            std::string paramsStr = args[0].get<std::string>();
+            auto params = nlohmann::json::parse(paramsStr);
+
+            std::string command = TrimString(SafeGetJsonString(params, "command", "codex"));
+            std::string workingDirectory = SafeGetJsonString(params, "workingDirectory", Utf16ToUtf8(GetExeDirectory()));
+            std::string prompt = SafeGetJsonString(params, "prompt", "");
+            if (command.empty()) {
+                command = "codex";
+            }
+            if (workingDirectory.empty()) {
+                workingDirectory = Utf16ToUtf8(GetExeDirectory());
+            }
+
+            nlohmann::json retObj;
+            retObj["commandPreview"] = command + " exec -C " + workingDirectory + " <prompt>";
+            if (prompt.empty()) {
+                retObj["success"] = false;
+                retObj["exitCode"] = 1;
+                retObj["error"] = "Prompt is empty";
+            } else {
+                wchar_t comspec[MAX_PATH] = L"C:\\Windows\\System32\\cmd.exe";
+                size_t comspecLen = 0;
+                wchar_t envComspec[MAX_PATH] = { 0 };
+                if (_wgetenv_s(&comspecLen, envComspec, MAX_PATH, L"COMSPEC") == 0 && comspecLen > 0 && envComspec[0] != L'\0') {
+                    wcscpy_s(comspec, envComspec);
+                }
+
+                std::wstring wCommand = Utf8ToUtf16(command);
+                std::wstring wWorkingDirectory = Utf8ToUtf16(workingDirectory);
+                std::wstring innerCommand = QuoteProcessArgument(wCommand)
+                    + L" exec -C "
+                    + QuoteProcessArgument(wWorkingDirectory)
+                    + L" -";
+                std::wstring commandLine = QuoteProcessArgument(comspec) + L" /S /C " + QuoteProcessArgument(innerCommand);
+
+                ProcessRunResult run = RunHiddenProcessCapture(commandLine, wWorkingDirectory, prompt, 120000);
+                retObj["success"] = run.success;
+                retObj["output"] = run.output;
+                retObj["error"] = run.error;
+                retObj["exitCode"] = run.exitCode;
+                retObj["timedOut"] = run.timedOut;
+            }
+
             response["status"] = "success";
             response["result"] = retObj.dump();
         }

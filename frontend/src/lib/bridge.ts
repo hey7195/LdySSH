@@ -63,8 +63,17 @@ export const nativeBridge = {
   getSavedConnections() {
     return callNative<Record<string, SavedConnection>>("get_saved_connections", {});
   },
+  getCommandLibrary() {
+    return callNative<CommandLibraryResult>("get_command_library", { success: false, folders: [] });
+  },
+  saveCommandLibrary(folders: CommandFolder[]) {
+    return callNative<{ success: boolean; error?: string }>("save_command_library", { success: false }, JSON.stringify(folders));
+  },
   connect(sessionId: string, params: ConnectParams) {
     return callNative<{ success: boolean; error?: string }>("connect", { success: false }, sessionId, JSON.stringify(params));
+  },
+  runCodex(params: CodexRunParams) {
+    return callNative<CodexRunResult>("run_codex", { success: false, error: "Codex native bridge unavailable" }, JSON.stringify(params));
   },
   sendInput(sessionId: string, data: string) {
     return callNative<{ success: boolean }>("send_input", { success: false }, sessionId, data);
@@ -102,6 +111,40 @@ export interface SavedConnection {
   username?: string;
   group?: string;
   keyPath?: string;
+}
+
+export interface CommandItem {
+  id: string;
+  name: string;
+  command: string;
+  description?: string;
+}
+
+export interface CommandFolder {
+  id: string;
+  name: string;
+  commands: CommandItem[];
+}
+
+export interface CommandLibraryResult {
+  success: boolean;
+  folders: CommandFolder[];
+  error?: string;
+}
+
+export interface CodexRunParams {
+  command: string;
+  workingDirectory: string;
+  prompt: string;
+}
+
+export interface CodexRunResult {
+  success: boolean;
+  output?: string;
+  error?: string;
+  exitCode?: number;
+  timedOut?: boolean;
+  commandPreview?: string;
 }
 
 export interface ConnectParams {

@@ -32,7 +32,14 @@ import {
 } from "lucide-react";
 import { Button, EmptyState, Input, Panel } from "./components/ui";
 import { cn } from "./lib/utils";
-import { nativeBridge, type ConnectParams, type NativeResult, type SavedConnection } from "./lib/bridge";
+import {
+  nativeBridge,
+  type CommandFolder,
+  type CommandItem,
+  type ConnectParams,
+  type NativeResult,
+  type SavedConnection
+} from "./lib/bridge";
 import {
   DEFAULT_HIGHLIGHT_RULES,
   THEMES,
@@ -69,6 +76,18 @@ interface AiQuote {
   text: string;
 }
 
+interface AiChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+}
+
+interface AiConfig {
+  codexCommand: string;
+  codexWorkingDirectory: string;
+  hermesBaseUrl: string;
+}
+
 const tools: Array<{ id: Tool; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "ssh", label: "SSH", icon: Server },
   { id: "cmd", label: "CMD", icon: Command },
@@ -90,6 +109,32 @@ const emptyForm: ConnectionForm = {
   save: true
 };
 
+const defaultCommandFolders: CommandFolder[] = [
+  {
+    id: "default",
+    name: "默认分类",
+    commands: [
+      { id: "top", name: "进程负载", command: "top", description: "查看实时进程和负载" },
+      { id: "disk", name: "磁盘使用", command: "df -h", description: "查看磁盘空间" },
+      { id: "memory", name: "内存使用", command: "free -m", description: "查看内存使用" }
+    ]
+  },
+  {
+    id: "service",
+    name: "服务操作",
+    commands: [
+      { id: "journal", name: "系统日志", command: "journalctl -xe", description: "查看系统错误日志" },
+      { id: "systemctl", name: "服务状态", command: "systemctl status", description: "查看 systemd 服务状态" }
+    ]
+  }
+];
+
+const defaultAiConfig: AiConfig = {
+  codexCommand: "codex",
+  codexWorkingDirectory: "E:\\adb\\tools\\LdSSH",
+  hermesBaseUrl: "http://127.0.0.1:3000"
+};
+
 export function App() {
   const [activeTool, setActiveTool] = useState<Tool>("ssh");
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
@@ -102,9 +147,13 @@ export function App() {
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(DEFAULT_HIGHLIGHT_RULES);
   const [aiQuotes, setAiQuotes] = useState<AiQuote[]>([]);
+  const [commandFolders, setCommandFolders] = useState<CommandFolder[]>(defaultCommandFolders);
+  const [activeCommandFolderId, setActiveCommandFolderId] = useState(defaultCommandFolders[0].id);
+  const [aiConfig, setAiConfig] = useState<AiConfig>(defaultAiConfig);
 
   useEffect(() => {
     void refreshConnections();
+    void refreshCommandLibrary();
   }, []);
 
   const activeSession = useMemo(
@@ -133,6 +182,13 @@ export function App() {
     const result = await nativeBridge.getSavedConnections();
     const list = Array.isArray(result) ? result : Object.values(result);
     setSavedConnections(list);
+  }
+
+  async function refreshCommandLibrary() {
+    const result = await nativeBridge.getCommandLibrary();
+    const folders = result.success && result.folders.length > 0 ? result.folders : defaultCommandFolders;
+    setCommandFolders(folders);
+    setActiveCommandFolderId((current) => folders.some((folder) => folder.id === current) ? current : folders[0]?.id || "");
   }
 
   async function openLocalSession() {
@@ -236,6 +292,61 @@ export function App() {
     ]);
   }
 
+  function updateCommandFolders(nextFolders: CommandFolder[]) {
+    setCommandFolders(nextFolders);
+    void nativeBridge.saveCommandLibrary(nextFolders);
+  }
+
+  function addCommandFolder(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const folder: CommandFolder = {
+      id: `folder_${Date.now()}`,
+      name: trimmed,
+      commands: []
+    };
+    updateCommandFolders([...commandFolders, folder]);
+    setActiveCommandFolderId(folder.id);
+  }
+
+  function saveCommand(folderId: string, command: Omit<CommandItem, "id">, commandId?: string) {
+    if (!command.name.trim() || !command.command.trim()) return;
+    const next = commandFolders.map((folder) => {
+      if (folder.id !== folderId) return folder;
+      const item: CommandItem = {
+        id: commandId || `cmd_${Date.now()}`,
+        name: command.name.trim(),
+        command: command.command.trim(),
+        description: command.description?.trim()
+      };
+      const exists = folder.commands.some((current) => current.id === item.id);
+      return {
+        ...folder,
+        commands: exists
+          ? folder.commands.map((current) => (current.id === item.id ? item : current))
+          : [...folder.commands, item]
+      };
+    });
+    updateCommandFolders(next);
+  }
+
+  function deleteCommand(folderId: string, commandId: string) {
+    updateCommandFolders(
+      commandFolders.map((folder) =>
+        folder.id === folderId
+          ? { ...folder, commands: folder.commands.filter((command) => command.id !== commandId) }
+          : folder
+      )
+    );
+  }
+
+  function sendCommandToActiveSession(command: string) {
+    if (!activeSession) return;
+    const data = command.endsWith("\n") ? command : `${command}\n`;
+    void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(data)));
+    setActiveTool("local");
+  }
+
   return (
     <div
       data-testid="app-root"
@@ -266,7 +377,18 @@ export function App() {
               onConnect={connectHost}
             />
           )}
-          {activeTool === "cmd" && <CommandPanel />}
+          {activeTool === "cmd" && (
+            <CommandPanel
+              folders={commandFolders}
+              activeFolderId={activeCommandFolderId}
+              activeSession={activeSession}
+              onActiveFolderChange={setActiveCommandFolderId}
+              onAddFolder={addCommandFolder}
+              onSaveCommand={saveCommand}
+              onDeleteCommand={deleteCommand}
+              onSendCommand={sendCommandToActiveSession}
+            />
+          )}
           {activeTool === "sftp" && <SftpPanel activeSession={activeSession} />}
           {activeTool === "pf" && <PortForwardPanel activeSession={activeSession} />}
           {activeTool === "monitor" && <MonitorPanel activeSession={activeSession} />}
@@ -282,7 +404,14 @@ export function App() {
               onAddAiQuote={addAiQuote}
             />
           )}
-          {activeTool === "ai" && <AiWorkspacePanel activeSession={activeSession} quotes={aiQuotes} />}
+          {activeTool === "ai" && (
+            <AiWorkspacePanel
+              activeSession={activeSession}
+              quotes={aiQuotes}
+              config={aiConfig}
+              onConfigChange={setAiConfig}
+            />
+          )}
           {activeTool === "settings" && (
             <SettingsPanel
               theme={theme}
@@ -880,23 +1009,195 @@ function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
   );
 }
 
-function CommandPanel() {
-  const commands = ["top", "df -h", "free -m", "journalctl -xe", "systemctl status"];
+function CommandPanel({
+  folders,
+  activeFolderId,
+  activeSession,
+  onActiveFolderChange,
+  onAddFolder,
+  onSaveCommand,
+  onDeleteCommand,
+  onSendCommand
+}: {
+  folders: CommandFolder[];
+  activeFolderId: string;
+  activeSession?: SessionTab;
+  onActiveFolderChange: (folderId: string) => void;
+  onAddFolder: (name: string) => void;
+  onSaveCommand: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
+  onDeleteCommand: (folderId: string, commandId: string) => void;
+  onSendCommand: (command: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [folderName, setFolderName] = useState("");
+  const [draft, setDraft] = useState({ id: "", name: "", command: "", description: "" });
+  const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
+  const keyword = query.trim().toLowerCase();
+  const visibleFolders = folders
+    .map((folder) => ({
+      ...folder,
+      commands: folder.commands.filter((command) => {
+        if (!keyword) return true;
+        return [folder.name, command.name, command.command, command.description]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(keyword);
+      })
+    }))
+    .filter((folder) => !keyword || folder.commands.length > 0 || folder.name.toLowerCase().includes(keyword));
+  const visibleCommands = keyword
+    ? visibleFolders.flatMap((folder) => folder.commands.map((command) => ({ ...command, folderId: folder.id, folderName: folder.name })))
+    : (activeFolder?.commands || []).map((command) => ({ ...command, folderId: activeFolder.id, folderName: activeFolder.name }));
+
+  function submitFolder() {
+    onAddFolder(folderName);
+    setFolderName("");
+  }
+
+  function submitCommand() {
+    if (!activeFolder) return;
+    onSaveCommand(activeFolder.id, draft, draft.id || undefined);
+    setDraft({ id: "", name: "", command: "", description: "" });
+  }
+
+  function editCommand(command: CommandItem) {
+    setDraft({
+      id: command.id,
+      name: command.name,
+      command: command.command,
+      description: command.description || ""
+    });
+  }
+
   return (
-    <SimplePage
-      title="命令库"
-      description="整理常用命令，后续可直接发送到活动终端。"
-      action={<Button variant="outline">导入命令</Button>}
-    >
-      <div className="grid grid-cols-2 gap-3">
-        {commands.map((command) => (
-          <div key={command} className="rounded-lg border border-slate-200 bg-white p-4">
-            <code className="text-sm font-semibold text-slate-900">{command}</code>
-            <p className="mt-2 text-sm text-slate-500">常用运维命令</p>
+    <div className="grid h-full min-w-0 grid-cols-[280px_minmax(0,1fr)] bg-white">
+      <aside className="min-h-0 border-r border-slate-200 bg-slate-50 p-4">
+        <div>
+          <h1 className="text-lg font-semibold text-slate-950">快捷命令库</h1>
+          <p className="mt-1 text-xs text-slate-500">
+            {activeSession ? `发送到：${activeSession.title}` : "打开终端后可一键发送命令"}
+          </p>
+        </div>
+
+        <div className="relative mt-4">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            className="pl-9"
+            value={query}
+            placeholder="搜索命令、描述或文件夹"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+
+        <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
+          <Input
+            value={folderName}
+            placeholder="新文件夹名称"
+            onChange={(event) => setFolderName(event.target.value)}
+          />
+          <Button variant="outline" onClick={submitFolder}>新建文件夹</Button>
+        </div>
+
+        <div className="mt-4 space-y-1">
+          {folders.map((folder) => (
+            <button
+              key={folder.id}
+              className={cn(
+                "flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm font-medium",
+                folder.id === activeFolder?.id ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-white"
+              )}
+              onClick={() => onActiveFolderChange(folder.id)}
+            >
+              <span className="truncate">{folder.name}</span>
+              <span className={cn("text-xs", folder.id === activeFolder?.id ? "text-slate-300" : "text-slate-400")}>
+                {folder.commands.length}
+              </span>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <section className="min-h-0 overflow-auto px-6 py-6">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-950">{keyword ? "搜索结果" : activeFolder?.name || "命令"}</h2>
+            <p className="mt-1 text-sm text-slate-500">命令按文件夹管理，点击发送会写入当前活动终端。</p>
           </div>
-        ))}
-      </div>
-    </SimplePage>
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500">
+            {visibleCommands.length} 条命令
+          </span>
+        </div>
+
+        <Panel title={draft.id ? "编辑命令" : "添加命令"}>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] gap-2">
+            <Input
+              value={draft.name}
+              placeholder="命令名称"
+              onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+            />
+            <Input
+              value={draft.command}
+              placeholder="命令内容"
+              onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))}
+            />
+            <Input
+              className="col-span-2"
+              value={draft.description}
+              placeholder="命令描述"
+              onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
+            />
+          </div>
+          <div className="mt-3 flex justify-end gap-2">
+            {draft.id && (
+              <Button variant="outline" onClick={() => setDraft({ id: "", name: "", command: "", description: "" })}>
+                取消编辑
+              </Button>
+            )}
+            <Button onClick={submitCommand}>{draft.id ? "保存命令" : "添加命令"}</Button>
+          </div>
+        </Panel>
+
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          {visibleCommands.map((command) => (
+            <div key={`${command.folderId}-${command.id}`} className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-slate-950">{command.name}</div>
+                  <div className="mt-1 text-xs text-slate-500">{command.folderName}</div>
+                </div>
+                <div className="flex gap-1">
+                  <Button variant="ghost" className="h-8 px-2" onClick={() => editCommand(command)}>
+                    编辑
+                  </Button>
+                  <Button variant="ghost" className="h-8 px-2" onClick={() => onDeleteCommand(command.folderId, command.id)}>
+                    删除
+                  </Button>
+                </div>
+              </div>
+              <code className="mt-3 block truncate rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-800">
+                {command.command}
+              </code>
+              {command.description && <p className="mt-2 text-sm text-slate-500">{command.description}</p>}
+              <div className="mt-3 flex justify-end">
+                <Button
+                  className="h-8 px-3"
+                  disabled={!activeSession}
+                  aria-label={`发送 ${command.name}`}
+                  onClick={() => onSendCommand(command.command)}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  发送
+                </Button>
+              </div>
+            </div>
+          ))}
+          {visibleCommands.length === 0 && (
+            <EmptyState title="没有匹配命令" description="换个关键词搜索，或在当前文件夹里新增一条命令。" />
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1030,10 +1331,87 @@ function SettingsPanel({
   );
 }
 
-function AiWorkspacePanel({ activeSession, quotes }: { activeSession?: SessionTab; quotes: AiQuote[] }) {
+function AiWorkspacePanel({
+  activeSession,
+  quotes,
+  config,
+  onConfigChange
+}: {
+  activeSession?: SessionTab;
+  quotes: AiQuote[];
+  config: AiConfig;
+  onConfigChange: (config: AiConfig) => void;
+}) {
   const [selectedTool, setSelectedTool] = useState<AiTool>("codex");
   const [prompt, setPrompt] = useState("");
+  const [messages, setMessages] = useState<AiChatMessage[]>([]);
+  const [running, setRunning] = useState(false);
+  const [hermesStatus, setHermesStatus] = useState("等待检查");
   const isCodex = selectedTool === "codex";
+
+  async function sendPrompt() {
+    const text = prompt.trim();
+    if (!text || running) return;
+
+    setPrompt("");
+    setRunning(true);
+    setMessages((current) => [...current, { id: `user_${Date.now()}`, role: "user", text }]);
+
+    const fullPrompt = buildAiPrompt(text, quotes, activeSession);
+    if (selectedTool === "codex") {
+      const result = await nativeBridge.runCodex({
+        command: config.codexCommand,
+        workingDirectory: config.codexWorkingDirectory,
+        prompt: fullPrompt
+      });
+      setMessages((current) => [
+        ...current,
+        {
+          id: `assistant_${Date.now()}`,
+          role: "assistant",
+          text: result.success ? result.output || "Codex 执行完成，无输出。" : result.error || "Codex 执行失败。"
+        }
+      ]);
+    } else {
+      try {
+        const response = await fetch(`${normalizeBaseUrl(config.hermesBaseUrl)}/api/chat/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: fullPrompt, session: activeSession?.title || "" })
+        });
+        const contentType = response.headers.get("content-type") || "";
+        const data = contentType.includes("application/json") ? await response.json() : await response.text();
+        setMessages((current) => [
+          ...current,
+          {
+            id: `assistant_${Date.now()}`,
+            role: "assistant",
+            text: extractHermesReply(data)
+          }
+        ]);
+      } catch (error) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: `assistant_${Date.now()}`,
+            role: "assistant",
+            text: error instanceof Error ? error.message : "Hermes 调用失败。"
+          }
+        ]);
+      }
+    }
+    setRunning(false);
+  }
+
+  async function checkHermesConnection() {
+    setHermesStatus("检查中...");
+    try {
+      const response = await fetch(`${normalizeBaseUrl(config.hermesBaseUrl)}/health`, { method: "GET" });
+      setHermesStatus(response.ok ? "Hermes 连接正常" : `Hermes 连接失败：HTTP ${response.status}`);
+    } catch (error) {
+      setHermesStatus(error instanceof Error ? error.message : "Hermes 连接失败");
+    }
+  }
 
   return (
     <div className="grid h-full min-w-0 grid-cols-[minmax(0,1fr)_410px] bg-white">
@@ -1123,7 +1501,13 @@ function AiWorkspacePanel({ activeSession, quotes }: { activeSession?: SessionTa
           </div>
         </header>
 
-        <AiConfigPanel selectedTool={selectedTool} />
+        <AiConfigPanel
+          selectedTool={selectedTool}
+          config={config}
+          hermesStatus={hermesStatus}
+          onConfigChange={onConfigChange}
+          onCheckHermes={checkHermesConnection}
+        />
 
         <div className="min-h-0 overflow-auto bg-slate-50 px-4 py-4">
           <div className="space-y-3">
@@ -1136,7 +1520,10 @@ function AiWorkspacePanel({ activeSession, quotes }: { activeSession?: SessionTa
                 ? "我会使用本地 Codex CLI 分析项目和终端上下文。执行前先展示命令，你确认后再运行。"
                 : "我会把问题发送到 Hermes。远端 Hermes 需要先配置 Base URL，并通过健康检查。"}
             </AiMessage>
-            <AiActionCard selectedTool={selectedTool} activeSession={activeSession} />
+            {messages.map((message) => (
+              <AiMessage key={message.id} role={message.role}>{message.text}</AiMessage>
+            ))}
+            <AiActionCard selectedTool={selectedTool} activeSession={activeSession} config={config} />
           </div>
         </div>
 
@@ -1152,8 +1539,18 @@ function AiWorkspacePanel({ activeSession, quotes }: { activeSession?: SessionTa
               value={prompt}
               placeholder="输入任务，选择 Codex 或 Hermes 执行..."
               onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void sendPrompt();
+                }
+              }}
             />
-            <button className="inline-flex h-10 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700" title="发送">
+            <button
+              className="inline-flex h-10 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+              title="发送"
+              disabled={running}
+              onClick={() => void sendPrompt()}
+            >
               <Send className="h-4 w-4" />
             </button>
           </div>
@@ -1175,6 +1572,31 @@ function AiQuoteCard({ quote }: { quote: AiQuote }) {
       </pre>
     </div>
   );
+}
+
+function buildAiPrompt(prompt: string, quotes: AiQuote[], activeSession?: SessionTab) {
+  const context = [
+    activeSession ? `当前会话：${activeSession.title}` : "",
+    ...quotes.map((quote) => `引用自 ${quote.sourceTitle}：\n${quote.text}`)
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  return context ? `${context}\n\n用户问题：${prompt}` : prompt;
+}
+
+function normalizeBaseUrl(value: string) {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function extractHermesReply(data: unknown) {
+  if (typeof data === "string") return data;
+  if (data && typeof data === "object") {
+    const record = data as Record<string, unknown>;
+    for (const key of ["reply", "output", "content", "message", "text"]) {
+      if (typeof record[key] === "string") return record[key] as string;
+    }
+  }
+  return "Hermes 已返回结果。";
 }
 
 function AiToolButton({
@@ -1209,15 +1631,37 @@ function AiToolButton({
   );
 }
 
-function AiConfigPanel({ selectedTool }: { selectedTool: AiTool }) {
+function AiConfigPanel({
+  selectedTool,
+  config,
+  hermesStatus,
+  onConfigChange,
+  onCheckHermes
+}: {
+  selectedTool: AiTool;
+  config: AiConfig;
+  hermesStatus: string;
+  onConfigChange: (config: AiConfig) => void;
+  onCheckHermes: () => void;
+}) {
   if (selectedTool === "codex") {
     return (
       <section className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="mb-2 text-xs font-semibold text-slate-500">Codex 配置</div>
         <div className="grid grid-cols-2 gap-2">
-          <ReadonlyField label="执行命令" value="codex exec" />
-          <ReadonlyField label="审批策略" value="执行前确认" />
-          <ReadonlyField className="col-span-2" label="工作目录" value="当前项目目录，也可跟随当前终端" />
+          <Field label="Codex 命令">
+            <Input
+              value={config.codexCommand}
+              onChange={(event) => onConfigChange({ ...config, codexCommand: event.target.value })}
+            />
+          </Field>
+          <ReadonlyField label="执行方式" value="exec 隐藏窗口执行" />
+          <Field label="工作目录">
+            <Input
+              value={config.codexWorkingDirectory}
+              onChange={(event) => onConfigChange({ ...config, codexWorkingDirectory: event.target.value })}
+            />
+          </Field>
         </div>
       </section>
     );
@@ -1226,10 +1670,21 @@ function AiConfigPanel({ selectedTool }: { selectedTool: AiTool }) {
   return (
     <section className="border-b border-slate-200 bg-white px-4 py-3">
       <div className="mb-2 text-xs font-semibold text-slate-500">Hermes 配置</div>
-      <div className="grid grid-cols-2 gap-2">
-        <ReadonlyField label="接入模式" value="本地 / 远端" />
-        <ReadonlyField label="流式协议" value="SSE 自动检测" />
-        <ReadonlyField className="col-span-2" label="远端 Base URL" value="https://hermes.intranet.example.com/" />
+      <div className="grid grid-cols-[1fr_auto] gap-2">
+        <label className="block">
+          <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">Hermes Base URL</span>
+          <Input
+            aria-label="Hermes Base URL"
+            value={config.hermesBaseUrl}
+            onChange={(event) => onConfigChange({ ...config, hermesBaseUrl: event.target.value })}
+          />
+        </label>
+        <div className="flex items-end">
+          <Button variant="outline" onClick={onCheckHermes}>检查连接</Button>
+        </div>
+        <div className="col-span-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          {hermesStatus}
+        </div>
       </div>
     </section>
   );
@@ -1251,11 +1706,19 @@ function AiMessage({ role, children }: { role: "user" | "assistant"; children: R
   );
 }
 
-function AiActionCard({ selectedTool, activeSession }: { selectedTool: AiTool; activeSession?: SessionTab }) {
+function AiActionCard({
+  selectedTool,
+  activeSession,
+  config
+}: {
+  selectedTool: AiTool;
+  activeSession?: SessionTab;
+  config: AiConfig;
+}) {
   const command =
     selectedTool === "codex"
-      ? 'codex exec -C E:\\adb\\tools\\LdSSH "分析当前终端错误"'
-      : "POST /api/chat/start -> SSE /api/chat/stream";
+      ? `${config.codexCommand} exec -C ${config.codexWorkingDirectory} "当前输入内容"`
+      : `${normalizeBaseUrl(config.hermesBaseUrl)}/api/chat/start`;
 
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
