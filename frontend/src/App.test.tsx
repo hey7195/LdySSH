@@ -6,7 +6,8 @@ import { App } from "./App";
 const terminalMock = vi.hoisted(() => ({
   selectionText: "",
   selectionHandler: undefined as undefined | (() => void),
-  writes: [] as string[]
+  writes: [] as string[],
+  instances: [] as Array<{ writes: string[] }>
 }));
 
 vi.mock("@xterm/addon-fit", () => ({
@@ -17,8 +18,12 @@ vi.mock("@xterm/addon-fit", () => ({
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
+    private instance = { writes: [] as string[] };
     cols = 80;
     rows = 24;
+    constructor() {
+      terminalMock.instances.push(this.instance);
+    }
     dispose() {}
     focus() {}
     loadAddon() {}
@@ -35,9 +40,11 @@ vi.mock("@xterm/xterm", () => ({
     open() {}
     write(data: string) {
       terminalMock.writes.push(data);
+      this.instance.writes.push(data);
     }
     writeln(data = "") {
       terminalMock.writes.push(`${data}\n`);
+      this.instance.writes.push(`${data}\n`);
     }
   }
 }));
@@ -46,6 +53,7 @@ beforeEach(() => {
   terminalMock.selectionText = "";
   terminalMock.selectionHandler = undefined;
   terminalMock.writes = [];
+  terminalMock.instances = [];
   window.localStorage.clear();
 
   window.pywebview = {
@@ -70,6 +78,8 @@ beforeEach(() => {
         ]
       }),
       save_command_library: vi.fn().mockResolvedValue({ success: true }),
+      create_session: vi.fn().mockResolvedValue("ssh-1"),
+      connect: vi.fn().mockResolvedValue({ success: true }),
       run_codex: vi.fn().mockResolvedValue({ success: true, output: "Codex 已完成分析", exitCode: 0 }),
       start_codex_run: vi.fn().mockResolvedValue({ success: true, jobId: "codex-job-1", commandPreview: "codex exec -C E:\\adb\\tools\\LdSSH <prompt>" }),
       get_codex_run: vi.fn().mockResolvedValue({ success: true, running: false, completed: true, output: "Codex 已完成分析", exitCode: 0 }),
@@ -110,13 +120,18 @@ describe("AI tools panel", () => {
 
     expect(screen.getByTitle("本地终端")).toHaveTextContent("本地");
     expect(screen.getByTitle("命令库")).toHaveTextContent("命令");
-    expect(screen.getByTitle("系统监控")).toHaveTextContent("监控");
+    expect(screen.getByTitle("设置")).toHaveTextContent("设置");
+    expect(screen.queryByTitle("AI 助手")).not.toBeInTheDocument();
   });
 
-  test("opens a right-side chat panel with Codex CLI and Hermes tool choices", async () => {
+  test("opens AI inside the terminal right sidebar", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("AI 助手"));
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    expect(await screen.findByRole("tab", { name: "命令" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "文件" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "AI" }));
 
     expect(await screen.findByRole("heading", { name: "AI 对话栏" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Codex CLI/ })).toBeInTheDocument();
@@ -138,7 +153,6 @@ describe("AI tools panel", () => {
     terminalMock.selectionHandler?.();
 
     fireEvent.click(await screen.findByRole("button", { name: "添加到对话" }));
-    fireEvent.click(screen.getByTitle("AI 助手"));
 
     expect(await screen.findByText("来自 Local CMD 的终端引用")).toBeInTheDocument();
     expect(screen.getByText("ERROR failed to connect 10.0.0.8")).toBeInTheDocument();
@@ -147,7 +161,9 @@ describe("AI tools panel", () => {
   test("starts Codex in a background job after approval", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("AI 助手"));
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.change(await screen.findByTestId("ai-memory-input"), {
       target: { value: "记住：优先检查最新日志" }
     });
@@ -172,6 +188,23 @@ describe("AI tools panel", () => {
     expect(await screen.findByText("Codex 已完成分析")).toBeInTheDocument();
   });
 
+  test("shows a thinking marker while Codex is running", async () => {
+    (window.pywebview?.api?.get_codex_run as ReturnType<typeof vi.fn>).mockImplementation(() => new Promise(() => {}));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "分析当前错误" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+    fireEvent.click(await screen.findByRole("button", { name: /授权执行/ }));
+
+    expect(await screen.findByText("thinking")).toBeInTheDocument();
+  });
+
   test("keeps Codex prompt context and runtime warnings out of the chat transcript", async () => {
     (window.pywebview?.api?.get_codex_run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       success: false,
@@ -189,7 +222,9 @@ describe("AI tools panel", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("AI 助手"));
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.change(await screen.findByTestId("ai-memory-input"), {
       target: { value: "记住：优先检查最新日志" }
     });
@@ -208,7 +243,9 @@ describe("AI tools panel", () => {
   test("checks Hermes connection through the native bridge proxy", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("AI 助手"));
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
     fireEvent.change(await screen.findByLabelText("Hermes Base URL"), {
       target: { value: "http://127.0.0.1:3000" }
@@ -227,7 +264,9 @@ describe("AI tools panel", () => {
   test("configures a remote Hermes WSS URL", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("AI 助手"));
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
     fireEvent.change(await screen.findByLabelText("Hermes WSS URL"), {
       target: { value: "wss://hermes.internal/ws" }
@@ -265,6 +304,88 @@ describe("AI tools panel", () => {
 });
 
 describe("command library", () => {
+  test("shows existing terminal sessions from the session sidebar and activates them", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    await screen.findByTestId("terminal-shell");
+
+    fireEvent.click(screen.getByTitle(/SSH/));
+
+    const sessionButton = await screen.findByRole("button", { name: /切换到 Local CMD/ });
+    fireEvent.click(sessionButton);
+
+    expect(await screen.findByTestId("terminal-shell")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /切换到 Local CMD/ })).toBeInTheDocument();
+  });
+
+  test("keeps terminal output after switching left activity pages", async () => {
+    (window.pywebview?.api?.get_output as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      output: btoa("persisted terminal output")
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    await waitFor(() => expect(terminalMock.writes.join("")).toContain("persisted terminal output"));
+
+    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(screen.getByTitle("本地终端"));
+
+    await waitFor(() => {
+      const latestTerminal = terminalMock.instances.at(-1);
+      expect(latestTerminal?.writes.join("")).toContain("persisted terminal output");
+    });
+  });
+
+  test("connects from the recent-host sidebar and opens a terminal session immediately", async () => {
+    let finishConnect!: (value: { success: boolean }) => void;
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { name: "prod-1", hostname: "10.0.0.8", port: 22, username: "root", password: "secret" }
+    ]);
+    (window.pywebview?.api?.connect as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise((resolve) => {
+        finishConnect = resolve;
+      })
+    );
+
+    render(<App />);
+
+    const recentHost = await screen.findAllByRole("button", { name: /prod-1/ });
+    fireEvent.click(recentHost[0]);
+
+    expect(await screen.findByTestId("terminal-shell")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.pywebview?.api?.create_session).toHaveBeenCalled();
+      expect(window.pywebview?.api?.connect).toHaveBeenCalled();
+    });
+
+    finishConnect({ success: true });
+  });
+
+  test("connects from the host list card", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { name: "prod-2", hostname: "10.0.0.9", port: 2222, username: "ubuntu", password: "secret" }
+    ]);
+
+    render(<App />);
+
+    const main = document.querySelector("main");
+    expect(main).toBeTruthy();
+    const hostCard = await within(main as HTMLElement).findByRole("button", { name: /prod-2/ });
+    fireEvent.click(hostCard);
+
+    await waitFor(() => {
+      expect(window.pywebview?.api?.connect).toHaveBeenCalled();
+    });
+    const connectArgs = (window.pywebview?.api?.connect as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(connectArgs?.[0]).toBe("ssh-1");
+    expect(connectArgs?.[1]).toContain("\"hostname\":\"10.0.0.9\"");
+    expect(await screen.findByTestId("terminal-shell")).toBeInTheDocument();
+  });
+
   test("shows the quick command sidebar inside the terminal workspace", async () => {
     render(<App />);
 
@@ -272,6 +393,7 @@ describe("command library", () => {
     fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
 
     expect(await screen.findByText("快捷命令栏")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "命令" })).toHaveAttribute("aria-selected", "true");
     fireEvent.change(screen.getByPlaceholderText("搜索命令或文件夹"), {
       target: { value: "磁盘" }
     });
@@ -288,10 +410,9 @@ describe("command library", () => {
     fireEvent.click(screen.getByTitle("本地终端"));
     fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
     await waitFor(() => expect(screen.getAllByText("Local CMD").length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByTitle("命令库"));
 
-    expect(await screen.findByRole("heading", { name: "快捷命令库" })).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("搜索命令、描述或文件夹"), {
+    expect(await screen.findByText("快捷命令栏")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("搜索命令或文件夹"), {
       target: { value: "磁盘" }
     });
 
@@ -306,6 +427,17 @@ describe("command library", () => {
     const lastCall = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.at(-1);
     expect(lastCall?.[1]).toBeTruthy();
     expect(atob(lastCall?.[1] as string)).toBe("df -h\n");
+  });
+
+  test("switches the terminal right sidebar to files", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "文件" }));
+
+    expect(await screen.findByRole("heading", { name: "文件浏览" })).toBeInTheDocument();
+    expect(screen.getByText(/当前会话：Local CMD/)).toBeInTheDocument();
   });
 
   test("adds command folders and commands then persists them", async () => {

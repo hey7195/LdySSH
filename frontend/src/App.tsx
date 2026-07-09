@@ -53,7 +53,8 @@ import {
   type ThemeMode
 } from "./lib/terminalSettings";
 
-type Tool = "ssh" | "cmd" | "sftp" | "pf" | "monitor" | "local" | "ai" | "settings";
+type Tool = "ssh" | "cmd" | "monitor" | "local" | "settings";
+type TerminalSidePanel = "commands" | "files" | "ai";
 type AiTool = "codex" | "hermes";
 
 interface SessionTab {
@@ -61,6 +62,8 @@ interface SessionTab {
   title: string;
   kind: "local" | "ssh";
   connected: boolean;
+  status?: "connecting" | "connected" | "failed";
+  error?: string;
 }
 
 interface ConnectionForm {
@@ -117,12 +120,9 @@ interface PendingAiRun {
 
 const tools: Array<{ id: Tool; label: string; title: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "ssh", label: "会话", title: "SSH 会话", icon: Server },
-  { id: "cmd", label: "命令", title: "命令库", icon: Command },
-  { id: "sftp", label: "文件", title: "SFTP 文件", icon: FolderOpen },
-  { id: "pf", label: "转发", title: "端口转发", icon: Shield },
-  { id: "monitor", label: "监控", title: "系统监控", icon: Monitor },
   { id: "local", label: "本地", title: "本地终端", icon: Terminal },
-  { id: "ai", label: "AI", title: "AI 助手", icon: Bot },
+  { id: "cmd", label: "命令", title: "命令库", icon: Command },
+  { id: "monitor", label: "监控", title: "系统监控", icon: Monitor },
   { id: "settings", label: "设置", title: "设置", icon: Settings }
 ];
 
@@ -254,6 +254,8 @@ export function App() {
   const [commandFolders, setCommandFolders] = useState<CommandFolder[]>(defaultCommandFolders);
   const [activeCommandFolderId, setActiveCommandFolderId] = useState(defaultCommandFolders[0].id);
   const [aiConfig, setAiConfig] = useState<AiConfig>(() => loadStoredAiConfig());
+  const [terminalSidePanel, setTerminalSidePanel] = useState<TerminalSidePanel>("commands");
+  const [terminalHistories, setTerminalHistories] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void refreshConnections();
@@ -326,11 +328,25 @@ export function App() {
       id: sessionId,
       title: "Local CMD",
       kind: "local",
-      connected: true
+      connected: true,
+      status: "connected"
     };
     setSessions((current) => [...current, tab]);
     setActiveSessionId(sessionId);
     setActiveTool("local");
+  }
+
+  function activateSession(sessionId: string) {
+    setActiveSessionId(sessionId);
+    setActiveTool("local");
+  }
+
+  function appendTerminalHistory(sessionId: string, text: string) {
+    if (!text) return;
+    setTerminalHistories((current) => ({
+      ...current,
+      [sessionId]: `${current[sessionId] || ""}${text}`
+    }));
   }
 
   async function connectHost(connection?: SavedConnection) {
@@ -361,24 +377,50 @@ export function App() {
       return;
     }
 
+    const title = params.name || `${params.username}@${params.hostname}`;
     const sessionId = await nativeBridge.createSession();
-    const result = await nativeBridge.connect(sessionId, params);
-    if (!result.success) {
-      setConnectError(result.error || "连接失败。");
+    if (!sessionId) {
+      setConnectError("创建会话失败。");
       return;
     }
 
-    const title = params.name || `${params.username}@${params.hostname}`;
-    setSessions((current) => [...current, { id: sessionId, title, kind: "ssh", connected: true }]);
+    setSessions((current) => [
+      ...current,
+      { id: sessionId, title, kind: "ssh", connected: false, status: "connecting" }
+    ]);
     setActiveSessionId(sessionId);
     setActiveTool("local");
+    setTerminalSidePanel("commands");
     setConnectOpen(false);
+
+    const result = await nativeBridge.connect(sessionId, params);
+    if (!result.success) {
+      const error = result.error || "连接失败。";
+      setConnectError(error);
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === sessionId ? { ...session, connected: false, status: "failed", error } : session
+        )
+      );
+      return;
+    }
+
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId ? { ...session, connected: true, status: "connected", error: undefined } : session
+      )
+    );
     setForm(emptyForm);
     void refreshConnections();
   }
 
   function closeTab(sessionId: string) {
     setSessions((current) => current.filter((session) => session.id !== sessionId));
+    setTerminalHistories((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
     if (activeSessionId === sessionId) {
       const next = sessions.find((session) => session.id !== sessionId);
       setActiveSessionId(next?.id || "");
@@ -394,7 +436,8 @@ export function App() {
       text: trimmed
     };
     setAiQuotes((current) => [quote, ...current].slice(0, 8));
-    setActiveTool("ai");
+    setActiveTool("local");
+    setTerminalSidePanel("ai");
   }
 
   function toggleHighlightRule(ruleId: string) {
@@ -477,6 +520,7 @@ export function App() {
     const data = command.endsWith("\n") ? command : `${command}\n`;
     void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(data)));
     setActiveTool("local");
+    setTerminalSidePanel("commands");
   }
 
   return (
@@ -490,13 +534,15 @@ export function App() {
         <ActivityRail activeTool={activeTool} onChange={setActiveTool} />
         <HostSidebar
           savedConnections={filteredConnections}
-          activeTool={activeTool}
+          sessions={sessions}
+          activeSessionId={activeSessionId}
           query={query}
           onQueryChange={setQuery}
           onOpenDialog={() => setConnectOpen(true)}
           onRefresh={refreshConnections}
           onConnect={connectHost}
           onCreateLocal={openLocalSession}
+          onActivateSession={activateSession}
         />
         <main className="min-w-0 overflow-hidden">
           {activeTool === "ssh" && (
@@ -521,8 +567,6 @@ export function App() {
               onSendCommand={sendCommandToActiveSession}
             />
           )}
-          {activeTool === "sftp" && <SftpPanel activeSession={activeSession} />}
-          {activeTool === "pf" && <PortForwardPanel activeSession={activeSession} />}
           {activeTool === "monitor" && <MonitorPanel activeSession={activeSession} />}
           {activeTool === "local" && (
             <TerminalWorkspace
@@ -533,20 +577,19 @@ export function App() {
               highlightRules={highlightRules}
               commandFolders={commandFolders}
               activeCommandFolderId={activeCommandFolderId}
+              sidePanel={terminalSidePanel}
+              aiQuotes={aiQuotes}
+              aiConfig={aiConfig}
+              terminalHistory={activeSession ? terminalHistories[activeSession.id] || "" : ""}
               onActivate={setActiveSessionId}
               onClose={closeTab}
               onCreateLocal={openLocalSession}
               onAddAiQuote={addAiQuote}
+              onTerminalOutput={appendTerminalHistory}
               onActiveCommandFolderChange={setActiveCommandFolderId}
               onSendCommand={sendCommandToActiveSession}
-            />
-          )}
-          {activeTool === "ai" && (
-            <AiWorkspacePanel
-              activeSession={activeSession}
-              quotes={aiQuotes}
-              config={aiConfig}
-              onConfigChange={setAiConfig}
+              onSidePanelChange={setTerminalSidePanel}
+              onAiConfigChange={setAiConfig}
             />
           )}
           {activeTool === "settings" && (
@@ -643,22 +686,26 @@ function ActivityRail({ activeTool, onChange }: { activeTool: Tool; onChange: (t
 
 function HostSidebar({
   savedConnections,
-  activeTool,
+  sessions,
+  activeSessionId,
   query,
   onQueryChange,
   onOpenDialog,
   onRefresh,
   onConnect,
-  onCreateLocal
+  onCreateLocal,
+  onActivateSession
 }: {
   savedConnections: SavedConnection[];
-  activeTool: Tool;
+  sessions: SessionTab[];
+  activeSessionId: string;
   query: string;
   onQueryChange: (value: string) => void;
   onOpenDialog: () => void;
   onRefresh: () => void;
   onConnect: (connection: SavedConnection) => void;
   onCreateLocal: () => void;
+  onActivateSession: (sessionId: string) => void;
 }) {
   return (
     <aside className="min-h-0 border-r border-slate-200 bg-[#eef2f7]">
@@ -713,7 +760,30 @@ function HostSidebar({
           )}
         </SidebarSection>
 
-        <SidebarSection title="活动会话" open={activeTool === "local" || activeTool === "monitor"}>
+        <SidebarSection title="活动会话" count={sessions.length} open>
+          {sessions.length > 0 && (
+            <div className="mb-2 space-y-1">
+              {sessions.map((session) => (
+                <button
+                  key={session.id}
+                  aria-label={`切换到 ${session.title}`}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
+                    session.id === activeSessionId ? "bg-white text-slate-950" : "text-slate-700 hover:bg-white"
+                  )}
+                  onClick={() => onActivateSession(session.id)}
+                >
+                  <span
+                    className={cn(
+                      "h-2 w-2 rounded-full",
+                      session.connected ? "bg-emerald-500" : session.status === "failed" ? "bg-rose-500" : "bg-amber-400"
+                    )}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <button
             className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-white"
             onClick={onCreateLocal}
@@ -877,12 +947,19 @@ function TerminalWorkspace({
   highlightRules,
   commandFolders,
   activeCommandFolderId,
+  sidePanel,
+  aiQuotes,
+  aiConfig,
+  terminalHistory,
   onActivate,
   onClose,
   onCreateLocal,
   onAddAiQuote,
+  onTerminalOutput,
   onActiveCommandFolderChange,
-  onSendCommand
+  onSendCommand,
+  onSidePanelChange,
+  onAiConfigChange
 }: {
   sessions: SessionTab[];
   activeSessionId: string;
@@ -891,12 +968,19 @@ function TerminalWorkspace({
   highlightRules: HighlightRule[];
   commandFolders: CommandFolder[];
   activeCommandFolderId: string;
+  sidePanel: TerminalSidePanel;
+  aiQuotes: AiQuote[];
+  aiConfig: AiConfig;
+  terminalHistory: string;
   onActivate: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
   onCreateLocal: () => void;
   onAddAiQuote: (text: string, sourceTitle: string) => void;
+  onTerminalOutput: (sessionId: string, text: string) => void;
   onActiveCommandFolderChange: (folderId: string) => void;
   onSendCommand: (command: string) => void;
+  onSidePanelChange: (panel: TerminalSidePanel) => void;
+  onAiConfigChange: (config: AiConfig) => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
 
@@ -934,26 +1018,42 @@ function TerminalWorkspace({
           <Menu className="h-4 w-4" />
         </Button>
       </div>
-      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_420px]">
         <TerminalSurface
           activeSession={activeSession}
           terminalTheme={terminalTheme}
           terminalBackgroundImage={terminalBackgroundImage}
           highlightRules={highlightRules}
+          initialTranscript={terminalHistory}
           onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
+          onOutput={onTerminalOutput}
         />
-        <TerminalCommandSidebar
-          folders={commandFolders}
-          activeFolderId={activeCommandFolderId}
+        <TerminalRightSidebar
+          activePanel={sidePanel}
           activeSession={activeSession}
-          onActiveFolderChange={onActiveCommandFolderChange}
+          commandFolders={commandFolders}
+          activeCommandFolderId={activeCommandFolderId}
+          aiQuotes={aiQuotes}
+          aiConfig={aiConfig}
+          onPanelChange={onSidePanelChange}
+          onActiveCommandFolderChange={onActiveCommandFolderChange}
           onSendCommand={onSendCommand}
+          onAiConfigChange={onAiConfigChange}
         />
       </div>
       <div className="flex items-center gap-3 border-t border-slate-200 bg-slate-50 px-5 text-xs text-slate-500">
         <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500" : "bg-slate-300")} />
-        <span>{activeSession ? "已连接" : "未连接"}</span>
+        <span>
+          {activeSession?.status === "connecting"
+            ? "连接中"
+            : activeSession?.status === "failed"
+              ? "连接失败"
+              : activeSession
+                ? "已连接"
+                : "未连接"}
+        </span>
         <span>{activeSession?.title || "无活动会话"}</span>
+        {activeSession?.error && <span className="truncate text-rose-600">{activeSession.error}</span>}
       </div>
     </div>
   );
@@ -964,13 +1064,17 @@ function TerminalSurface({
   terminalTheme,
   terminalBackgroundImage,
   highlightRules,
-  onAddAiQuote
+  initialTranscript,
+  onAddAiQuote,
+  onOutput
 }: {
   activeSession?: SessionTab;
   terminalTheme: TerminalThemeMode;
   terminalBackgroundImage: string;
   highlightRules: HighlightRule[];
+  initialTranscript: string;
   onAddAiQuote: (text: string) => void;
+  onOutput: (sessionId: string, text: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
@@ -982,6 +1086,12 @@ function TerminalSurface({
   useEffect(() => {
     activeIdRef.current = activeSession?.id || "";
   }, [activeSession?.id]);
+
+  const onOutputRef = useRef(onOutput);
+
+  useEffect(() => {
+    onOutputRef.current = onOutput;
+  }, [onOutput]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1003,6 +1113,9 @@ function TerminalSurface({
     terminal.focus();
     terminal.writeln(`\x1b[36m${activeSession.title}\x1b[0m`);
     terminal.writeln("");
+    if (initialTranscript) {
+      terminal.write(applyHighlightRules(initialTranscript, highlightRules));
+    }
     decoderRef.current = new TextDecoder("utf-8");
     terminal.onData((data) => {
       void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(data)));
@@ -1025,7 +1138,9 @@ function TerminalSurface({
     const interval = window.setInterval(async () => {
       const result = await nativeBridge.getOutput(activeSession.id);
       if (result.output) {
-        terminal.write(applyHighlightRules(decodeTerminalOutput(result.output, decoderRef), highlightRules));
+        const output = decodeTerminalOutput(result.output, decoderRef);
+        terminal.write(applyHighlightRules(output, highlightRules));
+        onOutput(activeSession.id, output);
       }
     }, 160);
 
@@ -1040,7 +1155,9 @@ function TerminalSurface({
   useEffect(() => {
     window.handlePushOutput = (sessionId, data) => {
       if (sessionId === activeIdRef.current) {
-        terminalRef.current?.write(applyHighlightRules(decodeTerminalOutput(data, decoderRef), highlightRules));
+        const output = decodeTerminalOutput(data, decoderRef);
+        terminalRef.current?.write(applyHighlightRules(output, highlightRules));
+        onOutputRef.current(sessionId, output);
       }
     };
     return () => {
@@ -1121,7 +1238,7 @@ function TerminalCommandSidebar({
   });
 
   return (
-    <aside className="min-h-0 border-l border-slate-200 bg-slate-50">
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-slate-50">
       <div className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -1143,7 +1260,7 @@ function TerminalCommandSidebar({
         </div>
       </div>
 
-      <div className="flex min-h-0 h-[calc(100%-93px)] flex-col">
+      <div className="flex min-h-0 flex-col">
         <div className="border-b border-slate-200 px-3 py-3">
           <div className="mb-2 text-[11px] font-semibold text-slate-500">文件夹</div>
           <div className="flex flex-wrap gap-2">
@@ -1170,6 +1287,7 @@ function TerminalCommandSidebar({
             {commands.map((command) => (
               <button
                 key={`${command.folderName}-${command.id}`}
+                aria-label={`发送 ${command.name}`}
                 className="block w-full rounded-md border border-slate-200 bg-white p-3 text-left hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
                 disabled={!activeSession}
                 onClick={() => onSendCommand(command.command)}
@@ -1187,7 +1305,7 @@ function TerminalCommandSidebar({
           </div>
         </div>
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -1214,6 +1332,114 @@ function bytesToBase64(bytes: Uint8Array) {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
+}
+
+function TerminalRightSidebar({
+  activePanel,
+  activeSession,
+  commandFolders,
+  activeCommandFolderId,
+  aiQuotes,
+  aiConfig,
+  onPanelChange,
+  onActiveCommandFolderChange,
+  onSendCommand,
+  onAiConfigChange
+}: {
+  activePanel: TerminalSidePanel;
+  activeSession?: SessionTab;
+  commandFolders: CommandFolder[];
+  activeCommandFolderId: string;
+  aiQuotes: AiQuote[];
+  aiConfig: AiConfig;
+  onPanelChange: (panel: TerminalSidePanel) => void;
+  onActiveCommandFolderChange: (folderId: string) => void;
+  onSendCommand: (command: string) => void;
+  onAiConfigChange: (config: AiConfig) => void;
+}) {
+  const panels: Array<{ id: TerminalSidePanel; label: string; icon: React.ReactNode }> = [
+    { id: "commands", label: "命令", icon: <Command className="h-3.5 w-3.5" /> },
+    { id: "files", label: "文件", icon: <FolderOpen className="h-3.5 w-3.5" /> },
+    { id: "ai", label: "AI", icon: <Bot className="h-3.5 w-3.5" /> }
+  ];
+
+  return (
+    <aside className="grid min-h-0 grid-rows-[44px_minmax(0,1fr)] border-l border-slate-200 bg-white">
+      <div className="flex items-center gap-1 border-b border-slate-200 bg-white px-2" role="tablist" aria-label="终端右侧工作栏">
+        {panels.map((panel) => {
+          const active = activePanel === panel.id;
+          return (
+            <button
+              key={panel.id}
+              role="tab"
+              aria-selected={active}
+              className={cn(
+                "inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-semibold transition-colors",
+                active ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              )}
+              onClick={() => onPanelChange(panel.id)}
+            >
+              {panel.icon}
+              {panel.label}
+            </button>
+          );
+        })}
+      </div>
+      <div className="min-h-0 overflow-hidden">
+        {activePanel === "commands" && (
+          <TerminalCommandSidebar
+            folders={commandFolders}
+            activeFolderId={activeCommandFolderId}
+            activeSession={activeSession}
+            onActiveFolderChange={onActiveCommandFolderChange}
+            onSendCommand={onSendCommand}
+          />
+        )}
+        {activePanel === "files" && <TerminalFileSidebar activeSession={activeSession} />}
+        {activePanel === "ai" && (
+          <AiWorkspacePanel
+            activeSession={activeSession}
+            quotes={aiQuotes}
+            config={aiConfig}
+            onConfigChange={onAiConfigChange}
+          />
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function TerminalFileSidebar({ activeSession }: { activeSession?: SessionTab }) {
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-slate-50">
+      <div className="border-b border-slate-200 bg-white px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-950">文件浏览</h2>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {activeSession ? `当前会话：${activeSession.title}` : "连接 SSH 后查看文件"}
+            </p>
+          </div>
+          <FolderOpen className="h-4 w-4 text-slate-400" />
+        </div>
+      </div>
+      <div className="min-h-0 overflow-auto p-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-md border border-slate-200 bg-white p-3">
+            <div className="text-xs font-semibold text-slate-900">本地文件</div>
+            <div className="mt-1 text-xs leading-5 text-slate-500">用于上传、下载和拖拽传输。</div>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-white p-3">
+            <div className="text-xs font-semibold text-slate-900">远程文件</div>
+            <div className="mt-1 text-xs leading-5 text-slate-500">选择 SSH 会话后显示目录。</div>
+          </div>
+        </div>
+        <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-3 py-8 text-center text-xs text-slate-500">
+          {activeSession?.kind === "ssh" ? "文件列表接入中。" : "当前不是 SSH 会话，暂不能浏览远程文件。"}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
@@ -1865,8 +2091,7 @@ function AiWorkspacePanel({
   }
 
   return (
-    <div className="h-full min-w-0 bg-slate-50">
-      <aside className="grid h-full w-[420px] max-w-full grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] border-r border-slate-200 bg-white">
+    <div className="grid h-full min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] bg-white">
         <header className="border-b border-slate-200 px-4 py-4">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -1957,7 +2182,8 @@ function AiWorkspacePanel({
                 onCancel={() => setPendingRun(null)}
               />
             )}
-            {runStatus && <AiRunStatus text={runStatus} />}
+            {running && <AiRunStatus text={runStatus || "Codex 执行中..."} thinking />}
+            {!running && runStatus && <AiRunStatus text={runStatus} />}
           </div>
         </div>
 
@@ -1989,7 +2215,6 @@ function AiWorkspacePanel({
             </button>
           </div>
         </footer>
-      </aside>
     </div>
   );
 }
@@ -2262,10 +2487,19 @@ function AiMessage({ role, children }: { role: "user" | "assistant"; children: R
   );
 }
 
-function AiRunStatus({ text }: { text: string }) {
+function AiRunStatus({ text, thinking = false }: { text: string; thinking?: boolean }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500">
-      {text}
+    <div className={cn(
+      "flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium",
+      thinking ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500"
+    )}>
+      {thinking && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-600" />
+          thinking
+        </span>
+      )}
+      <span>{text}</span>
     </div>
   );
 }
