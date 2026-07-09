@@ -72,6 +72,14 @@ export const nativeBridge = {
   connect(sessionId: string, params: ConnectParams) {
     return callNative<{ success: boolean; error?: string }>("connect", { success: false }, sessionId, JSON.stringify(params));
   },
+  saveSavedConnection(key: string, params: ConnectParams) {
+    return callNative<{ success: boolean; key?: string; error?: string }>(
+      "save_saved_connection",
+      { success: false },
+      key,
+      JSON.stringify(params)
+    );
+  },
   runCodex(params: CodexRunParams) {
     return callNative<CodexRunResult>("run_codex", { success: false, error: "Codex native bridge unavailable" }, JSON.stringify(params));
   },
@@ -118,10 +126,12 @@ export const nativeBridge = {
 };
 
 export interface SavedConnection {
+  key?: string;
   name?: string;
   hostname?: string;
   port?: number;
   username?: string;
+  password?: string;
   group?: string;
   keyPath?: string;
 }
@@ -195,6 +205,7 @@ export interface ConnectParams {
   password?: string;
   keyPath?: string;
   save?: boolean;
+  group?: string;
 }
 
 export interface NativeResult {

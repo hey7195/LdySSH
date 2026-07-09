@@ -74,3 +74,34 @@ def test_send_input_base64_decodes_before_dispatch(tmp_path):
         assert sent == [("session_1", "df -h\n")]
     finally:
         api.cleanup()
+
+
+def test_save_saved_connection_replaces_old_key(tmp_path):
+    api = make_api(tmp_path)
+
+    try:
+        original = {
+            "hostname": "10.0.0.8",
+            "port": 22,
+            "username": "root",
+            "password": "secret",
+            "name": "prod-1"
+        }
+        updated = {
+            "hostname": "10.0.0.8",
+            "port": 2222,
+            "username": "deploy",
+            "password": "secret",
+            "name": "prod-main"
+        }
+
+        assert api.connection_store.save_connection(original) is True
+        result = json.loads(api.save_saved_connection("10.0.0.8@root", json.dumps(updated)))
+        connections = api.connection_store.load_connections()
+
+        assert result == {"success": True, "key": "10.0.0.8@deploy"}
+        assert "10.0.0.8@root" not in connections
+        assert connections["10.0.0.8@deploy"]["name"] == "prod-main"
+        assert connections["10.0.0.8@deploy"]["port"] == 2222
+    finally:
+        api.cleanup()

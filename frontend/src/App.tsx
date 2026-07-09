@@ -17,6 +17,7 @@ import {
   MessageSquare,
   Minimize2,
   Monitor,
+  Pencil,
   Plus,
   Play,
   RefreshCw,
@@ -174,6 +175,7 @@ const storageKeys = {
   theme: "ldyssh.ui.theme",
   terminalTheme: "ldyssh.terminal.theme",
   terminalBackgroundImage: "ldyssh.terminal.backgroundImage",
+  terminalBackgroundOverlay: "ldyssh.terminal.backgroundOverlay",
   highlightRules: "ldyssh.terminal.highlightRules",
   aiConfig: "ldyssh.ai.config",
   aiSessions: "ldyssh.ai.sessions"
@@ -216,6 +218,11 @@ function loadStoredTerminalTheme(): TerminalThemeMode {
 
 function loadStoredTerminalBackgroundImage() {
   return window.localStorage.getItem(storageKeys.terminalBackgroundImage) || "";
+}
+
+function loadStoredTerminalBackgroundOverlay() {
+  const value = Number(window.localStorage.getItem(storageKeys.terminalBackgroundOverlay) || 50);
+  return Number.isFinite(value) ? value : 50;
 }
 
 function loadStoredHighlightRules(): HighlightRule[] {
@@ -275,11 +282,13 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [query, setQuery] = useState("");
   const [connectOpen, setConnectOpen] = useState(false);
+  const [editingConnectionKey, setEditingConnectionKey] = useState("");
   const [form, setForm] = useState<ConnectionForm>(emptyForm);
   const [connectError, setConnectError] = useState("");
   const [theme, setTheme] = useState<ThemeMode>(() => loadStoredTheme());
   const [terminalTheme, setTerminalTheme] = useState<TerminalThemeMode>(() => loadStoredTerminalTheme());
   const [terminalBackgroundImage, setTerminalBackgroundImage] = useState(() => loadStoredTerminalBackgroundImage());
+  const [terminalBackgroundOverlay, setTerminalBackgroundOverlay] = useState(() => loadStoredTerminalBackgroundOverlay());
   const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(() => loadStoredHighlightRules());
   const [aiQuotes, setAiQuotes] = useState<AiQuote[]>([]);
   const [commandFolders, setCommandFolders] = useState<CommandFolder[]>(defaultCommandFolders);
@@ -308,6 +317,10 @@ export function App() {
       window.localStorage.removeItem(storageKeys.terminalBackgroundImage);
     }
   }, [terminalBackgroundImage]);
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.terminalBackgroundOverlay, String(terminalBackgroundOverlay));
+  }, [terminalBackgroundOverlay]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKeys.highlightRules, JSON.stringify(highlightRules));
@@ -378,6 +391,61 @@ export function App() {
       ...current,
       [sessionId]: trimTerminalHistory(`${current[sessionId] || ""}${text}`)
     }));
+  }
+
+  function toConnectionForm(connection: SavedConnection): ConnectionForm {
+    return {
+      name: connection.name || "",
+      hostname: connection.hostname || "",
+      port: String(connection.port || 22),
+      username: connection.username || "",
+      password: connection.password || "",
+      keyPath: connection.keyPath || "",
+      save: true
+    };
+  }
+
+  function openNewConnectionDialog() {
+    setEditingConnectionKey("");
+    setForm(emptyForm);
+    setConnectError("");
+    setConnectOpen(true);
+  }
+
+  function openEditConnectionDialog(connection: SavedConnection) {
+    setEditingConnectionKey(connection.key || `${connection.hostname || ""}@${connection.username || ""}`);
+    setForm(toConnectionForm(connection));
+    setConnectError("");
+    setConnectOpen(true);
+  }
+
+  async function saveEditedConnection() {
+    setConnectError("");
+    const params: ConnectParams = {
+      name: form.name || `${form.username}@${form.hostname}`,
+      hostname: form.hostname,
+      port: Number(form.port || 22),
+      username: form.username,
+      password: form.password,
+      keyPath: form.keyPath,
+      save: true
+    };
+
+    if (!params.hostname || !params.username) {
+      setConnectError("主机地址和用户名不能为空。");
+      return;
+    }
+
+    const result = await nativeBridge.saveSavedConnection(editingConnectionKey, params);
+    if (!result.success) {
+      setConnectError(result.error || "保存失败。");
+      return;
+    }
+
+    setConnectOpen(false);
+    setEditingConnectionKey("");
+    setForm(emptyForm);
+    void refreshConnections();
   }
 
   async function connectHost(connection?: SavedConnection) {
@@ -569,9 +637,10 @@ export function App() {
           activeSessionId={activeSessionId}
           query={query}
           onQueryChange={setQuery}
-          onOpenDialog={() => setConnectOpen(true)}
+          onOpenDialog={openNewConnectionDialog}
           onRefresh={refreshConnections}
           onConnect={connectHost}
+          onEditConnection={openEditConnectionDialog}
           onCreateLocal={openLocalSession}
           onActivateSession={activateSession}
         />
@@ -581,9 +650,10 @@ export function App() {
               savedConnections={filteredConnections}
               query={query}
               onQueryChange={setQuery}
-              onOpenDialog={() => setConnectOpen(true)}
+              onOpenDialog={openNewConnectionDialog}
               onRefresh={refreshConnections}
               onConnect={connectHost}
+              onEditConnection={openEditConnectionDialog}
             />
           )}
           {activeTool === "cmd" && (
@@ -605,6 +675,7 @@ export function App() {
               activeSessionId={activeSessionId}
               terminalTheme={terminalTheme}
               terminalBackgroundImage={terminalBackgroundImage}
+              terminalBackgroundOverlay={terminalBackgroundOverlay}
               highlightRules={highlightRules}
               commandFolders={commandFolders}
               activeCommandFolderId={activeCommandFolderId}
@@ -628,10 +699,12 @@ export function App() {
               theme={theme}
               terminalTheme={terminalTheme}
               terminalBackgroundImage={terminalBackgroundImage}
+              terminalBackgroundOverlay={terminalBackgroundOverlay}
               highlightRules={highlightRules}
               onThemeChange={setTheme}
               onTerminalThemeChange={setTerminalTheme}
               onTerminalBackgroundImageChange={setTerminalBackgroundImage}
+              onTerminalBackgroundOverlayChange={setTerminalBackgroundOverlay}
               onToggleHighlightRule={toggleHighlightRule}
               onAddHighlightRule={addHighlightRule}
               onDeleteHighlightRule={deleteHighlightRule}
@@ -644,9 +717,11 @@ export function App() {
         open={connectOpen}
         form={form}
         error={connectError}
+        mode={editingConnectionKey ? "edit" : "create"}
         onOpenChange={setConnectOpen}
         onFormChange={setForm}
         onConnect={() => connectHost()}
+        onSave={saveEditedConnection}
       />
     </div>
   );
@@ -724,6 +799,7 @@ function HostSidebar({
   onOpenDialog,
   onRefresh,
   onConnect,
+  onEditConnection,
   onCreateLocal,
   onActivateSession
 }: {
@@ -735,6 +811,7 @@ function HostSidebar({
   onOpenDialog: () => void;
   onRefresh: () => void;
   onConnect: (connection: SavedConnection) => void;
+  onEditConnection: (connection: SavedConnection) => void;
   onCreateLocal: () => void;
   onActivateSession: (sessionId: string) => void;
 }) {
@@ -774,18 +851,26 @@ function HostSidebar({
           ) : (
             <div className="space-y-1">
               {savedConnections.slice(0, 8).map((connection, index) => (
-                <button
+                <div
                   key={`${connection.hostname}-${connection.username}-${index}`}
-                  className="w-full rounded-md px-3 py-2 text-left hover:bg-white"
-                  onClick={() => onConnect(connection)}
+                  className="grid grid-cols-[minmax(0,1fr)_30px] items-center gap-1 rounded-md px-3 py-2 hover:bg-white"
                 >
-                  <div className="truncate text-sm font-medium text-slate-900">
-                    {connection.name || connection.hostname}
-                  </div>
-                  <div className="mt-0.5 truncate text-xs text-slate-500">
-                    {connection.username || "user"}@{connection.hostname || "host"}:{connection.port || 22}
-                  </div>
-                </button>
+                  <button className="min-w-0 text-left" onClick={() => onConnect(connection)}>
+                    <div className="truncate text-sm font-medium text-slate-900">
+                      {connection.name || connection.hostname}
+                    </div>
+                    <div className="mt-0.5 truncate text-xs text-slate-500">
+                      {connection.username || "user"}@{connection.hostname || "host"}:{connection.port || 22}
+                    </div>
+                  </button>
+                  <button
+                    aria-label={`编辑 ${connection.name || connection.hostname}`}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    onClick={() => onEditConnection(connection)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -861,7 +946,8 @@ function Workbench({
   onQueryChange,
   onOpenDialog,
   onRefresh,
-  onConnect
+  onConnect,
+  onEditConnection
 }: {
   savedConnections: SavedConnection[];
   query: string;
@@ -869,6 +955,7 @@ function Workbench({
   onOpenDialog: () => void;
   onRefresh: () => void;
   onConnect: (connection: SavedConnection) => void;
+  onEditConnection: (connection: SavedConnection) => void;
 }) {
   return (
     <div className="h-full overflow-auto px-8 py-8">
@@ -922,10 +1009,9 @@ function Workbench({
           ) : (
             <div className="grid grid-cols-2 gap-3">
               {savedConnections.map((connection, index) => (
-                <button
+                <div
                   key={`${connection.hostname}-${connection.username}-${index}`}
                   className="rounded-lg border border-slate-200 bg-white p-4 text-left transition-colors hover:border-slate-300 hover:bg-slate-50"
-                  onClick={() => onConnect(connection)}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -936,11 +1022,25 @@ function Workbench({
                         {connection.username || "user"}@{connection.hostname}:{connection.port || 22}
                       </div>
                     </div>
-                    <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500">
-                      连接
-                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        aria-label="编辑主机"
+                        title={`编辑 ${connection.name || connection.hostname}`}
+                        className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                        onClick={() => onEditConnection(connection)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        aria-label={`连接 ${connection.name || connection.hostname}`}
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                        onClick={() => onConnect(connection)}
+                      >
+                        连接
+                      </button>
+                    </div>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           )}
@@ -975,6 +1075,7 @@ function TerminalWorkspace({
   activeSessionId,
   terminalTheme,
   terminalBackgroundImage,
+  terminalBackgroundOverlay,
   highlightRules,
   commandFolders,
   activeCommandFolderId,
@@ -996,6 +1097,7 @@ function TerminalWorkspace({
   activeSessionId: string;
   terminalTheme: TerminalThemeMode;
   terminalBackgroundImage: string;
+  terminalBackgroundOverlay: number;
   highlightRules: HighlightRule[];
   commandFolders: CommandFolder[];
   activeCommandFolderId: string;
@@ -1054,6 +1156,7 @@ function TerminalWorkspace({
           activeSession={activeSession}
           terminalTheme={terminalTheme}
           terminalBackgroundImage={terminalBackgroundImage}
+          terminalBackgroundOverlay={terminalBackgroundOverlay}
           highlightRules={highlightRules}
           initialTranscript={terminalHistory}
           onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
@@ -1094,6 +1197,7 @@ function TerminalSurface({
   activeSession,
   terminalTheme,
   terminalBackgroundImage,
+  terminalBackgroundOverlay,
   highlightRules,
   initialTranscript,
   onAddAiQuote,
@@ -1102,6 +1206,7 @@ function TerminalSurface({
   activeSession?: SessionTab;
   terminalTheme: TerminalThemeMode;
   terminalBackgroundImage: string;
+  terminalBackgroundOverlay: number;
   highlightRules: HighlightRule[];
   initialTranscript: string;
   onAddAiQuote: (text: string) => void;
@@ -1149,12 +1254,15 @@ function TerminalSurface({
 
     setSelectedText("");
     terminalRef.current?.dispose();
+    const terminalThemeOptions = getTerminalTheme(terminalTheme, Boolean(terminalBackgroundImage));
     const terminal = new XTerm({
       cursorBlink: true,
       fontFamily: "Cascadia Mono, Consolas, monospace",
       fontSize: 13,
       lineHeight: 1.25,
-      theme: getTerminalTheme(terminalTheme, Boolean(terminalBackgroundImage))
+      theme: terminalBackgroundImage
+        ? { ...terminalThemeOptions, background: "rgba(0, 0, 0, 0)" }
+        : terminalThemeOptions
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -1269,11 +1377,12 @@ function TerminalSurface({
   }
 
   const terminalColors = getTerminalTheme(terminalTheme);
+  const backgroundOverlayAlpha = terminalBackgroundOverlay / 100;
   const terminalStyle = {
     "--terminal-bg": terminalColors.background,
     "--terminal-text": terminalColors.foreground,
     backgroundImage: terminalBackgroundImage
-      ? `linear-gradient(rgba(2, 6, 23, 0.5), rgba(2, 6, 23, 0.5)), url(${JSON.stringify(terminalBackgroundImage)})`
+      ? `linear-gradient(rgba(2, 6, 23, ${backgroundOverlayAlpha}), rgba(2, 6, 23, ${backgroundOverlayAlpha})), url(${JSON.stringify(terminalBackgroundImage)})`
       : undefined
   } as CSSProperties;
 
@@ -1892,10 +2001,12 @@ function SettingsPanel({
   theme,
   terminalTheme,
   terminalBackgroundImage,
+  terminalBackgroundOverlay,
   highlightRules,
   onThemeChange,
   onTerminalThemeChange,
   onTerminalBackgroundImageChange,
+  onTerminalBackgroundOverlayChange,
   onToggleHighlightRule,
   onAddHighlightRule,
   onDeleteHighlightRule
@@ -1903,21 +2014,24 @@ function SettingsPanel({
   theme: ThemeMode;
   terminalTheme: TerminalThemeMode;
   terminalBackgroundImage: string;
+  terminalBackgroundOverlay: number;
   highlightRules: HighlightRule[];
   onThemeChange: (theme: ThemeMode) => void;
   onTerminalThemeChange: (theme: TerminalThemeMode) => void;
   onTerminalBackgroundImageChange: (value: string) => void;
+  onTerminalBackgroundOverlayChange: (value: number) => void;
   onToggleHighlightRule: (ruleId: string) => void;
   onAddHighlightRule: (rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) => void;
   onDeleteHighlightRule: (ruleId: string) => void;
 }) {
   const [draft, setDraft] = useState({ name: "", pattern: "", foreground: "#2563eb" });
   const terminalPreviewColors = getTerminalTheme(terminalTheme);
+  const terminalPreviewOverlayAlpha = terminalBackgroundOverlay / 100;
   const terminalPreviewStyle = {
     backgroundColor: terminalPreviewColors.background,
     color: terminalPreviewColors.foreground,
     backgroundImage: terminalBackgroundImage
-      ? `linear-gradient(rgba(2, 6, 23, 0.48), rgba(2, 6, 23, 0.48)), url(${JSON.stringify(terminalBackgroundImage)})`
+      ? `linear-gradient(rgba(2, 6, 23, ${terminalPreviewOverlayAlpha}), rgba(2, 6, 23, ${terminalPreviewOverlayAlpha})), url(${JSON.stringify(terminalBackgroundImage)})`
       : undefined
   } as CSSProperties;
 
@@ -2005,6 +2119,22 @@ function SettingsPanel({
                   清除
                 </Button>
               </div>
+              <label className="mt-3 block text-xs font-semibold text-[var(--app-muted)]">
+                <span className="flex items-center justify-between gap-3">
+                  <span>背景遮罩透明度</span>
+                  <span>{terminalBackgroundOverlay}%</span>
+                </span>
+                <input
+                  aria-label="背景遮罩透明度"
+                  className="mt-2 w-full accent-blue-600"
+                  type="range"
+                  min="0"
+                  max="90"
+                  step="5"
+                  value={terminalBackgroundOverlay}
+                  onChange={(event) => onTerminalBackgroundOverlayChange(Number(event.target.value))}
+                />
+              </label>
             </div>
             <div className="mt-4 rounded-md border border-[var(--app-line)] bg-[var(--subtle-bg)] p-3">
               <div className="text-xs font-semibold text-[var(--app-muted)]">终端预览</div>
@@ -2765,20 +2895,26 @@ function ConnectDialog({
   open,
   form,
   error,
+  mode,
   onOpenChange,
   onFormChange,
-  onConnect
+  onConnect,
+  onSave
 }: {
   open: boolean;
   form: ConnectionForm;
   error: string;
+  mode: "create" | "edit";
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: ConnectionForm) => void;
   onConnect: () => void;
+  onSave: () => void;
 }) {
   function update<K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) {
     onFormChange({ ...form, [key]: value });
   }
+
+  const isEdit = mode === "edit";
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -2787,9 +2923,11 @@ function ConnectDialog({
         <Dialog.Content className="fixed left-1/2 top-1/2 w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
           <div className="mb-5 flex items-start justify-between">
             <div>
-              <Dialog.Title className="text-lg font-semibold text-slate-950">新建 SSH 连接</Dialog.Title>
+              <Dialog.Title className="text-lg font-semibold text-slate-950">
+                {isEdit ? "编辑 SSH 连接" : "新建 SSH 连接"}
+              </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm text-slate-500">
-                填写主机地址、端口和认证信息。
+                {isEdit ? "修改已保存主机的地址、端口和认证信息。" : "填写主机地址、端口和认证信息。"}
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -2820,14 +2958,16 @@ function ConnectDialog({
             </Field>
           </div>
 
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-600">
-            <input
-              type="checkbox"
-              checked={form.save}
-              onChange={(event) => update("save", event.target.checked)}
-            />
-            保存到主机列表
-          </label>
+          {!isEdit && (
+            <label className="mt-4 flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={form.save}
+                onChange={(event) => update("save", event.target.checked)}
+              />
+              保存到主机列表
+            </label>
+          )}
 
           {error && <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
 
@@ -2835,7 +2975,7 @@ function ConnectDialog({
             <Dialog.Close asChild>
               <Button variant="outline">取消</Button>
             </Dialog.Close>
-            <Button onClick={onConnect}>连接</Button>
+            <Button onClick={isEdit ? onSave : onConnect}>{isEdit ? "保存" : "连接"}</Button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

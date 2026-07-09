@@ -83,6 +83,7 @@ beforeEach(() => {
         ]
       }),
       save_command_library: vi.fn().mockResolvedValue({ success: true }),
+      save_saved_connection: vi.fn().mockResolvedValue({ success: true }),
       create_session: vi.fn().mockResolvedValue("ssh-1"),
       connect: vi.fn().mockResolvedValue({ success: true }),
       run_codex: vi.fn().mockResolvedValue({ success: true, output: "Codex 已完成分析", exitCode: 0 }),
@@ -306,6 +307,25 @@ describe("AI tools panel", () => {
     expect(screen.getByTestId("terminal-theme-light")).toBeInTheDocument();
     expect(screen.getByTestId("terminal-background-upload")).toHaveAttribute("accept", "image/*");
   });
+
+  test("adjusts terminal background mask opacity", async () => {
+    window.localStorage.setItem("ldyssh.terminal.backgroundImage", "data:image/png;base64,bg");
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("设置"));
+    const opacitySlider = await screen.findByLabelText("背景遮罩透明度");
+    fireEvent.change(opacitySlider, { target: { value: "20" } });
+
+    expect(window.localStorage.getItem("ldyssh.terminal.backgroundOverlay")).toBe("20");
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+
+    expect(await screen.findByTestId("terminal-shell")).toHaveStyle({
+      backgroundImage: 'linear-gradient(rgba(2, 6, 23, 0.2), rgba(2, 6, 23, 0.2)), url("data:image/png;base64,bg")'
+    });
+  });
 });
 
 describe("command library", () => {
@@ -418,6 +438,45 @@ describe("command library", () => {
     expect(connectArgs?.[0]).toBe("ssh-1");
     expect(connectArgs?.[1]).toContain("\"hostname\":\"10.0.0.9\"");
     expect(await screen.findByTestId("terminal-shell")).toBeInTheDocument();
+  });
+
+  test("edits an existing saved SSH connection without starting a session", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        key: "10.0.0.8@root",
+        name: "prod-1",
+        hostname: "10.0.0.8",
+        port: 22,
+        username: "root",
+        password: "secret"
+      }
+    ]);
+
+    render(<App />);
+
+    const editButtons = await screen.findAllByRole("button", { name: "编辑 prod-1" });
+    fireEvent.click(editButtons[0]);
+
+    expect(await screen.findByRole("heading", { name: "编辑 SSH 连接" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("连接名称"), {
+      target: { value: "prod-main" }
+    });
+    fireEvent.change(screen.getByLabelText("端口"), {
+      target: { value: "2222" }
+    });
+    fireEvent.change(screen.getByLabelText("用户名"), {
+      target: { value: "deploy" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.save_saved_connection).toHaveBeenCalled());
+    const saveArgs = (window.pywebview?.api?.save_saved_connection as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(saveArgs?.[0]).toBe("10.0.0.8@root");
+    expect(saveArgs?.[1]).toContain("\"name\":\"prod-main\"");
+    expect(saveArgs?.[1]).toContain("\"port\":2222");
+    expect(saveArgs?.[1]).toContain("\"username\":\"deploy\"");
+    expect(window.pywebview?.api?.create_session).not.toHaveBeenCalled();
+    expect(window.pywebview?.api?.connect).not.toHaveBeenCalled();
   });
 
   test("shows the quick command sidebar inside the terminal workspace", async () => {

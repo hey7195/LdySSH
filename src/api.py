@@ -128,7 +128,28 @@ class PrismSSHAPI:
         except Exception as e:
             self.logger.error(f"API: Failed to create session: {e}")
             raise PrismSSHError(f"Failed to create session: {str(e)}")
-    
+
+    def _build_saved_connection(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            'hostname': params['hostname'],
+            'port': params.get('port', self.config.default_port),
+            'username': params['username'],
+            'password': params.get('password'),
+            'keyPath': params.get('keyPath'),
+            'name': params.get('name', f"{params['username']}@{params['hostname']}"),
+            'jumpHost': params.get('jumpHost', ''),
+            'jumpPort': params.get('jumpPort', 22),
+            'jumpUser': params.get('jumpUser', ''),
+            'jumpPass': params.get('jumpPass', ''),
+            'jumpKey': params.get('jumpKey', ''),
+            'jumpKeyPassphrase': params.get('jumpKeyPassphrase', ''),
+            'proxyType': params.get('proxyType', 'none'),
+            'proxyHost': params.get('proxyHost', ''),
+            'proxyPort': params.get('proxyPort', 1080),
+            'proxyUser': params.get('proxyUser', ''),
+            'proxyPass': params.get('proxyPass', '')
+        }
+
     def connect(self, session_id: str, connection_params: str) -> str:
         """Connect to SSH server."""
         try:
@@ -143,31 +164,10 @@ class PrismSSHAPI:
                         'success': False, 
                         'error': f'Missing required field: {field}'
                     })
-            
+
             # Save connection if requested
             if params.get('save', False):
-                save_data = {
-                    'hostname': params['hostname'],
-                    'port': params.get('port', self.config.default_port),
-                    'username': params['username'],
-                    'password': params.get('password'),
-                    'keyPath': params.get('keyPath'),
-                    'name': params.get('name', f"{params['username']}@{params['hostname']}"),
-                    # 堡垒机参数
-                    'jumpHost': params.get('jumpHost', ''),
-                    'jumpPort': params.get('jumpPort', 22),
-                    'jumpUser': params.get('jumpUser', ''),
-                    'jumpPass': params.get('jumpPass', ''),
-                    'jumpKey': params.get('jumpKey', ''),
-                    'jumpKeyPassphrase': params.get('jumpKeyPassphrase', ''),
-                    # 代理参数
-                    'proxyType': params.get('proxyType', 'none'),
-                    'proxyHost': params.get('proxyHost', ''),
-                    'proxyPort': params.get('proxyPort', 1080),
-                    'proxyUser': params.get('proxyUser', ''),
-                    'proxyPass': params.get('proxyPass', '')
-                }
-                
+                save_data = self._build_saved_connection(params)
                 save_result = self.connection_store.save_connection(save_data)
                 if not save_result:
                     self.logger.warning("Failed to save connection")
@@ -189,7 +189,33 @@ class PrismSSHAPI:
         except Exception as e:
             self.logger.error(f"API: Connection error for session {session_id}: {e}")
             return json.dumps({'success': False, 'error': str(e)})
-    
+
+    def save_saved_connection(self, key: str, connection_params: str) -> str:
+        """Create or update a saved connection without opening a session."""
+        try:
+            params = json.loads(connection_params)
+            for field in ['hostname', 'username']:
+                if not params.get(field):
+                    return json.dumps({
+                        'success': False,
+                        'error': f'Missing required field: {field}'
+                    })
+
+            save_data = self._build_saved_connection(params)
+            new_key = f"{save_data['hostname']}@{save_data['username']}"
+            success = self.connection_store.save_connection(save_data)
+            if success and key and key != new_key:
+                self.connection_store.delete_connection(key)
+
+            self.logger.info(f"API: Saved connection {new_key}: {success}")
+            return json.dumps({'success': success, 'key': new_key})
+        except json.JSONDecodeError as e:
+            self.logger.error(f"API: Invalid JSON in saved connection params: {e}")
+            return json.dumps({'success': False, 'error': 'Invalid connection parameters'})
+        except Exception as e:
+            self.logger.error(f"API: Error saving connection {key}: {e}")
+            return json.dumps({'success': False, 'error': str(e)})
+
     def get_saved_connections(self) -> str:
         """Get all saved connections."""
         try:

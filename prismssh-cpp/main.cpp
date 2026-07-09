@@ -686,6 +686,96 @@ ProcessRunResult RunHiddenProcessCapture(
     return result;
 }
 
+static void PutEncryptedSecret(nlohmann::json& connObj, const std::string& field, const std::string& encryptedField, const std::string& value) {
+    if (!value.empty()) {
+        std::string fernetKey = GetOrCreateFernetKey();
+        std::string encrypted = EncryptFernetPassword(fernetKey, value);
+        if (!encrypted.empty()) {
+            connObj[field] = encrypted;
+            connObj[encryptedField] = true;
+        } else {
+            connObj[field] = value;
+            connObj[encryptedField] = false;
+        }
+    } else {
+        connObj[field] = "";
+        connObj[encryptedField] = false;
+    }
+}
+
+static nlohmann::json BuildSavedConnectionObject(const nlohmann::json& params) {
+    std::string hostname = SafeGetJsonString(params, "hostname", "");
+    std::string username = SafeGetJsonString(params, "username", "");
+
+    nlohmann::json connObj;
+    connObj["hostname"] = hostname;
+    connObj["port"] = SafeGetJsonInt(params, "port", 22);
+    connObj["username"] = username;
+    connObj["name"] = SafeGetJsonString(params, "name", username + "@" + hostname);
+    connObj["keyPath"] = SafeGetJsonString(params, "keyPath", "");
+    connObj["group"] = SafeGetJsonString(params, "group", "");
+
+    PutEncryptedSecret(connObj, "password", "password_encrypted", SafeGetJsonString(params, "password", ""));
+
+    connObj["jumpHost"] = SafeGetJsonString(params, "jumpHost", "");
+    connObj["jumpPort"] = SafeGetJsonInt(params, "jumpPort", 22);
+    connObj["jumpUser"] = SafeGetJsonString(params, "jumpUser", "");
+    connObj["jumpKey"] = SafeGetJsonString(params, "jumpKey", "");
+    connObj["jumpKeyPassphrase"] = SafeGetJsonString(params, "jumpKeyPassphrase", "");
+    PutEncryptedSecret(connObj, "jumpPass", "jumpPass_encrypted", SafeGetJsonString(params, "jumpPass", ""));
+
+    connObj["proxyType"] = SafeGetJsonString(params, "proxyType", "none");
+    connObj["proxyHost"] = SafeGetJsonString(params, "proxyHost", "");
+    connObj["proxyPort"] = SafeGetJsonInt(params, "proxyPort", 1080);
+    connObj["proxyUser"] = SafeGetJsonString(params, "proxyUser", "");
+    PutEncryptedSecret(connObj, "proxyPass", "proxyPass_encrypted", SafeGetJsonString(params, "proxyPass", ""));
+
+    return connObj;
+}
+
+static bool SaveConnectionConfig(const std::string& oldKey, const nlohmann::json& params, std::string& savedKey, std::string& error) {
+    std::string hostname = SafeGetJsonString(params, "hostname", "");
+    std::string username = SafeGetJsonString(params, "username", "");
+    if (hostname.empty()) {
+        error = "Missing required field: hostname";
+        return false;
+    }
+    if (username.empty()) {
+        error = "Missing required field: username";
+        return false;
+    }
+
+    savedKey = hostname + "@" + username;
+    NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
+    std::wstring configDir = GetConfigDirectory();
+    if (!configDir.empty()) {
+        CreateDirectoryW(configDir.c_str(), NULL);
+    }
+    std::wstring connPath = configDir + L"\\connections.json";
+    std::string connData = ReadConnectionConfigWithRecovery(connPath);
+
+    nlohmann::json conns = nlohmann::json::object();
+    if (!connData.empty()) {
+        try {
+            conns = nlohmann::json::parse(connData);
+        } catch (...) {
+            conns = nlohmann::json::object();
+        }
+    }
+
+    if (!oldKey.empty() && oldKey != savedKey) {
+        conns.erase(oldKey);
+    }
+    conns[savedKey] = BuildSavedConnectionObject(params);
+
+    BackupConnectionConfig(connPath);
+    if (!WriteUtf8ToFile(connPath, conns.dump(2))) {
+        error = "Failed to write connections file";
+        return false;
+    }
+    return true;
+}
+
 // API router and handler
 void HandleApiCall(const std::string& reqId, const std::string& action, const nlohmann::json& args) {
     nlohmann::json response;
@@ -830,6 +920,25 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             
             nlohmann::json retObj;
             retObj["success"] = updated;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "save_saved_connection") {
+            std::string oldKey = args[0].get<std::string>();
+            std::string paramsStr = args[1].get<std::string>();
+            auto params = nlohmann::json::parse(paramsStr);
+
+            std::string savedKey;
+            std::string error;
+            bool success = SaveConnectionConfig(oldKey, params, savedKey, error);
+
+            nlohmann::json retObj;
+            retObj["success"] = success;
+            if (success) {
+                retObj["key"] = savedKey;
+            } else {
+                retObj["error"] = error.empty() ? "Failed to save connection" : error;
+            }
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
@@ -1152,86 +1261,11 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string storeKey = hostname + "@" + username;
             
             if (SafeGetJsonBool(params, "save", false)) {
-                NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
-                std::wstring configDir = GetConfigDirectory();
-                std::wstring connPath = configDir + L"\\connections.json";
-                std::string connData = ReadConnectionConfigWithRecovery(connPath);
-                
-                nlohmann::json conns = nlohmann::json::object();
-                if (!connData.empty()) {
-                    try {
-                        conns = nlohmann::json::parse(connData);
-                    } catch(...) {}
+                std::string savedKey;
+                std::string saveError;
+                if (!SaveConnectionConfig("", params, savedKey, saveError)) {
+                    PrismLog("WARN", "Failed to save connection " + storeKey + ": " + saveError);
                 }
-                
-                nlohmann::json connObj;
-                connObj["hostname"] = hostname;
-                connObj["port"] = port;
-                connObj["username"] = username;
-                connObj["name"] = SafeGetJsonString(params, "name", username + "@" + hostname);
-                connObj["keyPath"] = SafeGetJsonString(params, "keyPath", "");
-                connObj["group"] = SafeGetJsonString(params, "group", "");
-                
-                if (!password.empty()) {
-                    std::string fernetKey = GetOrCreateFernetKey();
-                    std::string encrypted = EncryptFernetPassword(fernetKey, password);
-                    if (!encrypted.empty()) {
-                        connObj["password"] = encrypted;
-                        connObj["password_encrypted"] = true;
-                    } else {
-                        connObj["password"] = password;
-                        connObj["password_encrypted"] = false;
-                    }
-                } else {
-                    connObj["password"] = "";
-                    connObj["password_encrypted"] = false;
-                }
-                
-                // 保存堡垒机配置
-                connObj["jumpHost"] = jumpHost;
-                connObj["jumpPort"] = jumpPort;
-                connObj["jumpUser"] = jumpUser;
-                connObj["jumpKey"] = jumpKey;
-                connObj["jumpKeyPassphrase"] = jumpKeyPassphrase;
-                if (!jumpPass.empty()) {
-                    std::string fernetKey = GetOrCreateFernetKey();
-                    std::string encrypted = EncryptFernetPassword(fernetKey, jumpPass);
-                    if (!encrypted.empty()) {
-                        connObj["jumpPass"] = encrypted;
-                        connObj["jumpPass_encrypted"] = true;
-                    } else {
-                        connObj["jumpPass"] = jumpPass;
-                        connObj["jumpPass_encrypted"] = false;
-                    }
-                } else {
-                    connObj["jumpPass"] = "";
-                    connObj["jumpPass_encrypted"] = false;
-                }
-
-                // 保存代理配置
-                connObj["proxyType"] = proxyType;
-                connObj["proxyHost"] = proxyHost;
-                connObj["proxyPort"] = proxyPort;
-                connObj["proxyUser"] = proxyUser;
-                if (!proxyPass.empty()) {
-                    std::string fernetKey = GetOrCreateFernetKey();
-                    std::string encrypted = EncryptFernetPassword(fernetKey, proxyPass);
-                    if (!encrypted.empty()) {
-                        connObj["proxyPass"] = encrypted;
-                        connObj["proxyPass_encrypted"] = true;
-                    } else {
-                        connObj["proxyPass"] = proxyPass;
-                        connObj["proxyPass_encrypted"] = false;
-                    }
-                } else {
-                    connObj["proxyPass"] = "";
-                    connObj["proxyPass_encrypted"] = false;
-                }
-
-                conns[storeKey] = connObj;
-                
-                BackupConnectionConfig(connPath);
-                WriteUtf8ToFile(connPath, conns.dump(2));
             }
 
             std::thread([sessId, hostname, port, username, password, keyPath, keyPassphrase, storeKey, reqId, jumpHost, jumpPort, jumpUser, jumpPass, jumpKey, jumpKeyPassphrase, proxyType, proxyHost, proxyPort, proxyUser, proxyPass]() {
