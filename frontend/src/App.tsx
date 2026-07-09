@@ -3566,7 +3566,8 @@ function normalizeBaseUrl(value: string) {
 }
 
 function extractCodexReply(result: CodexJobResult, prompt: string) {
-  const cleaned = sanitizeCodexOutput(result.output || "", prompt);
+  const output = result.output || "";
+  const cleaned = extractCodexFinalMessage(output, prompt) || sanitizeCodexOutput(output, prompt);
   if (result.success) {
     return cleaned || "Codex 执行完成，无输出。";
   }
@@ -3576,6 +3577,66 @@ function extractCodexReply(result: CodexJobResult, prompt: string) {
   return cleaned && !looksLikeOnlyRuntimeNoise(cleaned)
     ? cleaned
     : "Codex 执行失败，请检查本地 Codex 环境。";
+}
+
+function extractCodexFinalMessage(output: string, prompt: string) {
+  const tail = extractCodexTailAfterTokenStats(output, prompt);
+  if (tail) return tail;
+
+  const blocks: string[] = [];
+  let current: string[] | null = null;
+  for (const line of output.replace(/\r\n?/g, "\n").split("\n")) {
+    const text = line.trim();
+    if (isCodexAssistantMarker(text)) {
+      const block = current ? sanitizeCodexOutput(current.join("\n"), prompt) : "";
+      if (block) blocks.push(block);
+      current = [];
+      continue;
+    }
+    if (!current) continue;
+    if (isCodexTranscriptBoundary(text)) {
+      const block = sanitizeCodexOutput(current.join("\n"), prompt);
+      if (block) blocks.push(block);
+      current = null;
+      continue;
+    }
+    current.push(line);
+  }
+
+  const lastBlock = current ? sanitizeCodexOutput(current.join("\n"), prompt) : "";
+  if (lastBlock) blocks.push(lastBlock);
+  return blocks.at(-1) || "";
+}
+
+function extractCodexTailAfterTokenStats(output: string, prompt: string) {
+  const lines = output.replace(/\r\n?/g, "\n").split("\n");
+  const lastTokenStatsIndex = lines.map((line) => line.trim().toLowerCase()).lastIndexOf("tokens used");
+  if (lastTokenStatsIndex === -1) return "";
+
+  const tail = lines
+    .slice(lastTokenStatsIndex + 1)
+    .filter((line, index) => !(index === 0 && isCodexTokenCount(line.trim())))
+    .join("\n");
+  const cleaned = sanitizeCodexOutput(tail, prompt);
+  return cleaned && !looksLikeOnlyRuntimeNoise(cleaned) ? cleaned : "";
+}
+
+function isCodexAssistantMarker(text: string) {
+  return text.toLowerCase() === "codex";
+}
+
+function isCodexTranscriptBoundary(text: string) {
+  if (!text) return false;
+  if (/^(user|exec|tokens used)$/i.test(text)) return true;
+  return isCodexRuntimeMetadata(text);
+}
+
+function isCodexRuntimeMetadata(text: string) {
+  return /^(workdir|model|provider|approval|sandbox|reasoning effort|reasoning summaries|session id):/i.test(text);
+}
+
+function isCodexTokenCount(text: string) {
+  return /^\d{1,3}(?:,\d{3})+$/.test(text);
 }
 
 function sanitizeCodexOutput(output: string, prompt: string) {
@@ -3594,6 +3655,10 @@ function sanitizeCodexOutput(output: string, prompt: string) {
       const text = line.trim();
       if (!text) return false;
       if (promptLines.has(text)) return false;
+      if (isCodexRuntimeMetadata(text)) return false;
+      if (/^(user|exec|codex|tokens used)$/i.test(text)) return false;
+      if (isCodexTokenCount(text)) return false;
+      if (/^".+"\s+in\s+[A-Za-z]:\\/i.test(text)) return false;
       if (/^(会话记忆|最近对话|当前终端会话|用户问题)：?/.test(text)) return false;
       if (/^引用自 .+：?$/.test(text)) return false;
       if (/请直接回复我的内容/.test(text)) return false;

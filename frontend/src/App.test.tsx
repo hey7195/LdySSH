@@ -316,6 +316,66 @@ describe("AI tools panel", () => {
     expect(within(transcript).queryByText(/优先检查最新日志/)).not.toBeInTheDocument();
   });
 
+  test("shows only the final Codex answer when exec transcript noise is returned", async () => {
+    (window.pywebview?.api?.get_codex_run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      running: false,
+      completed: true,
+      output: [
+        "workdir: E:\\adb\\tools\\LdSSH",
+        "model: gpt-5.5",
+        "provider: OpenAI",
+        "approval: never",
+        "sandbox: read-only",
+        "reasoning effort: xhigh",
+        "reasoning summaries: none",
+        "user",
+        "exec",
+        "\"powershell.exe\" -Command \"Get-Content -Raw using-superpowers\\SKILL.md\" in E:\\adb\\tools\\LdSSH",
+        "name: using-superpowers",
+        "description: Use when starting any conversation",
+        "# Using Skills",
+        "## Skill Types",
+        "codex",
+        "使用 `superpowers:using-superpowers`，因为这是本轮会话起始要求。",
+        "codex",
+        "结论：我在。直接发要查的问题、文件路径、日志或命令目标。",
+        "依据：当前只收到 `hi`，没有具体任务或日志，我不会编造未看到的内容。",
+        "tokens used",
+        "19,367",
+        "结论：我在。直接发要查的问题、文件路径、日志或命令目标。",
+        "依据：当前只收到 `hi`，没有具体任务或日志，我不会编造未看到的内容。"
+      ].join("\n"),
+      error: ""
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "hi" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    const transcript = screen.getByTestId("ai-chat-transcript");
+    await waitFor(() => {
+      expect(transcript).toHaveTextContent("结论：我在。直接发要查的问题、文件路径、日志或命令目标。");
+    });
+    expect(transcript).toHaveTextContent("依据：当前只收到 `hi`，没有具体任务或日志，我不会编造未看到的内容。");
+    expect(within(transcript).queryByText(/workdir:/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/model:/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/provider:/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/approval:/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/sandbox:/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/exec/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/using-superpowers/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/Skill Types/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/tokens used/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/19,367/)).not.toBeInTheDocument();
+  });
+
   test("checks Hermes connection through the native bridge proxy", async () => {
     render(<App />);
 
