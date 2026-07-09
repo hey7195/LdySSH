@@ -107,5 +107,20 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
+  <Target Name="CopyUiAssets" AfterTargets="Build">
+    <ItemGroup>
+      <UiTemplate Include="$(ProjectDir)ui\template.html" />
+      <UiAssetFiles Include="$(ProjectDir)ui\assets\**\*.*" />
+      <UiCommandFiles Include="$(ProjectDir)ui\static\commands.json" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutDir)ui" />
+    <RemoveDir Directories="$(OutDir)ui\assets" />
+    <MakeDir Directories="$(OutDir)ui\assets;$(OutDir)ui\static" />
+    <Copy SourceFiles="@(UiTemplate)" DestinationFolder="$(OutDir)ui" />
+    <Copy
+      SourceFiles="@(UiAssetFiles)"
+      DestinationFiles="@(UiAssetFiles->'$(OutDir)ui\assets\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(UiCommandFiles)" DestinationFolder="$(OutDir)ui\static" />
+  </Target>
   <Target Name="ResolveNuGetPackageAssets" />
 </Project>

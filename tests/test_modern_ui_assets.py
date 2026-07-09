@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -36,6 +37,7 @@ def test_react_source_defines_new_desktop_shell():
 def test_templates_reference_cache_busted_stylesheet():
     template_paths = [
         "prismssh-cpp/ui/template.html",
+        "prismssh-cpp/x64/Release/ui/template.html",
         "src/ui/template.html",
     ]
 
@@ -45,3 +47,12 @@ def test_templates_reference_cache_busted_stylesheet():
         assert "assets/" in html
         assert "static/styles.css" not in html
         assert "static/modern-framework.css" not in html
+
+
+def test_release_template_references_existing_react_assets():
+    html = read("prismssh-cpp/x64/Release/ui/template.html")
+    asset_paths = re.findall(r'(?:src|href)="\./([^"]+)"', html)
+
+    assert asset_paths
+    for asset_path in asset_paths:
+        assert (ROOT / "prismssh-cpp/x64/Release/ui" / asset_path).is_file()
