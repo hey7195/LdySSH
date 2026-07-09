@@ -203,9 +203,20 @@ class PrismSSHAPI:
 
             save_data = self._build_saved_connection(params)
             new_key = f"{save_data['hostname']}@{save_data['username']}"
-            success = self.connection_store.save_connection(save_data)
-            if success and key and key != new_key:
-                self.connection_store.delete_connection(key)
+            if params.get('preservePassword'):
+                raw_connections = self.connection_store._load_raw_connections()
+                old_connection = raw_connections.get(key, {})
+                if old_connection:
+                    save_data['password'] = old_connection.get('password', '')
+                    if 'password_encrypted' in old_connection:
+                        save_data['password_encrypted'] = old_connection.get('password_encrypted')
+                    success = self.connection_store.save_raw_connection(new_key, save_data, key)
+                else:
+                    success = self.connection_store.save_connection(save_data)
+            else:
+                success = self.connection_store.save_connection(save_data)
+                if success and key and key != new_key:
+                    self.connection_store.delete_connection(key)
 
             self.logger.info(f"API: Saved connection {new_key}: {success}")
             return json.dumps({'success': success, 'key': new_key})

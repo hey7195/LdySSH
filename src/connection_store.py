@@ -286,7 +286,28 @@ class ConnectionStore:
             except Exception as e:
                 self.logger.error(f"Error saving connection: {e}")
                 return False
-    
+
+    def save_raw_connection(self, key: str, connection: Dict[str, Any], old_key: str = "") -> bool:
+        """Save a connection object that already has its secret fields in disk format."""
+        with self._lock:
+            try:
+                connections = self._load_raw_connections()
+                if old_key and old_key != key:
+                    connections.pop(old_key, None)
+                connections[key] = connection.copy()
+
+                self._ensure_config_dir()
+                self._backup_config()
+
+                with open(self.config.connections_file, 'w', encoding='utf-8') as f:
+                    json.dump(connections, f, indent=2)
+
+                self.logger.info(f"Raw connection saved: {key}")
+                return True
+            except Exception as e:
+                self.logger.error(f"Error saving raw connection: {e}")
+                return False
+
     def load_connections(self) -> Dict[str, Any]:
         """Load all saved connections."""
         with self._lock:

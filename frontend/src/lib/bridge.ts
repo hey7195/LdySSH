@@ -72,6 +72,9 @@ export const nativeBridge = {
   connect(sessionId: string, params: ConnectParams) {
     return callNative<{ success: boolean; error?: string }>("connect", { success: false }, sessionId, JSON.stringify(params));
   },
+  disconnect(sessionId: string) {
+    return callNative<{ success: boolean; error?: string }>("disconnect", { success: false }, sessionId);
+  },
   saveSavedConnection(key: string, params: ConnectParams) {
     return callNative<{ success: boolean; key?: string; error?: string }>(
       "save_saved_connection",
@@ -132,6 +135,7 @@ export interface SavedConnection {
   port?: number;
   username?: string;
   password?: string;
+  password_unavailable?: boolean;
   group?: string;
   keyPath?: string;
 }
@@ -206,6 +210,7 @@ export interface ConnectParams {
   keyPath?: string;
   save?: boolean;
   group?: string;
+  preservePassword?: boolean;
 }
 
 export interface NativeResult {

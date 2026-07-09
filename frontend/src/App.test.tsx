@@ -98,7 +98,8 @@ beforeEach(() => {
       create_local_session: vi.fn().mockResolvedValue("local-1"),
       get_output: vi.fn().mockResolvedValue({}),
       resize_terminal: vi.fn().mockResolvedValue({ success: true }),
-      send_input_base64: vi.fn().mockResolvedValue({ success: true })
+      send_input_base64: vi.fn().mockResolvedValue({ success: true }),
+      disconnect: vi.fn().mockResolvedValue({ success: true })
     }
   };
 
@@ -440,6 +441,78 @@ describe("command library", () => {
     expect(await screen.findByTestId("terminal-shell")).toBeInTheDocument();
   });
 
+  test("asks for a password and retries the same failed SSH session", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { name: "prod-auth", hostname: "10.0.0.10", port: 22, username: "root" }
+    ]);
+    (window.pywebview?.api?.connect as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ success: false, error: "Authentication failed" })
+      .mockResolvedValueOnce({ success: true });
+
+    render(<App />);
+
+    const recentHost = await screen.findAllByRole("button", { name: /prod-auth/ });
+    fireEvent.click(recentHost[0]);
+
+    expect(await screen.findByTestId("retry-password-dialog")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("retry-password-input"), {
+      target: { value: "typed-secret" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "重新连接" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.connect).toHaveBeenCalledTimes(2));
+    const retryCall = (window.pywebview?.api?.connect as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(retryCall?.[0]).toBe("ssh-1");
+    expect(retryCall?.[1]).toContain("\"password\":\"typed-secret\"");
+    expect(window.pywebview?.api?.create_session).toHaveBeenCalledTimes(1);
+  });
+
+  test("disconnects and reconnects an SSH session from the tab context menu", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { name: "prod-menu", hostname: "10.0.0.11", port: 22, username: "root", password: "secret" }
+    ]);
+    (window.pywebview?.api?.create_session as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce("ssh-1")
+      .mockResolvedValueOnce("ssh-2");
+
+    render(<App />);
+
+    const recentHost = await screen.findAllByRole("button", { name: /prod-menu/ });
+    fireEvent.click(recentHost[0]);
+    await waitFor(() => expect(window.pywebview?.api?.connect).toHaveBeenCalledTimes(1));
+
+    const tab = await screen.findByRole("button", { name: "prod-menu" });
+    fireEvent.contextMenu(tab);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "断开" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.disconnect).toHaveBeenCalledWith("ssh-1"));
+
+    fireEvent.contextMenu(tab);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "重连" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.connect).toHaveBeenCalledTimes(2));
+    const reconnectCall = (window.pywebview?.api?.connect as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(reconnectCall?.[0]).toBe("ssh-2");
+    expect(reconnectCall?.[1]).toContain("\"hostname\":\"10.0.0.11\"");
+  });
+
+  test("duplicates a local terminal session from the tab context menu", async () => {
+    (window.pywebview?.api?.create_local_session as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce("local-1")
+      .mockResolvedValueOnce("local-2");
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+
+    const tab = await screen.findByRole("button", { name: "Local CMD" });
+    fireEvent.contextMenu(tab);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "复制标签" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.create_local_session).toHaveBeenCalledTimes(2));
+  });
+
   test("edits an existing saved SSH connection without starting a session", async () => {
     (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       {
@@ -477,6 +550,35 @@ describe("command library", () => {
     expect(saveArgs?.[1]).toContain("\"username\":\"deploy\"");
     expect(window.pywebview?.api?.create_session).not.toHaveBeenCalled();
     expect(window.pywebview?.api?.connect).not.toHaveBeenCalled();
+  });
+
+  test("masks an existing saved password and preserves it when unchanged", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        key: "10.0.0.8@root",
+        name: "prod-secret",
+        hostname: "10.0.0.8",
+        port: 22,
+        username: "root",
+        password: "secret"
+      }
+    ]);
+
+    render(<App />);
+
+    const editButtons = await screen.findAllByRole("button", { name: "编辑 prod-secret" });
+    fireEvent.click(editButtons[0]);
+
+    expect(await screen.findByDisplayValue("***")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("连接名称"), {
+      target: { value: "prod-secret-renamed" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.save_saved_connection).toHaveBeenCalled());
+    const saveArgs = (window.pywebview?.api?.save_saved_connection as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(saveArgs?.[1]).toContain("\"password\":\"secret\"");
+    expect(saveArgs?.[1]).not.toContain("\"password\":\"***\"");
   });
 
   test("shows the quick command sidebar inside the terminal workspace", async () => {

@@ -105,3 +105,39 @@ def test_save_saved_connection_replaces_old_key(tmp_path):
         assert connections["10.0.0.8@deploy"]["port"] == 2222
     finally:
         api.cleanup()
+
+
+def test_save_saved_connection_preserves_existing_password(tmp_path):
+    api = make_api(tmp_path)
+
+    try:
+        original = {
+            "hostname": "10.0.0.8",
+            "port": 22,
+            "username": "root",
+            "password": "secret",
+            "name": "prod-secret"
+        }
+        updated = {
+            "hostname": "10.0.0.8",
+            "port": 2222,
+            "username": "root",
+            "password": "",
+            "name": "prod-secret-renamed",
+            "preservePassword": True
+        }
+
+        assert api.connection_store.save_connection(original) is True
+        raw_before = api.connection_store._load_raw_connections()["10.0.0.8@root"]
+        result = json.loads(api.save_saved_connection("10.0.0.8@root", json.dumps(updated)))
+        raw_after = api.connection_store._load_raw_connections()["10.0.0.8@root"]
+        connections = api.connection_store.load_connections()
+
+        assert result == {"success": True, "key": "10.0.0.8@root"}
+        assert raw_after["password"] == raw_before["password"]
+        assert raw_after.get("password_encrypted") == raw_before.get("password_encrypted")
+        assert connections["10.0.0.8@root"]["password"] == "secret"
+        assert connections["10.0.0.8@root"]["name"] == "prod-secret-renamed"
+        assert connections["10.0.0.8@root"]["port"] == 2222
+    finally:
+        api.cleanup()

@@ -763,10 +763,22 @@ static bool SaveConnectionConfig(const std::string& oldKey, const nlohmann::json
         }
     }
 
+    nlohmann::json oldConn = nlohmann::json::object();
+    if (SafeGetJsonBool(params, "preservePassword", false) && !oldKey.empty() && conns.contains(oldKey) && conns[oldKey].is_object()) {
+        oldConn = conns[oldKey];
+    }
+
     if (!oldKey.empty() && oldKey != savedKey) {
         conns.erase(oldKey);
     }
-    conns[savedKey] = BuildSavedConnectionObject(params);
+    nlohmann::json connObj = BuildSavedConnectionObject(params);
+    if (!oldConn.empty()) {
+        connObj["password"] = SafeGetJsonString(oldConn, "password", "");
+        if (oldConn.contains("password_encrypted")) {
+            connObj["password_encrypted"] = oldConn["password_encrypted"];
+        }
+    }
+    conns[savedKey] = connObj;
 
     BackupConnectionConfig(connPath);
     if (!WriteUtf8ToFile(connPath, conns.dump(2))) {

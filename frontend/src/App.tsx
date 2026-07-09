@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -63,8 +63,9 @@ interface SessionTab {
   title: string;
   kind: "local" | "ssh";
   connected: boolean;
-  status?: "connecting" | "connected" | "failed";
+  status?: "connecting" | "connected" | "failed" | "disconnected";
   error?: string;
+  connectParams?: ConnectParams;
 }
 
 interface ConnectionForm {
@@ -117,6 +118,13 @@ interface PendingAiRun {
   hermesBaseUrl: string;
   hermesWsUrl: string;
   hermesApiToken: string;
+}
+
+interface RetryPasswordPrompt {
+  sessionId: string;
+  title: string;
+  error: string;
+  password: string;
 }
 
 interface TerminalSearchMatch {
@@ -182,6 +190,7 @@ const storageKeys = {
 };
 
 const TERMINAL_HISTORY_LIMIT = 2_000_000;
+const PASSWORD_PLACEHOLDER = "***";
 
 function trimTerminalHistory(text: string) {
   return text.length > TERMINAL_HISTORY_LIMIT ? text.slice(-TERMINAL_HISTORY_LIMIT) : text;
@@ -296,6 +305,7 @@ export function App() {
   const [aiConfig, setAiConfig] = useState<AiConfig>(() => loadStoredAiConfig());
   const [terminalSidePanel, setTerminalSidePanel] = useState<TerminalSidePanel>("commands");
   const [terminalHistories, setTerminalHistories] = useState<Record<string, string>>({});
+  const [passwordPrompt, setPasswordPrompt] = useState<RetryPasswordPrompt | null>(null);
 
   useEffect(() => {
     void refreshConnections();
@@ -399,10 +409,27 @@ export function App() {
       hostname: connection.hostname || "",
       port: String(connection.port || 22),
       username: connection.username || "",
-      password: connection.password || "",
+      password: connection.password || connection.password_unavailable ? PASSWORD_PLACEHOLDER : "",
       keyPath: connection.keyPath || "",
       save: true
     };
+  }
+
+  function toConnectParams(connection: SavedConnection): ConnectParams {
+    return {
+      name: connection.name,
+      hostname: connection.hostname || "",
+      port: Number(connection.port || 22),
+      username: connection.username || "",
+      password: connection.password || "",
+      keyPath: connection.keyPath || "",
+      save: false,
+      group: connection.group
+    };
+  }
+
+  function savedConnectionKey(connection: SavedConnection) {
+    return connection.key || `${connection.hostname || ""}@${connection.username || ""}`;
   }
 
   function openNewConnectionDialog() {
@@ -421,14 +448,17 @@ export function App() {
 
   async function saveEditedConnection() {
     setConnectError("");
+    const existingConnection = savedConnections.find((connection) => savedConnectionKey(connection) === editingConnectionKey);
+    const preservePassword = form.password === PASSWORD_PLACEHOLDER;
     const params: ConnectParams = {
       name: form.name || `${form.username}@${form.hostname}`,
       hostname: form.hostname,
       port: Number(form.port || 22),
       username: form.username,
-      password: form.password,
+      password: preservePassword ? existingConnection?.password || "" : form.password,
       keyPath: form.keyPath,
-      save: true
+      save: true,
+      preservePassword
     };
 
     if (!params.hostname || !params.username) {
@@ -452,15 +482,7 @@ export function App() {
     setConnectError("");
 
     const params: ConnectParams = connection
-      ? {
-          name: connection.name,
-          hostname: connection.hostname || "",
-          port: Number(connection.port || 22),
-          username: connection.username || "",
-          password: (connection as SavedConnection & { password?: string }).password || "",
-          keyPath: connection.keyPath || "",
-          save: false
-        }
+      ? toConnectParams(connection)
       : {
           name: form.name || `${form.username}@${form.hostname}`,
           hostname: form.hostname,
@@ -485,7 +507,7 @@ export function App() {
 
     setSessions((current) => [
       ...current,
-      { id: sessionId, title, kind: "ssh", connected: false, status: "connecting" }
+      { id: sessionId, title, kind: "ssh", connected: false, status: "connecting", connectParams: params }
     ]);
     setActiveSessionId(sessionId);
     setActiveTool("local");
@@ -498,22 +520,115 @@ export function App() {
       setConnectError(error);
       setSessions((current) =>
         current.map((session) =>
-          session.id === sessionId ? { ...session, connected: false, status: "failed", error } : session
+          session.id === sessionId ? { ...session, connected: false, status: "failed", error, connectParams: params } : session
         )
       );
+      setPasswordPrompt({ sessionId, title, error, password: "" });
       return;
     }
 
     setSessions((current) =>
       current.map((session) =>
-        session.id === sessionId ? { ...session, connected: true, status: "connected", error: undefined } : session
+        session.id === sessionId ? { ...session, connected: true, status: "connected", error: undefined, connectParams: params } : session
       )
     );
+    setPasswordPrompt(null);
     setForm(emptyForm);
     void refreshConnections();
   }
 
+  async function retrySession(sessionId: string, password?: string) {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session?.connectParams) return;
+    const params = { ...session.connectParams, password: password ?? session.connectParams.password };
+    const needsNewNativeSession = session.status !== "failed";
+    let targetSessionId = sessionId;
+    if (needsNewNativeSession) {
+      await nativeBridge.disconnect(sessionId);
+      const newSessionId = await nativeBridge.createSession();
+      if (!newSessionId) {
+        setSessions((current) =>
+          current.map((item) =>
+            item.id === sessionId ? { ...item, connected: false, status: "failed", error: "创建会话失败。", connectParams: params } : item
+          )
+        );
+        return;
+      }
+      targetSessionId = newSessionId;
+      setTerminalHistories((current) => {
+        const history = current[sessionId];
+        if (!history) return current;
+        const next = { ...current, [targetSessionId]: history };
+        delete next[sessionId];
+        return next;
+      });
+    }
+
+    setSessions((current) =>
+      current.map((item) =>
+        item.id === sessionId
+          ? { ...item, id: targetSessionId, connected: false, status: "connecting", error: undefined, connectParams: params }
+          : item
+      )
+    );
+    setActiveSessionId(targetSessionId);
+    setActiveTool("local");
+
+    const result = await nativeBridge.connect(targetSessionId, params);
+    if (!result.success) {
+      const error = result.error || "连接失败。";
+      setSessions((current) =>
+        current.map((item) =>
+          item.id === targetSessionId ? { ...item, connected: false, status: "failed", error, connectParams: params } : item
+        )
+      );
+      setPasswordPrompt({ sessionId: targetSessionId, title: params.name || `${params.username}@${params.hostname}`, error, password: "" });
+      return;
+    }
+
+    setSessions((current) =>
+      current.map((item) =>
+        item.id === targetSessionId ? { ...item, connected: true, status: "connected", error: undefined, connectParams: params } : item
+      )
+    );
+    setPasswordPrompt(null);
+  }
+
+  async function submitRetryPassword() {
+    if (!passwordPrompt) return;
+    await retrySession(passwordPrompt.sessionId, passwordPrompt.password);
+  }
+
+  async function disconnectSession(sessionId: string) {
+    await nativeBridge.disconnect(sessionId);
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId ? { ...session, connected: false, status: "disconnected", error: undefined } : session
+      )
+    );
+  }
+
+  async function duplicateSession(sessionId: string) {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session) return;
+    if (session.kind === "local") {
+      await openLocalSession();
+      return;
+    }
+    if (!session.connectParams) return;
+    await connectHost({
+      name: session.connectParams.name,
+      hostname: session.connectParams.hostname,
+      port: session.connectParams.port,
+      username: session.connectParams.username,
+      password: session.connectParams.password,
+      keyPath: session.connectParams.keyPath,
+      group: session.connectParams.group
+    });
+  }
+
   function closeTab(sessionId: string) {
+    void nativeBridge.disconnect(sessionId);
     setSessions((current) => current.filter((session) => session.id !== sessionId));
     setTerminalHistories((current) => {
       const next = { ...current };
@@ -524,6 +639,27 @@ export function App() {
       const next = sessions.find((session) => session.id !== sessionId);
       setActiveSessionId(next?.id || "");
     }
+  }
+
+  function closeOtherTabs(sessionId: string) {
+    sessions.filter((session) => session.id !== sessionId).forEach((session) => {
+      void nativeBridge.disconnect(session.id);
+    });
+    setSessions((current) => current.filter((session) => session.id === sessionId));
+    setTerminalHistories((current) => {
+      const keep = current[sessionId];
+      return keep ? { [sessionId]: keep } : {};
+    });
+    setActiveSessionId(sessionId);
+  }
+
+  function closeAllTabs() {
+    sessions.forEach((session) => {
+      void nativeBridge.disconnect(session.id);
+    });
+    setSessions([]);
+    setTerminalHistories({});
+    setActiveSessionId("");
   }
 
   function addAiQuote(text: string, sourceTitle: string) {
@@ -685,6 +821,11 @@ export function App() {
               terminalHistory={activeSession ? terminalHistories[activeSession.id] || "" : ""}
               onActivate={setActiveSessionId}
               onClose={closeTab}
+              onDuplicate={duplicateSession}
+              onReconnect={retrySession}
+              onDisconnect={disconnectSession}
+              onCloseOther={closeOtherTabs}
+              onCloseAll={closeAllTabs}
               onCreateLocal={openLocalSession}
               onAddAiQuote={addAiQuote}
               onTerminalOutput={appendTerminalHistory}
@@ -722,6 +863,12 @@ export function App() {
         onFormChange={setForm}
         onConnect={() => connectHost()}
         onSave={saveEditedConnection}
+      />
+      <RetryPasswordDialog
+        prompt={passwordPrompt}
+        onPasswordChange={(password) => setPasswordPrompt((current) => current ? { ...current, password } : current)}
+        onRetry={submitRetryPassword}
+        onClose={() => setPasswordPrompt(null)}
       />
     </div>
   );
@@ -1085,6 +1232,11 @@ function TerminalWorkspace({
   terminalHistory,
   onActivate,
   onClose,
+  onDuplicate,
+  onReconnect,
+  onDisconnect,
+  onCloseOther,
+  onCloseAll,
   onCreateLocal,
   onAddAiQuote,
   onTerminalOutput,
@@ -1107,6 +1259,11 @@ function TerminalWorkspace({
   terminalHistory: string;
   onActivate: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
+  onDuplicate: (sessionId: string) => void;
+  onReconnect: (sessionId: string) => void;
+  onDisconnect: (sessionId: string) => void;
+  onCloseOther: (sessionId: string) => void;
+  onCloseAll: () => void;
   onCreateLocal: () => void;
   onAddAiQuote: (text: string, sourceTitle: string) => void;
   onTerminalOutput: (sessionId: string, text: string) => void;
@@ -1116,6 +1273,20 @@ function TerminalWorkspace({
   onAiConfigChange: (config: AiConfig) => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
+  const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const menuSession = tabMenu ? sessions.find((session) => session.id === tabMenu.sessionId) : undefined;
+
+  function openTabMenu(event: ReactMouseEvent, sessionId: string) {
+    event.preventDefault();
+    onActivate(sessionId);
+    setTabMenu({ sessionId, x: event.clientX, y: event.clientY });
+  }
+
+  function runTabAction(action: (sessionId: string) => void) {
+    if (!tabMenu) return;
+    action(tabMenu.sessionId);
+    setTabMenu(null);
+  }
 
   return (
     <div className="grid h-full grid-rows-[34px_minmax(0,1fr)_34px] bg-white">
@@ -1131,6 +1302,7 @@ function TerminalWorkspace({
           {sessions.map((session) => (
             <div
               key={session.id}
+              onContextMenu={(event) => openTabMenu(event, session.id)}
               className={cn(
                 "flex h-7 max-w-48 items-center gap-2 rounded-md border px-3 text-xs font-medium",
                 session.id === activeSessionId
@@ -1138,7 +1310,7 @@ function TerminalWorkspace({
                   : "border-transparent text-slate-500 hover:bg-white"
               )}
             >
-              <button className="min-w-0 truncate" onClick={() => onActivate(session.id)}>
+              <button className="min-w-0 truncate" onClick={() => onActivate(session.id)} onContextMenu={(event) => openTabMenu(event, session.id)}>
                 {session.title}
               </button>
               <button className="text-slate-400 hover:text-slate-700" onClick={() => onClose(session.id)}>
@@ -1150,6 +1322,52 @@ function TerminalWorkspace({
         <Button variant="ghost" className="h-7 px-2">
           <Menu className="h-4 w-4" />
         </Button>
+        {menuSession && tabMenu && (
+          <div
+            role="menu"
+            className="fixed z-50 w-36 rounded-md border border-slate-200 bg-white py-1 text-xs font-medium text-slate-700 shadow-lg"
+            style={{ left: tabMenu.x, top: tabMenu.y }}
+            onMouseLeave={() => setTabMenu(null)}
+          >
+            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onDuplicate)}>
+              <Plus className="h-3.5 w-3.5" />
+              复制标签
+            </button>
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+              disabled={menuSession.kind !== "ssh" || !menuSession.connectParams}
+              onClick={() => runTabAction(onReconnect)}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              重连
+            </button>
+            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onDisconnect)}>
+              <X className="h-3.5 w-3.5" />
+              断开
+            </button>
+            <div className="my-1 border-t border-slate-100" />
+            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onClose)}>
+              <X className="h-3.5 w-3.5" />
+              关闭
+            </button>
+            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onCloseOther)}>
+              <Menu className="h-3.5 w-3.5" />
+              关闭其他
+            </button>
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50"
+              onClick={() => {
+                onCloseAll();
+                setTabMenu(null);
+              }}
+            >
+              <X className="h-3.5 w-3.5" />
+              关闭全部
+            </button>
+          </div>
+        )}
       </div>
       <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_420px]">
         <TerminalSurface
@@ -2976,6 +3194,69 @@ function ConnectDialog({
               <Button variant="outline">取消</Button>
             </Dialog.Close>
             <Button onClick={isEdit ? onSave : onConnect}>{isEdit ? "保存" : "连接"}</Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function RetryPasswordDialog({
+  prompt,
+  onPasswordChange,
+  onRetry,
+  onClose
+}: {
+  prompt: RetryPasswordPrompt | null;
+  onPasswordChange: (password: string) => void;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog.Root open={Boolean(prompt)} onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
+        <Dialog.Content
+          data-testid="retry-password-dialog"
+          className="fixed left-1/2 top-1/2 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+        >
+          <div className="mb-4 flex items-start justify-between">
+            <div>
+              <Dialog.Title className="text-lg font-semibold text-slate-950">输入密码</Dialog.Title>
+              <Dialog.Description className="mt-1 text-sm text-slate-500">
+                {prompt?.title || "SSH 会话"} 连接失败，请输入密码后重连。
+              </Dialog.Description>
+            </div>
+            <Dialog.Close asChild>
+              <button className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                <X className="h-4 w-4" />
+              </button>
+            </Dialog.Close>
+          </div>
+
+          {prompt?.error && (
+            <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {prompt.error}
+            </div>
+          )}
+
+          <Field label="密码">
+            <Input
+              data-testid="retry-password-input"
+              type="password"
+              value={prompt?.password || ""}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") onRetry();
+              }}
+            />
+          </Field>
+
+          <div className="mt-5 flex justify-end gap-2">
+            <Dialog.Close asChild>
+              <Button variant="outline">取消</Button>
+            </Dialog.Close>
+            <Button onClick={onRetry}>重新连接</Button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
