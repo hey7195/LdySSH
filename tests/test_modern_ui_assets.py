@@ -65,3 +65,13 @@ def test_borderless_window_maximize_uses_monitor_work_area():
     assert "MONITORINFO" in source
     assert "rcWork" in source
     assert "ptMaxSize" in source
+
+
+def test_native_bridge_proxies_hermes_http_requests():
+    source = read("prismssh-cpp/main.cpp")
+    bridge = read("frontend/src/lib/bridge.ts")
+
+    assert "hermes_http_request" in source
+    assert "WinHttpOpen" in source
+    assert "Authorization: Bearer" in source
+    assert "hermesHttpRequest" in bridge

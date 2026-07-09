@@ -19,10 +19,12 @@
 #include <nlohmann/json.hpp>
 #include <thread>
 #include <algorithm>
+#include <cctype>
 #include <commdlg.h>
 #include <shlobj.h>
 #include <shellapi.h>
 #include <dwmapi.h>
+#include <winhttp.h>
 
 // Project Header Files
 #include "common_utils.h"
@@ -35,6 +37,7 @@
 
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -308,6 +311,163 @@ struct ProcessRunResult {
     std::string output;
     std::string error;
 };
+
+struct HttpRunResult {
+    bool success = false;
+    DWORD status = 0;
+    std::string contentType;
+    std::string body;
+    std::string error;
+};
+
+HttpRunResult RunHttpRequest(
+    const std::string& methodUtf8,
+    const std::string& urlUtf8,
+    const std::string& body,
+    const std::string& token
+) {
+    HttpRunResult result;
+    std::wstring url = Utf8ToUtf16(urlUtf8);
+    std::wstring method = Utf8ToUtf16(methodUtf8.empty() ? "GET" : methodUtf8);
+
+    wchar_t hostName[512] = { 0 };
+    wchar_t urlPath[4096] = { 0 };
+    wchar_t extraInfo[2048] = { 0 };
+    URL_COMPONENTS parts = { 0 };
+    parts.dwStructSize = sizeof(parts);
+    parts.lpszHostName = hostName;
+    parts.dwHostNameLength = _countof(hostName);
+    parts.lpszUrlPath = urlPath;
+    parts.dwUrlPathLength = _countof(urlPath);
+    parts.lpszExtraInfo = extraInfo;
+    parts.dwExtraInfoLength = _countof(extraInfo);
+
+    if (!WinHttpCrackUrl(url.c_str(), 0, 0, &parts)) {
+        result.error = "Invalid URL: " + std::to_string(GetLastError());
+        return result;
+    }
+
+    std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
+    path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
+    if (path.empty()) {
+        path = L"/";
+    }
+
+    HINTERNET session = WinHttpOpen(
+        L"LdySSH/1.0",
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME,
+        WINHTTP_NO_PROXY_BYPASS,
+        0
+    );
+    if (!session) {
+        result.error = "WinHttpOpen failed: " + std::to_string(GetLastError());
+        return result;
+    }
+    WinHttpSetTimeouts(session, 5000, 5000, 10000, 120000);
+
+    HINTERNET connect = WinHttpConnect(session, std::wstring(parts.lpszHostName, parts.dwHostNameLength).c_str(), parts.nPort, 0);
+    if (!connect) {
+        result.error = "WinHttpConnect failed: " + std::to_string(GetLastError());
+        WinHttpCloseHandle(session);
+        return result;
+    }
+
+    DWORD flags = parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET request = WinHttpOpenRequest(
+        connect,
+        method.c_str(),
+        path.c_str(),
+        NULL,
+        WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES,
+        flags
+    );
+    if (!request) {
+        result.error = "WinHttpOpenRequest failed: " + std::to_string(GetLastError());
+        WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        return result;
+    }
+
+    std::wstring headers = L"Accept: application/json\r\n";
+    if (!body.empty()) {
+        headers += L"Content-Type: application/json\r\n";
+    }
+    if (!TrimString(token).empty()) {
+        headers += L"Authorization: Bearer " + Utf8ToUtf16(TrimString(token)) + L"\r\n";
+    }
+
+    LPVOID requestBody = body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data();
+    DWORD requestBodySize = (DWORD)body.size();
+    BOOL sent = WinHttpSendRequest(
+        request,
+        headers.c_str(),
+        (DWORD)-1L,
+        requestBody,
+        requestBodySize,
+        requestBodySize,
+        0
+    );
+    if (!sent || !WinHttpReceiveResponse(request, NULL)) {
+        result.error = "WinHttp request failed: " + std::to_string(GetLastError());
+        WinHttpCloseHandle(request);
+        WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        return result;
+    }
+
+    DWORD status = 0;
+    DWORD statusSize = sizeof(status);
+    WinHttpQueryHeaders(
+        request,
+        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+        WINHTTP_HEADER_NAME_BY_INDEX,
+        &status,
+        &statusSize,
+        WINHTTP_NO_HEADER_INDEX
+    );
+    result.status = status;
+
+    wchar_t contentType[256] = { 0 };
+    DWORD contentTypeSize = sizeof(contentType);
+    if (WinHttpQueryHeaders(
+        request,
+        WINHTTP_QUERY_CONTENT_TYPE,
+        WINHTTP_HEADER_NAME_BY_INDEX,
+        contentType,
+        &contentTypeSize,
+        WINHTTP_NO_HEADER_INDEX
+    )) {
+        result.contentType = Utf16ToUtf8(contentType);
+    }
+
+    DWORD available = 0;
+    do {
+        available = 0;
+        if (!WinHttpQueryDataAvailable(request, &available)) {
+            result.error = "WinHttpQueryDataAvailable failed: " + std::to_string(GetLastError());
+            break;
+        }
+        if (available == 0) {
+            break;
+        }
+        std::string chunk(available, '\0');
+        DWORD read = 0;
+        if (!WinHttpReadData(request, chunk.data(), available, &read)) {
+            result.error = "WinHttpReadData failed: " + std::to_string(GetLastError());
+            break;
+        }
+        chunk.resize(read);
+        result.body += chunk;
+    } while (available > 0);
+
+    result.success = result.error.empty() && status >= 200 && status < 300;
+    WinHttpCloseHandle(request);
+    WinHttpCloseHandle(connect);
+    WinHttpCloseHandle(session);
+    return result;
+}
 
 std::wstring QuoteProcessArgument(const std::wstring& value) {
     if (value.empty()) {
@@ -776,6 +936,37 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             
             nlohmann::json retObj;
             retObj["success"] = success;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "hermes_http_request") {
+            std::string paramsStr = args[0].get<std::string>();
+            auto params = nlohmann::json::parse(paramsStr);
+
+            std::string method = TrimString(SafeGetJsonString(params, "method", "GET"));
+            std::transform(method.begin(), method.end(), method.begin(), [](unsigned char ch) { return (char)std::toupper(ch); });
+            if (method != "GET" && method != "POST") {
+                method = "GET";
+            }
+
+            std::string url = TrimString(SafeGetJsonString(params, "url", ""));
+            std::string body = SafeGetJsonString(params, "body", "");
+            std::string token = SafeGetJsonString(params, "token", "");
+
+            nlohmann::json retObj;
+            if (url.empty()) {
+                retObj["success"] = false;
+                retObj["status"] = 0;
+                retObj["error"] = "URL is empty";
+            } else {
+                HttpRunResult run = RunHttpRequest(method, url, body, token);
+                retObj["success"] = run.success;
+                retObj["status"] = run.status;
+                retObj["contentType"] = run.contentType;
+                retObj["body"] = run.body;
+                retObj["error"] = run.error;
+            }
+
             response["status"] = "success";
             response["result"] = retObj.dump();
         }

@@ -85,22 +85,33 @@ interface AiChatMessage {
   text: string;
 }
 
+interface AiSession {
+  id: string;
+  title: string;
+  tool: AiTool;
+  memory: string;
+  messages: AiChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface AiConfig {
   codexCommand: string;
   codexWorkingDirectory: string;
   hermesBaseUrl: string;
   hermesWsUrl: string;
+  hermesApiToken: string;
 }
 
-const tools: Array<{ id: Tool; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { id: "ssh", label: "SSH", icon: Server },
-  { id: "cmd", label: "CMD", icon: Command },
-  { id: "sftp", label: "SFTP", icon: FolderOpen },
-  { id: "pf", label: "PF", icon: Shield },
-  { id: "monitor", label: "MON", icon: Monitor },
-  { id: "local", label: "L-CMD", icon: Terminal },
-  { id: "ai", label: "AI", icon: Bot },
-  { id: "settings", label: "设置", icon: Settings }
+const tools: Array<{ id: Tool; label: string; title: string; icon: React.ComponentType<{ className?: string }> }> = [
+  { id: "ssh", label: "会话", title: "SSH 会话", icon: Server },
+  { id: "cmd", label: "命令", title: "命令库", icon: Command },
+  { id: "sftp", label: "文件", title: "SFTP 文件", icon: FolderOpen },
+  { id: "pf", label: "转发", title: "端口转发", icon: Shield },
+  { id: "monitor", label: "监控", title: "系统监控", icon: Monitor },
+  { id: "local", label: "本地", title: "本地终端", icon: Terminal },
+  { id: "ai", label: "AI", title: "AI 助手", icon: Bot },
+  { id: "settings", label: "设置", title: "设置", icon: Settings }
 ];
 
 const emptyForm: ConnectionForm = {
@@ -137,7 +148,8 @@ const defaultAiConfig: AiConfig = {
   codexCommand: "codex",
   codexWorkingDirectory: "E:\\adb\\tools\\LdSSH",
   hermesBaseUrl: "http://127.0.0.1:3000",
-  hermesWsUrl: ""
+  hermesWsUrl: "",
+  hermesApiToken: ""
 };
 
 const storageKeys = {
@@ -145,7 +157,8 @@ const storageKeys = {
   terminalTheme: "ldyssh.terminal.theme",
   terminalBackgroundImage: "ldyssh.terminal.backgroundImage",
   highlightRules: "ldyssh.terminal.highlightRules",
-  aiConfig: "ldyssh.ai.config"
+  aiConfig: "ldyssh.ai.config",
+  aiSessions: "ldyssh.ai.sessions"
 };
 
 function loadStoredTheme(): ThemeMode {
@@ -185,6 +198,30 @@ function loadStoredAiConfig(): AiConfig {
     return { ...defaultAiConfig, ...(JSON.parse(raw) as Partial<AiConfig>) };
   } catch {
     return defaultAiConfig;
+  }
+}
+
+function createAiSession(tool: AiTool = "codex"): AiSession {
+  const now = Date.now();
+  return {
+    id: `ai_${now}`,
+    title: "新会话",
+    tool,
+    memory: "",
+    messages: [],
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function loadStoredAiSessions(): AiSession[] {
+  const raw = window.localStorage.getItem(storageKeys.aiSessions);
+  if (!raw) return [createAiSession()];
+  try {
+    const parsed = JSON.parse(raw) as AiSession[];
+    return parsed.length > 0 ? parsed : [createAiSession()];
+  } catch {
+    return [createAiSession()];
   }
 }
 
@@ -578,7 +615,7 @@ function ActivityRail({ activeTool, onChange }: { activeTool: Tool; onChange: (t
                 "flex h-12 w-12 flex-col items-center justify-center gap-1 rounded-md text-[10px] font-semibold transition-colors",
                 active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
               )}
-              title={tool.label}
+              title={tool.title}
               onClick={() => onChange(tool.id)}
             >
               <Icon className="h-4 w-4" />
@@ -1650,12 +1687,52 @@ function AiWorkspacePanel({
   config: AiConfig;
   onConfigChange: (config: AiConfig) => void;
 }) {
-  const [selectedTool, setSelectedTool] = useState<AiTool>("codex");
+  const [aiSessions, setAiSessions] = useState<AiSession[]>(() => loadStoredAiSessions());
+  const [activeAiSessionId, setActiveAiSessionId] = useState(() => aiSessions[0]?.id || "");
   const [prompt, setPrompt] = useState("");
-  const [messages, setMessages] = useState<AiChatMessage[]>([]);
   const [running, setRunning] = useState(false);
   const [hermesStatus, setHermesStatus] = useState("等待检查");
+  const activeAiSession = aiSessions.find((session) => session.id === activeAiSessionId) || aiSessions[0];
+  const selectedTool = activeAiSession?.tool || "codex";
+  const messages = activeAiSession?.messages || [];
   const isCodex = selectedTool === "codex";
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.aiSessions, JSON.stringify(aiSessions));
+  }, [aiSessions]);
+
+  function updateActiveAiSession(update: (session: AiSession) => AiSession) {
+    setAiSessions((current) =>
+      current.map((session) => (session.id === activeAiSession.id ? update(session) : session))
+    );
+  }
+
+  function setSelectedTool(tool: AiTool) {
+    updateActiveAiSession((session) => ({ ...session, tool, updatedAt: Date.now() }));
+  }
+
+  function setMessages(update: (messages: AiChatMessage[]) => AiChatMessage[]) {
+    updateActiveAiSession((session) => {
+      const messages = update(session.messages);
+      const firstUserText = messages.find((message) => message.role === "user")?.text.trim();
+      return {
+        ...session,
+        title: session.title === "新会话" && firstUserText ? firstUserText.slice(0, 18) : session.title,
+        messages,
+        updatedAt: Date.now()
+      };
+    });
+  }
+
+  function createNewAiSession() {
+    const session = createAiSession(selectedTool);
+    setAiSessions((current) => [session, ...current]);
+    setActiveAiSessionId(session.id);
+  }
+
+  function updateAiMemory(memory: string) {
+    updateActiveAiSession((session) => ({ ...session, memory, updatedAt: Date.now() }));
+  }
 
   async function sendPrompt() {
     const text = prompt.trim();
@@ -1665,7 +1742,7 @@ function AiWorkspacePanel({
     setRunning(true);
     setMessages((current) => [...current, { id: `user_${Date.now()}`, role: "user", text }]);
 
-    const fullPrompt = buildAiPrompt(text, quotes, activeSession);
+    const fullPrompt = buildAiPrompt(text, quotes, activeSession, activeAiSession);
     if (selectedTool === "codex") {
       const result = await nativeBridge.runCodex({
         command: config.codexCommand,
@@ -1684,7 +1761,7 @@ function AiWorkspacePanel({
       try {
         const data = config.hermesWsUrl.trim()
           ? await sendHermesWebSocket(config.hermesWsUrl, fullPrompt, activeSession?.title || "")
-          : await sendHermesHttp(config.hermesBaseUrl, fullPrompt, activeSession?.title || "");
+          : await sendHermesHttp(config.hermesBaseUrl, fullPrompt, activeSession?.title || "", config.hermesApiToken);
         setMessages((current) => [
           ...current,
           {
@@ -1710,8 +1787,12 @@ function AiWorkspacePanel({
   async function checkHermesConnection() {
     setHermesStatus("检查中...");
     try {
-      const response = await fetch(`${normalizeBaseUrl(config.hermesBaseUrl)}/health`, { method: "GET" });
-      setHermesStatus(response.ok ? "Hermes 连接正常" : `Hermes 连接失败：HTTP ${response.status}`);
+      const response = await nativeBridge.hermesHttpRequest({
+        method: "GET",
+        url: `${normalizeBaseUrl(config.hermesBaseUrl)}/health`,
+        token: config.hermesApiToken
+      });
+      setHermesStatus(response.success ? "Hermes 连接正常" : `Hermes 连接失败：HTTP ${response.status || 0} ${response.error || response.body || ""}`);
     } catch (error) {
       setHermesStatus(error instanceof Error ? error.message : "Hermes 连接失败");
     }
@@ -1774,7 +1855,7 @@ function AiWorkspacePanel({
         </div>
       </section>
 
-      <aside className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] bg-white">
+      <aside className="grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] bg-white">
         <header className="border-b border-slate-200 px-4 py-4">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -1803,6 +1884,23 @@ function AiWorkspacePanel({
               onClick={() => setSelectedTool("hermes")}
             />
           </div>
+          <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+            <select
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              aria-label="AI 会话记录"
+              value={activeAiSession?.id || ""}
+              onChange={(event) => setActiveAiSessionId(event.target.value)}
+            >
+              {aiSessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.title}
+                </option>
+              ))}
+            </select>
+            <Button variant="outline" className="h-9 px-3" onClick={createNewAiSession}>
+              新会话
+            </Button>
+          </div>
         </header>
 
         <AiConfigPanel
@@ -1812,6 +1910,19 @@ function AiWorkspacePanel({
           onConfigChange={onConfigChange}
           onCheckHermes={checkHermesConnection}
         />
+
+        <section className="border-b border-slate-200 bg-white px-4 py-3">
+          <label className="block">
+            <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">会话记忆</span>
+            <textarea
+              data-testid="ai-memory-input"
+              className="h-16 w-full resize-none rounded-md border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-800 outline-none placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              value={activeAiSession?.memory || ""}
+              placeholder="例如：优先检查最新日志、默认使用当前项目目录"
+              onChange={(event) => updateAiMemory(event.target.value)}
+            />
+          </label>
+        </section>
 
         <div className="min-h-0 overflow-auto bg-slate-50 px-4 py-4">
           <div className="space-y-3">
@@ -1878,9 +1989,16 @@ function AiQuoteCard({ quote }: { quote: AiQuote }) {
   );
 }
 
-function buildAiPrompt(prompt: string, quotes: AiQuote[], activeSession?: SessionTab) {
+function buildAiPrompt(prompt: string, quotes: AiQuote[], activeSession?: SessionTab, aiSession?: AiSession) {
   const context = [
-    activeSession ? `当前会话：${activeSession.title}` : "",
+    aiSession?.memory.trim() ? `会话记忆：\n${aiSession.memory.trim()}` : "",
+    activeSession ? `当前终端会话：${activeSession.title}` : "",
+    aiSession?.messages.length
+      ? `最近对话：\n${aiSession.messages
+          .slice(-12)
+          .map((message) => `${message.role === "user" ? "用户" : "助手"}：${message.text}`)
+          .join("\n")}`
+      : "",
     ...quotes.map((quote) => `引用自 ${quote.sourceTitle}：\n${quote.text}`)
   ]
     .filter(Boolean)
@@ -1892,14 +2010,19 @@ function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
 }
 
-async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: string) {
-  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/chat/start`, {
+async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: string, token: string) {
+  const response = await nativeBridge.hermesHttpRequest({
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    url: `${normalizeBaseUrl(baseUrl)}/api/chat/start`,
+    token,
     body: JSON.stringify({ message: prompt, session: sessionTitle })
   });
-  const contentType = response.headers.get("content-type") || "";
-  return contentType.includes("application/json") ? response.json() : response.text();
+  if (!response.success) {
+    throw new Error(`Hermes HTTP ${response.status || 0}: ${response.error || response.body || "请求失败"}`);
+  }
+  const contentType = response.contentType || "";
+  const body = response.body || "";
+  return contentType.includes("application/json") ? JSON.parse(body || "{}") : body;
 }
 
 function sendHermesWebSocket(wsUrl: string, prompt: string, sessionTitle: string) {
@@ -2022,6 +2145,16 @@ function AiConfigPanel({
         <div className="flex items-end">
           <Button variant="outline" onClick={onCheckHermes}>检查连接</Button>
         </div>
+        <label className="col-span-2 block">
+          <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">Hermes API Token（可选）</span>
+          <Input
+            aria-label="Hermes API Token"
+            type="password"
+            value={config.hermesApiToken}
+            placeholder="用于访问受保护的 /api 接口"
+            onChange={(event) => onConfigChange({ ...config, hermesApiToken: event.target.value })}
+          />
+        </label>
         <label className="col-span-2 block">
           <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">Hermes WSS 地址（可选）</span>
           <Input

@@ -71,6 +71,12 @@ beforeEach(() => {
       }),
       save_command_library: vi.fn().mockResolvedValue({ success: true }),
       run_codex: vi.fn().mockResolvedValue({ success: true, output: "Codex 已完成分析", exitCode: 0 }),
+      hermes_http_request: vi.fn().mockResolvedValue({
+        success: true,
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "ok", reply: "Hermes 已连接" })
+      }),
       create_local_session: vi.fn().mockResolvedValue("local-1"),
       get_output: vi.fn().mockResolvedValue({}),
       resize_terminal: vi.fn().mockResolvedValue({ success: true }),
@@ -97,10 +103,18 @@ afterEach(() => {
 });
 
 describe("AI tools panel", () => {
+  test("uses Chinese labels in the activity sidebar", () => {
+    render(<App />);
+
+    expect(screen.getByTitle("本地终端")).toHaveTextContent("本地");
+    expect(screen.getByTitle("命令库")).toHaveTextContent("命令");
+    expect(screen.getByTitle("系统监控")).toHaveTextContent("监控");
+  });
+
   test("opens a right-side chat panel with Codex CLI and Hermes tool choices", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("AI"));
+    fireEvent.click(screen.getByTitle("AI 助手"));
 
     expect(await screen.findByRole("heading", { name: "AI 助手" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Codex CLI/ })).toBeInTheDocument();
@@ -112,7 +126,7 @@ describe("AI tools panel", () => {
   test("shows quoted terminal selection inside the AI chat panel", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("L-CMD"));
+    fireEvent.click(screen.getByTitle("本地终端"));
     fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
 
     await waitFor(() => expect(terminalMock.selectionHandler).toBeTypeOf("function"));
@@ -121,7 +135,7 @@ describe("AI tools panel", () => {
     terminalMock.selectionHandler?.();
 
     fireEvent.click(await screen.findByRole("button", { name: "添加到对话" }));
-    fireEvent.click(screen.getByTitle("AI"));
+    fireEvent.click(screen.getByTitle("AI 助手"));
 
     expect(await screen.findByText("来自 Local CMD 的终端引用")).toBeInTheDocument();
     expect(screen.getByText("ERROR failed to connect 10.0.0.8")).toBeInTheDocument();
@@ -130,7 +144,10 @@ describe("AI tools panel", () => {
   test("runs a Codex CLI prompt through the native bridge", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("AI"));
+    fireEvent.click(screen.getByTitle("AI 助手"));
+    fireEvent.change(await screen.findByTestId("ai-memory-input"), {
+      target: { value: "记住：优先检查最新日志" }
+    });
     fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
       target: { value: "分析这段日志" }
     });
@@ -139,13 +156,16 @@ describe("AI tools panel", () => {
     await waitFor(() => {
       expect(window.pywebview?.api?.run_codex).toHaveBeenCalled();
     });
+    const call = (window.pywebview?.api?.run_codex as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(call?.[0]).toContain("记住：优先检查最新日志");
+    expect(window.localStorage.getItem("ldyssh.ai.sessions")).toContain("记住：优先检查最新日志");
     expect(await screen.findByText("Codex 已完成分析")).toBeInTheDocument();
   });
 
-  test("checks Hermes connection with a configurable base URL", async () => {
+  test("checks Hermes connection through the native bridge proxy", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("AI"));
+    fireEvent.click(screen.getByTitle("AI 助手"));
     fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
     fireEvent.change(await screen.findByLabelText("Hermes Base URL"), {
       target: { value: "http://127.0.0.1:3000" }
@@ -153,15 +173,18 @@ describe("AI tools panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "检查连接" }));
 
     await waitFor(() => {
-      expect(window.fetch).toHaveBeenCalledWith("http://127.0.0.1:3000/health", expect.any(Object));
+      expect(window.pywebview?.api?.hermes_http_request).toHaveBeenCalled();
     });
+    const call = (window.pywebview?.api?.hermes_http_request as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(call?.[0]).toContain("http://127.0.0.1:3000/health");
+    expect(window.fetch).not.toHaveBeenCalled();
     expect(await screen.findByText("Hermes 连接正常")).toBeInTheDocument();
   });
 
   test("configures a remote Hermes WSS URL", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("AI"));
+    fireEvent.click(screen.getByTitle("AI 助手"));
     fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
     fireEvent.change(await screen.findByLabelText("Hermes WSS URL"), {
       target: { value: "wss://hermes.internal/ws" }
@@ -175,7 +198,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     expect(screen.getByTestId("app-root")).toHaveAttribute("data-theme", "light");
-    fireEvent.click(screen.getByTitle("L-CMD"));
+    fireEvent.click(screen.getByTitle("本地终端"));
     await waitFor(() => {
       expect(screen.getAllByRole("button").some((button) => button.textContent?.includes("Local CMD"))).toBe(true);
     });
@@ -202,7 +225,7 @@ describe("command library", () => {
   test("shows the quick command sidebar inside the terminal workspace", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("L-CMD"));
+    fireEvent.click(screen.getByTitle("本地终端"));
     fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
 
     expect(await screen.findByText("快捷命令栏")).toBeInTheDocument();
@@ -219,10 +242,10 @@ describe("command library", () => {
   test("searches folder commands and sends a command to the active terminal", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("L-CMD"));
+    fireEvent.click(screen.getByTitle("本地终端"));
     fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
     await waitFor(() => expect(screen.getAllByText("Local CMD").length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByTitle("CMD"));
+    fireEvent.click(screen.getByTitle("命令库"));
 
     expect(await screen.findByRole("heading", { name: "快捷命令库" })).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("搜索命令、描述或文件夹"), {
@@ -245,7 +268,7 @@ describe("command library", () => {
   test("adds command folders and commands then persists them", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("CMD"));
+    fireEvent.click(screen.getByTitle("命令库"));
     fireEvent.change(await screen.findByPlaceholderText("新文件夹名称"), {
       target: { value: "ADB" }
     });
