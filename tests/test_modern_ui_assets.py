@@ -73,8 +73,10 @@ def test_native_bridge_proxies_hermes_http_requests():
 
     assert "hermes_http_request" in source
     assert "WinHttpOpen" in source
-    assert "Authorization: Bearer" in source
+    assert "WINHTTP_QUERY_SET_COOKIE" in source
+    assert "Cookie: " in source
     assert "hermesHttpRequest" in bridge
+    assert "cookie?: string" in bridge
 
 
 def test_codex_runs_as_background_job_from_the_ui():

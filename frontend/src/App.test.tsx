@@ -397,6 +397,61 @@ describe("AI tools panel", () => {
     expect(await screen.findByText("Hermes 连接正常")).toBeInTheDocument();
   });
 
+  test("logs into password-protected Hermes before sending chat requests", async () => {
+    (window.pywebview?.api?.hermes_http_request as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        success: true,
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+        cookie: "hermes_session=sid123"
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ session: { session_id: "session-1" } })
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ reply: "Hermes 已回复" })
+      });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
+    fireEvent.change(await screen.findByLabelText("Hermes Base URL"), {
+      target: { value: "http://127.0.0.1:8648" }
+    });
+    fireEvent.change(await screen.findByLabelText("Hermes 登录密码"), {
+      target: { value: "secret" }
+    });
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "你好" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    expect(await screen.findByText("Hermes 已回复")).toBeInTheDocument();
+    const calls = (window.pywebview?.api?.hermes_http_request as ReturnType<typeof vi.fn>).mock.calls;
+    const loginCall = JSON.parse(calls[0]?.[0] || "{}");
+    const sessionCall = JSON.parse(calls[1]?.[0] || "{}");
+    const chatCall = JSON.parse(calls[2]?.[0] || "{}");
+
+    expect(loginCall.url).toBe("http://127.0.0.1:8648/api/auth/login");
+    expect(JSON.parse(loginCall.body)).toEqual({ password: "secret" });
+    expect(sessionCall.url).toBe("http://127.0.0.1:8648/api/session/new");
+    expect(sessionCall.cookie).toBe("hermes_session=sid123");
+    expect(chatCall.url).toBe("http://127.0.0.1:8648/api/chat/start");
+    expect(JSON.parse(chatCall.body)).toEqual({ session_id: "session-1", message: expect.any(String) });
+    expect(chatCall.cookie).toBe("hermes_session=sid123");
+    expect(screen.queryByLabelText("Hermes API Token")).not.toBeInTheDocument();
+  });
+
   test("configures a remote Hermes WSS URL", async () => {
     render(<App />);
 

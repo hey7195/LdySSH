@@ -123,7 +123,7 @@ interface AiConfig {
   codexWorkingDirectory: string;
   hermesBaseUrl: string;
   hermesWsUrl: string;
-  hermesApiToken: string;
+  hermesPassword: string;
 }
 
 interface AiRun {
@@ -138,7 +138,7 @@ interface AiRun {
   codexWorkingDirectory: string;
   hermesBaseUrl: string;
   hermesWsUrl: string;
-  hermesApiToken: string;
+  hermesPassword: string;
 }
 
 interface RetryPasswordPrompt {
@@ -205,7 +205,7 @@ const defaultAiConfig: AiConfig = {
   codexWorkingDirectory: "E:\\adb\\tools\\LdSSH",
   hermesBaseUrl: "http://127.0.0.1:3000",
   hermesWsUrl: "",
-  hermesApiToken: ""
+  hermesPassword: ""
 };
 
 const aiModelOptions = ["", "gpt-5.5", "gpt-5.4-mini", "deepseek-v3.2", "hi"];
@@ -3162,7 +3162,7 @@ function AiWorkspacePanel({
       codexWorkingDirectory: config.codexWorkingDirectory,
       hermesBaseUrl: config.hermesBaseUrl,
       hermesWsUrl: config.hermesWsUrl,
-      hermesApiToken: config.hermesApiToken
+      hermesPassword: config.hermesPassword
     });
   }
 
@@ -3197,19 +3197,19 @@ function AiWorkspacePanel({
         try {
           const data = run.hermesWsUrl.trim()
             ? await sendHermesWebSocket(run.hermesWsUrl, run.prompt, run.sessionTitle)
-            : await sendHermesHttp(run.hermesBaseUrl, run.prompt, run.sessionTitle, run.hermesApiToken);
+            : await sendHermesHttp(run.hermesBaseUrl, run.prompt, run.sessionTitle, run.hermesPassword);
           setMessages((current) => [
             ...current,
             {
               id: `assistant_${Date.now()}`,
-            role: "assistant",
-            text: extractHermesReply(data)
-          }
-        ]);
-        setRunStatus("Hermes 调用完成。");
-      } catch (error) {
-        setRunStatus("Hermes 调用失败。");
-        setMessages((current) => [
+              role: "assistant",
+              text: extractHermesReply(data)
+            }
+          ]);
+          setRunStatus("Hermes 调用完成。");
+        } catch (error) {
+          setRunStatus("Hermes 调用失败。");
+          setMessages((current) => [
             ...current,
             {
               id: `assistant_${Date.now()}`,
@@ -3250,8 +3250,7 @@ function AiWorkspacePanel({
     try {
       const response = await nativeBridge.hermesHttpRequest({
         method: "GET",
-        url: `${normalizeBaseUrl(config.hermesBaseUrl)}/health`,
-        token: config.hermesApiToken
+        url: `${normalizeBaseUrl(config.hermesBaseUrl)}/health`
       });
       setHermesStatus(response.success ? "Hermes 连接正常" : `Hermes 连接失败：HTTP ${response.status || 0} ${response.error || response.body || ""}`);
     } catch (error) {
@@ -3689,19 +3688,66 @@ function looksLikeOnlyRuntimeNoise(text: string) {
   return /^(failed to|error:|warning:|warn\b|mcp\b|codex_)/i.test(text.trim());
 }
 
-async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: string, token: string) {
+async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: string, password: string) {
+  const base = normalizeBaseUrl(baseUrl);
+  let cookie = "";
+  if (password.trim()) {
+    const login = await nativeBridge.hermesHttpRequest({
+      method: "POST",
+      url: `${base}/api/auth/login`,
+      body: JSON.stringify({ password })
+    });
+    if (!login.success) {
+      throw new Error(`Hermes 登录失败：HTTP ${login.status || 0}: ${login.error || login.body || "密码错误或认证失败"}`);
+    }
+    cookie = login.cookie || "";
+  }
+
+  const session = await nativeBridge.hermesHttpRequest({
+    method: "POST",
+    url: `${base}/api/session/new`,
+    cookie,
+    body: JSON.stringify({ title: sessionTitle || "LdySSH" })
+  });
+  if (!session.success) {
+    if (session.status === 401 && !password.trim()) {
+      throw new Error("Hermes 需要登录密码，请在 Hermes 配置里填写登录密码。");
+    }
+    throw new Error(`Hermes HTTP ${session.status || 0}: ${session.error || session.body || "创建会话失败"}`);
+  }
+  const sessionData = parseHermesJson(session);
+  const sessionId = extractHermesSessionId(sessionData);
+  if (!sessionId) {
+    throw new Error("Hermes 未返回 session_id。");
+  }
+
   const response = await nativeBridge.hermesHttpRequest({
     method: "POST",
-    url: `${normalizeBaseUrl(baseUrl)}/api/chat/start`,
-    token,
-    body: JSON.stringify({ message: prompt, session: sessionTitle })
+    url: `${base}/api/chat/start`,
+    cookie,
+    body: JSON.stringify({ session_id: sessionId, message: prompt })
   });
   if (!response.success) {
     throw new Error(`Hermes HTTP ${response.status || 0}: ${response.error || response.body || "请求失败"}`);
   }
+  return parseHermesJson(response);
+}
+
+function parseHermesJson(response: { contentType?: string; body?: string }) {
   const contentType = response.contentType || "";
   const body = response.body || "";
   return contentType.includes("application/json") ? JSON.parse(body || "{}") : body;
+}
+
+function extractHermesSessionId(data: unknown) {
+  if (!data || typeof data !== "object") return "";
+  const record = data as Record<string, unknown>;
+  if (typeof record.session_id === "string") return record.session_id;
+  const session = record.session;
+  if (session && typeof session === "object" && typeof (session as Record<string, unknown>).session_id === "string") {
+    return (session as Record<string, string>).session_id;
+  }
+  return "";
 }
 
 function sendHermesWebSocket(wsUrl: string, prompt: string, sessionTitle: string) {
@@ -3825,13 +3871,13 @@ function AiConfigPanel({
           <Button variant="outline" onClick={onCheckHermes}>检查连接</Button>
         </div>
         <label className="col-span-2 block">
-          <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">Hermes API Token（可选）</span>
+          <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">Hermes 登录密码</span>
           <Input
-            aria-label="Hermes API Token"
+            aria-label="Hermes 登录密码"
             type="password"
-            value={config.hermesApiToken}
-            placeholder="用于访问受保护的 /api 接口"
-            onChange={(event) => onConfigChange({ ...config, hermesApiToken: event.target.value })}
+            value={config.hermesPassword}
+            placeholder="和 Hermes WebUI 登录页使用同一个密码"
+            onChange={(event) => onConfigChange({ ...config, hermesPassword: event.target.value })}
           />
         </label>
         <label className="col-span-2 block">

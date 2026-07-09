@@ -221,7 +221,7 @@ export interface HermesHttpRequestParams {
   method: "GET" | "POST";
   url: string;
   body?: string;
-  token?: string;
+  cookie?: string;
 }
 
 export interface HermesHttpRequestResult {
@@ -229,6 +229,7 @@ export interface HermesHttpRequestResult {
   status?: number;
   contentType?: string;
   body?: string;
+  cookie?: string;
   error?: string;
 }
 

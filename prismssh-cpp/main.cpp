@@ -329,14 +329,60 @@ struct HttpRunResult {
     DWORD status = 0;
     std::string contentType;
     std::string body;
+    std::string cookie;
     std::string error;
 };
+
+std::wstring TrimWideString(const std::wstring& value) {
+    const size_t first = value.find_first_not_of(L" \t\r\n\0", 0);
+    if (first == std::wstring::npos) {
+        return L"";
+    }
+    const size_t last = value.find_last_not_of(L" \t\r\n\0");
+    return value.substr(first, last - first + 1);
+}
+
+std::string ExtractCookiePairs(const std::wstring& setCookieHeaders) {
+    std::vector<std::string> pairs;
+    size_t start = 0;
+
+    while (start < setCookieHeaders.size()) {
+        size_t end = setCookieHeaders.find_first_of(L"\r\n\0", start);
+        std::wstring line = TrimWideString(setCookieHeaders.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start));
+        if (!line.empty()) {
+            const std::wstring prefix = L"Set-Cookie:";
+            if (line.size() >= prefix.size() && _wcsnicmp(line.c_str(), prefix.c_str(), prefix.size()) == 0) {
+                line = TrimWideString(line.substr(prefix.size()));
+            }
+
+            size_t semicolon = line.find(L';');
+            std::wstring pair = TrimWideString(line.substr(0, semicolon));
+            if (!pair.empty()) {
+                pairs.push_back(Utf16ToUtf8(pair));
+            }
+        }
+
+        if (end == std::wstring::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+
+    std::string cookie;
+    for (const std::string& pair : pairs) {
+        if (!cookie.empty()) {
+            cookie += "; ";
+        }
+        cookie += pair;
+    }
+    return cookie;
+}
 
 HttpRunResult RunHttpRequest(
     const std::string& methodUtf8,
     const std::string& urlUtf8,
     const std::string& body,
-    const std::string& token
+    const std::string& cookie
 ) {
     HttpRunResult result;
     std::wstring url = Utf8ToUtf16(urlUtf8);
@@ -406,8 +452,8 @@ HttpRunResult RunHttpRequest(
     if (!body.empty()) {
         headers += L"Content-Type: application/json\r\n";
     }
-    if (!TrimString(token).empty()) {
-        headers += L"Authorization: Bearer " + Utf8ToUtf16(TrimString(token)) + L"\r\n";
+    if (!TrimString(cookie).empty()) {
+        headers += L"Cookie: " + Utf8ToUtf16(TrimString(cookie)) + L"\r\n";
     }
 
     LPVOID requestBody = body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data();
@@ -452,6 +498,35 @@ HttpRunResult RunHttpRequest(
         WINHTTP_NO_HEADER_INDEX
     )) {
         result.contentType = Utf16ToUtf8(contentType);
+    }
+
+    DWORD cookieSize = 0;
+    WinHttpQueryHeaders(
+        request,
+        WINHTTP_QUERY_SET_COOKIE,
+        WINHTTP_HEADER_NAME_BY_INDEX,
+        WINHTTP_NO_OUTPUT_BUFFER,
+        &cookieSize,
+        WINHTTP_NO_HEADER_INDEX
+    );
+    if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && cookieSize > 0) {
+        std::wstring setCookie(cookieSize / sizeof(wchar_t), L'\0');
+        DWORD headerIndex = 0;
+        if (WinHttpQueryHeaders(
+            request,
+            WINHTTP_QUERY_SET_COOKIE,
+            WINHTTP_HEADER_NAME_BY_INDEX,
+            setCookie.data(),
+            &cookieSize,
+            &headerIndex
+        )) {
+            setCookie.resize(cookieSize / sizeof(wchar_t));
+            size_t nul = setCookie.find(L'\0');
+            if (nul != std::wstring::npos) {
+                setCookie.resize(nul);
+            }
+            result.cookie = ExtractCookiePairs(setCookie);
+        }
     }
 
     DWORD available = 0;
@@ -1156,7 +1231,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
 
             std::string url = TrimString(SafeGetJsonString(params, "url", ""));
             std::string body = SafeGetJsonString(params, "body", "");
-            std::string token = SafeGetJsonString(params, "token", "");
+            std::string cookie = SafeGetJsonString(params, "cookie", "");
 
             nlohmann::json retObj;
             if (url.empty()) {
@@ -1164,11 +1239,12 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 retObj["status"] = 0;
                 retObj["error"] = "URL is empty";
             } else {
-                HttpRunResult run = RunHttpRequest(method, url, body, token);
+                HttpRunResult run = RunHttpRequest(method, url, body, cookie);
                 retObj["success"] = run.success;
                 retObj["status"] = run.status;
                 retObj["contentType"] = run.contentType;
                 retObj["body"] = run.body;
+                retObj["cookie"] = run.cookie;
                 retObj["error"] = run.error;
             }
 
