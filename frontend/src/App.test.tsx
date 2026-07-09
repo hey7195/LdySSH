@@ -7,6 +7,7 @@ const terminalMock = vi.hoisted(() => ({
   selectionText: "",
   selectionHandler: undefined as undefined | (() => void),
   keyHandler: undefined as undefined | ((event: KeyboardEvent) => boolean),
+  options: [] as unknown[],
   writes: [] as string[],
   instances: [] as Array<{ writes: string[] }>
 }));
@@ -22,7 +23,8 @@ vi.mock("@xterm/xterm", () => ({
     private instance = { writes: [] as string[] };
     cols = 80;
     rows = 24;
-    constructor() {
+    constructor(options: unknown) {
+      terminalMock.options.push(options);
       terminalMock.instances.push(this.instance);
     }
     dispose() {}
@@ -57,6 +59,7 @@ beforeEach(() => {
   terminalMock.selectionText = "";
   terminalMock.selectionHandler = undefined;
   terminalMock.keyHandler = undefined;
+  terminalMock.options = [];
   terminalMock.writes = [];
   terminalMock.instances = [];
   window.localStorage.clear();
@@ -108,7 +111,12 @@ beforeEach(() => {
       get_output: vi.fn().mockResolvedValue({}),
       resize_terminal: vi.fn().mockResolvedValue({ success: true }),
       send_input_base64: vi.fn().mockResolvedValue({ success: true }),
-      disconnect: vi.fn().mockResolvedValue({ success: true })
+      disconnect: vi.fn().mockResolvedValue({ success: true }),
+      get_system_info: vi.fn().mockResolvedValue({ success: true, info: {} }),
+      get_system_stats: vi.fn().mockResolvedValue({ success: true, stats: {} }),
+      get_process_list: vi.fn().mockResolvedValue({ success: true, processes: [] }),
+      get_disk_usage: vi.fn().mockResolvedValue({ success: true, disk_usage: [] }),
+      get_network_info: vi.fn().mockResolvedValue({ success: true, network_info: [] })
     }
   };
 
@@ -726,6 +734,46 @@ describe("settings panel", () => {
     expect(screen.getByTestId("app-root")).toHaveAttribute("data-theme", "dark");
   });
 
+  test("configures terminal font and RGB colors from settings", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.change(await screen.findByLabelText("终端字体"), {
+      target: { value: "JetBrains Mono, monospace" }
+    });
+    fireEvent.change(screen.getByLabelText("字号"), {
+      target: { value: "16" }
+    });
+    fireEvent.change(screen.getByLabelText("文字颜色"), {
+      target: { value: "#00ff88" }
+    });
+    fireEvent.change(screen.getByLabelText("背景颜色"), {
+      target: { value: "#101820" }
+    });
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem("ldyssh.terminal.fontFamily")).toBe("JetBrains Mono, monospace");
+      expect(window.localStorage.getItem("ldyssh.terminal.fontSize")).toBe("16");
+      expect(window.localStorage.getItem("ldyssh.terminal.foreground")).toBe("#00ff88");
+      expect(window.localStorage.getItem("ldyssh.terminal.background")).toBe("#101820");
+    });
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+
+    expect(await screen.findByTestId("terminal-shell")).toHaveStyle({
+      backgroundColor: "#101820",
+      color: "#00ff88"
+    });
+    await waitFor(() => {
+      const options = terminalMock.options.at(-1) as { fontFamily?: string; fontSize?: number; theme?: { background?: string; foreground?: string } };
+      expect(options.fontFamily).toBe("JetBrains Mono, monospace");
+      expect(options.fontSize).toBe(16);
+      expect(options.theme?.foreground).toBe("#00ff88");
+      expect(options.theme?.background).toBe("#101820");
+    });
+  });
+
   test("adds a custom terminal highlight rule from settings", async () => {
     render(<App />);
 
@@ -759,6 +807,77 @@ describe("settings panel", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "删除" }).at(-1)!);
 
     expect(screen.queryByText("崩溃")).not.toBeInTheDocument();
+  });
+});
+
+describe("monitor panel", () => {
+  test("renders host monitoring data as charts and tables instead of JSON blocks", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { name: "prod-monitor", hostname: "10.0.0.8", port: 22, username: "root", password: "secret" }
+    ]);
+    (window.pywebview?.api?.get_system_info as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      info: {
+        architecture: "x86_64",
+        cpu: "Intel(R) Core(TM) i5-7500 CPU @ 3.40GHz",
+        hostname: "hy7195",
+        os_name: "Ubuntu 22.04.5 LTS",
+        os_version: "22.04.5 LTS (Jammy Jellyfish)",
+        total_memory: "8083924 kB",
+        uptime: "Since 2026-06-01 17:06:35"
+      }
+    });
+    (window.pywebview?.api?.get_system_stats as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      stats: {
+        cpu_usage: "13.5%",
+        disk_total: "98G",
+        disk_usage: "23%",
+        disk_used: "22G",
+        memory_total: "7894 MB",
+        memory_usage: "59.0%",
+        memory_used: "4654 MB"
+      }
+    });
+    (window.pywebview?.api?.get_process_list as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      processes: [
+        { cpu: "26.3%", memory: "24.6%", name: "/usr/lib/x86_64-linux-gnu/webkit", pid: "7844" }
+      ]
+    });
+    (window.pywebview?.api?.get_disk_usage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      disk_usage: [
+        { device: "/dev/sda3", free: "73G", mount: "/", total: "98G", usage: "23%", used: "22G" }
+      ]
+    });
+    (window.pywebview?.api?.get_network_info as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      network_info: [
+        { cidr: "192.168.220.128/24", ip: "192.168.220.128", name: "ens33" }
+      ]
+    });
+
+    render(<App />);
+
+    const recentHost = await screen.findAllByRole("button", { name: /prod-monitor/ });
+    fireEvent.click(recentHost[0]);
+    await screen.findByTestId("terminal-shell");
+    fireEvent.click(screen.getByTitle("系统监控"));
+
+    expect(await screen.findByText("CPU")).toBeInTheDocument();
+    expect(screen.getByText("13.5%")).toBeInTheDocument();
+    expect(screen.getAllByText("内存").length).toBeGreaterThan(0);
+    expect(screen.getByText("59.0%")).toBeInTheDocument();
+    expect(screen.getAllByText("磁盘").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("23%").length).toBeGreaterThan(0);
+    expect(screen.getByText("hy7195")).toBeInTheDocument();
+    expect(screen.getByText("Ubuntu 22.04.5 LTS")).toBeInTheDocument();
+    expect(screen.getByText("PID")).toBeInTheDocument();
+    expect(screen.getByText("7844")).toBeInTheDocument();
+    expect(screen.getByText("ens33")).toBeInTheDocument();
+    expect(screen.getByText("192.168.220.128")).toBeInTheDocument();
+    expect(document.querySelector("pre")).toBeNull();
   });
 });
 

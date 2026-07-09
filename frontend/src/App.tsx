@@ -133,6 +133,13 @@ interface TerminalSearchMatch {
   line: string;
 }
 
+interface TerminalAppearance {
+  fontFamily: string;
+  fontSize: number;
+  foreground: string;
+  background: string;
+}
+
 const tools: Array<{ id: Tool; label: string; title: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "ssh", label: "会话", title: "SSH 会话", icon: Server },
   { id: "local", label: "本地", title: "本地终端", icon: Terminal },
@@ -183,6 +190,10 @@ const defaultAiConfig: AiConfig = {
 const storageKeys = {
   theme: "ldyssh.ui.theme",
   terminalTheme: "ldyssh.terminal.theme",
+  terminalFontFamily: "ldyssh.terminal.fontFamily",
+  terminalFontSize: "ldyssh.terminal.fontSize",
+  terminalForeground: "ldyssh.terminal.foreground",
+  terminalBackground: "ldyssh.terminal.background",
   terminalBackgroundImage: "ldyssh.terminal.backgroundImage",
   terminalBackgroundOverlay: "ldyssh.terminal.backgroundOverlay",
   highlightRules: "ldyssh.terminal.highlightRules",
@@ -192,6 +203,12 @@ const storageKeys = {
 
 const TERMINAL_HISTORY_LIMIT = 2_000_000;
 const PASSWORD_PLACEHOLDER = "***";
+const defaultTerminalAppearance: TerminalAppearance = {
+  fontFamily: "Cascadia Mono, Consolas, monospace",
+  fontSize: 13,
+  foreground: "",
+  background: ""
+};
 
 function trimTerminalHistory(text: string) {
   return text.length > TERMINAL_HISTORY_LIMIT ? text.slice(-TERMINAL_HISTORY_LIMIT) : text;
@@ -233,6 +250,51 @@ function loadStoredTerminalBackgroundImage() {
 function loadStoredTerminalBackgroundOverlay() {
   const value = Number(window.localStorage.getItem(storageKeys.terminalBackgroundOverlay) || 50);
   return Number.isFinite(value) ? value : 50;
+}
+
+function loadStoredTerminalAppearance(): TerminalAppearance {
+  const fontSize = Number(window.localStorage.getItem(storageKeys.terminalFontSize) || defaultTerminalAppearance.fontSize);
+  return {
+    fontFamily: window.localStorage.getItem(storageKeys.terminalFontFamily) || defaultTerminalAppearance.fontFamily,
+    fontSize: Number.isFinite(fontSize) ? fontSize : defaultTerminalAppearance.fontSize,
+    foreground: window.localStorage.getItem(storageKeys.terminalForeground) || "",
+    background: window.localStorage.getItem(storageKeys.terminalBackground) || ""
+  };
+}
+
+function getTerminalAppearance(appearance: TerminalAppearance) {
+  return {
+    fontFamily: appearance.fontFamily.trim() || defaultTerminalAppearance.fontFamily,
+    fontSize: Number.isFinite(appearance.fontSize) ? appearance.fontSize : defaultTerminalAppearance.fontSize,
+    foreground: appearance.foreground,
+    background: appearance.background
+  };
+}
+
+function getTerminalColors(theme: TerminalThemeMode, appearance: TerminalAppearance, translucent = false) {
+  const themeColors = getTerminalTheme(theme, translucent);
+  return {
+    ...themeColors,
+    foreground: appearance.foreground || themeColors.foreground,
+    background: appearance.background || themeColors.background
+  };
+}
+
+function colorToRgbParts(color: string) {
+  const match = /^#([0-9a-f]{6})$/i.exec(color.trim());
+  if (!match) return "2, 6, 23";
+  const hex = match[1];
+  return [
+    Number.parseInt(hex.slice(0, 2), 16),
+    Number.parseInt(hex.slice(2, 4), 16),
+    Number.parseInt(hex.slice(4, 6), 16)
+  ].join(", ");
+}
+
+function buildTerminalBackgroundImage(backgroundImage: string, backgroundColor: string, overlayAlpha: number) {
+  if (!backgroundImage) return undefined;
+  const rgb = colorToRgbParts(backgroundColor);
+  return `linear-gradient(rgba(${rgb}, ${overlayAlpha}), rgba(${rgb}, ${overlayAlpha})), url(${JSON.stringify(backgroundImage)})`;
 }
 
 function loadStoredHighlightRules(): HighlightRule[] {
@@ -297,6 +359,7 @@ export function App() {
   const [connectError, setConnectError] = useState("");
   const [theme, setTheme] = useState<ThemeMode>(() => loadStoredTheme());
   const [terminalTheme, setTerminalTheme] = useState<TerminalThemeMode>(() => loadStoredTerminalTheme());
+  const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearance>(() => loadStoredTerminalAppearance());
   const [terminalBackgroundImage, setTerminalBackgroundImage] = useState(() => loadStoredTerminalBackgroundImage());
   const [terminalBackgroundOverlay, setTerminalBackgroundOverlay] = useState(() => loadStoredTerminalBackgroundOverlay());
   const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(() => loadStoredHighlightRules());
@@ -322,6 +385,22 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(storageKeys.terminalTheme, terminalTheme);
   }, [terminalTheme]);
+
+  useEffect(() => {
+    const appearance = getTerminalAppearance(terminalAppearance);
+    window.localStorage.setItem(storageKeys.terminalFontFamily, appearance.fontFamily);
+    window.localStorage.setItem(storageKeys.terminalFontSize, String(appearance.fontSize));
+    if (appearance.foreground) {
+      window.localStorage.setItem(storageKeys.terminalForeground, appearance.foreground);
+    } else {
+      window.localStorage.removeItem(storageKeys.terminalForeground);
+    }
+    if (appearance.background) {
+      window.localStorage.setItem(storageKeys.terminalBackground, appearance.background);
+    } else {
+      window.localStorage.removeItem(storageKeys.terminalBackground);
+    }
+  }, [terminalAppearance]);
 
   useEffect(() => {
     if (terminalBackgroundImage) {
@@ -868,6 +947,7 @@ export function App() {
               sessions={sessions}
               activeSessionId={activeSessionId}
               terminalTheme={terminalTheme}
+              terminalAppearance={terminalAppearance}
               terminalBackgroundImage={terminalBackgroundImage}
               terminalBackgroundOverlay={terminalBackgroundOverlay}
               highlightRules={highlightRules}
@@ -897,11 +977,13 @@ export function App() {
             <SettingsPanel
               theme={theme}
               terminalTheme={terminalTheme}
+              terminalAppearance={terminalAppearance}
               terminalBackgroundImage={terminalBackgroundImage}
               terminalBackgroundOverlay={terminalBackgroundOverlay}
               highlightRules={highlightRules}
               onThemeChange={setTheme}
               onTerminalThemeChange={setTerminalTheme}
+              onTerminalAppearanceChange={setTerminalAppearance}
               onTerminalBackgroundImageChange={setTerminalBackgroundImage}
               onTerminalBackgroundOverlayChange={setTerminalBackgroundOverlay}
               onToggleHighlightRule={toggleHighlightRule}
@@ -1299,6 +1381,7 @@ function TerminalWorkspace({
   sessions,
   activeSessionId,
   terminalTheme,
+  terminalAppearance,
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   highlightRules,
@@ -1326,6 +1409,7 @@ function TerminalWorkspace({
   sessions: SessionTab[];
   activeSessionId: string;
   terminalTheme: TerminalThemeMode;
+  terminalAppearance: TerminalAppearance;
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   highlightRules: HighlightRule[];
@@ -1451,6 +1535,7 @@ function TerminalWorkspace({
         <TerminalSurface
           activeSession={activeSession}
           terminalTheme={terminalTheme}
+          terminalAppearance={terminalAppearance}
           terminalBackgroundImage={terminalBackgroundImage}
           terminalBackgroundOverlay={terminalBackgroundOverlay}
           highlightRules={highlightRules}
@@ -1492,6 +1577,7 @@ function TerminalWorkspace({
 function TerminalSurface({
   activeSession,
   terminalTheme,
+  terminalAppearance,
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   highlightRules,
@@ -1501,6 +1587,7 @@ function TerminalSurface({
 }: {
   activeSession?: SessionTab;
   terminalTheme: TerminalThemeMode;
+  terminalAppearance: TerminalAppearance;
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   highlightRules: HighlightRule[];
@@ -1550,11 +1637,12 @@ function TerminalSurface({
 
     setSelectedText("");
     terminalRef.current?.dispose();
-    const terminalThemeOptions = getTerminalTheme(terminalTheme, Boolean(terminalBackgroundImage));
+    const appearance = getTerminalAppearance(terminalAppearance);
+    const terminalThemeOptions = getTerminalColors(terminalTheme, appearance, Boolean(terminalBackgroundImage));
     const terminal = new XTerm({
       cursorBlink: true,
-      fontFamily: "Cascadia Mono, Consolas, monospace",
-      fontSize: 13,
+      fontFamily: appearance.fontFamily,
+      fontSize: appearance.fontSize,
       lineHeight: 1.25,
       theme: terminalBackgroundImage
         ? { ...terminalThemeOptions, background: "rgba(0, 0, 0, 0)" }
@@ -1612,7 +1700,7 @@ function TerminalSurface({
       selectionDisposable.dispose();
       terminal.dispose();
     };
-  }, [activeSession?.id, highlightRules, terminalTheme, terminalBackgroundImage]);
+  }, [activeSession?.id, highlightRules, terminalTheme, terminalAppearance, terminalBackgroundImage]);
 
   useEffect(() => {
     window.handlePushOutput = (sessionId, data) => {
@@ -1672,14 +1760,14 @@ function TerminalSurface({
     );
   }
 
-  const terminalColors = getTerminalTheme(terminalTheme);
+  const terminalColors = getTerminalColors(terminalTheme, getTerminalAppearance(terminalAppearance));
   const backgroundOverlayAlpha = terminalBackgroundOverlay / 100;
   const terminalStyle = {
     "--terminal-bg": terminalColors.background,
     "--terminal-text": terminalColors.foreground,
-    backgroundImage: terminalBackgroundImage
-      ? `linear-gradient(rgba(2, 6, 23, ${backgroundOverlayAlpha}), rgba(2, 6, 23, ${backgroundOverlayAlpha})), url(${JSON.stringify(terminalBackgroundImage)})`
-      : undefined
+    backgroundColor: terminalColors.background,
+    color: terminalColors.foreground,
+    backgroundImage: buildTerminalBackgroundImage(terminalBackgroundImage, terminalColors.background, backgroundOverlayAlpha)
   } as CSSProperties;
 
   return (
@@ -2119,6 +2207,91 @@ function BrowserPanel({
   );
 }
 
+function isMonitorRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function monitorRecord(result: NativeResult | undefined, key: string) {
+  const value = result?.[key];
+  return isMonitorRecord(value) ? value : {};
+}
+
+function monitorList(result: NativeResult | undefined, key: string) {
+  const value = result?.[key];
+  return Array.isArray(value) ? value.filter(isMonitorRecord) : [];
+}
+
+function monitorText(value: unknown) {
+  if (value === null || value === undefined || value === "") return "-";
+  return String(value);
+}
+
+function monitorPercent(value: unknown) {
+  const match = /-?\d+(?:\.\d+)?/.exec(monitorText(value));
+  if (!match) return 0;
+  const parsed = Number(match[0]);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(100, parsed));
+}
+
+function monitorPercentLabel(value: unknown) {
+  const text = monitorText(value);
+  if (text === "-") return "0%";
+  return text.includes("%") ? text : `${text}%`;
+}
+
+function MonitorProgress({ value, className = "bg-blue-500" }: { value: number; className?: string }) {
+  return (
+    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+      <div className={cn("h-full rounded-full", className)} style={{ width: `${value}%` }} />
+    </div>
+  );
+}
+
+function MonitorMetricCard({
+  label,
+  value,
+  detail,
+  icon: Icon,
+  percent,
+  barClassName
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  icon: React.ComponentType<{ className?: string }>;
+  percent: number;
+  barClassName: string;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold text-slate-500">{label}</span>
+        <Icon className="h-4 w-4 text-slate-400" />
+      </div>
+      <div className="mt-3 text-3xl font-semibold text-slate-950">{value}</div>
+      <div className="mt-3">
+        <MonitorProgress value={percent} className={barClassName} />
+      </div>
+      <div className="mt-2 truncate text-xs text-slate-500">{detail}</div>
+    </div>
+  );
+}
+
+function MonitorStatusBlock({ result }: { result?: NativeResult }) {
+  if (!result) {
+    return <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">等待刷新数据</div>;
+  }
+  if (!result.success) {
+    return (
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-4 text-sm text-amber-800">
+        {result.error || "暂未获取到数据"}
+      </div>
+    );
+  }
+  return null;
+}
+
 function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
   const [loading, setLoading] = useState(false);
   const [snapshots, setSnapshots] = useState<Record<string, NativeResult>>({});
@@ -2142,21 +2315,27 @@ function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
     void refresh();
   }, [activeSession?.id]);
 
-  const sections = [
-    ["系统信息", snapshots.info],
-    ["资源占用", snapshots.stats],
-    ["进程列表", snapshots.processes],
-    ["磁盘使用", snapshots.disk],
-    ["网络接口", snapshots.network]
-  ] as const;
+  const info = monitorRecord(snapshots.info, "info");
+  const stats = monitorRecord(snapshots.stats, "stats");
+  const processes = monitorList(snapshots.processes, "processes").slice(0, 8);
+  const disks = monitorList(snapshots.disk, "disk_usage");
+  const networks = monitorList(snapshots.network, "network_info");
+  const hasStats = Boolean(snapshots.stats?.success);
+  const hasInfo = Boolean(snapshots.info?.success);
+  const hasProcesses = Boolean(snapshots.processes?.success);
+  const hasDisk = Boolean(snapshots.disk?.success);
+  const hasNetwork = Boolean(snapshots.network?.success);
+  const statusResults = [snapshots.info, snapshots.stats, snapshots.processes, snapshots.disk, snapshots.network].filter(
+    (result): result is NativeResult => Boolean(result && !result.success)
+  );
 
   return (
-    <div className="h-full overflow-auto px-8 py-8">
+    <div className="h-full overflow-auto bg-[var(--app-bg)] px-8 py-8">
       <div className="mx-auto max-w-6xl">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-950">系统监控</h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <h1 className="text-2xl font-semibold text-[var(--app-text)]">系统监控</h1>
+            <p className="mt-1 text-sm text-[var(--app-muted)]">
               {activeSession ? `当前会话：${activeSession.title}` : "选择一个 SSH 会话后显示主机状态。"}
             </p>
           </div>
@@ -2165,25 +2344,153 @@ function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
             刷新
           </Button>
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          {sections.map(([title, result]) => (
-            <Panel key={title} title={title}>
-              {!activeSession ? (
-                <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无活动 SSH 会话</div>
-              ) : !result ? (
-                <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">等待刷新数据</div>
-              ) : result.success ? (
-                <pre className="max-h-60 overflow-auto rounded-md bg-slate-950 p-3 text-xs leading-5 text-slate-100">
-                  {JSON.stringify(result, null, 2)}
-                </pre>
+
+        {!activeSession ? (
+          <EmptyState title="暂无活动 SSH 会话" description="连接 SSH 主机后，这里会显示 CPU、内存、磁盘、进程和网络接口。" />
+        ) : (
+          <div className="space-y-4">
+            {statusResults.length > 0 && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {statusResults.map((result) => result.error || "暂未获取到数据").join("；")}
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-4">
+              <MonitorMetricCard
+                label="CPU"
+                value={hasStats ? monitorPercentLabel(stats.cpu_usage) : "0%"}
+                detail="当前处理器占用"
+                icon={Cpu}
+                percent={monitorPercent(stats.cpu_usage)}
+                barClassName="bg-blue-500"
+              />
+              <MonitorMetricCard
+                label="内存"
+                value={hasStats ? monitorPercentLabel(stats.memory_usage) : "0%"}
+                detail={`${monitorText(stats.memory_used)} / ${monitorText(stats.memory_total)}`}
+                icon={Server}
+                percent={monitorPercent(stats.memory_usage)}
+                barClassName="bg-emerald-500"
+              />
+              <MonitorMetricCard
+                label="磁盘"
+                value={hasStats ? monitorPercentLabel(stats.disk_usage) : "0%"}
+                detail={`${monitorText(stats.disk_used)} / ${monitorText(stats.disk_total)}`}
+                icon={HardDrive}
+                percent={monitorPercent(stats.disk_usage)}
+                barClassName="bg-amber-500"
+              />
+            </div>
+
+            <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-4">
+              <Panel title="系统概览">
+                {!hasInfo ? (
+                  <MonitorStatusBlock result={snapshots.info} />
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {[
+                      { label: "主机名", value: info.hostname },
+                      { label: "系统", value: info.os_name || info.os_version },
+                      { label: "架构", value: info.architecture },
+                      { label: "CPU", value: info.cpu },
+                      { label: "内存", value: info.total_memory },
+                      { label: "运行时间", value: info.uptime }
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-md bg-slate-50 px-3 py-2">
+                        <div className="text-xs font-semibold text-slate-500">{item.label}</div>
+                        <div className="mt-1 truncate font-medium text-slate-900">{monitorText(item.value)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+
+              <Panel title="网络接口">
+                {!hasNetwork ? (
+                  <MonitorStatusBlock result={snapshots.network} />
+                ) : networks.length === 0 ? (
+                  <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无网络接口数据</div>
+                ) : (
+                  <div className="space-y-2">
+                    {networks.map((network, index) => (
+                      <div key={`${monitorText(network.name)}-${index}`} className="rounded-md border border-slate-200 px-3 py-2">
+                        <div className="font-semibold text-slate-900">{monitorText(network.name)}</div>
+                        <div className="mt-1 text-sm text-slate-600">{monitorText(network.ip)}</div>
+                        <div className="mt-1 text-xs text-slate-400">{monitorText(network.cidr)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+            </div>
+
+            <Panel title="进程列表">
+              {!hasProcesses ? (
+                <MonitorStatusBlock result={snapshots.processes} />
+              ) : processes.length === 0 ? (
+                <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无进程数据</div>
               ) : (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-4 text-sm text-amber-800">
-                  {result.error || "暂未获取到数据"}
+                <div className="overflow-hidden rounded-md border border-slate-200">
+                  <table className="w-full table-fixed text-left text-sm">
+                    <thead className="bg-slate-50 text-xs font-semibold text-slate-500">
+                      <tr>
+                        <th className="w-24 px-3 py-2">PID</th>
+                        <th className="px-3 py-2">名称</th>
+                        <th className="w-32 px-3 py-2">CPU</th>
+                        <th className="w-32 px-3 py-2">内存</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {processes.map((process, index) => (
+                        <tr key={`${monitorText(process.pid)}-${index}`} className="text-slate-700">
+                          <td className="px-3 py-2 font-mono text-xs text-slate-500">{monitorText(process.pid)}</td>
+                          <td className="truncate px-3 py-2 font-medium text-slate-900">{monitorText(process.name)}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-2">
+                              <span className="w-12 text-xs">{monitorPercentLabel(process.cpu)}</span>
+                              <div className="min-w-0 flex-1">
+                                <MonitorProgress value={monitorPercent(process.cpu)} className="bg-blue-500" />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-xs">{monitorPercentLabel(process.memory)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </Panel>
-          ))}
-        </div>
+
+            <Panel title="磁盘使用">
+              {!hasDisk ? (
+                <MonitorStatusBlock result={snapshots.disk} />
+              ) : disks.length === 0 ? (
+                <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无磁盘数据</div>
+              ) : (
+                <div className="space-y-3">
+                  {disks.map((disk, index) => (
+                    <div key={`${monitorText(disk.mount)}-${index}`} className="rounded-md border border-slate-200 px-4 py-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-900">{monitorText(disk.mount)}</div>
+                          <div className="mt-1 truncate text-xs text-slate-500">{monitorText(disk.device)}</div>
+                        </div>
+                        <div className="text-right text-sm font-semibold text-slate-900">{monitorPercentLabel(disk.usage)}</div>
+                      </div>
+                      <div className="mt-3">
+                        <MonitorProgress value={monitorPercent(disk.usage)} className="bg-amber-500" />
+                      </div>
+                      <div className="mt-2 text-xs text-slate-500">
+                        {monitorText(disk.used)} / {monitorText(disk.total)}，可用 {monitorText(disk.free)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2406,11 +2713,13 @@ function PortForwardPanel({ activeSession }: { activeSession?: SessionTab }) {
 function SettingsPanel({
   theme,
   terminalTheme,
+  terminalAppearance,
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   highlightRules,
   onThemeChange,
   onTerminalThemeChange,
+  onTerminalAppearanceChange,
   onTerminalBackgroundImageChange,
   onTerminalBackgroundOverlayChange,
   onToggleHighlightRule,
@@ -2419,11 +2728,13 @@ function SettingsPanel({
 }: {
   theme: ThemeMode;
   terminalTheme: TerminalThemeMode;
+  terminalAppearance: TerminalAppearance;
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   highlightRules: HighlightRule[];
   onThemeChange: (theme: ThemeMode) => void;
   onTerminalThemeChange: (theme: TerminalThemeMode) => void;
+  onTerminalAppearanceChange: (appearance: TerminalAppearance) => void;
   onTerminalBackgroundImageChange: (value: string) => void;
   onTerminalBackgroundOverlayChange: (value: number) => void;
   onToggleHighlightRule: (ruleId: string) => void;
@@ -2431,14 +2742,15 @@ function SettingsPanel({
   onDeleteHighlightRule: (ruleId: string) => void;
 }) {
   const [draft, setDraft] = useState({ name: "", pattern: "", foreground: "#2563eb" });
-  const terminalPreviewColors = getTerminalTheme(terminalTheme);
+  const resolvedTerminalAppearance = getTerminalAppearance(terminalAppearance);
+  const terminalPreviewColors = getTerminalColors(terminalTheme, resolvedTerminalAppearance);
   const terminalPreviewOverlayAlpha = terminalBackgroundOverlay / 100;
   const terminalPreviewStyle = {
     backgroundColor: terminalPreviewColors.background,
     color: terminalPreviewColors.foreground,
-    backgroundImage: terminalBackgroundImage
-      ? `linear-gradient(rgba(2, 6, 23, ${terminalPreviewOverlayAlpha}), rgba(2, 6, 23, ${terminalPreviewOverlayAlpha})), url(${JSON.stringify(terminalBackgroundImage)})`
-      : undefined
+    fontFamily: resolvedTerminalAppearance.fontFamily,
+    fontSize: `${resolvedTerminalAppearance.fontSize}px`,
+    backgroundImage: buildTerminalBackgroundImage(terminalBackgroundImage, terminalPreviewColors.background, terminalPreviewOverlayAlpha)
   } as CSSProperties;
 
   function addRule() {
@@ -2458,6 +2770,10 @@ function SettingsPanel({
     };
     reader.readAsDataURL(file);
     event.currentTarget.value = "";
+  }
+
+  function updateTerminalAppearance(patch: Partial<TerminalAppearance>) {
+    onTerminalAppearanceChange({ ...terminalAppearance, ...patch });
   }
 
   return (
@@ -2504,6 +2820,52 @@ function SettingsPanel({
                     {mode === "dark" ? "黑色终端" : "浅色终端"}
                   </button>
                 ))}
+              </div>
+              <div className="mt-3 space-y-3">
+                <label className="block text-xs font-semibold text-[var(--app-muted)]">
+                  <span>终端字体</span>
+                  <Input
+                    className="mt-2"
+                    aria-label="终端字体"
+                    value={terminalAppearance.fontFamily}
+                    placeholder={defaultTerminalAppearance.fontFamily}
+                    onChange={(event) => updateTerminalAppearance({ fontFamily: event.target.value })}
+                  />
+                </label>
+                <label className="block text-xs font-semibold text-[var(--app-muted)]">
+                  <span>字号</span>
+                  <Input
+                    className="mt-2"
+                    aria-label="字号"
+                    type="number"
+                    min={10}
+                    max={28}
+                    value={terminalAppearance.fontSize}
+                    onChange={(event) => updateTerminalAppearance({ fontSize: Number(event.target.value || defaultTerminalAppearance.fontSize) })}
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-xs font-semibold text-[var(--app-muted)]">
+                    <span>文字颜色</span>
+                    <input
+                      aria-label="文字颜色"
+                      className="mt-2 h-10 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-1"
+                      type="color"
+                      value={terminalAppearance.foreground || terminalPreviewColors.foreground}
+                      onChange={(event) => updateTerminalAppearance({ foreground: event.target.value })}
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-[var(--app-muted)]">
+                    <span>背景颜色</span>
+                    <input
+                      aria-label="背景颜色"
+                      className="mt-2 h-10 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-1"
+                      type="color"
+                      value={terminalAppearance.background || terminalPreviewColors.background}
+                      onChange={(event) => updateTerminalAppearance({ background: event.target.value })}
+                    />
+                  </label>
+                </div>
               </div>
               <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
                 <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
