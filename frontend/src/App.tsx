@@ -25,7 +25,6 @@ import {
   Server,
   Settings,
   Shield,
-  Sparkles,
   Terminal,
   Wrench,
   X
@@ -34,6 +33,7 @@ import { Button, EmptyState, Input, Panel } from "./components/ui";
 import { cn } from "./lib/utils";
 import {
   nativeBridge,
+  type CodexJobResult,
   type CommandFolder,
   type CommandItem,
   type ConnectParams,
@@ -1704,6 +1704,7 @@ function AiWorkspacePanel({
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [pendingRun, setPendingRun] = useState<PendingAiRun | null>(null);
+  const [runStatus, setRunStatus] = useState("");
   const [hermesStatus, setHermesStatus] = useState("等待检查");
   const activeAiSession = aiSessions.find((session) => session.id === activeAiSessionId) || aiSessions[0];
   const selectedTool = activeAiSession?.tool || "codex";
@@ -1752,6 +1753,7 @@ function AiWorkspacePanel({
     if (!text || running || pendingRun) return;
 
     setPrompt("");
+    setRunStatus("等待授权执行。");
     setMessages((current) => [...current, { id: `user_${Date.now()}`, role: "user", text }]);
 
     const fullPrompt = buildAiPrompt(text, quotes, activeSession, activeAiSession);
@@ -1774,6 +1776,7 @@ function AiWorkspacePanel({
     const run = pendingRun;
     setPendingRun(null);
     setRunning(true);
+    setRunStatus(run.tool === "codex" ? "Codex 执行中..." : "Hermes 调用中...");
 
     try {
       if (run.tool === "codex") {
@@ -1785,12 +1788,14 @@ function AiWorkspacePanel({
         const result = start.success && start.jobId
           ? await pollCodexRun(start.jobId)
           : { success: false, error: start.error || "Codex 启动失败。" };
+        const reply = extractCodexReply(result, run.prompt);
+        setRunStatus(result.success ? "Codex 执行完成。" : "Codex 执行结束，返回失败。");
         setMessages((current) => [
           ...current,
           {
             id: `assistant_${Date.now()}`,
             role: "assistant",
-            text: result.success ? result.output || "Codex 执行完成，无输出。" : result.error || result.output || "Codex 执行失败。"
+            text: reply
           }
         ]);
       } else {
@@ -1802,12 +1807,14 @@ function AiWorkspacePanel({
             ...current,
             {
               id: `assistant_${Date.now()}`,
-              role: "assistant",
-              text: extractHermesReply(data)
-            }
-          ]);
-        } catch (error) {
-          setMessages((current) => [
+            role: "assistant",
+            text: extractHermesReply(data)
+          }
+        ]);
+        setRunStatus("Hermes 调用完成。");
+      } catch (error) {
+        setRunStatus("Hermes 调用失败。");
+        setMessages((current) => [
             ...current,
             {
               id: `assistant_${Date.now()}`,
@@ -1818,6 +1825,7 @@ function AiWorkspacePanel({
         }
       }
     } catch (error) {
+      setRunStatus("AI 执行失败。");
       setMessages((current) => [
         ...current,
         {
@@ -1857,63 +1865,8 @@ function AiWorkspacePanel({
   }
 
   return (
-    <div className="grid h-full min-w-0 grid-cols-[minmax(0,1fr)_410px] bg-white">
-      <section className="min-w-0 overflow-auto border-r border-slate-200 bg-slate-50 px-8 py-8">
-        <div className="mx-auto max-w-5xl">
-          <div className="mb-6 flex items-center justify-between gap-4">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                <Sparkles className="h-3.5 w-3.5" />
-                AI Workbench
-              </div>
-              <h1 className="mt-3 text-2xl font-semibold text-slate-950">AI 助手</h1>
-              <p className="mt-1 text-sm text-slate-500">像 VSCode 右侧对话框一样工作：选择工具，带着当前上下文发起对话或本地执行。</p>
-            </div>
-            <Button variant="outline">
-              <Settings className="h-4 w-4" />
-              AI 设置
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-3 gap-4">
-            <Panel title="当前上下文" className="col-span-2">
-              <div className="grid grid-cols-2 gap-3">
-                <ContextItem label="活动会话" value={activeSession?.title || "未选择活动会话"} />
-                <ContextItem label="执行目录" value="当前项目 / 当前终端" />
-                <ContextItem label="Codex 命令" value="codex exec" />
-                <ContextItem label="Hermes 远端协议" value={config.hermesWsUrl ? "WSS WebSocket" : "HTTP API"} />
-              </div>
-            </Panel>
-
-            <Panel title="连接状态">
-              <div className="space-y-3">
-                <StatusLine label="Codex CLI" value="本地可用" tone="success" />
-                <StatusLine label="Hermes 本地" value="localhost:61355 / 61356" tone="success" />
-                <StatusLine label="Hermes 远端" value={config.hermesWsUrl || "等待配置 WSS"} tone={config.hermesWsUrl ? "success" : "muted"} />
-              </div>
-            </Panel>
-          </div>
-
-          <div className="mt-4 grid grid-cols-2 gap-4">
-            <Panel title="Codex CLI 执行器">
-              <p className="text-sm leading-6 text-slate-600">用于本机工程分析、代码修改、测试执行。真正执行前会展示命令预览和审批按钮。</p>
-              <pre className="mt-3 overflow-auto rounded-md bg-slate-950 p-3 text-xs leading-5 text-slate-100">
-                codex exec -C E:\adb\tools\LdSSH "分析当前问题并给出修改"
-              </pre>
-            </Panel>
-
-            <Panel title="Hermes 对话网关">
-              <p className="text-sm leading-6 text-slate-600">支持本地和远端 Hermes WebUI。远端可配置 HTTP Base URL，也可填 WSS 地址走 WebSocket 对话。</p>
-              <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
-                <div>POST /api/chat/start</div>
-                <div>WSS：浏览器开发者工具 Network / WS 查看真实连接地址</div>
-              </div>
-            </Panel>
-          </div>
-        </div>
-      </section>
-
-      <aside className="grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] bg-white">
+    <div className="h-full min-w-0 bg-slate-50">
+      <aside className="grid h-full w-[420px] max-w-full grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] border-r border-slate-200 bg-white">
         <header className="border-b border-slate-200 px-4 py-4">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -1982,20 +1935,19 @@ function AiWorkspacePanel({
           </label>
         </section>
 
-        <div className="min-h-0 overflow-auto bg-slate-50 px-4 py-4">
+        <div data-testid="ai-chat-transcript" className="min-h-0 overflow-auto bg-slate-50 px-4 py-4">
           <div className="space-y-3">
             {quotes.map((quote) => (
               <AiQuoteCard key={quote.id} quote={quote} />
             ))}
-            <AiMessage role="user">帮我分析当前终端错误，并给出下一步处理建议。</AiMessage>
-            <AiMessage role="assistant">
-              {isCodex
-                ? "我会使用本地 Codex CLI 分析项目和终端上下文。执行前先展示命令，你确认后再运行。"
-                : "我会把问题发送到 Hermes。远端 Hermes 需要先配置 Base URL，并通过健康检查。"}
-            </AiMessage>
             {messages.map((message) => (
               <AiMessage key={message.id} role={message.role}>{message.text}</AiMessage>
             ))}
+            {messages.length === 0 && quotes.length === 0 && (
+              <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-400">
+                暂无对话
+              </div>
+            )}
             {pendingRun && (
               <AiActionCard
                 pendingRun={pendingRun}
@@ -2005,6 +1957,7 @@ function AiWorkspacePanel({
                 onCancel={() => setPendingRun(null)}
               />
             )}
+            {runStatus && <AiRunStatus text={runStatus} />}
           </div>
         </div>
 
@@ -2074,6 +2027,58 @@ function buildAiPrompt(prompt: string, quotes: AiQuote[], activeSession?: Sessio
 
 function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
+}
+
+function extractCodexReply(result: CodexJobResult, prompt: string) {
+  const cleaned = sanitizeCodexOutput(result.output || "", prompt);
+  if (result.success) {
+    return cleaned || "Codex 执行完成，无输出。";
+  }
+  if (result.timedOut) {
+    return "Codex 执行超时，请检查本地 Codex 环境。";
+  }
+  return cleaned && !looksLikeOnlyRuntimeNoise(cleaned)
+    ? cleaned
+    : "Codex 执行失败，请检查本地 Codex 环境。";
+}
+
+function sanitizeCodexOutput(output: string, prompt: string) {
+  const promptLines = new Set(
+    prompt
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 3)
+  );
+
+  const withoutPrompt = output.replace(prompt, "");
+  return withoutPrompt
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => {
+      const text = line.trim();
+      if (!text) return false;
+      if (promptLines.has(text)) return false;
+      if (/^(会话记忆|最近对话|当前终端会话|用户问题)：?/.test(text)) return false;
+      if (/^引用自 .+：?$/.test(text)) return false;
+      if (/请直接回复我的内容/.test(text)) return false;
+      if (/我会按当前仓库处理/.test(text)) return false;
+      if (/codex_core_plugins/i.test(text)) return false;
+      if (/curated plugin cache/i.test(text)) return false;
+      if (/codex_mcp_client/i.test(text)) return false;
+      if (/\bWARN\b.*MCP/i.test(text)) return false;
+      if (/MCP startup failed/i.test(text)) return false;
+      if (/handshaking with MCP server/i.test(text)) return false;
+      if (/connection closed/i.test(text)) return false;
+      if (/os error 5/i.test(text)) return false;
+      if (/拒绝访问/.test(text)) return false;
+      return true;
+    })
+    .join("\n")
+    .trim();
+}
+
+function looksLikeOnlyRuntimeNoise(text: string) {
+  return /^(failed to|error:|warning:|warn\b|mcp\b|codex_)/i.test(text.trim());
 }
 
 async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: string, token: string) {
@@ -2247,12 +2252,20 @@ function AiMessage({ role, children }: { role: "user" | "assistant"; children: R
     <div className={cn("flex", user ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[86%] rounded-lg px-3 py-2 text-sm leading-6",
+          "max-w-[86%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm leading-6",
           user ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700"
         )}
       >
         {children}
       </div>
+    </div>
+  );
+}
+
+function AiRunStatus({ text }: { text: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500">
+      {text}
     </div>
   );
 }
@@ -2286,7 +2299,7 @@ function AiActionCard({
           {activeSession?.title || "无活动会话"}
         </span>
       </div>
-      <pre className="mt-3 overflow-auto rounded-md border border-amber-200 bg-white p-2 text-xs leading-5 text-slate-800">{command}</pre>
+      <pre className="mt-3 whitespace-pre-wrap break-words rounded-md border border-amber-200 bg-white p-2 text-xs leading-5 text-slate-800">{command}</pre>
       <div className="mt-3 flex justify-end gap-2">
         <Button variant="outline" className="h-8 px-3" disabled={running} onClick={onCancel}>取消</Button>
         <Button className="h-8 px-3" disabled={running} onClick={onApprove}>

@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
 
@@ -118,10 +118,11 @@ describe("AI tools panel", () => {
 
     fireEvent.click(screen.getByTitle("AI 助手"));
 
-    expect(await screen.findByRole("heading", { name: "AI 助手" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "AI 对话栏" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Codex CLI/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Hermes/ })).toBeInTheDocument();
-    expect(screen.getByText("当前上下文")).toBeInTheDocument();
+    expect(screen.queryByText("当前上下文")).not.toBeInTheDocument();
+    expect(screen.queryByText("Codex CLI 执行器")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行...")).toBeInTheDocument();
   });
 
@@ -169,6 +170,39 @@ describe("AI tools panel", () => {
       expect(window.pywebview?.api?.get_codex_run).toHaveBeenCalledWith("codex-job-1");
     });
     expect(await screen.findByText("Codex 已完成分析")).toBeInTheDocument();
+  });
+
+  test("keeps Codex prompt context and runtime warnings out of the chat transcript", async () => {
+    (window.pywebview?.api?.get_codex_run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: false,
+      running: false,
+      completed: true,
+      output: [
+        "codex_core_plugins::manager: failed to refresh curated plugin cache",
+        "2026-07-09 WARN codex_mcp_client: failed to initialize MCP client",
+        "会话记忆：",
+        "记住：优先检查最新日志",
+        "用户问题：hi"
+      ].join("\n"),
+      error: ""
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("AI 助手"));
+    fireEvent.change(await screen.findByTestId("ai-memory-input"), {
+      target: { value: "记住：优先检查最新日志" }
+    });
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "hi" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+    fireEvent.click(await screen.findByRole("button", { name: /授权执行/ }));
+
+    expect(await screen.findByText("Codex 执行失败，请检查本地 Codex 环境。")).toBeInTheDocument();
+    const transcript = screen.getByTestId("ai-chat-transcript");
+    expect(within(transcript).queryByText(/codex_core_plugins/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/优先检查最新日志/)).not.toBeInTheDocument();
   });
 
   test("checks Hermes connection through the native bridge proxy", async () => {
