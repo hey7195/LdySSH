@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  DEFAULT_TERMINAL_THEME,
   DEFAULT_HIGHLIGHT_RULES,
   applyHighlightRules,
   getTerminalTheme,
@@ -49,13 +50,21 @@ describe("terminal highlight settings", () => {
 });
 
 describe("terminal theme settings", () => {
+  test("defaults to a dark terminal inside the light application shell", () => {
+    expect(DEFAULT_TERMINAL_THEME).toBe("dark");
+    expect(getTerminalTheme(DEFAULT_TERMINAL_THEME)).toMatchObject({
+      background: "#020617",
+      foreground: "#e5e7eb"
+    });
+  });
+
   test("returns xterm colors for light and dark themes", () => {
     expect(getTerminalTheme("light")).toMatchObject({
       background: "#ffffff",
       foreground: "#1f2937"
     });
     expect(getTerminalTheme("dark")).toMatchObject({
-      background: "#111827",
+      background: "#020617",
       foreground: "#e5e7eb"
     });
   });

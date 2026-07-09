@@ -1,4 +1,5 @@
 export type ThemeMode = "light" | "dark";
+export type TerminalThemeMode = "light" | "dark";
 
 export interface HighlightRule {
   id: string;
@@ -15,6 +16,8 @@ export interface HighlightRule {
 }
 
 export const THEMES: ThemeMode[] = ["light", "dark"];
+export const TERMINAL_THEMES: TerminalThemeMode[] = ["dark", "light"];
+export const DEFAULT_TERMINAL_THEME: TerminalThemeMode = "dark";
 
 export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
   {
@@ -134,10 +137,10 @@ export function getThemeAttribute(theme: ThemeMode) {
   return theme;
 }
 
-export function getTerminalTheme(theme: ThemeMode) {
+export function getTerminalTheme(theme: TerminalThemeMode, translucent = false) {
   if (theme === "dark") {
     return {
-      background: "#111827",
+      background: translucent ? "rgba(2, 6, 23, 0.82)" : "#020617",
       foreground: "#e5e7eb",
       cursor: "#93c5fd",
       selectionBackground: "#334155"
@@ -145,7 +148,7 @@ export function getTerminalTheme(theme: ThemeMode) {
   }
 
   return {
-    background: "#ffffff",
+    background: translucent ? "rgba(255, 255, 255, 0.86)" : "#ffffff",
     foreground: "#1f2937",
     cursor: "#2563eb",
     selectionBackground: "#dbeafe"

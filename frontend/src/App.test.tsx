@@ -170,6 +170,32 @@ describe("AI tools panel", () => {
     expect(screen.getByDisplayValue("wss://hermes.internal/ws")).toBeInTheDocument();
     expect(screen.getByText(/复制以 ws:\/\/ 或 wss:\/\//)).toBeInTheDocument();
   });
+
+  test("keeps the app light while defaulting the terminal to a dark theme", async () => {
+    render(<App />);
+
+    expect(screen.getByTestId("app-root")).toHaveAttribute("data-theme", "light");
+    fireEvent.click(screen.getByTitle("L-CMD"));
+    await waitFor(() => {
+      expect(screen.getAllByRole("button").some((button) => button.textContent?.includes("Local CMD"))).toBe(true);
+    });
+    const openLocalButton = screen.getAllByRole("button").find((button) => button.textContent?.includes("Local CMD"));
+    fireEvent.click(openLocalButton!);
+
+    expect(await screen.findByTestId("terminal-shell")).toHaveAttribute("data-terminal-theme", "dark");
+  });
+
+  test("shows terminal theme controls and background upload in settings", async () => {
+    render(<App />);
+
+    const settingsButton = screen.getAllByRole("button").find((button) => button.getAttribute("title") === "设置");
+    expect(settingsButton).toBeTruthy();
+    fireEvent.click(settingsButton!);
+
+    expect(await screen.findByTestId("terminal-theme-dark")).toBeInTheDocument();
+    expect(screen.getByTestId("terminal-theme-light")).toBeInTheDocument();
+    expect(screen.getByTestId("terminal-background-upload")).toHaveAttribute("accept", "image/*");
+  });
 });
 
 describe("command library", () => {

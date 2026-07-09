@@ -8,8 +8,8 @@
   --app-line: #d9e2ef;
   --panel-bg: #ffffff;
   --subtle-bg: #f8fafc;
-  --terminal-bg: #ffffff;
-  --terminal-text: #1f2937;
+  --terminal-bg: #020617;
+  --terminal-text: #e5e7eb;
 }
 
 .app-root[data-theme="dark"] {
@@ -20,7 +20,7 @@
   --app-line: #334155;
   --panel-bg: #111827;
   --subtle-bg: #1e293b;
-  --terminal-bg: #111827;
+  --terminal-bg: #020617;
   --terminal-text: #e5e7eb;
 }
 
@@ -70,8 +70,14 @@ textarea {
 }
 
 .terminal-shell {
-  background: var(--terminal-bg);
+  background-color: var(--terminal-bg);
+  background-position: center;
+  background-size: cover;
   color: var(--terminal-text);
+}
+
+.terminal-shell .xterm {
+  background: transparent;
 }
 
 .app-root[data-theme="dark"] .bg-white,

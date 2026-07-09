@@ -2294,6 +2294,21 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
+    case WM_GETMINMAXINFO: {
+        auto mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+        HMONITOR monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitorInfo = { sizeof(monitorInfo) };
+        if (monitor != NULL && GetMonitorInfo(monitor, &monitorInfo)) {
+            const RECT& work = monitorInfo.rcWork;
+            const RECT& monitorRect = monitorInfo.rcMonitor;
+            mmi->ptMaxPosition.x = work.left - monitorRect.left;
+            mmi->ptMaxPosition.y = work.top - monitorRect.top;
+            mmi->ptMaxSize.x = work.right - work.left;
+            mmi->ptMaxSize.y = work.bottom - work.top;
+            mmi->ptMaxTrackSize = mmi->ptMaxSize;
+        }
+        return 0;
+    }
     case WM_NCCALCSIZE:
         if (wParam == TRUE) {
             return 0;

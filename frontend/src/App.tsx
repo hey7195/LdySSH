@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -42,11 +42,14 @@ import {
 } from "./lib/bridge";
 import {
   DEFAULT_HIGHLIGHT_RULES,
+  DEFAULT_TERMINAL_THEME,
   THEMES,
+  TERMINAL_THEMES,
   applyHighlightRules,
   getTerminalTheme,
   getThemeAttribute,
   type HighlightRule,
+  type TerminalThemeMode,
   type ThemeMode
 } from "./lib/terminalSettings";
 
@@ -139,6 +142,8 @@ const defaultAiConfig: AiConfig = {
 
 const storageKeys = {
   theme: "ldyssh.ui.theme",
+  terminalTheme: "ldyssh.terminal.theme",
+  terminalBackgroundImage: "ldyssh.terminal.backgroundImage",
   highlightRules: "ldyssh.terminal.highlightRules",
   aiConfig: "ldyssh.ai.config"
 };
@@ -146,6 +151,15 @@ const storageKeys = {
 function loadStoredTheme(): ThemeMode {
   const value = window.localStorage.getItem(storageKeys.theme);
   return value === "dark" ? "dark" : "light";
+}
+
+function loadStoredTerminalTheme(): TerminalThemeMode {
+  const value = window.localStorage.getItem(storageKeys.terminalTheme);
+  return value === "light" ? "light" : DEFAULT_TERMINAL_THEME;
+}
+
+function loadStoredTerminalBackgroundImage() {
+  return window.localStorage.getItem(storageKeys.terminalBackgroundImage) || "";
 }
 
 function loadStoredHighlightRules(): HighlightRule[] {
@@ -184,6 +198,8 @@ export function App() {
   const [form, setForm] = useState<ConnectionForm>(emptyForm);
   const [connectError, setConnectError] = useState("");
   const [theme, setTheme] = useState<ThemeMode>(() => loadStoredTheme());
+  const [terminalTheme, setTerminalTheme] = useState<TerminalThemeMode>(() => loadStoredTerminalTheme());
+  const [terminalBackgroundImage, setTerminalBackgroundImage] = useState(() => loadStoredTerminalBackgroundImage());
   const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(() => loadStoredHighlightRules());
   const [aiQuotes, setAiQuotes] = useState<AiQuote[]>([]);
   const [commandFolders, setCommandFolders] = useState<CommandFolder[]>(defaultCommandFolders);
@@ -198,6 +214,18 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(storageKeys.theme, theme);
   }, [theme]);
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.terminalTheme, terminalTheme);
+  }, [terminalTheme]);
+
+  useEffect(() => {
+    if (terminalBackgroundImage) {
+      window.localStorage.setItem(storageKeys.terminalBackgroundImage, terminalBackgroundImage);
+    } else {
+      window.localStorage.removeItem(storageKeys.terminalBackgroundImage);
+    }
+  }, [terminalBackgroundImage]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKeys.highlightRules, JSON.stringify(highlightRules));
@@ -451,7 +479,8 @@ export function App() {
             <TerminalWorkspace
               sessions={sessions}
               activeSessionId={activeSessionId}
-              theme={theme}
+              terminalTheme={terminalTheme}
+              terminalBackgroundImage={terminalBackgroundImage}
               highlightRules={highlightRules}
               commandFolders={commandFolders}
               activeCommandFolderId={activeCommandFolderId}
@@ -474,8 +503,12 @@ export function App() {
           {activeTool === "settings" && (
             <SettingsPanel
               theme={theme}
+              terminalTheme={terminalTheme}
+              terminalBackgroundImage={terminalBackgroundImage}
               highlightRules={highlightRules}
               onThemeChange={setTheme}
+              onTerminalThemeChange={setTerminalTheme}
+              onTerminalBackgroundImageChange={setTerminalBackgroundImage}
               onToggleHighlightRule={toggleHighlightRule}
               onAddHighlightRule={addHighlightRule}
               onDeleteHighlightRule={deleteHighlightRule}
@@ -790,7 +823,8 @@ function Metric({
 function TerminalWorkspace({
   sessions,
   activeSessionId,
-  theme,
+  terminalTheme,
+  terminalBackgroundImage,
   highlightRules,
   commandFolders,
   activeCommandFolderId,
@@ -803,7 +837,8 @@ function TerminalWorkspace({
 }: {
   sessions: SessionTab[];
   activeSessionId: string;
-  theme: ThemeMode;
+  terminalTheme: TerminalThemeMode;
+  terminalBackgroundImage: string;
   highlightRules: HighlightRule[];
   commandFolders: CommandFolder[];
   activeCommandFolderId: string;
@@ -853,7 +888,8 @@ function TerminalWorkspace({
       <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_320px]">
         <TerminalSurface
           activeSession={activeSession}
-          theme={theme}
+          terminalTheme={terminalTheme}
+          terminalBackgroundImage={terminalBackgroundImage}
           highlightRules={highlightRules}
           onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
         />
@@ -876,12 +912,14 @@ function TerminalWorkspace({
 
 function TerminalSurface({
   activeSession,
-  theme,
+  terminalTheme,
+  terminalBackgroundImage,
   highlightRules,
   onAddAiQuote
 }: {
   activeSession?: SessionTab;
-  theme: ThemeMode;
+  terminalTheme: TerminalThemeMode;
+  terminalBackgroundImage: string;
   highlightRules: HighlightRule[];
   onAddAiQuote: (text: string) => void;
 }) {
@@ -907,7 +945,7 @@ function TerminalSurface({
       fontFamily: "Cascadia Mono, Consolas, monospace",
       fontSize: 13,
       lineHeight: 1.25,
-      theme: getTerminalTheme(theme)
+      theme: getTerminalTheme(terminalTheme, Boolean(terminalBackgroundImage))
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -948,7 +986,7 @@ function TerminalSurface({
       selectionDisposable.dispose();
       terminal.dispose();
     };
-  }, [activeSession?.id, highlightRules, theme]);
+  }, [activeSession?.id, highlightRules, terminalTheme, terminalBackgroundImage]);
 
   useEffect(() => {
     window.handlePushOutput = (sessionId, data) => {
@@ -972,8 +1010,22 @@ function TerminalSurface({
     );
   }
 
+  const terminalColors = getTerminalTheme(terminalTheme);
+  const terminalStyle = {
+    "--terminal-bg": terminalColors.background,
+    "--terminal-text": terminalColors.foreground,
+    backgroundImage: terminalBackgroundImage
+      ? `linear-gradient(rgba(2, 6, 23, 0.5), rgba(2, 6, 23, 0.5)), url(${JSON.stringify(terminalBackgroundImage)})`
+      : undefined
+  } as CSSProperties;
+
   return (
-    <div className="terminal-shell relative h-full min-h-0 overflow-hidden">
+    <div
+      className="terminal-shell relative h-full min-h-0 overflow-hidden"
+      data-testid="terminal-shell"
+      data-terminal-theme={terminalTheme}
+      style={terminalStyle}
+    >
       <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
       {selectedText && (
         <button
@@ -1401,24 +1453,54 @@ function PortForwardPanel({ activeSession }: { activeSession?: SessionTab }) {
 
 function SettingsPanel({
   theme,
+  terminalTheme,
+  terminalBackgroundImage,
   highlightRules,
   onThemeChange,
+  onTerminalThemeChange,
+  onTerminalBackgroundImageChange,
   onToggleHighlightRule,
   onAddHighlightRule,
   onDeleteHighlightRule
 }: {
   theme: ThemeMode;
+  terminalTheme: TerminalThemeMode;
+  terminalBackgroundImage: string;
   highlightRules: HighlightRule[];
   onThemeChange: (theme: ThemeMode) => void;
+  onTerminalThemeChange: (theme: TerminalThemeMode) => void;
+  onTerminalBackgroundImageChange: (value: string) => void;
   onToggleHighlightRule: (ruleId: string) => void;
   onAddHighlightRule: (rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) => void;
   onDeleteHighlightRule: (ruleId: string) => void;
 }) {
   const [draft, setDraft] = useState({ name: "", pattern: "", foreground: "#2563eb" });
+  const terminalPreviewColors = getTerminalTheme(terminalTheme);
+  const terminalPreviewStyle = {
+    backgroundColor: terminalPreviewColors.background,
+    color: terminalPreviewColors.foreground,
+    backgroundImage: terminalBackgroundImage
+      ? `linear-gradient(rgba(2, 6, 23, 0.48), rgba(2, 6, 23, 0.48)), url(${JSON.stringify(terminalBackgroundImage)})`
+      : undefined
+  } as CSSProperties;
 
   function addRule() {
     onAddHighlightRule(draft);
     setDraft({ name: "", pattern: "", foreground: "#2563eb" });
+  }
+
+  function uploadTerminalBackground(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        onTerminalBackgroundImageChange(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+    event.currentTarget.value = "";
   }
 
   return (
@@ -1447,9 +1529,49 @@ function SettingsPanel({
                 </button>
               ))}
             </div>
+            <div className="mt-4 border-t border-[var(--app-line)] pt-4">
+              <div className="mb-2 text-xs font-semibold text-[var(--app-muted)]">终端颜色</div>
+              <div className="grid grid-cols-2 gap-2">
+                {TERMINAL_THEMES.map((mode) => (
+                  <button
+                    key={mode}
+                    data-testid={`terminal-theme-${mode}`}
+                    className={cn(
+                      "h-10 rounded-md border text-sm font-semibold transition-colors",
+                      terminalTheme === mode
+                        ? "border-blue-300 bg-blue-50 text-blue-700"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    )}
+                    onClick={() => onTerminalThemeChange(mode)}
+                  >
+                    {mode === "dark" ? "黑色终端" : "浅色终端"}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+                <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  上传背景图
+                  <input
+                    data-testid="terminal-background-upload"
+                    className="sr-only"
+                    type="file"
+                    accept="image/*"
+                    onChange={uploadTerminalBackground}
+                  />
+                </label>
+                <Button
+                  variant="outline"
+                  className="h-10 px-3"
+                  disabled={!terminalBackgroundImage}
+                  onClick={() => onTerminalBackgroundImageChange("")}
+                >
+                  清除
+                </Button>
+              </div>
+            </div>
             <div className="mt-4 rounded-md border border-[var(--app-line)] bg-[var(--subtle-bg)] p-3">
               <div className="text-xs font-semibold text-[var(--app-muted)]">终端预览</div>
-              <pre className="mt-2 rounded-md bg-[var(--terminal-bg)] p-3 text-xs leading-5 text-[var(--terminal-text)]">
+              <pre className="mt-2 rounded-md bg-cover bg-center p-3 text-xs leading-5" style={terminalPreviewStyle}>
                 ERROR ssh failed at 10.0.0.8{"\n"}WARN retry in 300ms
               </pre>
             </div>

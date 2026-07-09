@@ -56,3 +56,12 @@ def test_release_template_references_existing_react_assets():
     assert asset_paths
     for asset_path in asset_paths:
         assert (ROOT / "prismssh-cpp/x64/Release/ui" / asset_path).is_file()
+
+
+def test_borderless_window_maximize_uses_monitor_work_area():
+    source = read("prismssh-cpp/main.cpp")
+
+    assert "WM_GETMINMAXINFO" in source
+    assert "MONITORINFO" in source
+    assert "rcWork" in source
+    assert "ptMaxSize" in source
