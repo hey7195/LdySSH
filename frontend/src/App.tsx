@@ -6,8 +6,10 @@ import {
   Bot,
   CheckCircle2,
   ChevronDown,
+  Copy,
   Command,
   Cpu,
+  Eye,
   ExternalLink,
   FolderOpen,
   Grid2X2,
@@ -27,6 +29,7 @@ import {
   Server,
   Settings,
   Terminal,
+  Trash2,
   X
 } from "lucide-react";
 import { Button, EmptyState, Input, Panel } from "./components/ui";
@@ -57,6 +60,8 @@ import {
 type Tool = "ssh" | "cmd" | "monitor" | "local" | "browser" | "settings";
 type TerminalSidePanel = "commands" | "files" | "ai";
 type AiTool = "codex" | "hermes";
+type AiNoiseMode = "minimal" | "standard" | "debug";
+type AiContextSource = "terminal_selection" | "session_metadata";
 
 interface SessionTab {
   id: string;
@@ -84,6 +89,16 @@ interface AiQuote {
   text: string;
 }
 
+interface AiContextChip {
+  id: string;
+  type: AiContextSource;
+  label: string;
+  sourceTitle: string;
+  text: string;
+  lineCount?: number;
+  capturedAt: number;
+}
+
 interface AiChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -94,6 +109,9 @@ interface AiSession {
   id: string;
   title: string;
   tool: AiTool;
+  model: string;
+  noiseMode: AiNoiseMode;
+  continueSession: boolean;
   memory: string;
   messages: AiChatMessage[];
   createdAt: number;
@@ -112,6 +130,9 @@ interface AiRun {
   id: string;
   tool: AiTool;
   prompt: string;
+  model: string;
+  noiseMode: AiNoiseMode;
+  contexts: AiContextChip[];
   sessionTitle: string;
   codexCommand: string;
   codexWorkingDirectory: string;
@@ -186,6 +207,8 @@ const defaultAiConfig: AiConfig = {
   hermesWsUrl: "",
   hermesApiToken: ""
 };
+
+const aiModelOptions = ["", "gpt-5.5", "gpt-5.4-mini", "deepseek-v3.2", "hi"];
 
 const storageKeys = {
   theme: "ldyssh.ui.theme",
@@ -329,6 +352,9 @@ function createAiSession(tool: AiTool = "codex"): AiSession {
     id: `ai_${now}`,
     title: "新会话",
     tool,
+    model: "",
+    noiseMode: "standard",
+    continueSession: true,
     memory: "",
     messages: [],
     createdAt: now,
@@ -336,15 +362,64 @@ function createAiSession(tool: AiTool = "codex"): AiSession {
   };
 }
 
+function hydrateAiSession(session: Partial<AiSession>, fallbackTool: AiTool = "codex"): AiSession {
+  return {
+    ...createAiSession(session.tool || fallbackTool),
+    ...session,
+    tool: session.tool || fallbackTool,
+    model: session.model || "",
+    noiseMode: session.noiseMode || "standard",
+    continueSession: session.continueSession ?? true,
+    memory: session.memory || "",
+    messages: session.messages || []
+  };
+}
+
 function loadStoredAiSessions(): AiSession[] {
   const raw = window.localStorage.getItem(storageKeys.aiSessions);
   if (!raw) return [createAiSession()];
   try {
-    const parsed = JSON.parse(raw) as AiSession[];
-    return parsed.length > 0 ? parsed : [createAiSession()];
+    const parsed = JSON.parse(raw) as Partial<AiSession>[];
+    return parsed.length > 0 ? parsed.map((session) => hydrateAiSession(session)) : [createAiSession()];
   } catch {
     return [createAiSession()];
   }
+}
+
+function getLineCount(text: string) {
+  return Math.max(1, text.split(/\r?\n/).length);
+}
+
+function createQuoteContext(quote: AiQuote): AiContextChip {
+  const lineCount = getLineCount(quote.text);
+  return {
+    id: quote.id,
+    type: "terminal_selection",
+    label: `终端选区 ${lineCount} 行`,
+    sourceTitle: quote.sourceTitle,
+    text: quote.text,
+    lineCount,
+    capturedAt: Date.now()
+  };
+}
+
+function createSessionContext(activeSession?: SessionTab): AiContextChip | null {
+  if (!activeSession) return null;
+  const lines = [
+    `类型: ${activeSession.kind}`,
+    `标题: ${activeSession.title}`,
+    activeSession.connectParams?.hostname ? `主机: ${activeSession.connectParams.hostname}` : "",
+    activeSession.connectParams?.port ? `端口: ${activeSession.connectParams.port}` : "",
+    activeSession.connectParams?.username ? `用户: ${activeSession.connectParams.username}` : ""
+  ].filter(Boolean);
+  return {
+    id: `session_${activeSession.id}`,
+    type: "session_metadata",
+    label: "当前会话",
+    sourceTitle: activeSession.title,
+    text: lines.join("\n"),
+    capturedAt: Date.now()
+  };
 }
 
 export function App() {
@@ -2991,10 +3066,19 @@ function AiWorkspacePanel({
   const [running, setRunning] = useState(false);
   const [runStatus, setRunStatus] = useState("");
   const [hermesStatus, setHermesStatus] = useState("等待检查");
+  const [configOpen, setConfigOpen] = useState(false);
+  const [dismissedContextIds, setDismissedContextIds] = useState<string[]>([]);
+  const [previewContextId, setPreviewContextId] = useState("");
   const activeAiSession = aiSessions.find((session) => session.id === activeAiSessionId) || aiSessions[0];
   const selectedTool = activeAiSession?.tool || "codex";
   const messages = activeAiSession?.messages || [];
   const isCodex = selectedTool === "codex";
+  const sessionContext = useMemo(() => createSessionContext(activeSession), [activeSession]);
+  const contextChips = useMemo(() => {
+    const contexts = [sessionContext, ...quotes.map((quote) => createQuoteContext(quote))].filter(Boolean) as AiContextChip[];
+    return contexts.filter((context) => !dismissedContextIds.includes(context.id));
+  }, [dismissedContextIds, quotes, sessionContext]);
+  const previewContext = contextChips.find((context) => context.id === previewContextId);
 
   useEffect(() => {
     window.localStorage.setItem(storageKeys.aiSessions, JSON.stringify(aiSessions));
@@ -3007,6 +3091,9 @@ function AiWorkspacePanel({
   }
 
   function setSelectedTool(tool: AiTool) {
+    if (tool === "hermes") {
+      setConfigOpen(true);
+    }
     updateActiveAiSession((session) => ({ ...session, tool, updatedAt: Date.now() }));
   }
 
@@ -3033,6 +3120,25 @@ function AiWorkspacePanel({
     updateActiveAiSession((session) => ({ ...session, memory, updatedAt: Date.now() }));
   }
 
+  function updateAiModel(model: string) {
+    updateActiveAiSession((session) => ({ ...session, model, updatedAt: Date.now() }));
+  }
+
+  function updateNoiseMode(noiseMode: AiNoiseMode) {
+    updateActiveAiSession((session) => ({ ...session, noiseMode, updatedAt: Date.now() }));
+  }
+
+  function updateContinueSession(continueSession: boolean) {
+    updateActiveAiSession((session) => ({ ...session, continueSession, updatedAt: Date.now() }));
+  }
+
+  function dismissContext(contextId: string) {
+    setDismissedContextIds((current) => [...current, contextId]);
+    if (previewContextId === contextId) {
+      setPreviewContextId("");
+    }
+  }
+
   async function sendPrompt() {
     const text = prompt.trim();
     if (!text || running) return;
@@ -3041,11 +3147,16 @@ function AiWorkspacePanel({
     setRunStatus("");
     setMessages((current) => [...current, { id: `user_${Date.now()}`, role: "user", text }]);
 
-    const fullPrompt = buildAiPrompt(text, quotes, activeSession, activeAiSession);
+    const model = activeAiSession?.model || "";
+    const noiseMode = activeAiSession?.noiseMode || "standard";
+    const fullPrompt = buildAiPrompt(text, contextChips, activeSession, activeAiSession);
     void executeAiRun({
       id: `run_${Date.now()}`,
       tool: selectedTool,
       prompt: fullPrompt,
+      model,
+      noiseMode,
+      contexts: contextChips,
       sessionTitle: activeSession?.title || "",
       codexCommand: config.codexCommand,
       codexWorkingDirectory: config.codexWorkingDirectory,
@@ -3065,7 +3176,9 @@ function AiWorkspacePanel({
         const start = await nativeBridge.startCodexRun({
           command: run.codexCommand,
           workingDirectory: run.codexWorkingDirectory,
-          prompt: run.prompt
+          prompt: run.prompt,
+          model: run.model,
+          noiseMode: run.noiseMode
         });
         const result = start.success && start.jobId
           ? await pollCodexRun(start.jobId)
@@ -3147,61 +3260,111 @@ function AiWorkspacePanel({
   }
 
   return (
-    <div className="grid h-full min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] bg-white">
-        <header className="border-b border-slate-200 px-4 py-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-slate-950">AI 对话栏</h2>
-              <p className="mt-1 text-xs text-slate-500">{isCodex ? "当前工具：本地 Codex CLI" : "当前工具：Hermes 本地 / 远端"}</p>
-            </div>
-            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              可用
-            </span>
+    <div className="grid h-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-white">
+      <header className="border-b border-slate-200 px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-950">AI 对话栏</h2>
+            <p className="mt-1 text-xs text-slate-500">{isCodex ? "当前工具：本地 Codex CLI" : "当前工具：Hermes 本地 / 远端"}</p>
           </div>
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            可用
+          </span>
+        </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <AiToolButton
-              active={selectedTool === "codex"}
-              icon={<Cpu className="h-4 w-4" />}
-              title="Codex CLI"
-              description="本地执行器"
-              onClick={() => setSelectedTool("codex")}
-            />
-            <AiToolButton
-              active={selectedTool === "hermes"}
-              icon={<MessageSquare className="h-4 w-4" />}
-              title="Hermes"
-              description="对话网关"
-              onClick={() => setSelectedTool("hermes")}
-            />
-          </div>
-          <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <AiToolButton
+            active={selectedTool === "codex"}
+            icon={<Cpu className="h-4 w-4" />}
+            title="Codex CLI"
+            description="本地执行器"
+            onClick={() => setSelectedTool("codex")}
+          />
+          <AiToolButton
+            active={selectedTool === "hermes"}
+            icon={<MessageSquare className="h-4 w-4" />}
+            title="Hermes"
+            description="对话网关"
+            onClick={() => setSelectedTool("hermes")}
+          />
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">模型</span>
             <select
-              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
-              aria-label="AI 会话记录"
-              value={activeAiSession?.id || ""}
-              onChange={(event) => setActiveAiSessionId(event.target.value)}
+              className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              aria-label="模型"
+              value={activeAiSession?.model || ""}
+              onChange={(event) => updateAiModel(event.target.value)}
             >
-              {aiSessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {session.title}
+              {aiModelOptions.map((model) => (
+                <option key={model || "auto"} value={model}>
+                  {model || "自动"}
                 </option>
               ))}
             </select>
-            <Button variant="outline" className="h-9 px-3" onClick={createNewAiSession}>
-              新会话
-            </Button>
-          </div>
-        </header>
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">降噪模式</span>
+            <select
+              className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              aria-label="降噪模式"
+              value={activeAiSession?.noiseMode || "standard"}
+              onChange={(event) => updateNoiseMode(event.target.value as AiNoiseMode)}
+            >
+              <option value="minimal">极简</option>
+              <option value="standard">标准</option>
+              <option value="debug">调试</option>
+            </select>
+          </label>
+        </div>
 
-        <AiConfigPanel
-          selectedTool={selectedTool}
-          config={config}
-          hermesStatus={hermesStatus}
-          onConfigChange={onConfigChange}
-          onCheckHermes={checkHermesConnection}
-        />
+        <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+          <select
+            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+            aria-label="AI 会话记录"
+            value={activeAiSession?.id || ""}
+            onChange={(event) => setActiveAiSessionId(event.target.value)}
+          >
+            {aiSessions.map((session) => (
+              <option key={session.id} value={session.id}>
+                {session.title}
+              </option>
+            ))}
+          </select>
+          <Button variant="outline" className="h-9 px-3" onClick={createNewAiSession}>
+            新会话
+          </Button>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              checked={activeAiSession?.continueSession ?? true}
+              onChange={(event) => updateContinueSession(event.target.checked)}
+            />
+            继续当前会话
+          </label>
+          <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => setConfigOpen((open) => !open)}>
+            高级配置
+          </Button>
+        </div>
+      </header>
+
+      <div className="min-h-0 overflow-auto bg-slate-50">
+        {configOpen && (
+          <AiConfigPanel
+            selectedTool={selectedTool}
+            config={config}
+            hermesStatus={hermesStatus}
+            onConfigChange={onConfigChange}
+            onCheckHermes={checkHermesConnection}
+          />
+        )}
 
         <section className="border-b border-slate-200 bg-white px-4 py-3">
           <label className="block">
@@ -3216,51 +3379,127 @@ function AiWorkspacePanel({
           </label>
         </section>
 
-        <div data-testid="ai-chat-transcript" className="min-h-0 overflow-auto bg-slate-50 px-4 py-4">
-          <div className="space-y-3">
-            {quotes.map((quote) => (
-              <AiQuoteCard key={quote.id} quote={quote} />
+        <section className="border-b border-slate-200 bg-white px-4 py-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-[11px] font-semibold text-slate-500">当前上下文</div>
+            <div className="text-[11px] text-slate-400">{contextChips.length} 项</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {contextChips.map((context) => (
+              <AiContextChipView
+                key={context.id}
+                context={context}
+                active={previewContextId === context.id}
+                onPreview={() => setPreviewContextId(previewContextId === context.id ? "" : context.id)}
+                onDismiss={() => dismissContext(context.id)}
+              />
             ))}
-            {messages.map((message) => (
-              <AiMessage key={message.id} role={message.role}>{message.text}</AiMessage>
-            ))}
-            {messages.length === 0 && quotes.length === 0 && (
-              <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-400">
-                暂无对话
+            {contextChips.length === 0 && (
+              <div className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">
+                暂无附加上下文
               </div>
             )}
-            {running && <AiRunStatus text={runStatus || "Codex 执行中..."} thinking />}
-            {!running && runStatus && <AiRunStatus text={runStatus} />}
           </div>
-        </div>
+          {previewContext && (
+            <pre className="mt-3 max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
+              {previewContext.text}
+            </pre>
+          )}
+        </section>
 
-        <footer className="border-t border-slate-200 bg-white p-4">
-          <div className="mb-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
-            <span className="rounded-full bg-slate-100 px-2 py-1">附加当前会话</span>
-            <span className="rounded-full bg-slate-100 px-2 py-1">附加终端输出</span>
-          </div>
-          <div className="grid grid-cols-[1fr_44px] gap-2">
-            <input
-              className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
-              value={prompt}
-              placeholder="输入任务，选择 Codex 或 Hermes 执行..."
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  void sendPrompt();
-                }
-              }}
-            />
-            <button
-              className="inline-flex h-10 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
-              title="发送"
-              disabled={running}
-              onClick={() => void sendPrompt()}
-            >
-              <Send className="h-4 w-4" />
-            </button>
-          </div>
-        </footer>
+        <div data-testid="ai-chat-transcript" className="space-y-3 px-4 py-4">
+          {messages.map((message) => (
+            <AiMessage key={message.id} role={message.role}>{message.text}</AiMessage>
+          ))}
+          {messages.length === 0 && (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-400">
+              暂无对话
+            </div>
+          )}
+          {running && <AiRunStatus text={runStatus || "Codex 执行中..."} thinking />}
+          {!running && runStatus && <AiRunStatus text={runStatus} />}
+        </div>
+      </div>
+
+      <footer className="border-t border-slate-200 bg-white p-4">
+        <div className="mb-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
+          <span className="rounded-full bg-slate-100 px-2 py-1">附加当前会话</span>
+          <span className="rounded-full bg-slate-100 px-2 py-1">附加终端输出</span>
+          <span className="rounded-full bg-slate-100 px-2 py-1">附加选区日志</span>
+        </div>
+        <div className="grid grid-cols-[1fr_44px] gap-2">
+          <input
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+            value={prompt}
+            placeholder="输入任务，选择 Codex 或 Hermes 执行..."
+            onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                void sendPrompt();
+              }
+            }}
+          />
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+            title="发送"
+            disabled={running}
+            onClick={() => void sendPrompt()}
+          >
+            <Send className="h-4 w-4" />
+          </button>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function AiContextChipView({
+  context,
+  active,
+  onPreview,
+  onDismiss
+}: {
+  context: AiContextChip;
+  active: boolean;
+  onPreview: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className={cn(
+      "inline-flex items-center overflow-hidden rounded-md border bg-white text-xs shadow-sm",
+      active ? "border-blue-300 ring-2 ring-blue-100" : "border-slate-200"
+    )}>
+      <button
+        className="inline-flex h-8 items-center gap-1.5 px-2.5 font-semibold text-slate-700 hover:bg-slate-50"
+        onClick={onPreview}
+      >
+        <MessageSquare className="h-3.5 w-3.5 text-blue-600" />
+        {context.label}
+      </button>
+      <button
+        aria-label={`查看 ${context.label}`}
+        title={`查看 ${context.label}`}
+        className="flex h-8 w-8 items-center justify-center border-l border-slate-100 text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+        onClick={onPreview}
+      >
+        <Eye className="h-3.5 w-3.5" />
+      </button>
+      <button
+        aria-label={`复制 ${context.label}`}
+        title={`复制 ${context.label}`}
+        className="flex h-8 w-8 items-center justify-center border-l border-slate-100 text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+        onClick={() => void navigator.clipboard?.writeText(context.text)}
+      >
+        <Copy className="h-3.5 w-3.5" />
+      </button>
+      <button
+        aria-label={`删除 ${context.label}`}
+        title={`删除 ${context.label}`}
+        className="flex h-8 w-8 items-center justify-center border-l border-slate-100 text-slate-500 hover:bg-rose-50 hover:text-rose-600"
+        onClick={onDismiss}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }
@@ -3279,21 +3518,47 @@ function AiQuoteCard({ quote }: { quote: AiQuote }) {
   );
 }
 
-function buildAiPrompt(prompt: string, quotes: AiQuote[], activeSession?: SessionTab, aiSession?: AiSession) {
+function buildAiPrompt(prompt: string, contexts: AiContextChip[], activeSession?: SessionTab, aiSession?: AiSession) {
+  const modelConfig = JSON.stringify({
+    provider: aiSession?.tool || "codex",
+    model: aiSession?.model || "",
+    noiseMode: aiSession?.noiseMode || "standard",
+    continueSession: aiSession?.continueSession ?? true
+  });
+  const sessionLines = activeSession
+    ? [
+        `- 类型: ${activeSession.kind}`,
+        `- 标题: ${activeSession.title}`,
+        activeSession.connectParams?.hostname ? `- host: ${activeSession.connectParams.hostname}` : "",
+        activeSession.connectParams?.username ? `- user: ${activeSession.connectParams.username}` : ""
+      ].filter(Boolean)
+    : ["- 无活动终端"];
+  const formattedContexts = contexts
+    .map((context) => {
+      if (context.type === "terminal_selection") {
+        return `<terminal_selection title="${context.sourceTitle}" lines="${context.lineCount || getLineCount(context.text)}">\n${context.text}\n</terminal_selection>`;
+      }
+      return `<session_metadata title="${context.sourceTitle}">\n${context.text}\n</session_metadata>`;
+    })
+    .join("\n\n");
   const context = [
-    aiSession?.memory.trim() ? `会话记忆：\n${aiSession.memory.trim()}` : "",
-    activeSession ? `当前终端会话：${activeSession.title}` : "",
+    "你正在 LdySSH 内置 AI 对话栏中工作。",
+    modelConfig,
+    `当前终端:\n${sessionLines.join("\n")}`,
+    aiSession?.memory.trim() ? `会话记忆:\n${aiSession.memory.trim()}` : "",
     aiSession?.messages.length
-      ? `最近对话：\n${aiSession.messages
+      ? `最近对话:\n${aiSession.messages
           .slice(-12)
-          .map((message) => `${message.role === "user" ? "用户" : "助手"}：${message.text}`)
+          .map((message) => `${message.role === "user" ? "用户" : "助手"}: ${message.text}`)
           .join("\n")}`
       : "",
-    ...quotes.map((quote) => `引用自 ${quote.sourceTitle}：\n${quote.text}`)
+    formattedContexts ? `附加上下文:\n${formattedContexts}` : "",
+    `用户任务:\n${prompt}`,
+    "输出要求:\n- 先给结论，再给依据。\n- 如需命令，给可复制命令。\n- 不要编造未看到的日志。"
   ]
     .filter(Boolean)
     .join("\n\n");
-  return context ? `${context}\n\n用户问题：${prompt}` : prompt;
+  return context;
 }
 
 function normalizeBaseUrl(value: string) {

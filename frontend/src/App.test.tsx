@@ -160,12 +160,16 @@ describe("AI tools panel", () => {
     expect(await screen.findByRole("heading", { name: "AI 对话栏" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Codex CLI/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Hermes/ })).toBeInTheDocument();
-    expect(screen.queryByText("当前上下文")).not.toBeInTheDocument();
+    expect(screen.getByText("当前上下文")).toBeInTheDocument();
+    expect(screen.getByLabelText("模型")).toBeInTheDocument();
+    expect(screen.getByLabelText("降噪模式")).toBeInTheDocument();
+    expect(screen.getByLabelText("继续当前会话")).toBeChecked();
+    expect(screen.getByRole("button", { name: "高级配置" })).toBeInTheDocument();
     expect(screen.queryByText("Codex CLI 执行器")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行...")).toBeInTheDocument();
   });
 
-  test("shows quoted terminal selection inside the AI chat panel", async () => {
+  test("shows terminal selection as a removable AI context chip", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
@@ -178,8 +182,48 @@ describe("AI tools panel", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "添加到对话" }));
 
-    expect(await screen.findByText("来自 Local CMD 的终端引用")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    expect(await screen.findByRole("button", { name: "终端选区 1 行" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看 终端选区 1 行" }));
     expect(screen.getByText("ERROR failed to connect 10.0.0.8")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "删除 终端选区 1 行" }));
+    expect(screen.queryByRole("button", { name: "终端选区 1 行" })).not.toBeInTheDocument();
+  });
+
+  test("sends Codex with model, noise mode, session metadata and selected context", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    await waitFor(() => expect(terminalMock.selectionHandler).toBeTypeOf("function"));
+
+    terminalMock.selectionText = "WARN disk usage 92%\nERROR cleanup failed";
+    terminalMock.selectionHandler?.();
+    fireEvent.click(await screen.findByRole("button", { name: "添加到对话" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+
+    fireEvent.change(screen.getByLabelText("模型"), { target: { value: "gpt-5.5" } });
+    fireEvent.change(screen.getByLabelText("降噪模式"), { target: { value: "minimal" } });
+    fireEvent.change(await screen.findByTestId("ai-memory-input"), {
+      target: { value: "优先给修复命令" }
+    });
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "分析这个错误" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => {
+      expect(window.pywebview?.api?.start_codex_run).toHaveBeenCalled();
+    });
+    const call = (window.pywebview?.api?.start_codex_run as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(call?.[0]).toContain("\"model\":\"gpt-5.5\"");
+    expect(call?.[0]).toContain("\"noiseMode\":\"minimal\"");
+    expect(call?.[0]).toContain("当前终端:");
+    expect(call?.[0]).toContain("Local CMD");
+    expect(call?.[0]).toContain("<terminal_selection");
+    expect(call?.[0]).toContain("WARN disk usage 92%");
+    expect(call?.[0]).toContain("优先给修复命令");
+    expect(await screen.findByText("Codex 已完成分析")).toBeInTheDocument();
   });
 
   test("starts Codex in a background job without approval", async () => {

@@ -192,6 +192,8 @@ export interface CodexRunParams {
   command: string;
   workingDirectory: string;
   prompt: string;
+  model?: string;
+  noiseMode?: string;
 }
 
 export interface CodexRunResult {
