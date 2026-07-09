@@ -12,6 +12,48 @@ const terminalMock = vi.hoisted(() => ({
   instances: [] as Array<{ writes: string[] }>
 }));
 
+const socketIoMock = vi.hoisted(() => {
+  type Handler = (payload?: unknown) => void;
+  const sockets: any[] = [];
+  const io = vi.fn((url: string, options: Record<string, unknown>) => {
+    const handlers = new Map<string, Handler[]>();
+    const socket: any = {
+      url,
+      options,
+      emitted: [] as Array<{ event: string; payload?: unknown }>,
+      connected: true,
+      on: vi.fn((event: string, handler: Handler) => {
+        handlers.set(event, [...(handlers.get(event) || []), handler]);
+        return socket;
+      }),
+      off: vi.fn((event: string, handler: Handler) => {
+        handlers.set(event, (handlers.get(event) || []).filter((item) => item !== handler));
+        return socket;
+      }),
+      removeAllListeners: vi.fn(() => {
+        handlers.clear();
+        return socket;
+      }),
+      disconnect: vi.fn(() => {
+        socket.connected = false;
+        return socket;
+      }),
+      emit: vi.fn((event: string, payload?: unknown) => {
+        socket.emitted.push({ event, payload });
+        return socket;
+      }),
+      trigger(event: string, payload?: unknown) {
+        for (const handler of handlers.get(event) || []) {
+          handler(payload);
+        }
+      }
+    };
+    sockets.push(socket);
+    return socket;
+  });
+  return { io, sockets };
+});
+
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
     fit() {}
@@ -55,6 +97,10 @@ vi.mock("@xterm/xterm", () => ({
   }
 }));
 
+vi.mock("socket.io-client", () => ({
+  io: socketIoMock.io
+}));
+
 beforeEach(() => {
   terminalMock.selectionText = "";
   terminalMock.selectionHandler = undefined;
@@ -62,6 +108,8 @@ beforeEach(() => {
   terminalMock.options = [];
   terminalMock.writes = [];
   terminalMock.instances = [];
+  socketIoMock.io.mockClear();
+  socketIoMock.sockets.length = 0;
   window.localStorage.clear();
 
   window.pywebview = {
@@ -453,6 +501,63 @@ describe("AI tools panel", () => {
     expect(JSON.parse(chatCall.body)).toEqual({ session_id: "session-1", message: expect.any(String) });
     expect(chatCall.cookie).toBe("hermes_session=sid123");
     expect(screen.queryByLabelText("Hermes API Token")).not.toBeInTheDocument();
+  });
+
+  test("uses Hermes bearer token with chat-run socket for current WebUI", async () => {
+    (window.pywebview?.api?.hermes_http_request as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ token: "jwt123" })
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
+    fireEvent.change(await screen.findByLabelText("Hermes Base URL"), {
+      target: { value: "http://127.0.0.1:8648" }
+    });
+    fireEvent.change(await screen.findByLabelText("Hermes 用户名"), {
+      target: { value: "admin" }
+    });
+    fireEvent.change(await screen.findByLabelText("Hermes 登录密码"), {
+      target: { value: "secret" }
+    });
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "你好" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(socketIoMock.io).toHaveBeenCalled());
+    const socket = socketIoMock.sockets[0];
+    expect(socket.url).toBe("http://127.0.0.1:8648/chat-run");
+    expect(socket.options.auth).toEqual({ token: "jwt123" });
+    expect(socket.options.query).toEqual({ profile: "default" });
+    expect(socket.emitted[0]?.event).toBe("run");
+    expect(socket.emitted[0]?.payload).toEqual(expect.objectContaining({
+      profile: "default",
+      source: "cli",
+      session_id: expect.any(String),
+      queue_id: expect.any(String)
+    }));
+    expect(socket.emitted[0]?.payload.input).toContain("用户任务:\n你好");
+
+    socket.trigger("message.delta", {
+      session_id: socket.emitted[0].payload.session_id,
+      event: "message.delta",
+      delta: "Hermes 已回复"
+    });
+    socket.trigger("run.completed", {
+      session_id: socket.emitted[0].payload.session_id,
+      event: "run.completed"
+    });
+
+    expect(await screen.findByText("Hermes 已回复")).toBeInTheDocument();
+    const calls = (window.pywebview?.api?.hermes_http_request as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).toHaveLength(1);
   });
 
   test("configures a remote Hermes WSS URL", async () => {

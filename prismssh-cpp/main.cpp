@@ -382,7 +382,8 @@ HttpRunResult RunHttpRequest(
     const std::string& methodUtf8,
     const std::string& urlUtf8,
     const std::string& body,
-    const std::string& cookie
+    const std::string& cookie,
+    const std::string& token
 ) {
     HttpRunResult result;
     std::wstring url = Utf8ToUtf16(urlUtf8);
@@ -454,6 +455,9 @@ HttpRunResult RunHttpRequest(
     }
     if (!TrimString(cookie).empty()) {
         headers += L"Cookie: " + Utf8ToUtf16(TrimString(cookie)) + L"\r\n";
+    }
+    if (!TrimString(token).empty()) {
+        headers += L"Authorization: Bearer " + Utf8ToUtf16(TrimString(token)) + L"\r\n";
     }
 
     LPVOID requestBody = body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data();
@@ -1232,6 +1236,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string url = TrimString(SafeGetJsonString(params, "url", ""));
             std::string body = SafeGetJsonString(params, "body", "");
             std::string cookie = SafeGetJsonString(params, "cookie", "");
+            std::string token = SafeGetJsonString(params, "token", "");
 
             nlohmann::json retObj;
             if (url.empty()) {
@@ -1239,7 +1244,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 retObj["status"] = 0;
                 retObj["error"] = "URL is empty";
             } else {
-                HttpRunResult run = RunHttpRequest(method, url, body, cookie);
+                HttpRunResult run = RunHttpRequest(method, url, body, cookie, token);
                 retObj["success"] = run.success;
                 retObj["status"] = run.status;
                 retObj["contentType"] = run.contentType;

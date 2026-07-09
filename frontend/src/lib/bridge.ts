@@ -222,6 +222,7 @@ export interface HermesHttpRequestParams {
   url: string;
   body?: string;
   cookie?: string;
+  token?: string;
 }
 
 export interface HermesHttpRequestResult {

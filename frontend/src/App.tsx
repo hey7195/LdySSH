@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSPropert
 import * as Dialog from "@radix-ui/react-dialog";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
+import { io, type Socket } from "socket.io-client";
 import {
   Bot,
   CheckCircle2,
@@ -62,6 +63,8 @@ type TerminalSidePanel = "commands" | "files" | "ai";
 type AiTool = "codex" | "hermes";
 type AiNoiseMode = "minimal" | "standard" | "debug";
 type AiContextSource = "terminal_selection" | "session_metadata";
+
+type HermesRunEvent = Record<string, unknown> & { event?: string; session_id?: string };
 
 interface SessionTab {
   id: string;
@@ -3704,6 +3707,11 @@ async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: str
     if (!login.success) {
       throw new Error(`Hermes 登录失败：HTTP ${login.status || 0}: ${login.error || login.body || "密码错误或认证失败"}`);
     }
+    const loginData = parseHermesJson(login);
+    const token = extractHermesToken(loginData);
+    if (token) {
+      return sendHermesStudioSocket(base, prompt, token);
+    }
     cookie = login.cookie || "";
   }
 
@@ -3752,6 +3760,87 @@ function extractHermesSessionId(data: unknown) {
     return (session as Record<string, string>).session_id;
   }
   return "";
+}
+
+function extractHermesToken(data: unknown) {
+  if (!data || typeof data !== "object") return "";
+  const record = data as Record<string, unknown>;
+  return typeof record.token === "string" ? record.token.trim() : "";
+}
+
+function makeHermesRunId(prefix: string) {
+  const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}_${id}`;
+}
+
+function sendHermesStudioSocket(baseUrl: string, prompt: string, token: string) {
+  const sessionId = makeHermesRunId("ldyssh");
+  const queueId = makeHermesRunId("queue");
+  return new Promise<Record<string, string>>((resolve, reject) => {
+    let socket: Socket | null = null;
+    let settled = false;
+    let timer = 0;
+    const chunks: string[] = [];
+
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      socket?.removeAllListeners();
+      socket?.disconnect();
+    };
+    const finish = (error?: Error, reply?: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ reply: reply || chunks.join("") || "Hermes 已返回结果。" });
+    };
+    const handleEvent = (event: HermesRunEvent, handler: (payload: HermesRunEvent) => void) => {
+      if (event.session_id && event.session_id !== sessionId) return;
+      handler(event);
+    };
+
+    timer = window.setTimeout(() => {
+      finish(new Error("Hermes Socket.IO 响应超时"));
+    }, 120000);
+
+    socket = io(`${baseUrl}/chat-run`, {
+      auth: { token },
+      query: { profile: "default" },
+      transports: ["websocket", "polling"],
+      reconnection: false,
+      timeout: 30000
+    });
+    socket.on("message.delta", (event: HermesRunEvent) => handleEvent(event, (payload) => {
+      const delta = payload.delta ?? payload.text;
+      if (typeof delta === "string") chunks.push(delta);
+    }));
+    socket.on("run.completed", (event: HermesRunEvent) => handleEvent(event, (payload) => {
+      const parsed = payload.parsed_content ?? payload.output;
+      finish(undefined, typeof parsed === "string" && parsed.trim() ? parsed : chunks.join(""));
+    }));
+    socket.on("run.failed", (event: HermesRunEvent) => handleEvent(event, (payload) => {
+      const message = payload.error || payload.message || "请求失败";
+      finish(new Error(`Hermes Socket.IO 运行失败：${String(message)}`));
+    }));
+    socket.on("connect_error", (error: Error) => {
+      finish(new Error(`Hermes Socket.IO 连接失败：${error.message}`));
+    });
+    socket.on("disconnect", (reason: string) => {
+      if (!settled && reason !== "io client disconnect") {
+        finish(new Error(`Hermes Socket.IO 已断开：${reason}`));
+      }
+    });
+    socket.emit("run", {
+      input: prompt,
+      session_id: sessionId,
+      profile: "default",
+      source: "cli",
+      queue_id: queueId
+    });
+  });
 }
 
 function sendHermesWebSocket(wsUrl: string, prompt: string, sessionTitle: string) {
