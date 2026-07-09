@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -118,6 +118,12 @@ interface PendingAiRun {
   hermesApiToken: string;
 }
 
+interface TerminalSearchMatch {
+  lineNumber: number;
+  column: number;
+  line: string;
+}
+
 const tools: Array<{ id: Tool; label: string; title: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "ssh", label: "会话", title: "SSH 会话", icon: Server },
   { id: "local", label: "本地", title: "本地终端", icon: Terminal },
@@ -172,6 +178,31 @@ const storageKeys = {
   aiConfig: "ldyssh.ai.config",
   aiSessions: "ldyssh.ai.sessions"
 };
+
+const TERMINAL_HISTORY_LIMIT = 2_000_000;
+
+function trimTerminalHistory(text: string) {
+  return text.length > TERMINAL_HISTORY_LIMIT ? text.slice(-TERMINAL_HISTORY_LIMIT) : text;
+}
+
+function findTerminalSearchMatches(transcript: string, query: string): TerminalSearchMatch[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+
+  const matches: TerminalSearchMatch[] = [];
+  transcript.split(/\r?\n/).forEach((line, index) => {
+    const haystack = line.toLowerCase();
+    let offset = 0;
+    while (offset < haystack.length) {
+      const column = haystack.indexOf(needle, offset);
+      if (column === -1) break;
+      matches.push({ lineNumber: index + 1, column: column + 1, line });
+      offset = column + needle.length;
+    }
+  });
+
+  return matches;
+}
 
 function loadStoredTheme(): ThemeMode {
   const value = window.localStorage.getItem(storageKeys.theme);
@@ -345,7 +376,7 @@ export function App() {
     if (!text) return;
     setTerminalHistories((current) => ({
       ...current,
-      [sessionId]: `${current[sessionId] || ""}${text}`
+      [sessionId]: trimTerminalHistory(`${current[sessionId] || ""}${text}`)
     }));
   }
 
@@ -1082,6 +1113,15 @@ function TerminalSurface({
   const decoderRef = useRef<TextDecoder | null>(null);
   const activeIdRef = useRef("");
   const [selectedText, setSelectedText] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const searchMatches = useMemo(
+    () => findTerminalSearchMatches(initialTranscript, searchQuery),
+    [initialTranscript, searchQuery]
+  );
+  const visibleMatchIndex = searchMatches.length === 0 ? 0 : Math.min(activeMatchIndex, searchMatches.length - 1);
+  const activeMatch = searchMatches[visibleMatchIndex];
 
   useEffect(() => {
     activeIdRef.current = activeSession?.id || "";
@@ -1092,6 +1132,16 @@ function TerminalSurface({
   useEffect(() => {
     onOutputRef.current = onOutput;
   }, [onOutput]);
+
+  useEffect(() => {
+    setActiveMatchIndex(0);
+  }, [activeSession?.id, searchQuery]);
+
+  useEffect(() => {
+    if (activeMatchIndex >= searchMatches.length) {
+      setActiveMatchIndex(Math.max(0, searchMatches.length - 1));
+    }
+  }, [activeMatchIndex, searchMatches.length]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1111,6 +1161,14 @@ function TerminalSurface({
     terminal.open(container);
     fitAddon.fit();
     terminal.focus();
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type === "keydown" && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setSearchOpen(true);
+        return false;
+      }
+      return true;
+    });
     terminal.writeln(`\x1b[36m${activeSession.title}\x1b[0m`);
     terminal.writeln("");
     if (initialTranscript) {
@@ -1165,6 +1223,40 @@ function TerminalSurface({
     };
   }, [highlightRules]);
 
+  function moveSearchMatch(direction: 1 | -1) {
+    setActiveMatchIndex((current) => {
+      if (searchMatches.length === 0) return 0;
+      return (current + direction + searchMatches.length) % searchMatches.length;
+    });
+  }
+
+  function handleTerminalKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      setSearchOpen(true);
+      return;
+    }
+
+    if (event.key === "Escape" && searchOpen) {
+      event.preventDefault();
+      setSearchOpen(false);
+      setSearchQuery("");
+    }
+  }
+
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      moveSearchMatch(event.shiftKey ? -1 : 1);
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setSearchOpen(false);
+      setSearchQuery("");
+    }
+  }
+
   if (!activeSession) {
     return (
       <div className="flex h-full items-center justify-center bg-slate-50">
@@ -1191,11 +1283,81 @@ function TerminalSurface({
       data-testid="terminal-shell"
       data-terminal-theme={terminalTheme}
       style={terminalStyle}
+      tabIndex={0}
+      onKeyDown={handleTerminalKeyDown}
     >
       <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
+      <button
+        aria-label="查找终端输出"
+        title="查找终端输出"
+        className="absolute right-5 top-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] shadow-lg hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)]"
+        onClick={() => setSearchOpen(true)}
+      >
+        <Search className="h-3.5 w-3.5" />
+      </button>
+      {searchOpen && (
+        <div className="absolute right-5 top-14 z-20 w-[min(380px,calc(100%-40px))] rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 text-xs text-[var(--app-text)] shadow-xl">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-2">
+            <Input
+              autoFocus
+              className="h-8 text-xs"
+              value={searchQuery}
+              placeholder="查找终端输出"
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
+            />
+            <span className="min-w-12 text-center font-semibold text-[var(--app-muted)]">
+              {searchQuery.trim() && searchMatches.length > 0 ? `${visibleMatchIndex + 1} / ${searchMatches.length}` : "0 / 0"}
+            </span>
+            <Button
+              variant="outline"
+              className="h-8 px-2 text-xs"
+              disabled={searchMatches.length === 0}
+              onClick={() => moveSearchMatch(-1)}
+            >
+              上一条
+            </Button>
+            <Button
+              variant="outline"
+              className="h-8 px-2 text-xs"
+              disabled={searchMatches.length === 0}
+              onClick={() => moveSearchMatch(1)}
+            >
+              下一条
+            </Button>
+            <button
+              aria-label="关闭查找"
+              title="关闭查找"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--app-muted)] hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)]"
+              onClick={() => {
+                setSearchOpen(false);
+                setSearchQuery("");
+              }}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {searchQuery.trim() && (
+            <div className="mt-3 rounded-md border border-[var(--app-line)] bg-[var(--subtle-bg)] px-3 py-2">
+              {activeMatch ? (
+                <>
+                  <div className="mb-1 font-semibold text-[var(--app-muted)]">
+                    第 {activeMatch.lineNumber} 行，第 {activeMatch.column} 列
+                  </div>
+                  <div className="max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono leading-5">
+                    {activeMatch.line}
+                  </div>
+                </>
+              ) : (
+                <div className="text-[var(--app-muted)]">没有匹配内容</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {selectedText && (
         <button
-          className="absolute right-5 top-4 inline-flex h-8 items-center gap-2 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs font-semibold text-[var(--app-text)] shadow-lg hover:bg-[var(--subtle-bg)]"
+          className="absolute right-16 top-4 z-10 inline-flex h-8 items-center gap-2 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs font-semibold text-[var(--app-text)] shadow-lg hover:bg-[var(--subtle-bg)]"
           onClick={() => {
             onAddAiQuote(selectedText);
             setSelectedText("");

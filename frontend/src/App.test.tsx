@@ -1,11 +1,12 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
 
 const terminalMock = vi.hoisted(() => ({
   selectionText: "",
   selectionHandler: undefined as undefined | (() => void),
+  keyHandler: undefined as undefined | ((event: KeyboardEvent) => boolean),
   writes: [] as string[],
   instances: [] as Array<{ writes: string[] }>
 }));
@@ -27,6 +28,9 @@ vi.mock("@xterm/xterm", () => ({
     dispose() {}
     focus() {}
     loadAddon() {}
+    attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
+      terminalMock.keyHandler = handler;
+    }
     onData() {
       return { dispose() {} };
     }
@@ -52,6 +56,7 @@ vi.mock("@xterm/xterm", () => ({
 beforeEach(() => {
   terminalMock.selectionText = "";
   terminalMock.selectionHandler = undefined;
+  terminalMock.keyHandler = undefined;
   terminalMock.writes = [];
   terminalMock.instances = [];
   window.localStorage.clear();
@@ -338,6 +343,35 @@ describe("command library", () => {
       const latestTerminal = terminalMock.instances.at(-1);
       expect(latestTerminal?.writes.join("")).toContain("persisted terminal output");
     });
+  });
+
+  test("searches terminal history beyond the visible terminal area", async () => {
+    (window.pywebview?.api?.get_output as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      output: btoa(["first line", "needle in old command output", "another line", "second needle result"].join("\n"))
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    await waitFor(() => expect(terminalMock.writes.join("")).toContain("second needle result"));
+
+    expect(await screen.findByRole("button", { name: "查找终端输出" })).toBeInTheDocument();
+    await waitFor(() => expect(terminalMock.keyHandler).toBeTypeOf("function"));
+    act(() => {
+      terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "f", ctrlKey: true }));
+    });
+    fireEvent.change(screen.getByPlaceholderText("查找终端输出"), {
+      target: { value: "needle" }
+    });
+
+    expect(await screen.findByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText(/needle in old command output/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "下一条" }));
+
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByText(/second needle result/)).toBeInTheDocument();
   });
 
   test("connects from the recent-host sidebar and opens a terminal session immediately", async () => {
