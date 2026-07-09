@@ -428,6 +428,9 @@ describe("AI tools panel", () => {
     fireEvent.change(await screen.findByLabelText("Hermes Base URL"), {
       target: { value: "http://127.0.0.1:8648" }
     });
+    fireEvent.change(await screen.findByLabelText("Hermes 用户名"), {
+      target: { value: "admin" }
+    });
     fireEvent.change(await screen.findByLabelText("Hermes 登录密码"), {
       target: { value: "secret" }
     });
@@ -443,7 +446,7 @@ describe("AI tools panel", () => {
     const chatCall = JSON.parse(calls[2]?.[0] || "{}");
 
     expect(loginCall.url).toBe("http://127.0.0.1:8648/api/auth/login");
-    expect(JSON.parse(loginCall.body)).toEqual({ password: "secret" });
+    expect(JSON.parse(loginCall.body)).toEqual({ username: "admin", password: "secret" });
     expect(sessionCall.url).toBe("http://127.0.0.1:8648/api/session/new");
     expect(sessionCall.cookie).toBe("hermes_session=sid123");
     expect(chatCall.url).toBe("http://127.0.0.1:8648/api/chat/start");

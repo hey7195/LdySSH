@@ -123,6 +123,7 @@ interface AiConfig {
   codexWorkingDirectory: string;
   hermesBaseUrl: string;
   hermesWsUrl: string;
+  hermesUsername: string;
   hermesPassword: string;
 }
 
@@ -138,6 +139,7 @@ interface AiRun {
   codexWorkingDirectory: string;
   hermesBaseUrl: string;
   hermesWsUrl: string;
+  hermesUsername: string;
   hermesPassword: string;
 }
 
@@ -205,6 +207,7 @@ const defaultAiConfig: AiConfig = {
   codexWorkingDirectory: "E:\\adb\\tools\\LdSSH",
   hermesBaseUrl: "http://127.0.0.1:3000",
   hermesWsUrl: "",
+  hermesUsername: "admin",
   hermesPassword: ""
 };
 
@@ -3162,6 +3165,7 @@ function AiWorkspacePanel({
       codexWorkingDirectory: config.codexWorkingDirectory,
       hermesBaseUrl: config.hermesBaseUrl,
       hermesWsUrl: config.hermesWsUrl,
+      hermesUsername: config.hermesUsername,
       hermesPassword: config.hermesPassword
     });
   }
@@ -3197,7 +3201,7 @@ function AiWorkspacePanel({
         try {
           const data = run.hermesWsUrl.trim()
             ? await sendHermesWebSocket(run.hermesWsUrl, run.prompt, run.sessionTitle)
-            : await sendHermesHttp(run.hermesBaseUrl, run.prompt, run.sessionTitle, run.hermesPassword);
+            : await sendHermesHttp(run.hermesBaseUrl, run.prompt, run.sessionTitle, run.hermesUsername, run.hermesPassword);
           setMessages((current) => [
             ...current,
             {
@@ -3688,14 +3692,14 @@ function looksLikeOnlyRuntimeNoise(text: string) {
   return /^(failed to|error:|warning:|warn\b|mcp\b|codex_)/i.test(text.trim());
 }
 
-async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: string, password: string) {
+async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: string, username: string, password: string) {
   const base = normalizeBaseUrl(baseUrl);
   let cookie = "";
   if (password.trim()) {
     const login = await nativeBridge.hermesHttpRequest({
       method: "POST",
       url: `${base}/api/auth/login`,
-      body: JSON.stringify({ password })
+      body: JSON.stringify({ username: username.trim() || "admin", password })
     });
     if (!login.success) {
       throw new Error(`Hermes 登录失败：HTTP ${login.status || 0}: ${login.error || login.body || "密码错误或认证失败"}`);
@@ -3870,6 +3874,15 @@ function AiConfigPanel({
         <div className="flex items-end">
           <Button variant="outline" onClick={onCheckHermes}>检查连接</Button>
         </div>
+        <label className="col-span-2 block">
+          <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">Hermes 用户名</span>
+          <Input
+            aria-label="Hermes 用户名"
+            value={config.hermesUsername}
+            placeholder="默认 admin"
+            onChange={(event) => onConfigChange({ ...config, hermesUsername: event.target.value })}
+          />
+        </label>
         <label className="col-span-2 block">
           <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">Hermes 登录密码</span>
           <Input
