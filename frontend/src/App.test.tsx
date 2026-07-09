@@ -46,6 +46,7 @@ beforeEach(() => {
   terminalMock.selectionText = "";
   terminalMock.selectionHandler = undefined;
   terminalMock.writes = [];
+  window.localStorage.clear();
 
   window.pywebview = {
     api: {
@@ -79,6 +80,7 @@ beforeEach(() => {
 
   window.fetch = vi.fn().mockResolvedValue({
     ok: true,
+    headers: { get: () => "application/json" },
     json: () => Promise.resolve({ status: "ok", reply: "Hermes 已连接" }),
     text: () => Promise.resolve("Hermes 已连接")
   }) as typeof fetch;
@@ -155,9 +157,39 @@ describe("AI tools panel", () => {
     });
     expect(await screen.findByText("Hermes 连接正常")).toBeInTheDocument();
   });
+
+  test("configures a remote Hermes WSS URL", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("AI"));
+    fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
+    fireEvent.change(await screen.findByLabelText("Hermes WSS URL"), {
+      target: { value: "wss://hermes.internal/ws" }
+    });
+
+    expect(screen.getByDisplayValue("wss://hermes.internal/ws")).toBeInTheDocument();
+    expect(screen.getByText(/复制以 ws:\/\/ 或 wss:\/\//)).toBeInTheDocument();
+  });
 });
 
 describe("command library", () => {
+  test("shows the quick command sidebar inside the terminal workspace", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("L-CMD"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+
+    expect(await screen.findByText("快捷命令栏")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("搜索命令或文件夹"), {
+      target: { value: "磁盘" }
+    });
+    fireEvent.click(screen.getByText("磁盘使用"));
+
+    await waitFor(() => {
+      expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled();
+    });
+  });
+
   test("searches folder commands and sends a command to the active terminal", async () => {
     render(<App />);
 
@@ -241,5 +273,23 @@ describe("settings panel", () => {
 
     expect(screen.getByText("自定义错误")).toBeInTheDocument();
     expect(screen.getByText("panic|crash")).toBeInTheDocument();
+  });
+
+  test("deletes a custom terminal highlight rule", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.change(await screen.findByPlaceholderText("规则名称"), {
+      target: { value: "崩溃" }
+    });
+    fireEvent.change(screen.getByPlaceholderText("正则表达式"), {
+      target: { value: "crash" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加规则" }));
+
+    expect(screen.getByText("崩溃")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "删除" }).at(-1)!);
+
+    expect(screen.queryByText("崩溃")).not.toBeInTheDocument();
   });
 });

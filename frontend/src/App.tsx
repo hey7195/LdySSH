@@ -86,6 +86,7 @@ interface AiConfig {
   codexCommand: string;
   codexWorkingDirectory: string;
   hermesBaseUrl: string;
+  hermesWsUrl: string;
 }
 
 const tools: Array<{ id: Tool; label: string; icon: React.ComponentType<{ className?: string }> }> = [
@@ -132,8 +133,46 @@ const defaultCommandFolders: CommandFolder[] = [
 const defaultAiConfig: AiConfig = {
   codexCommand: "codex",
   codexWorkingDirectory: "E:\\adb\\tools\\LdSSH",
-  hermesBaseUrl: "http://127.0.0.1:3000"
+  hermesBaseUrl: "http://127.0.0.1:3000",
+  hermesWsUrl: ""
 };
+
+const storageKeys = {
+  theme: "ldyssh.ui.theme",
+  highlightRules: "ldyssh.terminal.highlightRules",
+  aiConfig: "ldyssh.ai.config"
+};
+
+function loadStoredTheme(): ThemeMode {
+  const value = window.localStorage.getItem(storageKeys.theme);
+  return value === "dark" ? "dark" : "light";
+}
+
+function loadStoredHighlightRules(): HighlightRule[] {
+  const raw = window.localStorage.getItem(storageKeys.highlightRules);
+  if (!raw) return DEFAULT_HIGHLIGHT_RULES;
+  try {
+    const parsed = JSON.parse(raw) as HighlightRule[];
+    const customRules = parsed.filter((rule) => !rule.system);
+    const storedSystemById = new Map(parsed.filter((rule) => rule.system).map((rule) => [rule.id, rule]));
+    return [
+      ...DEFAULT_HIGHLIGHT_RULES.map((rule) => ({ ...rule, enabled: storedSystemById.get(rule.id)?.enabled ?? rule.enabled })),
+      ...customRules
+    ];
+  } catch {
+    return DEFAULT_HIGHLIGHT_RULES;
+  }
+}
+
+function loadStoredAiConfig(): AiConfig {
+  const raw = window.localStorage.getItem(storageKeys.aiConfig);
+  if (!raw) return defaultAiConfig;
+  try {
+    return { ...defaultAiConfig, ...(JSON.parse(raw) as Partial<AiConfig>) };
+  } catch {
+    return defaultAiConfig;
+  }
+}
 
 export function App() {
   const [activeTool, setActiveTool] = useState<Tool>("ssh");
@@ -144,17 +183,29 @@ export function App() {
   const [connectOpen, setConnectOpen] = useState(false);
   const [form, setForm] = useState<ConnectionForm>(emptyForm);
   const [connectError, setConnectError] = useState("");
-  const [theme, setTheme] = useState<ThemeMode>("light");
-  const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(DEFAULT_HIGHLIGHT_RULES);
+  const [theme, setTheme] = useState<ThemeMode>(() => loadStoredTheme());
+  const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(() => loadStoredHighlightRules());
   const [aiQuotes, setAiQuotes] = useState<AiQuote[]>([]);
   const [commandFolders, setCommandFolders] = useState<CommandFolder[]>(defaultCommandFolders);
   const [activeCommandFolderId, setActiveCommandFolderId] = useState(defaultCommandFolders[0].id);
-  const [aiConfig, setAiConfig] = useState<AiConfig>(defaultAiConfig);
+  const [aiConfig, setAiConfig] = useState<AiConfig>(() => loadStoredAiConfig());
 
   useEffect(() => {
     void refreshConnections();
     void refreshCommandLibrary();
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.theme, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.highlightRules, JSON.stringify(highlightRules));
+  }, [highlightRules]);
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.aiConfig, JSON.stringify(aiConfig));
+  }, [aiConfig]);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId),
@@ -292,6 +343,10 @@ export function App() {
     ]);
   }
 
+  function deleteHighlightRule(ruleId: string) {
+    setHighlightRules((current) => current.filter((rule) => rule.system || rule.id !== ruleId));
+  }
+
   function updateCommandFolders(nextFolders: CommandFolder[]) {
     setCommandFolders(nextFolders);
     void nativeBridge.saveCommandLibrary(nextFolders);
@@ -398,10 +453,14 @@ export function App() {
               activeSessionId={activeSessionId}
               theme={theme}
               highlightRules={highlightRules}
+              commandFolders={commandFolders}
+              activeCommandFolderId={activeCommandFolderId}
               onActivate={setActiveSessionId}
               onClose={closeTab}
               onCreateLocal={openLocalSession}
               onAddAiQuote={addAiQuote}
+              onActiveCommandFolderChange={setActiveCommandFolderId}
+              onSendCommand={sendCommandToActiveSession}
             />
           )}
           {activeTool === "ai" && (
@@ -419,6 +478,7 @@ export function App() {
               onThemeChange={setTheme}
               onToggleHighlightRule={toggleHighlightRule}
               onAddHighlightRule={addHighlightRule}
+              onDeleteHighlightRule={deleteHighlightRule}
             />
           )}
         </main>
@@ -732,19 +792,27 @@ function TerminalWorkspace({
   activeSessionId,
   theme,
   highlightRules,
+  commandFolders,
+  activeCommandFolderId,
   onActivate,
   onClose,
   onCreateLocal,
-  onAddAiQuote
+  onAddAiQuote,
+  onActiveCommandFolderChange,
+  onSendCommand
 }: {
   sessions: SessionTab[];
   activeSessionId: string;
   theme: ThemeMode;
   highlightRules: HighlightRule[];
+  commandFolders: CommandFolder[];
+  activeCommandFolderId: string;
   onActivate: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
   onCreateLocal: () => void;
   onAddAiQuote: (text: string, sourceTitle: string) => void;
+  onActiveCommandFolderChange: (folderId: string) => void;
+  onSendCommand: (command: string) => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
 
@@ -782,12 +850,21 @@ function TerminalWorkspace({
           <Menu className="h-4 w-4" />
         </Button>
       </div>
-      <TerminalSurface
-        activeSession={activeSession}
-        theme={theme}
-        highlightRules={highlightRules}
-        onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
-      />
+      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_320px]">
+        <TerminalSurface
+          activeSession={activeSession}
+          theme={theme}
+          highlightRules={highlightRules}
+          onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
+        />
+        <TerminalCommandSidebar
+          folders={commandFolders}
+          activeFolderId={activeCommandFolderId}
+          activeSession={activeSession}
+          onActiveFolderChange={onActiveCommandFolderChange}
+          onSendCommand={onSendCommand}
+        />
+      </div>
       <div className="flex items-center gap-3 border-t border-slate-200 bg-slate-50 px-5 text-xs text-slate-500">
         <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500" : "bg-slate-300")} />
         <span>{activeSession ? "已连接" : "未连接"}</span>
@@ -911,6 +988,105 @@ function TerminalSurface({
         </button>
       )}
     </div>
+  );
+}
+
+function TerminalCommandSidebar({
+  folders,
+  activeFolderId,
+  activeSession,
+  onActiveFolderChange,
+  onSendCommand
+}: {
+  folders: CommandFolder[];
+  activeFolderId: string;
+  activeSession?: SessionTab;
+  onActiveFolderChange: (folderId: string) => void;
+  onSendCommand: (command: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const keyword = query.trim().toLowerCase();
+  const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
+  const commands = (keyword
+    ? folders.flatMap((folder) => folder.commands.map((command) => ({ ...command, folderName: folder.name })))
+    : (activeFolder?.commands || []).map((command) => ({ ...command, folderName: activeFolder.name }))
+  ).filter((command) => {
+    if (!keyword) return true;
+    return [command.folderName, command.name, command.command, command.description]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(keyword);
+  });
+
+  return (
+    <aside className="min-h-0 border-l border-slate-200 bg-slate-50">
+      <div className="border-b border-slate-200 bg-white px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-950">快捷命令栏</h2>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {activeSession ? `发送到 ${activeSession.title}` : "打开终端后可发送命令"}
+            </p>
+          </div>
+          <Command className="h-4 w-4 text-slate-400" />
+        </div>
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <Input
+            className="h-9 pl-8 text-xs"
+            value={query}
+            placeholder="搜索命令或文件夹"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="flex min-h-0 h-[calc(100%-93px)] flex-col">
+        <div className="border-b border-slate-200 px-3 py-3">
+          <div className="mb-2 text-[11px] font-semibold text-slate-500">文件夹</div>
+          <div className="flex flex-wrap gap-2">
+            {folders.map((folder) => (
+              <button
+                key={folder.id}
+                className={cn(
+                  "rounded-md border px-2.5 py-1.5 text-xs font-semibold",
+                  folder.id === activeFolder?.id
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                )}
+                onClick={() => onActiveFolderChange(folder.id)}
+              >
+                {folder.name}
+                <span className="ml-1 opacity-60">{folder.commands.length}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto p-3">
+          <div className="space-y-2">
+            {commands.map((command) => (
+              <button
+                key={`${command.folderName}-${command.id}`}
+                className="block w-full rounded-md border border-slate-200 bg-white p-3 text-left hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                disabled={!activeSession}
+                onClick={() => onSendCommand(command.command)}
+              >
+                <span className="block truncate text-sm font-semibold text-slate-900">{command.name}</span>
+                <code className="mt-1 block truncate text-xs text-slate-500">{command.command}</code>
+                {command.description && <span className="mt-1 block truncate text-xs text-slate-400">{command.description}</span>}
+              </button>
+            ))}
+            {commands.length === 0 && (
+              <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-6 text-center text-xs text-slate-500">
+                未找到匹配命令
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -1228,13 +1404,15 @@ function SettingsPanel({
   highlightRules,
   onThemeChange,
   onToggleHighlightRule,
-  onAddHighlightRule
+  onAddHighlightRule,
+  onDeleteHighlightRule
 }: {
   theme: ThemeMode;
   highlightRules: HighlightRule[];
   onThemeChange: (theme: ThemeMode) => void;
   onToggleHighlightRule: (ruleId: string) => void;
   onAddHighlightRule: (rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) => void;
+  onDeleteHighlightRule: (ruleId: string) => void;
 }) {
   const [draft, setDraft] = useState({ name: "", pattern: "", foreground: "#2563eb" });
 
@@ -1301,7 +1479,7 @@ function SettingsPanel({
               {highlightRules.map((rule) => (
                 <div
                   key={rule.id}
-                  className="grid grid-cols-[170px_minmax(0,1fr)_86px] items-center gap-3 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3"
+                  className="grid grid-cols-[170px_minmax(0,1fr)_86px_72px] items-center gap-3 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3"
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -1320,6 +1498,14 @@ function SettingsPanel({
                   </code>
                   <Button variant="outline" className="h-8" onClick={() => onToggleHighlightRule(rule.id)}>
                     {rule.enabled ? "停用" : "启用"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="h-8"
+                    disabled={rule.system}
+                    onClick={() => onDeleteHighlightRule(rule.id)}
+                  >
+                    删除
                   </Button>
                 </div>
               ))}
@@ -1374,13 +1560,9 @@ function AiWorkspacePanel({
       ]);
     } else {
       try {
-        const response = await fetch(`${normalizeBaseUrl(config.hermesBaseUrl)}/api/chat/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: fullPrompt, session: activeSession?.title || "" })
-        });
-        const contentType = response.headers.get("content-type") || "";
-        const data = contentType.includes("application/json") ? await response.json() : await response.text();
+        const data = config.hermesWsUrl.trim()
+          ? await sendHermesWebSocket(config.hermesWsUrl, fullPrompt, activeSession?.title || "")
+          : await sendHermesHttp(config.hermesBaseUrl, fullPrompt, activeSession?.title || "");
         setMessages((current) => [
           ...current,
           {
@@ -1438,7 +1620,7 @@ function AiWorkspacePanel({
                 <ContextItem label="活动会话" value={activeSession?.title || "未选择活动会话"} />
                 <ContextItem label="执行目录" value="当前项目 / 当前终端" />
                 <ContextItem label="Codex 命令" value="codex exec" />
-                <ContextItem label="Hermes 流式协议" value="HTTP + SSE" />
+                <ContextItem label="Hermes 远端协议" value={config.hermesWsUrl ? "WSS WebSocket" : "HTTP API"} />
               </div>
             </Panel>
 
@@ -1446,7 +1628,7 @@ function AiWorkspacePanel({
               <div className="space-y-3">
                 <StatusLine label="Codex CLI" value="本地可用" tone="success" />
                 <StatusLine label="Hermes 本地" value="localhost:61355 / 61356" tone="success" />
-                <StatusLine label="Hermes 远端" value="等待配置" tone="muted" />
+                <StatusLine label="Hermes 远端" value={config.hermesWsUrl || "等待配置 WSS"} tone={config.hermesWsUrl ? "success" : "muted"} />
               </div>
             </Panel>
           </div>
@@ -1460,10 +1642,10 @@ function AiWorkspacePanel({
             </Panel>
 
             <Panel title="Hermes 对话网关">
-              <p className="text-sm leading-6 text-slate-600">支持本地和远端 Hermes WebUI。远端优先配置 Base URL，程序自动检测 /health、/api/chat/start 和 SSE 流。</p>
+              <p className="text-sm leading-6 text-slate-600">支持本地和远端 Hermes WebUI。远端可配置 HTTP Base URL，也可填 WSS 地址走 WebSocket 对话。</p>
               <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
                 <div>POST /api/chat/start</div>
-                <div>GET /api/chat/stream?stream_id=...</div>
+                <div>WSS：浏览器开发者工具 Network / WS 查看真实连接地址</div>
               </div>
             </Panel>
           </div>
@@ -1588,6 +1770,42 @@ function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
 }
 
+async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: string) {
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/chat/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: prompt, session: sessionTitle })
+  });
+  const contentType = response.headers.get("content-type") || "";
+  return contentType.includes("application/json") ? response.json() : response.text();
+}
+
+function sendHermesWebSocket(wsUrl: string, prompt: string, sessionTitle: string) {
+  return new Promise<string>((resolve, reject) => {
+    const socket = new WebSocket(wsUrl.trim());
+    const chunks: string[] = [];
+    const timer = window.setTimeout(() => {
+      socket.close();
+      reject(new Error("Hermes WSS 响应超时"));
+    }, 120000);
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ type: "chat", message: prompt, session: sessionTitle }));
+    };
+    socket.onmessage = (event) => {
+      chunks.push(typeof event.data === "string" ? event.data : String(event.data));
+    };
+    socket.onerror = () => {
+      window.clearTimeout(timer);
+      reject(new Error("Hermes WSS 连接失败"));
+    };
+    socket.onclose = () => {
+      window.clearTimeout(timer);
+      resolve(chunks.join("\n") || "Hermes WSS 已关闭连接，未返回文本。");
+    };
+  });
+}
+
 function extractHermesReply(data: unknown) {
   if (typeof data === "string") return data;
   if (data && typeof data === "object") {
@@ -1682,8 +1900,20 @@ function AiConfigPanel({
         <div className="flex items-end">
           <Button variant="outline" onClick={onCheckHermes}>检查连接</Button>
         </div>
+        <label className="col-span-2 block">
+          <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">Hermes WSS 地址（可选）</span>
+          <Input
+            aria-label="Hermes WSS URL"
+            value={config.hermesWsUrl}
+            placeholder="wss://你的-hermes-web-ui/ws 或 ws://内网地址/ws"
+            onChange={(event) => onConfigChange({ ...config, hermesWsUrl: event.target.value })}
+          />
+        </label>
         <div className="col-span-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
           {hermesStatus}
+        </div>
+        <div className="col-span-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-700">
+          远端 WSS 获取方式：打开内网 Hermes WebUI，按 F12 进入 Network，筛选 WS，刷新或发送一条消息，复制以 ws:// 或 wss:// 开头的 Request URL。
         </div>
       </div>
     </section>
@@ -1718,7 +1948,7 @@ function AiActionCard({
   const command =
     selectedTool === "codex"
       ? `${config.codexCommand} exec -C ${config.codexWorkingDirectory} "当前输入内容"`
-      : `${normalizeBaseUrl(config.hermesBaseUrl)}/api/chat/start`;
+      : config.hermesWsUrl.trim() || `${normalizeBaseUrl(config.hermesBaseUrl)}/api/chat/start`;
 
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
