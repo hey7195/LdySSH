@@ -103,6 +103,18 @@ interface AiConfig {
   hermesApiToken: string;
 }
 
+interface PendingAiRun {
+  id: string;
+  tool: AiTool;
+  prompt: string;
+  sessionTitle: string;
+  codexCommand: string;
+  codexWorkingDirectory: string;
+  hermesBaseUrl: string;
+  hermesWsUrl: string;
+  hermesApiToken: string;
+}
+
 const tools: Array<{ id: Tool; label: string; title: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "ssh", label: "会话", title: "SSH 会话", icon: Server },
   { id: "cmd", label: "命令", title: "命令库", icon: Command },
@@ -1691,6 +1703,7 @@ function AiWorkspacePanel({
   const [activeAiSessionId, setActiveAiSessionId] = useState(() => aiSessions[0]?.id || "");
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
+  const [pendingRun, setPendingRun] = useState<PendingAiRun | null>(null);
   const [hermesStatus, setHermesStatus] = useState("等待检查");
   const activeAiSession = aiSessions.find((session) => session.id === activeAiSessionId) || aiSessions[0];
   const selectedTool = activeAiSession?.tool || "codex";
@@ -1736,52 +1749,97 @@ function AiWorkspacePanel({
 
   async function sendPrompt() {
     const text = prompt.trim();
-    if (!text || running) return;
+    if (!text || running || pendingRun) return;
 
     setPrompt("");
-    setRunning(true);
     setMessages((current) => [...current, { id: `user_${Date.now()}`, role: "user", text }]);
 
     const fullPrompt = buildAiPrompt(text, quotes, activeSession, activeAiSession);
-    if (selectedTool === "codex") {
-      const result = await nativeBridge.runCodex({
-        command: config.codexCommand,
-        workingDirectory: config.codexWorkingDirectory,
-        prompt: fullPrompt
-      });
+    setPendingRun({
+      id: `pending_${Date.now()}`,
+      tool: selectedTool,
+      prompt: fullPrompt,
+      sessionTitle: activeSession?.title || "",
+      codexCommand: config.codexCommand,
+      codexWorkingDirectory: config.codexWorkingDirectory,
+      hermesBaseUrl: config.hermesBaseUrl,
+      hermesWsUrl: config.hermesWsUrl,
+      hermesApiToken: config.hermesApiToken
+    });
+  }
+
+  async function approvePendingRun() {
+    if (!pendingRun || running) return;
+
+    const run = pendingRun;
+    setPendingRun(null);
+    setRunning(true);
+
+    try {
+      if (run.tool === "codex") {
+        const start = await nativeBridge.startCodexRun({
+          command: run.codexCommand,
+          workingDirectory: run.codexWorkingDirectory,
+          prompt: run.prompt
+        });
+        const result = start.success && start.jobId
+          ? await pollCodexRun(start.jobId)
+          : { success: false, error: start.error || "Codex 启动失败。" };
+        setMessages((current) => [
+          ...current,
+          {
+            id: `assistant_${Date.now()}`,
+            role: "assistant",
+            text: result.success ? result.output || "Codex 执行完成，无输出。" : result.error || result.output || "Codex 执行失败。"
+          }
+        ]);
+      } else {
+        try {
+          const data = run.hermesWsUrl.trim()
+            ? await sendHermesWebSocket(run.hermesWsUrl, run.prompt, run.sessionTitle)
+            : await sendHermesHttp(run.hermesBaseUrl, run.prompt, run.sessionTitle, run.hermesApiToken);
+          setMessages((current) => [
+            ...current,
+            {
+              id: `assistant_${Date.now()}`,
+              role: "assistant",
+              text: extractHermesReply(data)
+            }
+          ]);
+        } catch (error) {
+          setMessages((current) => [
+            ...current,
+            {
+              id: `assistant_${Date.now()}`,
+              role: "assistant",
+              text: error instanceof Error ? error.message : "Hermes 调用失败。"
+            }
+          ]);
+        }
+      }
+    } catch (error) {
       setMessages((current) => [
         ...current,
         {
           id: `assistant_${Date.now()}`,
           role: "assistant",
-          text: result.success ? result.output || "Codex 执行完成，无输出。" : result.error || "Codex 执行失败。"
+          text: error instanceof Error ? error.message : "AI 执行失败。"
         }
       ]);
-    } else {
-      try {
-        const data = config.hermesWsUrl.trim()
-          ? await sendHermesWebSocket(config.hermesWsUrl, fullPrompt, activeSession?.title || "")
-          : await sendHermesHttp(config.hermesBaseUrl, fullPrompt, activeSession?.title || "", config.hermesApiToken);
-        setMessages((current) => [
-          ...current,
-          {
-            id: `assistant_${Date.now()}`,
-            role: "assistant",
-            text: extractHermesReply(data)
-          }
-        ]);
-      } catch (error) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: `assistant_${Date.now()}`,
-            role: "assistant",
-            text: error instanceof Error ? error.message : "Hermes 调用失败。"
-          }
-        ]);
-      }
+    } finally {
+      setRunning(false);
     }
-    setRunning(false);
+  }
+
+  async function pollCodexRun(jobId: string) {
+    for (let attempt = 0; attempt < 240; attempt += 1) {
+      const result = await nativeBridge.getCodexRun(jobId);
+      if (!result.success || result.completed || !result.running) {
+        return result;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+    }
+    return { success: false, error: "Codex 执行超时。", timedOut: true };
   }
 
   async function checkHermesConnection() {
@@ -1938,7 +1996,15 @@ function AiWorkspacePanel({
             {messages.map((message) => (
               <AiMessage key={message.id} role={message.role}>{message.text}</AiMessage>
             ))}
-            <AiActionCard selectedTool={selectedTool} activeSession={activeSession} config={config} />
+            {pendingRun && (
+              <AiActionCard
+                pendingRun={pendingRun}
+                activeSession={activeSession}
+                running={running}
+                onApprove={() => void approvePendingRun()}
+                onCancel={() => setPendingRun(null)}
+              />
+            )}
           </div>
         </div>
 
@@ -1963,7 +2029,7 @@ function AiWorkspacePanel({
             <button
               className="inline-flex h-10 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
               title="发送"
-              disabled={running}
+              disabled={running || Boolean(pendingRun)}
               onClick={() => void sendPrompt()}
             >
               <Send className="h-4 w-4" />
@@ -2192,25 +2258,29 @@ function AiMessage({ role, children }: { role: "user" | "assistant"; children: R
 }
 
 function AiActionCard({
-  selectedTool,
+  pendingRun,
   activeSession,
-  config
+  running,
+  onApprove,
+  onCancel
 }: {
-  selectedTool: AiTool;
+  pendingRun: PendingAiRun;
   activeSession?: SessionTab;
-  config: AiConfig;
+  running: boolean;
+  onApprove: () => void;
+  onCancel: () => void;
 }) {
   const command =
-    selectedTool === "codex"
-      ? `${config.codexCommand} exec -C ${config.codexWorkingDirectory} "当前输入内容"`
-      : config.hermesWsUrl.trim() || `${normalizeBaseUrl(config.hermesBaseUrl)}/api/chat/start`;
+    pendingRun.tool === "codex"
+      ? `${pendingRun.codexCommand} exec -C ${pendingRun.codexWorkingDirectory} <prompt>`
+      : pendingRun.hermesWsUrl.trim() || `${normalizeBaseUrl(pendingRun.hermesBaseUrl)}/api/chat/start`;
 
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
           <Wrench className="h-4 w-4" />
-          {selectedTool === "codex" ? "本地执行审批" : "Hermes 调用审批"}
+          {pendingRun.tool === "codex" ? "本地执行审批" : "Hermes 调用审批"}
         </div>
         <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-amber-800">
           {activeSession?.title || "无活动会话"}
@@ -2218,10 +2288,10 @@ function AiActionCard({
       </div>
       <pre className="mt-3 overflow-auto rounded-md border border-amber-200 bg-white p-2 text-xs leading-5 text-slate-800">{command}</pre>
       <div className="mt-3 flex justify-end gap-2">
-        <Button variant="outline" className="h-8 px-3">取消</Button>
-        <Button className="h-8 px-3">
+        <Button variant="outline" className="h-8 px-3" disabled={running} onClick={onCancel}>取消</Button>
+        <Button className="h-8 px-3" disabled={running} onClick={onApprove}>
           <Play className="h-3.5 w-3.5" />
-          授权执行
+          {running ? "执行中" : "授权执行"}
         </Button>
       </div>
     </div>

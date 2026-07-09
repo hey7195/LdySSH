@@ -75,6 +75,12 @@ export const nativeBridge = {
   runCodex(params: CodexRunParams) {
     return callNative<CodexRunResult>("run_codex", { success: false, error: "Codex native bridge unavailable" }, JSON.stringify(params));
   },
+  startCodexRun(params: CodexRunParams) {
+    return callNative<CodexStartResult>("start_codex_run", { success: false, error: "Codex native bridge unavailable" }, JSON.stringify(params));
+  },
+  getCodexRun(jobId: string) {
+    return callNative<CodexJobResult>("get_codex_run", { success: false, error: "Codex job unavailable" }, jobId);
+  },
   hermesHttpRequest(params: HermesHttpRequestParams) {
     return callNative<HermesHttpRequestResult>(
       "hermes_http_request",
@@ -152,6 +158,18 @@ export interface CodexRunResult {
   exitCode?: number;
   timedOut?: boolean;
   commandPreview?: string;
+}
+
+export interface CodexStartResult {
+  success: boolean;
+  jobId?: string;
+  commandPreview?: string;
+  error?: string;
+}
+
+export interface CodexJobResult extends CodexRunResult {
+  running?: boolean;
+  completed?: boolean;
 }
 
 export interface HermesHttpRequestParams {

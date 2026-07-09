@@ -75,3 +75,17 @@ def test_native_bridge_proxies_hermes_http_requests():
     assert "WinHttpOpen" in source
     assert "Authorization: Bearer" in source
     assert "hermesHttpRequest" in bridge
+
+
+def test_codex_runs_as_background_job_from_the_ui():
+    source = read("prismssh-cpp/main.cpp")
+    bridge = read("frontend/src/lib/bridge.ts")
+    app = read("frontend/src/App.tsx")
+
+    assert "start_codex_run" in source
+    assert "get_codex_run" in source
+    assert "codexJobs" in source
+    assert "std::thread([jobId" in source
+    assert "startCodexRun" in bridge
+    assert "getCodexRun" in bridge
+    assert "pendingRun" in app

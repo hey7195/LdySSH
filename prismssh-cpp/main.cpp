@@ -20,6 +20,7 @@
 #include <thread>
 #include <algorithm>
 #include <cctype>
+#include <atomic>
 #include <commdlg.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -312,6 +313,17 @@ struct ProcessRunResult {
     std::string error;
 };
 
+struct CodexJob {
+    bool running = true;
+    bool completed = false;
+    std::string commandPreview;
+    ProcessRunResult result;
+};
+
+std::mutex codexJobsMutex;
+std::unordered_map<std::string, CodexJob> codexJobs;
+std::atomic<unsigned long long> codexJobCounter{ 0 };
+
 struct HttpRunResult {
     bool success = false;
     DWORD status = 0;
@@ -503,6 +515,34 @@ std::wstring QuoteProcessArgument(const std::wstring& value) {
     quoted.append(backslashes * 2, L'\\');
     quoted.push_back(L'"');
     return quoted;
+}
+
+struct CodexInvocation {
+    std::string commandPreview;
+    std::wstring commandLine;
+    std::wstring workingDirectory;
+};
+
+CodexInvocation BuildCodexInvocation(const std::string& command, const std::string& workingDirectory) {
+    wchar_t comspec[MAX_PATH] = L"C:\\Windows\\System32\\cmd.exe";
+    size_t comspecLen = 0;
+    wchar_t envComspec[MAX_PATH] = { 0 };
+    if (_wgetenv_s(&comspecLen, envComspec, MAX_PATH, L"COMSPEC") == 0 && comspecLen > 0 && envComspec[0] != L'\0') {
+        wcscpy_s(comspec, envComspec);
+    }
+
+    std::wstring wCommand = Utf8ToUtf16(command);
+    std::wstring wWorkingDirectory = Utf8ToUtf16(workingDirectory);
+    std::wstring innerCommand = QuoteProcessArgument(wCommand)
+        + L" exec -C "
+        + QuoteProcessArgument(wWorkingDirectory)
+        + L" -";
+
+    CodexInvocation invocation;
+    invocation.commandPreview = command + " exec -C " + workingDirectory + " <prompt>";
+    invocation.commandLine = QuoteProcessArgument(comspec) + L" /S /C " + QuoteProcessArgument(innerCommand);
+    invocation.workingDirectory = wWorkingDirectory;
+    return invocation;
 }
 
 std::string ReadAvailablePipe(HANDLE readPipe) {
@@ -970,6 +1010,80 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
+        else if (action == "start_codex_run") {
+            std::string paramsStr = args[0].get<std::string>();
+            auto params = nlohmann::json::parse(paramsStr);
+
+            std::string command = TrimString(SafeGetJsonString(params, "command", "codex"));
+            std::string workingDirectory = SafeGetJsonString(params, "workingDirectory", Utf16ToUtf8(GetExeDirectory()));
+            std::string prompt = SafeGetJsonString(params, "prompt", "");
+            if (command.empty()) {
+                command = "codex";
+            }
+            if (workingDirectory.empty()) {
+                workingDirectory = Utf16ToUtf8(GetExeDirectory());
+            }
+
+            nlohmann::json retObj;
+            if (prompt.empty()) {
+                retObj["success"] = false;
+                retObj["error"] = "Prompt is empty";
+            } else {
+                CodexInvocation invocation = BuildCodexInvocation(command, workingDirectory);
+                std::string jobId = "codex_" + std::to_string(GetTickCount64()) + "_" + std::to_string(++codexJobCounter);
+
+                {
+                    std::lock_guard<std::mutex> lock(codexJobsMutex);
+                    CodexJob job;
+                    job.commandPreview = invocation.commandPreview;
+                    codexJobs[jobId] = job;
+                }
+
+                std::thread([jobId, invocation, prompt]() {
+                    ProcessRunResult run = RunHiddenProcessCapture(invocation.commandLine, invocation.workingDirectory, prompt, 120000);
+                    std::lock_guard<std::mutex> lock(codexJobsMutex);
+                    auto it = codexJobs.find(jobId);
+                    if (it != codexJobs.end()) {
+                        it->second.running = false;
+                        it->second.completed = true;
+                        it->second.result = run;
+                    }
+                }).detach();
+
+                retObj["success"] = true;
+                retObj["jobId"] = jobId;
+                retObj["commandPreview"] = invocation.commandPreview;
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "get_codex_run") {
+            std::string jobId = args[0].get<std::string>();
+            nlohmann::json retObj;
+
+            std::lock_guard<std::mutex> lock(codexJobsMutex);
+            auto it = codexJobs.find(jobId);
+            if (it == codexJobs.end()) {
+                retObj["success"] = false;
+                retObj["running"] = false;
+                retObj["completed"] = true;
+                retObj["error"] = "Codex job not found";
+            } else {
+                const CodexJob& job = it->second;
+                retObj["success"] = !job.completed || job.result.success;
+                retObj["running"] = job.running;
+                retObj["completed"] = job.completed;
+                retObj["commandPreview"] = job.commandPreview;
+                retObj["output"] = job.result.output;
+                retObj["error"] = job.result.error;
+                retObj["exitCode"] = job.result.exitCode;
+                retObj["timedOut"] = job.result.timedOut;
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "run_codex") {
             std::string paramsStr = args[0].get<std::string>();
             auto params = nlohmann::json::parse(paramsStr);
@@ -985,28 +1099,14 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             }
 
             nlohmann::json retObj;
-            retObj["commandPreview"] = command + " exec -C " + workingDirectory + " <prompt>";
+            CodexInvocation invocation = BuildCodexInvocation(command, workingDirectory);
+            retObj["commandPreview"] = invocation.commandPreview;
             if (prompt.empty()) {
                 retObj["success"] = false;
                 retObj["exitCode"] = 1;
                 retObj["error"] = "Prompt is empty";
             } else {
-                wchar_t comspec[MAX_PATH] = L"C:\\Windows\\System32\\cmd.exe";
-                size_t comspecLen = 0;
-                wchar_t envComspec[MAX_PATH] = { 0 };
-                if (_wgetenv_s(&comspecLen, envComspec, MAX_PATH, L"COMSPEC") == 0 && comspecLen > 0 && envComspec[0] != L'\0') {
-                    wcscpy_s(comspec, envComspec);
-                }
-
-                std::wstring wCommand = Utf8ToUtf16(command);
-                std::wstring wWorkingDirectory = Utf8ToUtf16(workingDirectory);
-                std::wstring innerCommand = QuoteProcessArgument(wCommand)
-                    + L" exec -C "
-                    + QuoteProcessArgument(wWorkingDirectory)
-                    + L" -";
-                std::wstring commandLine = QuoteProcessArgument(comspec) + L" /S /C " + QuoteProcessArgument(innerCommand);
-
-                ProcessRunResult run = RunHiddenProcessCapture(commandLine, wWorkingDirectory, prompt, 120000);
+                ProcessRunResult run = RunHiddenProcessCapture(invocation.commandLine, invocation.workingDirectory, prompt, 120000);
                 retObj["success"] = run.success;
                 retObj["output"] = run.output;
                 retObj["error"] = run.error;

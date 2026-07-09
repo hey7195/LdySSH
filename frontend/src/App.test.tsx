@@ -71,6 +71,8 @@ beforeEach(() => {
       }),
       save_command_library: vi.fn().mockResolvedValue({ success: true }),
       run_codex: vi.fn().mockResolvedValue({ success: true, output: "Codex 已完成分析", exitCode: 0 }),
+      start_codex_run: vi.fn().mockResolvedValue({ success: true, jobId: "codex-job-1", commandPreview: "codex exec -C E:\\adb\\tools\\LdSSH <prompt>" }),
+      get_codex_run: vi.fn().mockResolvedValue({ success: true, running: false, completed: true, output: "Codex 已完成分析", exitCode: 0 }),
       hermes_http_request: vi.fn().mockResolvedValue({
         success: true,
         status: 200,
@@ -141,7 +143,7 @@ describe("AI tools panel", () => {
     expect(screen.getByText("ERROR failed to connect 10.0.0.8")).toBeInTheDocument();
   });
 
-  test("runs a Codex CLI prompt through the native bridge", async () => {
+  test("starts Codex in a background job after approval", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("AI 助手"));
@@ -153,12 +155,19 @@ describe("AI tools panel", () => {
     });
     fireEvent.click(screen.getByTitle("发送"));
 
+    expect(window.pywebview?.api?.run_codex).not.toHaveBeenCalled();
+    expect(await screen.findByText("本地执行审批")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /授权执行/ }));
+
     await waitFor(() => {
-      expect(window.pywebview?.api?.run_codex).toHaveBeenCalled();
+      expect(window.pywebview?.api?.start_codex_run).toHaveBeenCalled();
     });
-    const call = (window.pywebview?.api?.run_codex as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    const call = (window.pywebview?.api?.start_codex_run as ReturnType<typeof vi.fn>).mock.calls.at(-1);
     expect(call?.[0]).toContain("记住：优先检查最新日志");
     expect(window.localStorage.getItem("ldyssh.ai.sessions")).toContain("记住：优先检查最新日志");
+    await waitFor(() => {
+      expect(window.pywebview?.api?.get_codex_run).toHaveBeenCalledWith("codex-job-1");
+    });
     expect(await screen.findByText("Codex 已完成分析")).toBeInTheDocument();
   });
 
