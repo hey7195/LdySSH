@@ -63,6 +63,9 @@ export const nativeBridge = {
   getSavedConnections() {
     return callNative<Record<string, SavedConnection>>("get_saved_connections", {});
   },
+  deleteSavedConnection(key: string) {
+    return callNative<{ success: boolean; error?: string }>("delete_saved_connection", { success: false }, key);
+  },
   getCommandLibrary() {
     return callNative<CommandLibraryResult>("get_command_library", { success: false, folders: [] });
   },
@@ -82,6 +85,26 @@ export const nativeBridge = {
       key,
       JSON.stringify(params)
     );
+  },
+  showOpenFileDialog() {
+    return callNative<{ filePath?: string }>("show_open_file_dialog", {});
+  },
+  getWebFavorites() {
+    return callNative<WebFavorite[]>("get_web_favorites", []);
+  },
+  addWebFavorite(title: string, url: string) {
+    return callNative<{ success: boolean; favorite?: WebFavorite; error?: string }>(
+      "add_web_favorite",
+      { success: false },
+      title,
+      url
+    );
+  },
+  deleteWebFavorite(id: string) {
+    return callNative<{ success: boolean; error?: string }>("delete_web_favorite", { success: false }, id);
+  },
+  openInExternalBrowser(url: string) {
+    return callNative<{ success: boolean; error?: string }>("open_in_external_browser", { success: false }, url);
   },
   runCodex(params: CodexRunParams) {
     return callNative<CodexRunResult>("run_codex", { success: false, error: "Codex native bridge unavailable" }, JSON.stringify(params));
@@ -157,6 +180,12 @@ export interface CommandLibraryResult {
   success: boolean;
   folders: CommandFolder[];
   error?: string;
+}
+
+export interface WebFavorite {
+  id: string;
+  title: string;
+  url: string;
 }
 
 export interface CodexRunParams {

@@ -84,8 +84,10 @@ beforeEach(() => {
       }),
       save_command_library: vi.fn().mockResolvedValue({ success: true }),
       save_saved_connection: vi.fn().mockResolvedValue({ success: true }),
+      delete_saved_connection: vi.fn().mockResolvedValue({ success: true }),
       create_session: vi.fn().mockResolvedValue("ssh-1"),
       connect: vi.fn().mockResolvedValue({ success: true }),
+      show_open_file_dialog: vi.fn().mockResolvedValue({ filePath: "C:\\Users\\1111\\.ssh\\id_rsa" }),
       run_codex: vi.fn().mockResolvedValue({ success: true, output: "Codex 已完成分析", exitCode: 0 }),
       start_codex_run: vi.fn().mockResolvedValue({ success: true, jobId: "codex-job-1", commandPreview: "codex exec -C E:\\adb\\tools\\LdSSH <prompt>" }),
       get_codex_run: vi.fn().mockResolvedValue({ success: true, running: false, completed: true, output: "Codex 已完成分析", exitCode: 0 }),
@@ -95,6 +97,13 @@ beforeEach(() => {
         contentType: "application/json",
         body: JSON.stringify({ status: "ok", reply: "Hermes 已连接" })
       }),
+      get_web_favorites: vi.fn().mockResolvedValue([]),
+      add_web_favorite: vi.fn().mockResolvedValue({
+        success: true,
+        favorite: { id: "fav-1", title: "Hermes", url: "https://hermes.local" }
+      }),
+      delete_web_favorite: vi.fn().mockResolvedValue({ success: true }),
+      open_in_external_browser: vi.fn().mockResolvedValue({ success: true }),
       create_local_session: vi.fn().mockResolvedValue("local-1"),
       get_output: vi.fn().mockResolvedValue({}),
       resize_terminal: vi.fn().mockResolvedValue({ success: true }),
@@ -165,7 +174,7 @@ describe("AI tools panel", () => {
     expect(screen.getByText("ERROR failed to connect 10.0.0.8")).toBeInTheDocument();
   });
 
-  test("starts Codex in a background job after approval", async () => {
+  test("starts Codex in a background job without approval", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
@@ -180,9 +189,6 @@ describe("AI tools panel", () => {
     fireEvent.click(screen.getByTitle("发送"));
 
     expect(window.pywebview?.api?.run_codex).not.toHaveBeenCalled();
-    expect(await screen.findByText("本地执行审批")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /授权执行/ }));
-
     await waitFor(() => {
       expect(window.pywebview?.api?.start_codex_run).toHaveBeenCalled();
     });
@@ -193,6 +199,7 @@ describe("AI tools panel", () => {
       expect(window.pywebview?.api?.get_codex_run).toHaveBeenCalledWith("codex-job-1");
     });
     expect(await screen.findByText("Codex 已完成分析")).toBeInTheDocument();
+    expect(screen.queryByText(/审批/)).not.toBeInTheDocument();
   });
 
   test("shows a thinking marker while Codex is running", async () => {
@@ -207,7 +214,6 @@ describe("AI tools panel", () => {
       target: { value: "分析当前错误" }
     });
     fireEvent.click(screen.getByTitle("发送"));
-    fireEvent.click(await screen.findByRole("button", { name: /授权执行/ }));
 
     expect(await screen.findByText("thinking")).toBeInTheDocument();
   });
@@ -220,6 +226,14 @@ describe("AI tools panel", () => {
       output: [
         "codex_core_plugins::manager: failed to refresh curated plugin cache",
         "2026-07-09 WARN codex_mcp_client: failed to initialize MCP client",
+        "OpenAI Codex v0.31.0",
+        "session id: 019f30d2",
+        "tokens used: 1294",
+        "succeeded in 8.1s",
+        "```json",
+        "{\"type\":\"message_delta\",\"delta\":\"噪音\"}",
+        "```",
+        "---",
         "会话记忆：",
         "记住：优先检查最新日志",
         "用户问题：hi"
@@ -239,11 +253,14 @@ describe("AI tools panel", () => {
       target: { value: "hi" }
     });
     fireEvent.click(screen.getByTitle("发送"));
-    fireEvent.click(await screen.findByRole("button", { name: /授权执行/ }));
 
     expect(await screen.findByText("Codex 执行失败，请检查本地 Codex 环境。")).toBeInTheDocument();
     const transcript = screen.getByTestId("ai-chat-transcript");
     expect(within(transcript).queryByText(/codex_core_plugins/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/OpenAI Codex/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/session id/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/tokens used/)).not.toBeInTheDocument();
+    expect(within(transcript).queryByText(/message_delta/)).not.toBeInTheDocument();
     expect(within(transcript).queryByText(/优先检查最新日志/)).not.toBeInTheDocument();
   });
 
@@ -429,7 +446,7 @@ describe("command library", () => {
 
     const main = document.querySelector("main");
     expect(main).toBeTruthy();
-    const hostCard = await within(main as HTMLElement).findByRole("button", { name: /prod-2/ });
+    const hostCard = await within(main as HTMLElement).findByRole("button", { name: "连接 prod-2" });
     fireEvent.click(hostCard);
 
     await waitFor(() => {
@@ -439,6 +456,19 @@ describe("command library", () => {
     expect(connectArgs?.[0]).toBe("ssh-1");
     expect(connectArgs?.[1]).toContain("\"hostname\":\"10.0.0.9\"");
     expect(await screen.findByTestId("terminal-shell")).toBeInTheDocument();
+  });
+
+  test("deletes a saved host from the host list", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { key: "prod-delete", name: "prod-delete", hostname: "10.0.0.12", port: 22, username: "root", password: "secret" }
+    ]);
+
+    render(<App />);
+
+    const deleteButtons = await screen.findAllByRole("button", { name: "删除 prod-delete" });
+    fireEvent.click(deleteButtons[0]);
+
+    await waitFor(() => expect(window.pywebview?.api?.delete_saved_connection).toHaveBeenCalledWith("prod-delete"));
   });
 
   test("asks for a password and retries the same failed SSH session", async () => {
@@ -581,6 +611,25 @@ describe("command library", () => {
     expect(saveArgs?.[1]).not.toContain("\"password\":\"***\"");
   });
 
+  test("selects an SSH private key path with the native file picker", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "新建连接" })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "浏览密钥文件" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.show_open_file_dialog).toHaveBeenCalled());
+    expect(screen.getByDisplayValue("C:\\Users\\1111\\.ssh\\id_rsa")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("连接名称"), { target: { value: "key-host" } });
+    fireEvent.change(screen.getByLabelText("主机地址"), { target: { value: "10.0.0.20" } });
+    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "root" } });
+    fireEvent.click(screen.getByRole("button", { name: "连接" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.connect).toHaveBeenCalled());
+    const connectArgs = (window.pywebview?.api?.connect as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(connectArgs?.[1]).toContain("\"keyPath\":\"C:\\\\Users\\\\1111\\\\.ssh\\\\id_rsa\"");
+  });
+
   test("shows the quick command sidebar inside the terminal workspace", async () => {
     render(<App />);
 
@@ -710,5 +759,39 @@ describe("settings panel", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "删除" }).at(-1)!);
 
     expect(screen.queryByText("崩溃")).not.toBeInTheDocument();
+  });
+});
+
+describe("browser cards", () => {
+  test("adds a browser card and opens it in an external browser", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("浏览器"));
+    fireEvent.change(await screen.findByPlaceholderText("标签名称"), {
+      target: { value: "Hermes" }
+    });
+    fireEvent.change(screen.getByPlaceholderText("https://example.com"), {
+      target: { value: "hermes.local" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加网页" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.add_web_favorite).toHaveBeenCalledWith("Hermes", "hermes.local"));
+    const card = await screen.findByRole("button", { name: /打开 Hermes/ });
+    fireEvent.click(card);
+
+    await waitFor(() => expect(window.pywebview?.api?.open_in_external_browser).toHaveBeenCalledWith("https://hermes.local"));
+  });
+
+  test("deletes a browser card", async () => {
+    (window.pywebview?.api?.get_web_favorites as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { id: "fav-delete", title: "Docs", url: "https://docs.example.com" }
+    ]);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("浏览器"));
+    fireEvent.click(await screen.findByRole("button", { name: "删除 Docs" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.delete_web_favorite).toHaveBeenCalledWith("fav-delete"));
   });
 });

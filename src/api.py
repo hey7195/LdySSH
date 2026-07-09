@@ -1200,11 +1200,63 @@ class PrismSSHAPI:
         except Exception as e:
             self.logger.error(f"API: Error showing native save dialog: {e}")
             return json.dumps({
-                'success': False, 
+                'success': False,
                 'error': str(e),
                 'fallback_needed': True
             })
-    
+
+    def show_open_file_dialog(self) -> str:
+        """Show native OS open file dialog and return the selected path."""
+        try:
+            import platform
+
+            system = platform.system().lower()
+            if system == 'windows':
+                import tkinter as tk
+                from tkinter import filedialog
+
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes('-topmost', True)
+                result = filedialog.askopenfilename(
+                    title='Select SSH private key',
+                    filetypes=[('All files', '*.*')]
+                )
+                root.destroy()
+            elif system == 'darwin':
+                result = subprocess.run(
+                    [
+                        'osascript',
+                        '-e',
+                        'POSIX path of (choose file with prompt "Select SSH private key")'
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                ).stdout.strip()
+            else:
+                try:
+                    result = subprocess.run(
+                        ['zenity', '--file-selection', '--title', 'Select SSH private key'],
+                        capture_output=True,
+                        text=True,
+                        timeout=60
+                    ).stdout.strip()
+                except Exception:
+                    import tkinter as tk
+                    from tkinter import filedialog
+
+                    root = tk.Tk()
+                    root.withdraw()
+                    root.attributes('-topmost', True)
+                    result = filedialog.askopenfilename(title='Select SSH private key')
+                    root.destroy()
+
+            return json.dumps({'filePath': result or ''})
+        except Exception as e:
+            self.logger.error(f"API: Error showing native open dialog: {e}")
+            return json.dumps({'filePath': '', 'error': str(e)})
+
     def start_download_with_progress(self, session_id: str, remote_path: str, download_id: str) -> str:
         """Start a download with progress tracking."""
         try:

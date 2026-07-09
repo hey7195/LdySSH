@@ -1067,6 +1067,50 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
+        else if (action == "open_in_external_browser") {
+            std::string url = args.size() > 0 ? TrimString(args[0].get<std::string>()) : "";
+            nlohmann::json retObj;
+
+            if (url.empty()) {
+                retObj["success"] = false;
+                retObj["error"] = "URL is required";
+            } else {
+                if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
+                    url = "https://" + url;
+                }
+
+                std::wstring urlW = Utf8ToUtf16(url);
+                std::vector<std::wstring> chromePaths;
+                wchar_t envPath[MAX_PATH] = { 0 };
+                if (GetEnvironmentVariableW(L"ProgramFiles", envPath, MAX_PATH) > 0) {
+                    chromePaths.push_back(std::wstring(envPath) + L"\\Google\\Chrome\\Application\\chrome.exe");
+                }
+                if (GetEnvironmentVariableW(L"ProgramFiles(x86)", envPath, MAX_PATH) > 0) {
+                    chromePaths.push_back(std::wstring(envPath) + L"\\Google\\Chrome\\Application\\chrome.exe");
+                }
+                if (GetEnvironmentVariableW(L"LOCALAPPDATA", envPath, MAX_PATH) > 0) {
+                    chromePaths.push_back(std::wstring(envPath) + L"\\Google\\Chrome\\Application\\chrome.exe");
+                }
+
+                HINSTANCE res = (HINSTANCE)31;
+                for (const auto& chromePath : chromePaths) {
+                    if (GetFileAttributesW(chromePath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                        res = ShellExecuteW(NULL, L"open", chromePath.c_str(), urlW.c_str(), NULL, SW_SHOWNORMAL);
+                        break;
+                    }
+                }
+                if ((INT_PTR)res <= 32) {
+                    res = ShellExecuteW(NULL, L"open", urlW.c_str(), NULL, NULL, SW_SHOWNORMAL);
+                }
+                retObj["success"] = ((INT_PTR)res > 32);
+                if (!retObj["success"].get<bool>()) {
+                    retObj["error"] = "Failed to open external browser";
+                }
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "get_command_library") {
             NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
             std::wstring configDir = GetConfigDirectory();

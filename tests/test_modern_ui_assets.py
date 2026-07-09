@@ -88,4 +88,5 @@ def test_codex_runs_as_background_job_from_the_ui():
     assert "std::thread([jobId" in source
     assert "startCodexRun" in bridge
     assert "getCodexRun" in bridge
-    assert "pendingRun" in app
+    assert "executeAiRun" in app
+    assert "pendingRun" not in app

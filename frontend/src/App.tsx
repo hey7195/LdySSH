@@ -8,8 +8,10 @@ import {
   ChevronDown,
   Command,
   Cpu,
+  ExternalLink,
   FolderOpen,
   Grid2X2,
+  Globe2,
   HardDrive,
   Home,
   KeyRound,
@@ -19,15 +21,12 @@ import {
   Monitor,
   Pencil,
   Plus,
-  Play,
   RefreshCw,
   Search,
   Send,
   Server,
   Settings,
-  Shield,
   Terminal,
-  Wrench,
   X
 } from "lucide-react";
 import { Button, EmptyState, Input, Panel } from "./components/ui";
@@ -39,7 +38,8 @@ import {
   type CommandItem,
   type ConnectParams,
   type NativeResult,
-  type SavedConnection
+  type SavedConnection,
+  type WebFavorite
 } from "./lib/bridge";
 import {
   DEFAULT_HIGHLIGHT_RULES,
@@ -54,7 +54,7 @@ import {
   type ThemeMode
 } from "./lib/terminalSettings";
 
-type Tool = "ssh" | "cmd" | "monitor" | "local" | "settings";
+type Tool = "ssh" | "cmd" | "monitor" | "local" | "browser" | "settings";
 type TerminalSidePanel = "commands" | "files" | "ai";
 type AiTool = "codex" | "hermes";
 
@@ -108,7 +108,7 @@ interface AiConfig {
   hermesApiToken: string;
 }
 
-interface PendingAiRun {
+interface AiRun {
   id: string;
   tool: AiTool;
   prompt: string;
@@ -138,6 +138,7 @@ const tools: Array<{ id: Tool; label: string; title: string; icon: React.Compone
   { id: "local", label: "本地", title: "本地终端", icon: Terminal },
   { id: "cmd", label: "命令", title: "命令库", icon: Command },
   { id: "monitor", label: "监控", title: "系统监控", icon: Monitor },
+  { id: "browser", label: "网页", title: "浏览器", icon: Globe2 },
   { id: "settings", label: "设置", title: "设置", icon: Settings }
 ];
 
@@ -306,10 +307,12 @@ export function App() {
   const [terminalSidePanel, setTerminalSidePanel] = useState<TerminalSidePanel>("commands");
   const [terminalHistories, setTerminalHistories] = useState<Record<string, string>>({});
   const [passwordPrompt, setPasswordPrompt] = useState<RetryPasswordPrompt | null>(null);
+  const [webFavorites, setWebFavorites] = useState<WebFavorite[]>([]);
 
   useEffect(() => {
     void refreshConnections();
     void refreshCommandLibrary();
+    void refreshWebFavorites();
   }, []);
 
   useEffect(() => {
@@ -373,6 +376,11 @@ export function App() {
     const folders = result.success && result.folders.length > 0 ? result.folders : defaultCommandFolders;
     setCommandFolders(folders);
     setActiveCommandFolderId((current) => folders.some((folder) => folder.id === current) ? current : folders[0]?.id || "");
+  }
+
+  async function refreshWebFavorites() {
+    const result = await nativeBridge.getWebFavorites();
+    setWebFavorites(Array.isArray(result) ? result : []);
   }
 
   async function openLocalSession() {
@@ -444,6 +452,45 @@ export function App() {
     setForm(toConnectionForm(connection));
     setConnectError("");
     setConnectOpen(true);
+  }
+
+  async function deleteSavedConnection(connection: SavedConnection) {
+    const key = savedConnectionKey(connection);
+    const result = await nativeBridge.deleteSavedConnection(key);
+    if (!result.success) {
+      setConnectError(result.error || "删除主机失败。");
+      return;
+    }
+    setSavedConnections((current) => current.filter((item) => savedConnectionKey(item) !== key));
+  }
+
+  async function browseKeyFile() {
+    const result = await nativeBridge.showOpenFileDialog();
+    if (result.filePath) {
+      setForm((current) => ({ ...current, keyPath: result.filePath || "" }));
+    }
+  }
+
+  async function addWebFavorite(title: string, url: string) {
+    const result = await nativeBridge.addWebFavorite(title, url);
+    if (result.success && result.favorite) {
+      setWebFavorites((current) => [...current, result.favorite as WebFavorite]);
+      return;
+    }
+    await refreshWebFavorites();
+  }
+
+  async function deleteWebFavorite(favorite: WebFavorite) {
+    const result = await nativeBridge.deleteWebFavorite(favorite.id);
+    if (result.success) {
+      setWebFavorites((current) => current.filter((item) => item.id !== favorite.id));
+      return;
+    }
+    await refreshWebFavorites();
+  }
+
+  async function openWebFavorite(favorite: WebFavorite) {
+    await nativeBridge.openInExternalBrowser(favorite.url);
   }
 
   async function saveEditedConnection() {
@@ -777,6 +824,7 @@ export function App() {
           onRefresh={refreshConnections}
           onConnect={connectHost}
           onEditConnection={openEditConnectionDialog}
+          onDeleteConnection={deleteSavedConnection}
           onCreateLocal={openLocalSession}
           onActivateSession={activateSession}
         />
@@ -790,6 +838,7 @@ export function App() {
               onRefresh={refreshConnections}
               onConnect={connectHost}
               onEditConnection={openEditConnectionDialog}
+              onDeleteConnection={deleteSavedConnection}
             />
           )}
           {activeTool === "cmd" && (
@@ -805,6 +854,15 @@ export function App() {
             />
           )}
           {activeTool === "monitor" && <MonitorPanel activeSession={activeSession} />}
+          {activeTool === "browser" && (
+            <BrowserPanel
+              favorites={webFavorites}
+              onRefresh={refreshWebFavorites}
+              onAdd={addWebFavorite}
+              onDelete={deleteWebFavorite}
+              onOpen={openWebFavorite}
+            />
+          )}
           {activeTool === "local" && (
             <TerminalWorkspace
               sessions={sessions}
@@ -863,6 +921,7 @@ export function App() {
         onFormChange={setForm}
         onConnect={() => connectHost()}
         onSave={saveEditedConnection}
+        onBrowseKey={browseKeyFile}
       />
       <RetryPasswordDialog
         prompt={passwordPrompt}
@@ -947,6 +1006,7 @@ function HostSidebar({
   onRefresh,
   onConnect,
   onEditConnection,
+  onDeleteConnection,
   onCreateLocal,
   onActivateSession
 }: {
@@ -959,6 +1019,7 @@ function HostSidebar({
   onRefresh: () => void;
   onConnect: (connection: SavedConnection) => void;
   onEditConnection: (connection: SavedConnection) => void;
+  onDeleteConnection: (connection: SavedConnection) => void;
   onCreateLocal: () => void;
   onActivateSession: (sessionId: string) => void;
 }) {
@@ -1000,7 +1061,7 @@ function HostSidebar({
               {savedConnections.slice(0, 8).map((connection, index) => (
                 <div
                   key={`${connection.hostname}-${connection.username}-${index}`}
-                  className="grid grid-cols-[minmax(0,1fr)_30px] items-center gap-1 rounded-md px-3 py-2 hover:bg-white"
+                  className="grid grid-cols-[minmax(0,1fr)_30px_30px] items-center gap-1 rounded-md px-3 py-2 hover:bg-white"
                 >
                   <button className="min-w-0 text-left" onClick={() => onConnect(connection)}>
                     <div className="truncate text-sm font-medium text-slate-900">
@@ -1016,6 +1077,13 @@ function HostSidebar({
                     onClick={() => onEditConnection(connection)}
                   >
                     <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    aria-label={`删除 ${connection.name || connection.hostname}`}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                    onClick={() => onDeleteConnection(connection)}
+                  >
+                    <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
               ))}
@@ -1094,7 +1162,8 @@ function Workbench({
   onOpenDialog,
   onRefresh,
   onConnect,
-  onEditConnection
+  onEditConnection,
+  onDeleteConnection
 }: {
   savedConnections: SavedConnection[];
   query: string;
@@ -1103,6 +1172,7 @@ function Workbench({
   onRefresh: () => void;
   onConnect: (connection: SavedConnection) => void;
   onEditConnection: (connection: SavedConnection) => void;
+  onDeleteConnection: (connection: SavedConnection) => void;
 }) {
   return (
     <div className="h-full overflow-auto px-8 py-8">
@@ -1171,12 +1241,20 @@ function Workbench({
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <button
-                        aria-label="编辑主机"
+                        aria-label={`编辑 ${connection.name || connection.hostname}`}
                         title={`编辑 ${connection.name || connection.hostname}`}
                         className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800"
                         onClick={() => onEditConnection(connection)}
                       >
                         <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        aria-label={`删除 ${connection.name || connection.hostname}`}
+                        title={`删除 ${connection.name || connection.hostname}`}
+                        className="flex h-8 w-8 items-center justify-center rounded-md border border-rose-100 bg-white text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                        onClick={() => onDeleteConnection(connection)}
+                      >
+                        <X className="h-3.5 w-3.5" />
                       </button>
                       <button
                         aria-label={`连接 ${connection.name || connection.hostname}`}
@@ -1931,6 +2009,116 @@ function TerminalFileSidebar({ activeSession }: { activeSession?: SessionTab }) 
   );
 }
 
+function BrowserPanel({
+  favorites,
+  onRefresh,
+  onAdd,
+  onDelete,
+  onOpen
+}: {
+  favorites: WebFavorite[];
+  onRefresh: () => void;
+  onAdd: (title: string, url: string) => void;
+  onDelete: (favorite: WebFavorite) => void;
+  onOpen: (favorite: WebFavorite) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+
+  function submit() {
+    const nextTitle = title.trim();
+    const nextUrl = url.trim();
+    if (!nextTitle || !nextUrl) return;
+    onAdd(nextTitle, nextUrl);
+    setTitle("");
+    setUrl("");
+  }
+
+  return (
+    <div className="h-full overflow-auto px-8 py-8">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-6 flex items-start justify-between gap-5">
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-950">浏览器状态栏</h1>
+            <p className="mt-1 text-sm text-slate-500">保存常用网页入口，点击卡片后用外部浏览器打开。</p>
+          </div>
+          <Button variant="outline" onClick={onRefresh}>
+            <RefreshCw className="h-4 w-4" />
+            刷新
+          </Button>
+        </div>
+
+        <Panel title="网页卡片">
+          <div className="grid grid-cols-[220px_minmax(0,1fr)_104px] gap-3">
+            <Input
+              placeholder="标签名称"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") submit();
+              }}
+            />
+            <Input
+              placeholder="https://example.com"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") submit();
+              }}
+            />
+            <Button onClick={submit}>添加网页</Button>
+          </div>
+
+          {favorites.length === 0 ? (
+            <EmptyState title="暂无网页卡片" description="添加一个标签和 URL 后，这里会显示可点击的网页入口。" />
+          ) : (
+            <div className="mt-5 grid grid-cols-3 gap-3">
+              {favorites.map((favorite) => (
+                <div
+                  key={favorite.id}
+                  className="rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                >
+                  <button
+                    aria-label={`打开 ${favorite.title}`}
+                    className="block w-full text-left"
+                    onClick={() => onOpen(favorite)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
+                        <Globe2 className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-slate-950">{favorite.title}</span>
+                        <span className="mt-1 block truncate text-xs text-slate-500">{favorite.url}</span>
+                      </span>
+                    </div>
+                  </button>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      aria-label={`删除 ${favorite.title}`}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-rose-100 bg-white text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                      onClick={() => onDelete(favorite)}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      aria-label={`外部链接 ${favorite.title}`}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                      onClick={() => onOpen(favorite)}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
 function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
   const [loading, setLoading] = useState(false);
   const [snapshots, setSnapshots] = useState<Record<string, NativeResult>>({});
@@ -2439,7 +2627,6 @@ function AiWorkspacePanel({
   const [activeAiSessionId, setActiveAiSessionId] = useState(() => aiSessions[0]?.id || "");
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
-  const [pendingRun, setPendingRun] = useState<PendingAiRun | null>(null);
   const [runStatus, setRunStatus] = useState("");
   const [hermesStatus, setHermesStatus] = useState("等待检查");
   const activeAiSession = aiSessions.find((session) => session.id === activeAiSessionId) || aiSessions[0];
@@ -2486,15 +2673,15 @@ function AiWorkspacePanel({
 
   async function sendPrompt() {
     const text = prompt.trim();
-    if (!text || running || pendingRun) return;
+    if (!text || running) return;
 
     setPrompt("");
-    setRunStatus("等待授权执行。");
+    setRunStatus("");
     setMessages((current) => [...current, { id: `user_${Date.now()}`, role: "user", text }]);
 
     const fullPrompt = buildAiPrompt(text, quotes, activeSession, activeAiSession);
-    setPendingRun({
-      id: `pending_${Date.now()}`,
+    void executeAiRun({
+      id: `run_${Date.now()}`,
       tool: selectedTool,
       prompt: fullPrompt,
       sessionTitle: activeSession?.title || "",
@@ -2506,11 +2693,8 @@ function AiWorkspacePanel({
     });
   }
 
-  async function approvePendingRun() {
-    if (!pendingRun || running) return;
-
-    const run = pendingRun;
-    setPendingRun(null);
+  async function executeAiRun(run: AiRun) {
+    if (running) return;
     setRunning(true);
     setRunStatus(run.tool === "codex" ? "Codex 执行中..." : "Hermes 调用中...");
 
@@ -2683,15 +2867,6 @@ function AiWorkspacePanel({
                 暂无对话
               </div>
             )}
-            {pendingRun && (
-              <AiActionCard
-                pendingRun={pendingRun}
-                activeSession={activeSession}
-                running={running}
-                onApprove={() => void approvePendingRun()}
-                onCancel={() => setPendingRun(null)}
-              />
-            )}
             {running && <AiRunStatus text={runStatus || "Codex 执行中..."} thinking />}
             {!running && runStatus && <AiRunStatus text={runStatus} />}
           </div>
@@ -2701,7 +2876,6 @@ function AiWorkspacePanel({
           <div className="mb-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
             <span className="rounded-full bg-slate-100 px-2 py-1">附加当前会话</span>
             <span className="rounded-full bg-slate-100 px-2 py-1">附加终端输出</span>
-            <span className="rounded-full bg-slate-100 px-2 py-1">需要审批</span>
           </div>
           <div className="grid grid-cols-[1fr_44px] gap-2">
             <input
@@ -2718,7 +2892,7 @@ function AiWorkspacePanel({
             <button
               className="inline-flex h-10 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
               title="发送"
-              disabled={running || Boolean(pendingRun)}
+              disabled={running}
               onClick={() => void sendPrompt()}
             >
               <Send className="h-4 w-4" />
@@ -2797,6 +2971,13 @@ function sanitizeCodexOutput(output: string, prompt: string) {
       if (/^引用自 .+：?$/.test(text)) return false;
       if (/请直接回复我的内容/.test(text)) return false;
       if (/我会按当前仓库处理/.test(text)) return false;
+      if (/^OpenAI Codex\b/i.test(text)) return false;
+      if (/^session id:/i.test(text)) return false;
+      if (/^tokens used:/i.test(text)) return false;
+      if (/^succeeded in /i.test(text)) return false;
+      if (/^---+$/.test(text)) return false;
+      if (/^```(?:json)?$/i.test(text)) return false;
+      if (/^\{.*"(type|delta)"\s*:.*\}$/.test(text) && /"(message_delta|delta)"/.test(text)) return false;
       if (/codex_core_plugins/i.test(text)) return false;
       if (/curated plugin cache/i.test(text)) return false;
       if (/codex_mcp_client/i.test(text)) return false;
@@ -3014,47 +3195,6 @@ function AiRunStatus({ text, thinking = false }: { text: string; thinking?: bool
   );
 }
 
-function AiActionCard({
-  pendingRun,
-  activeSession,
-  running,
-  onApprove,
-  onCancel
-}: {
-  pendingRun: PendingAiRun;
-  activeSession?: SessionTab;
-  running: boolean;
-  onApprove: () => void;
-  onCancel: () => void;
-}) {
-  const command =
-    pendingRun.tool === "codex"
-      ? `${pendingRun.codexCommand} exec -C ${pendingRun.codexWorkingDirectory} <prompt>`
-      : pendingRun.hermesWsUrl.trim() || `${normalizeBaseUrl(pendingRun.hermesBaseUrl)}/api/chat/start`;
-
-  return (
-    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
-          <Wrench className="h-4 w-4" />
-          {pendingRun.tool === "codex" ? "本地执行审批" : "Hermes 调用审批"}
-        </div>
-        <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-amber-800">
-          {activeSession?.title || "无活动会话"}
-        </span>
-      </div>
-      <pre className="mt-3 whitespace-pre-wrap break-words rounded-md border border-amber-200 bg-white p-2 text-xs leading-5 text-slate-800">{command}</pre>
-      <div className="mt-3 flex justify-end gap-2">
-        <Button variant="outline" className="h-8 px-3" disabled={running} onClick={onCancel}>取消</Button>
-        <Button className="h-8 px-3" disabled={running} onClick={onApprove}>
-          <Play className="h-3.5 w-3.5" />
-          {running ? "执行中" : "授权执行"}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 function ContextItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -3117,7 +3257,8 @@ function ConnectDialog({
   onOpenChange,
   onFormChange,
   onConnect,
-  onSave
+  onSave,
+  onBrowseKey
 }: {
   open: boolean;
   form: ConnectionForm;
@@ -3127,6 +3268,7 @@ function ConnectDialog({
   onFormChange: (form: ConnectionForm) => void;
   onConnect: () => void;
   onSave: () => void;
+  onBrowseKey: () => void;
 }) {
   function update<K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) {
     onFormChange({ ...form, [key]: value });
@@ -3172,7 +3314,16 @@ function ConnectDialog({
               <Input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} />
             </Field>
             <Field label="密钥路径">
-              <Input value={form.keyPath} onChange={(event) => update("keyPath", event.target.value)} />
+              <div className="grid grid-cols-[minmax(0,1fr)_92px] gap-2">
+                <Input value={form.keyPath} onChange={(event) => update("keyPath", event.target.value)} />
+                <button
+                  type="button"
+                  className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                  onClick={onBrowseKey}
+                >
+                  浏览密钥文件
+                </button>
+              </div>
             </Field>
           </div>
 
