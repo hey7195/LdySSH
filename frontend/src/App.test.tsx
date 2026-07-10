@@ -3,6 +3,23 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
 
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(base64: string) {
+  const raw = atob(base64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) {
+    bytes[i] = raw.charCodeAt(i);
+  }
+  return bytes;
+}
+
 const terminalMock = vi.hoisted(() => ({
   selectionText: "",
   selectionHandler: undefined as undefined | (() => void),
@@ -91,6 +108,9 @@ beforeEach(() => {
       create_session: vi.fn().mockResolvedValue("ssh-1"),
       connect: vi.fn().mockResolvedValue({ success: true }),
       show_open_file_dialog: vi.fn().mockResolvedValue({ filePath: "C:\\Users\\1111\\.ssh\\id_rsa" }),
+      show_save_file_dialog: vi.fn().mockResolvedValue({ filePath: "C:\\Users\\1111\\Downloads\\ldyssh-commands.json" }),
+      read_base64_file: vi.fn().mockResolvedValue({ content: "" }),
+      write_base64_file: vi.fn().mockResolvedValue({ success: true }),
       run_codex: vi.fn().mockResolvedValue({ success: true, output: "Codex 已完成分析", exitCode: 0 }),
       start_codex_run: vi.fn().mockResolvedValue({ success: true, jobId: "codex-job-1", commandPreview: "codex exec -C E:\\adb\\tools\\LdSSH <prompt>" }),
       get_codex_run: vi.fn().mockResolvedValue({ success: true, running: false, completed: true, output: "Codex 已完成分析", exitCode: 0 }),
@@ -949,6 +969,39 @@ describe("command library", () => {
     expect(await screen.findByText("列出设备")).toBeInTheDocument();
     expect(screen.getByText("adb devices")).toBeInTheDocument();
     expect(window.pywebview?.api?.save_command_library).toHaveBeenCalled();
+  });
+
+  test("imports FinalShell commands through the command panel", async () => {
+    const finalShellJson = JSON.stringify({
+      groups: [{ name: "FinalShell", children: [{ name: "查看磁盘", cmd: "df -h /data" }] }]
+    });
+    (window.pywebview?.api?.show_open_file_dialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      filePath: "C:\\Users\\1111\\.finalshell\\commands.json"
+    });
+    (window.pywebview?.api?.read_base64_file as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: bytesToBase64(new TextEncoder().encode(finalShellJson))
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("命令库"));
+    fireEvent.click(await screen.findByRole("button", { name: "导入 FinalShell" }));
+
+    expect(await screen.findByText("查看磁盘")).toBeInTheDocument();
+    expect(screen.getByText("df -h /data")).toBeInTheDocument();
+    expect(window.pywebview?.api?.save_command_library).toHaveBeenCalled();
+  });
+
+  test("exports command library through the native save dialog", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("命令库"));
+    fireEvent.click(await screen.findByRole("button", { name: "导出" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.write_base64_file).toHaveBeenCalled());
+    const call = (window.pywebview?.api?.write_base64_file as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(call?.[0]).toBe("C:\\Users\\1111\\Downloads\\ldyssh-commands.json");
+    expect(new TextDecoder().decode(base64ToBytes(call?.[1] as string))).toContain('"folders"');
   });
 });
 

@@ -30,6 +30,21 @@ def test_command_library_round_trip(tmp_path):
         api.cleanup()
 
 
+def test_local_base64_file_round_trip(tmp_path):
+    api = make_api(tmp_path)
+    path = tmp_path / "commands.json"
+    payload = base64.b64encode("命令库".encode("utf-8")).decode("ascii")
+
+    try:
+        write_result = json.loads(api.write_base64_file(str(path), payload))
+        read_result = json.loads(api.read_base64_file(str(path)))
+
+        assert write_result["success"] is True
+        assert base64.b64decode(read_result["content"]).decode("utf-8") == "命令库"
+    finally:
+        api.cleanup()
+
+
 def test_run_codex_invokes_cli(monkeypatch, tmp_path):
     api = make_api(tmp_path)
     calls = []

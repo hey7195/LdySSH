@@ -86,8 +86,17 @@ export const nativeBridge = {
       JSON.stringify(params)
     );
   },
-  showOpenFileDialog() {
-    return callNative<{ filePath?: string }>("show_open_file_dialog", {});
+  showOpenFileDialog(title = "") {
+    return callNative<{ filePath?: string }>("show_open_file_dialog", {}, title);
+  },
+  showSaveFileDialog(defaultName: string) {
+    return callNative<{ filePath?: string }>("show_save_file_dialog", {}, defaultName);
+  },
+  readBase64File(filePath: string) {
+    return callNative<{ content?: string; error?: string }>("read_base64_file", {}, filePath);
+  },
+  writeBase64File(filePath: string, content: string) {
+    return callNative<{ success: boolean; error?: string }>("write_base64_file", { success: false }, filePath, content);
   },
   getWebFavorites() {
     return callNative<WebFavorite[]>("get_web_favorites", []);

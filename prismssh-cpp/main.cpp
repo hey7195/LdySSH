@@ -255,7 +255,7 @@ std::wstring ShowSaveFileDialog(const std::wstring& defaultName) {
     ofn.lpstrFileTitle = NULL;
     ofn.nMaxFileTitle = 0;
     ofn.lpstrInitialDir = NULL;
-    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_OVERWRITEPROMPT;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
     
     if (GetSaveFileNameW(&ofn)) {
         return std::wstring(szFile);
@@ -263,7 +263,7 @@ std::wstring ShowSaveFileDialog(const std::wstring& defaultName) {
     return L"";
 }
 
-std::wstring ShowOpenFileDialog() {
+std::wstring ShowOpenFileDialog(const std::wstring& title = L"Select file") {
     wchar_t szFile[MAX_PATH] = { 0 };
     OPENFILENAMEW ofn = { 0 };
     ofn.lStructSize = sizeof(ofn);
@@ -274,6 +274,7 @@ std::wstring ShowOpenFileDialog() {
     ofn.nFilterIndex = 1;
     ofn.lpstrFileTitle = NULL;
     ofn.nMaxFileTitle = 0;
+    ofn.lpstrTitle = title.empty() ? NULL : title.c_str();
     ofn.lpstrInitialDir = NULL;
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
     
@@ -331,7 +332,29 @@ struct HttpRunResult {
     std::string body;
     std::string cookie;
     std::string error;
+    DWORD transportError = 0;
 };
+
+std::string DescribeWinHttpError(DWORD errorCode) {
+    switch (errorCode) {
+    case ERROR_WINHTTP_CANNOT_CONNECT:
+        return "cannot connect to Hermes service; check the address, port, service status, or proxy";
+    case ERROR_WINHTTP_TIMEOUT:
+        return "request timed out";
+    case ERROR_WINHTTP_NAME_NOT_RESOLVED:
+        return "host name was not resolved";
+    case ERROR_WINHTTP_CONNECTION_ERROR:
+        return "connection was closed or reset";
+    case ERROR_WINHTTP_SECURE_FAILURE:
+        return "TLS validation failed";
+    default:
+        return "WinHTTP error";
+    }
+}
+
+std::string FormatWinHttpError(const std::string& step, DWORD errorCode) {
+    return step + ": " + std::to_string(errorCode) + " (" + DescribeWinHttpError(errorCode) + ")";
+}
 
 std::wstring TrimWideString(const std::wstring& value) {
     const size_t first = value.find_first_not_of(L" \t\r\n\0", 0);
@@ -414,20 +437,22 @@ HttpRunResult RunHttpRequest(
 
     HINTERNET session = WinHttpOpen(
         L"LdySSH/1.0",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_ACCESS_TYPE_NO_PROXY,
         WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS,
         0
     );
     if (!session) {
-        result.error = "WinHttpOpen failed: " + std::to_string(GetLastError());
+        result.transportError = GetLastError();
+        result.error = FormatWinHttpError("WinHttpOpen failed", result.transportError);
         return result;
     }
     WinHttpSetTimeouts(session, 5000, 5000, 10000, 120000);
 
     HINTERNET connect = WinHttpConnect(session, std::wstring(parts.lpszHostName, parts.dwHostNameLength).c_str(), parts.nPort, 0);
     if (!connect) {
-        result.error = "WinHttpConnect failed: " + std::to_string(GetLastError());
+        result.transportError = GetLastError();
+        result.error = FormatWinHttpError("WinHttpConnect failed", result.transportError);
         WinHttpCloseHandle(session);
         return result;
     }
@@ -443,7 +468,8 @@ HttpRunResult RunHttpRequest(
         flags
     );
     if (!request) {
-        result.error = "WinHttpOpenRequest failed: " + std::to_string(GetLastError());
+        result.transportError = GetLastError();
+        result.error = FormatWinHttpError("WinHttpOpenRequest failed", result.transportError);
         WinHttpCloseHandle(connect);
         WinHttpCloseHandle(session);
         return result;
@@ -472,7 +498,8 @@ HttpRunResult RunHttpRequest(
         0
     );
     if (!sent || !WinHttpReceiveResponse(request, NULL)) {
-        result.error = "WinHttp request failed: " + std::to_string(GetLastError());
+        result.transportError = GetLastError();
+        result.error = FormatWinHttpError("WinHttp request failed", result.transportError);
         WinHttpCloseHandle(request);
         WinHttpCloseHandle(connect);
         WinHttpCloseHandle(session);
@@ -537,7 +564,8 @@ HttpRunResult RunHttpRequest(
     do {
         available = 0;
         if (!WinHttpQueryDataAvailable(request, &available)) {
-            result.error = "WinHttpQueryDataAvailable failed: " + std::to_string(GetLastError());
+            result.transportError = GetLastError();
+            result.error = FormatWinHttpError("WinHttpQueryDataAvailable failed", result.transportError);
             break;
         }
         if (available == 0) {
@@ -546,7 +574,8 @@ HttpRunResult RunHttpRequest(
         std::string chunk(available, '\0');
         DWORD read = 0;
         if (!WinHttpReadData(request, chunk.data(), available, &read)) {
-            result.error = "WinHttpReadData failed: " + std::to_string(GetLastError());
+            result.transportError = GetLastError();
+            result.error = FormatWinHttpError("WinHttpReadData failed", result.transportError);
             break;
         }
         chunk.resize(read);
@@ -1507,7 +1536,8 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["result"] = retObj.dump();
         }
         else if (action == "show_open_file_dialog") {
-            std::wstring path = ShowOpenFileDialog();
+            std::string titleUtf8 = args.empty() ? "" : args[0].get<std::string>();
+            std::wstring path = ShowOpenFileDialog(Utf8ToUtf16(titleUtf8));
             nlohmann::json retObj;
             retObj["filePath"] = Utf16ToUtf8(path);
             response["status"] = "success";

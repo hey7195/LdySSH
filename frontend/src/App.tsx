@@ -9,6 +9,7 @@ import {
   Copy,
   Command,
   Cpu,
+  Download,
   Eye,
   ExternalLink,
   FolderOpen,
@@ -30,9 +31,11 @@ import {
   Settings,
   Terminal,
   Trash2,
+  Upload,
   X
 } from "lucide-react";
 import { Button, EmptyState, Input, Panel } from "./components/ui";
+import { mergeCommandFolders, parseCommandLibraryImport, serializeCommandLibraryExport } from "./lib/commandLibrary";
 import { cn } from "./lib/utils";
 import {
   nativeBridge,
@@ -446,6 +449,7 @@ export function App() {
   const [aiQuotes, setAiQuotes] = useState<AiQuote[]>([]);
   const [commandFolders, setCommandFolders] = useState<CommandFolder[]>(defaultCommandFolders);
   const [activeCommandFolderId, setActiveCommandFolderId] = useState(defaultCommandFolders[0].id);
+  const [commandTransferStatus, setCommandTransferStatus] = useState("");
   const [aiConfig, setAiConfig] = useState<AiConfig>(() => loadStoredAiConfig());
   const [terminalSidePanel, setTerminalSidePanel] = useState<TerminalSidePanel>("commands");
   const [terminalHistories, setTerminalHistories] = useState<Record<string, string>>({});
@@ -956,6 +960,45 @@ export function App() {
     );
   }
 
+  async function importCommandLibrary(source: string) {
+    setCommandTransferStatus("");
+    const selected = await nativeBridge.showOpenFileDialog(source === "FinalShell" ? "选择 FinalShell 命令文件" : "选择命令库文件");
+    if (!selected.filePath) return;
+
+    const file = await nativeBridge.readBase64File(selected.filePath);
+    if (!file.content) {
+      setCommandTransferStatus("读取命令文件失败。");
+      return;
+    }
+
+    const text = new TextDecoder("utf-8").decode(base64ToBytes(file.content));
+    const imported = parseCommandLibraryImport(text, source);
+    if (imported.imported === 0) {
+      setCommandTransferStatus("未找到可导入的命令。");
+      return;
+    }
+
+    const next = mergeCommandFolders(commandFolders, imported.folders);
+    updateCommandFolders(next);
+    const firstImportedFolder = imported.folders[0]?.name;
+    const activeImportedFolder = next.find((folder) => folder.name === firstImportedFolder);
+    setActiveCommandFolderId(activeImportedFolder?.id || next[0]?.id || "");
+    setCommandTransferStatus(`已从 ${source} 导入 ${imported.imported} 条命令。`);
+  }
+
+  async function exportCommandLibrary() {
+    setCommandTransferStatus("");
+    const selected = await nativeBridge.showSaveFileDialog("ldyssh-commands.json");
+    if (!selected.filePath) return;
+
+    const content = serializeCommandLibraryExport(commandFolders);
+    const result = await nativeBridge.writeBase64File(
+      selected.filePath,
+      bytesToBase64(new TextEncoder().encode(content))
+    );
+    setCommandTransferStatus(result.success ? "命令库已导出。" : result.error || "导出命令库失败。");
+  }
+
   function sendCommandToActiveSession(command: string) {
     if (!activeSession) return;
     const data = command.endsWith("\n") ? command : `${command}\n`;
@@ -1010,6 +1053,9 @@ export function App() {
               onSaveCommand={saveCommand}
               onDeleteCommand={deleteCommand}
               onSendCommand={sendCommandToActiveSession}
+              onImportCommands={importCommandLibrary}
+              onExportCommands={exportCommandLibrary}
+              transferStatus={commandTransferStatus}
             />
           )}
           {activeTool === "monitor" && <MonitorPanel activeSession={activeSession} />}
@@ -2584,7 +2630,10 @@ function CommandPanel({
   onAddFolder,
   onSaveCommand,
   onDeleteCommand,
-  onSendCommand
+  onSendCommand,
+  onImportCommands,
+  onExportCommands,
+  transferStatus
 }: {
   folders: CommandFolder[];
   activeFolderId: string;
@@ -2594,6 +2643,9 @@ function CommandPanel({
   onSaveCommand: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
   onDeleteCommand: (folderId: string, commandId: string) => void;
   onSendCommand: (command: string) => void;
+  onImportCommands: (source: string) => void;
+  onExportCommands: () => void;
+  transferStatus: string;
 }) {
   const [query, setQuery] = useState("");
   const [folderName, setFolderName] = useState("");
@@ -2656,6 +2708,22 @@ function CommandPanel({
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button className="col-span-2 h-9 px-3 text-xs" variant="outline" onClick={() => onImportCommands("FinalShell")}>
+            <Upload className="h-3.5 w-3.5" />
+            导入 FinalShell
+          </Button>
+          <Button className="h-9 px-3 text-xs" variant="outline" onClick={() => onImportCommands("本地文件")}>
+            <Upload className="h-3.5 w-3.5" />
+            导入
+          </Button>
+          <Button className="h-9 px-3 text-xs" variant="outline" onClick={onExportCommands}>
+            <Download className="h-3.5 w-3.5" />
+            导出
+          </Button>
+        </div>
+        {transferStatus && <p className="mt-2 text-xs text-slate-500">{transferStatus}</p>}
 
         <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
           <Input

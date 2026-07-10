@@ -1205,10 +1205,11 @@ class PrismSSHAPI:
                 'fallback_needed': True
             })
 
-    def show_open_file_dialog(self) -> str:
+    def show_open_file_dialog(self, title: str = "Select file") -> str:
         """Show native OS open file dialog and return the selected path."""
         try:
             import platform
+            dialog_title = title or "Select file"
 
             system = platform.system().lower()
             if system == 'windows':
@@ -1219,7 +1220,7 @@ class PrismSSHAPI:
                 root.withdraw()
                 root.attributes('-topmost', True)
                 result = filedialog.askopenfilename(
-                    title='Select SSH private key',
+                    title=dialog_title,
                     filetypes=[('All files', '*.*')]
                 )
                 root.destroy()
@@ -1228,7 +1229,7 @@ class PrismSSHAPI:
                     [
                         'osascript',
                         '-e',
-                        'POSIX path of (choose file with prompt "Select SSH private key")'
+                        f'POSIX path of (choose file with prompt "{dialog_title}")'
                     ],
                     capture_output=True,
                     text=True,
@@ -1237,7 +1238,7 @@ class PrismSSHAPI:
             else:
                 try:
                     result = subprocess.run(
-                        ['zenity', '--file-selection', '--title', 'Select SSH private key'],
+                        ['zenity', '--file-selection', '--title', dialog_title],
                         capture_output=True,
                         text=True,
                         timeout=60
@@ -1249,13 +1250,31 @@ class PrismSSHAPI:
                     root = tk.Tk()
                     root.withdraw()
                     root.attributes('-topmost', True)
-                    result = filedialog.askopenfilename(title='Select SSH private key')
+                    result = filedialog.askopenfilename(title=dialog_title)
                     root.destroy()
 
             return json.dumps({'filePath': result or ''})
         except Exception as e:
             self.logger.error(f"API: Error showing native open dialog: {e}")
             return json.dumps({'filePath': '', 'error': str(e)})
+
+    def read_base64_file(self, file_path: str) -> str:
+        """Read a local file and return base64 content for the frontend bridge."""
+        try:
+            data = Path(file_path).read_bytes()
+            return json.dumps({'content': base64.b64encode(data).decode('ascii')})
+        except Exception as e:
+            self.logger.error(f"API: Error reading local file {file_path}: {e}")
+            return json.dumps({'content': '', 'error': str(e)})
+
+    def write_base64_file(self, file_path: str, content: str) -> str:
+        """Write base64 content from the frontend bridge to a local file."""
+        try:
+            Path(file_path).write_bytes(base64.b64decode(content))
+            return json.dumps({'success': True})
+        except Exception as e:
+            self.logger.error(f"API: Error writing local file {file_path}: {e}")
+            return json.dumps({'success': False, 'error': str(e)})
 
     def start_download_with_progress(self, session_id: str, remote_path: str, download_id: str) -> str:
         """Start a download with progress tracking."""
