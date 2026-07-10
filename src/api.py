@@ -276,16 +276,19 @@ class PrismSSHAPI:
             command = (params.get("command") or "codex").strip() or "codex"
             working_directory = (params.get("workingDirectory") or str(Path.cwd())).strip() or str(Path.cwd())
             prompt = params.get("prompt") or ""
+            codex_session_id = (params.get("codexSessionId") or "").strip() if params.get("continueSession") else ""
+            command_args = [command, "exec", "resume", codex_session_id, "-"] if codex_session_id else [command, "exec", "-C", working_directory, "-"]
+            command_preview = f'{command} exec resume {codex_session_id} <prompt>' if codex_session_id else f'{command} exec -C {working_directory} <prompt>'
             if not prompt:
                 return json.dumps({
                     'success': False,
                     'exitCode': 1,
                     'error': 'Prompt is empty',
-                    'commandPreview': f'{command} exec -C {working_directory} <prompt>'
+                    'commandPreview': command_preview
                 })
 
             result = subprocess.run(
-                [command, "exec", "-C", working_directory, "-"],
+                command_args,
                 cwd=working_directory,
                 input=prompt,
                 capture_output=True,
@@ -301,7 +304,7 @@ class PrismSSHAPI:
                 'error': "" if result.returncode == 0 else output,
                 'exitCode': result.returncode,
                 'timedOut': False,
-                'commandPreview': f'{command} exec -C {working_directory} <prompt>'
+                'commandPreview': command_preview
             })
         except subprocess.TimeoutExpired as e:
             output = ((e.stdout or "") + (e.stderr or ""))

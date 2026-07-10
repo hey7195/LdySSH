@@ -220,7 +220,7 @@ describe("AI tools panel", () => {
     expect(screen.queryByRole("button", { name: "终端选区 1 行" })).not.toBeInTheDocument();
   });
 
-  test("sends Codex with model, noise mode, session metadata and selected context", async () => {
+  test("sends Codex with model, noise mode and selected context without automatic metadata", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
@@ -248,11 +248,10 @@ describe("AI tools panel", () => {
     const call = (window.pywebview?.api?.start_codex_run as ReturnType<typeof vi.fn>).mock.calls.at(-1);
     expect(call?.[0]).toContain("\"model\":\"gpt-5.5\"");
     expect(call?.[0]).toContain("\"noiseMode\":\"minimal\"");
-    expect(call?.[0]).toContain("当前终端:");
-    expect(call?.[0]).toContain("Local CMD");
     expect(call?.[0]).toContain("<terminal_selection");
     expect(call?.[0]).toContain("WARN disk usage 92%");
-    expect(call?.[0]).toContain("优先给修复命令");
+    expect(call?.[0]).not.toContain("当前终端:");
+    expect(call?.[0]).not.toContain("优先给修复命令");
     expect(await screen.findByText("Codex 已完成分析")).toBeInTheDocument();
   });
 
@@ -324,13 +323,57 @@ describe("AI tools panel", () => {
       expect(window.pywebview?.api?.start_codex_run).toHaveBeenCalled();
     });
     const call = (window.pywebview?.api?.start_codex_run as ReturnType<typeof vi.fn>).mock.calls.at(-1);
-    expect(call?.[0]).toContain("记住：优先检查最新日志");
+    expect(call?.[0]).not.toContain("记住：优先检查最新日志");
     expect(window.localStorage.getItem("ldyssh.ai.sessions")).toContain("记住：优先检查最新日志");
     await waitFor(() => {
       expect(window.pywebview?.api?.get_codex_run).toHaveBeenCalledWith("codex-job-1");
     });
     expect(await screen.findByText("Codex 已完成分析")).toBeInTheDocument();
     expect(screen.queryByText(/审批/)).not.toBeInTheDocument();
+  });
+
+  test("resumes Codex sessions without resending previous chat messages", async () => {
+    (window.pywebview?.api?.get_codex_run as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        success: true,
+        running: false,
+        completed: true,
+        output: "session id: 019f40a7-e44a-7bc3-871e-6acf1120deda\n第一次回复",
+        error: ""
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        running: false,
+        completed: true,
+        output: "第二次回复",
+        error: ""
+      });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "第一次问题" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+    expect(await screen.findByText("第一次回复")).toBeInTheDocument();
+
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "第二次问题" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+    expect(await screen.findByText("第二次回复")).toBeInTheDocument();
+
+    const calls = (window.pywebview?.api?.start_codex_run as ReturnType<typeof vi.fn>).mock.calls;
+    const secondRun = JSON.parse(calls[1]?.[0] || "{}");
+    expect(secondRun.continueSession).toBe(true);
+    expect(secondRun.codexSessionId).toBe("019f40a7-e44a-7bc3-871e-6acf1120deda");
+    expect(secondRun.prompt).toContain("第二次问题");
+    expect(secondRun.prompt).not.toContain("第一次问题");
+    expect(secondRun.prompt).not.toContain("最近对话");
   });
 
   test("shows a thinking marker while Codex is running", async () => {
@@ -534,6 +577,82 @@ describe("AI tools panel", () => {
     expect(screen.queryByLabelText("Hermes API Token")).not.toBeInTheDocument();
   });
 
+  test("keeps Hermes replies in the current provider session and sends only the latest message", async () => {
+    (window.pywebview?.api?.hermes_http_request as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        success: true,
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+        cookie: "hermes_session=sid123"
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ session: { session_id: "session-1" } })
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ reply: "第一次回复" })
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+        cookie: "hermes_session=sid123"
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ reply: "第二次回复" })
+      });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
+    fireEvent.change(await screen.findByLabelText("Hermes Base URL"), {
+      target: { value: "http://127.0.0.1:8648" }
+    });
+    fireEvent.change(await screen.findByLabelText("Hermes 用户名"), {
+      target: { value: "admin" }
+    });
+    fireEvent.change(await screen.findByLabelText("Hermes 登录密码"), {
+      target: { value: "secret" }
+    });
+
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "第一次问题" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+    expect(await screen.findByText("第一次回复")).toBeInTheDocument();
+
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "第二次问题" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+    expect(await screen.findByText("第二次回复")).toBeInTheDocument();
+
+    const calls = (window.pywebview?.api?.hermes_http_request as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => JSON.parse(call[0] || "{}"));
+    const sessionCreateCalls = calls.filter((call) => call.url === "http://127.0.0.1:8648/api/session/new");
+    const chatCalls = calls.filter((call) => call.url === "http://127.0.0.1:8648/api/chat/start");
+
+    expect(sessionCreateCalls).toHaveLength(1);
+    expect(JSON.parse(chatCalls[0].body)).toEqual({ session_id: "session-1", message: "第一次问题" });
+    expect(JSON.parse(chatCalls[1].body)).toEqual({ session_id: "session-1", message: "第二次问题" });
+    expect(chatCalls[1].body).not.toContain("第一次问题");
+    expect(chatCalls[1].body).not.toContain("最近对话");
+    expect(chatCalls[1].body).not.toContain("你正在 LdySSH");
+  });
+
   test("uses native Engine.IO polling for Hermes bearer chat runs", async () => {
     (window.pywebview?.api?.hermes_http_request as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
@@ -605,7 +724,8 @@ describe("AI tools panel", () => {
     expect(namespaceAckCall.method).toBe("GET");
     expect(runCall.method).toBe("POST");
     expect(runCall.body).toContain('42/chat-run,["run",');
-    expect(runCall.body).toContain("用户任务:\\n你好");
+    expect(runCall.body).toContain('"input":"你好"');
+    expect(runCall.body).not.toContain("用户任务");
   });
 
   test("configures a remote Hermes WSS URL", async () => {

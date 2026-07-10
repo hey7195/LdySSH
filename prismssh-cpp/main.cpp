@@ -631,7 +631,7 @@ struct CodexInvocation {
     std::wstring workingDirectory;
 };
 
-CodexInvocation BuildCodexInvocation(const std::string& command, const std::string& workingDirectory) {
+CodexInvocation BuildCodexInvocation(const std::string& command, const std::string& workingDirectory, const std::string& codexSessionId = "") {
     wchar_t comspec[MAX_PATH] = L"C:\\Windows\\System32\\cmd.exe";
     size_t comspecLen = 0;
     wchar_t envComspec[MAX_PATH] = { 0 };
@@ -641,12 +641,24 @@ CodexInvocation BuildCodexInvocation(const std::string& command, const std::stri
 
     std::wstring wCommand = Utf8ToUtf16(command);
     std::wstring wWorkingDirectory = Utf8ToUtf16(workingDirectory);
+
+    CodexInvocation invocation;
+    if (!codexSessionId.empty()) {
+        std::wstring wCodexSessionId = Utf8ToUtf16(codexSessionId);
+        std::wstring innerCommand = QuoteProcessArgument(wCommand)
+            + L" exec resume "
+            + QuoteProcessArgument(wCodexSessionId)
+            + L" -";
+        invocation.commandPreview = command + " exec resume " + codexSessionId + " <prompt>";
+        invocation.commandLine = QuoteProcessArgument(comspec) + L" /S /C " + QuoteProcessArgument(innerCommand);
+        invocation.workingDirectory = wWorkingDirectory;
+        return invocation;
+    }
+
     std::wstring innerCommand = QuoteProcessArgument(wCommand)
         + L" exec -C "
         + QuoteProcessArgument(wWorkingDirectory)
         + L" -";
-
-    CodexInvocation invocation;
     invocation.commandPreview = command + " exec -C " + workingDirectory + " <prompt>";
     invocation.commandLine = QuoteProcessArgument(comspec) + L" /S /C " + QuoteProcessArgument(innerCommand);
     invocation.workingDirectory = wWorkingDirectory;
@@ -1292,6 +1304,9 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string command = TrimString(SafeGetJsonString(params, "command", "codex"));
             std::string workingDirectory = SafeGetJsonString(params, "workingDirectory", Utf16ToUtf8(GetExeDirectory()));
             std::string prompt = SafeGetJsonString(params, "prompt", "");
+            std::string codexSessionId = SafeGetJsonBool(params, "continueSession", false)
+                ? TrimString(SafeGetJsonString(params, "codexSessionId", ""))
+                : "";
             if (command.empty()) {
                 command = "codex";
             }
@@ -1304,7 +1319,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 retObj["success"] = false;
                 retObj["error"] = "Prompt is empty";
             } else {
-                CodexInvocation invocation = BuildCodexInvocation(command, workingDirectory);
+                CodexInvocation invocation = BuildCodexInvocation(command, workingDirectory, codexSessionId);
                 std::string jobId = "codex_" + std::to_string(GetTickCount64()) + "_" + std::to_string(++codexJobCounter);
 
                 {
@@ -1366,6 +1381,9 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string command = TrimString(SafeGetJsonString(params, "command", "codex"));
             std::string workingDirectory = SafeGetJsonString(params, "workingDirectory", Utf16ToUtf8(GetExeDirectory()));
             std::string prompt = SafeGetJsonString(params, "prompt", "");
+            std::string codexSessionId = SafeGetJsonBool(params, "continueSession", false)
+                ? TrimString(SafeGetJsonString(params, "codexSessionId", ""))
+                : "";
             if (command.empty()) {
                 command = "codex";
             }
@@ -1374,7 +1392,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             }
 
             nlohmann::json retObj;
-            CodexInvocation invocation = BuildCodexInvocation(command, workingDirectory);
+            CodexInvocation invocation = BuildCodexInvocation(command, workingDirectory, codexSessionId);
             retObj["commandPreview"] = invocation.commandPreview;
             if (prompt.empty()) {
                 retObj["success"] = false;

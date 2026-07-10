@@ -211,6 +211,8 @@ export interface CodexRunParams {
   prompt: string;
   model?: string;
   noiseMode?: string;
+  continueSession?: boolean;
+  codexSessionId?: string;
 }
 
 export interface CodexRunResult {

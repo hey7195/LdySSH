@@ -132,6 +132,8 @@ interface AiSession {
   model: string;
   noiseMode: AiNoiseMode;
   continueSession: boolean;
+  hermesSessionId?: string;
+  codexSessionId?: string;
   memory: string;
   messages: AiChatMessage[];
   createdAt: number;
@@ -155,10 +157,14 @@ interface AiConfig {
 
 interface AiRun {
   id: string;
+  aiSessionId: string;
   tool: AiTool;
   prompt: string;
   model: string;
   noiseMode: AiNoiseMode;
+  continueSession: boolean;
+  codexSessionId?: string;
+  hermesSessionId?: string;
   contexts: AiContextChip[];
   sessionTitle: string;
   codexCommand: string;
@@ -399,6 +405,8 @@ function hydrateAiSession(session: Partial<AiSession>, fallbackTool: AiTool = "c
     model: session.model || "",
     noiseMode: session.noiseMode || "standard",
     continueSession: session.continueSession ?? true,
+    hermesSessionId: session.hermesSessionId || "",
+    codexSessionId: session.codexSessionId || "",
     memory: session.memory || "",
     messages: session.messages || []
   };
@@ -3352,10 +3360,14 @@ function AiWorkspacePanel({
     window.localStorage.setItem(storageKeys.aiSessions, JSON.stringify(aiSessions));
   }, [aiSessions]);
 
-  function updateActiveAiSession(update: (session: AiSession) => AiSession) {
+  function updateAiSessionById(sessionId: string, update: (session: AiSession) => AiSession) {
     setAiSessions((current) =>
-      current.map((session) => (session.id === activeAiSession.id ? update(session) : session))
+      current.map((session) => (session.id === sessionId ? update(session) : session))
     );
+  }
+
+  function updateActiveAiSession(update: (session: AiSession) => AiSession) {
+    updateAiSessionById(activeAiSession.id, update);
   }
 
   function setSelectedTool(tool: AiTool) {
@@ -3479,7 +3491,8 @@ function AiWorkspacePanel({
   async function sendPrompt() {
     const text = prompt.trim();
     const currentAttachments = attachments;
-    if ((!text && currentAttachments.length === 0) || running) return;
+    const aiSession = activeAiSession;
+    if ((!text && currentAttachments.length === 0) || running || !aiSession) return;
 
     const userText = text || "查看附件";
     setPrompt("");
@@ -3491,15 +3504,19 @@ function AiWorkspacePanel({
       { id: `user_${Date.now()}`, role: "user", text: userText, attachments: currentAttachments }
     ]);
 
-    const model = activeAiSession?.model || "";
-    const noiseMode = activeAiSession?.noiseMode || "standard";
-    const fullPrompt = buildAiPrompt(userText, contextChips, activeSession, activeAiSession, currentAttachments);
+    const model = aiSession.model || "";
+    const noiseMode = aiSession.noiseMode || "standard";
+    const fullPrompt = buildAiPrompt(userText, contextChips, currentAttachments);
     void executeAiRun({
       id: `run_${Date.now()}`,
-      tool: selectedTool,
+      aiSessionId: aiSession.id,
+      tool: aiSession.tool || selectedTool,
       prompt: fullPrompt,
       model,
       noiseMode,
+      continueSession: aiSession.continueSession,
+      codexSessionId: aiSession.codexSessionId,
+      hermesSessionId: aiSession.hermesSessionId,
       contexts: contextChips,
       sessionTitle: activeSession?.title || "",
       codexCommand: config.codexCommand,
@@ -3523,11 +3540,17 @@ function AiWorkspacePanel({
           workingDirectory: run.codexWorkingDirectory,
           prompt: run.prompt,
           model: run.model,
-          noiseMode: run.noiseMode
+          noiseMode: run.noiseMode,
+          continueSession: run.continueSession && Boolean(run.codexSessionId),
+          codexSessionId: run.codexSessionId
         });
         const result = start.success && start.jobId
           ? await pollCodexRun(start.jobId)
           : { success: false, error: start.error || "Codex 启动失败。" };
+        const codexSessionId = extractCodexSessionId(result.output || "");
+        if (codexSessionId) {
+          updateAiSessionById(run.aiSessionId, (session) => ({ ...session, codexSessionId, updatedAt: Date.now() }));
+        }
         const reply = extractCodexReply(result, run.prompt);
         setRunStatus(result.success ? "Codex 执行完成。" : "Codex 执行结束，返回失败。");
         setMessages((current) => [
@@ -3542,7 +3565,11 @@ function AiWorkspacePanel({
         try {
           const data = run.hermesWsUrl.trim()
             ? await sendHermesWebSocket(run.hermesWsUrl, run.prompt, run.sessionTitle)
-            : await sendHermesHttp(run.hermesBaseUrl, run.prompt, run.sessionTitle, run.hermesUsername, run.hermesPassword);
+            : await sendHermesHttp(run.hermesBaseUrl, run.prompt, run.sessionTitle, run.hermesUsername, run.hermesPassword, run.hermesSessionId);
+          const hermesSessionId = extractHermesSessionId(data);
+          if (hermesSessionId) {
+            updateAiSessionById(run.aiSessionId, (session) => ({ ...session, hermesSessionId, updatedAt: Date.now() }));
+          }
           setMessages((current) => [
             ...current,
             {
@@ -3895,52 +3922,22 @@ function AiQuoteCard({ quote }: { quote: AiQuote }) {
 function buildAiPrompt(
   prompt: string,
   contexts: AiContextChip[],
-  activeSession?: SessionTab,
-  aiSession?: AiSession,
   attachments: AiAttachment[] = []
 ) {
-  const modelConfig = JSON.stringify({
-    provider: aiSession?.tool || "codex",
-    model: aiSession?.model || "",
-    noiseMode: aiSession?.noiseMode || "standard",
-    continueSession: aiSession?.continueSession ?? true
-  });
-  const sessionLines = activeSession
-    ? [
-        `- 类型: ${activeSession.kind}`,
-        `- 标题: ${activeSession.title}`,
-        activeSession.connectParams?.hostname ? `- host: ${activeSession.connectParams.hostname}` : "",
-        activeSession.connectParams?.username ? `- user: ${activeSession.connectParams.username}` : ""
-      ].filter(Boolean)
-    : ["- 无活动终端"];
   const formattedContexts = contexts
+    .filter((context) => context.type === "terminal_selection")
     .map((context) => {
-      if (context.type === "terminal_selection") {
-        return `<terminal_selection title="${context.sourceTitle}" lines="${context.lineCount || getLineCount(context.text)}">\n${context.text}\n</terminal_selection>`;
-      }
-      return `<session_metadata title="${context.sourceTitle}">\n${context.text}\n</session_metadata>`;
+      return `<terminal_selection title="${context.sourceTitle}" lines="${context.lineCount || getLineCount(context.text)}">\n${context.text}\n</terminal_selection>`;
     })
     .join("\n\n");
   const formattedAttachments = buildAttachmentPrompt(attachments);
-  const context = [
-    "你正在 LdySSH 内置 AI 对话栏中工作。",
-    modelConfig,
-    `当前终端:\n${sessionLines.join("\n")}`,
-    aiSession?.memory.trim() ? `会话记忆:\n${aiSession.memory.trim()}` : "",
-    aiSession?.messages.length
-      ? `最近对话:\n${aiSession.messages
-          .slice(-12)
-          .map((message) => `${message.role === "user" ? "用户" : "助手"}: ${message.text}`)
-          .join("\n")}`
-      : "",
-    formattedContexts ? `附加上下文:\n${formattedContexts}` : "",
-    formattedAttachments ? `附件上下文:\n${formattedAttachments}` : "",
-    `用户任务:\n${prompt}`,
-    "输出要求:\n- 先给结论，再给依据。\n- 如需命令，给可复制命令。\n- 不要编造未看到的日志。"
+  return [
+    prompt,
+    formattedContexts ? `Selected terminal context:\n${formattedContexts}` : "",
+    formattedAttachments ? `Attachments:\n${formattedAttachments}` : ""
   ]
     .filter(Boolean)
     .join("\n\n");
-  return context;
 }
 
 function buildAttachmentPrompt(attachments: AiAttachment[]) {
@@ -3960,6 +3957,10 @@ function buildAttachmentPrompt(attachments: AiAttachment[]) {
 
 function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
+}
+
+function extractCodexSessionId(output: string) {
+  return output.match(/session id:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1] || "";
 }
 
 function extractCodexReply(result: CodexJobResult, prompt: string) {
@@ -4044,7 +4045,7 @@ function sanitizeCodexOutput(output: string, prompt: string) {
       .filter((line) => line.length > 3)
   );
 
-  const withoutPrompt = output.replace(prompt, "");
+  const withoutPrompt = output;
   return withoutPrompt
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
@@ -4057,6 +4058,7 @@ function sanitizeCodexOutput(output: string, prompt: string) {
       if (isCodexTokenCount(text)) return false;
       if (/^".+"\s+in\s+[A-Za-z]:\\/i.test(text)) return false;
       if (/^(会话记忆|最近对话|当前终端会话|用户问题)：?/.test(text)) return false;
+      if (/^记住[：:]/.test(text)) return false;
       if (/^引用自 .+：?$/.test(text)) return false;
       if (/请直接回复我的内容/.test(text)) return false;
       if (/我会按当前仓库处理/.test(text)) return false;
@@ -4086,7 +4088,7 @@ function looksLikeOnlyRuntimeNoise(text: string) {
   return /^(failed to|error:|warning:|warn\b|mcp\b|codex_)/i.test(text.trim());
 }
 
-async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: string, username: string, password: string) {
+async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: string, username: string, password: string, existingSessionId = "") {
   const base = normalizeBaseUrl(baseUrl);
   let cookie = "";
   if (password.trim()) {
@@ -4101,27 +4103,30 @@ async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: str
     const loginData = parseHermesJson(login);
     const token = extractHermesToken(loginData);
     if (token) {
-      return sendHermesStudioSocket(base, prompt, token);
+      return sendHermesStudioSocket(base, prompt, token, existingSessionId);
     }
     cookie = login.cookie || "";
   }
 
-  const session = await nativeBridge.hermesHttpRequest({
-    method: "POST",
-    url: `${base}/api/session/new`,
-    cookie,
-    body: JSON.stringify({ title: sessionTitle || "LdySSH" })
-  });
-  if (!session.success) {
-    if (session.status === 401 && !password.trim()) {
-      throw new Error("Hermes 需要登录密码，请在 Hermes 配置里填写登录密码。");
-    }
-    throw new Error(`Hermes HTTP ${session.status || 0}: ${session.error || session.body || "创建会话失败"}`);
-  }
-  const sessionData = parseHermesJson(session);
-  const sessionId = extractHermesSessionId(sessionData);
+  let sessionId = existingSessionId.trim();
   if (!sessionId) {
-    throw new Error("Hermes 未返回 session_id。");
+    const session = await nativeBridge.hermesHttpRequest({
+      method: "POST",
+      url: `${base}/api/session/new`,
+      cookie,
+      body: JSON.stringify({ title: sessionTitle || "LdySSH" })
+    });
+    if (!session.success) {
+      if (session.status === 401 && !password.trim()) {
+        throw new Error("Hermes 需要登录密码，请在 Hermes 配置里填写登录密码。");
+      }
+      throw new Error(`Hermes HTTP ${session.status || 0}: ${session.error || session.body || "创建会话失败"}`);
+    }
+    const sessionData = parseHermesJson(session);
+    sessionId = extractHermesSessionId(sessionData);
+    if (!sessionId) {
+      throw new Error("Hermes 未返回 session_id。");
+    }
   }
 
   const response = await nativeBridge.hermesHttpRequest({
@@ -4133,7 +4138,7 @@ async function sendHermesHttp(baseUrl: string, prompt: string, sessionTitle: str
   if (!response.success) {
     throw new Error(`Hermes HTTP ${response.status || 0}: ${response.error || response.body || "请求失败"}`);
   }
-  return parseHermesJson(response);
+  return attachHermesSessionId(parseHermesJson(response), sessionId);
 }
 
 function parseHermesJson(response: { contentType?: string; body?: string }) {
@@ -4142,10 +4147,18 @@ function parseHermesJson(response: { contentType?: string; body?: string }) {
   return contentType.includes("application/json") ? JSON.parse(body || "{}") : body;
 }
 
+function attachHermesSessionId(data: unknown, sessionId: string) {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    return { ...(data as Record<string, unknown>), sessionId };
+  }
+  return { reply: typeof data === "string" ? data : String(data ?? ""), sessionId };
+}
+
 function extractHermesSessionId(data: unknown) {
   if (!data || typeof data !== "object") return "";
   const record = data as Record<string, unknown>;
   if (typeof record.session_id === "string") return record.session_id;
+  if (typeof record.sessionId === "string") return record.sessionId;
   const session = record.session;
   if (session && typeof session === "object" && typeof (session as Record<string, unknown>).session_id === "string") {
     return (session as Record<string, string>).session_id;
@@ -4206,8 +4219,8 @@ async function requestHermesEngine(method: "GET" | "POST", url: string, body?: s
   return response.body || "";
 }
 
-async function sendHermesStudioSocket(baseUrl: string, prompt: string, token: string) {
-  const sessionId = makeHermesRunId("ldyssh");
+async function sendHermesStudioSocket(baseUrl: string, prompt: string, token: string, existingSessionId = "") {
+  const sessionId = existingSessionId.trim() || makeHermesRunId("ldyssh");
   const queueId = makeHermesRunId("queue");
   const chunks: string[] = [];
   let sid = "";
@@ -4247,7 +4260,7 @@ async function sendHermesStudioSocket(baseUrl: string, prompt: string, token: st
         if (eventName === "run.completed") {
           const parsed = payload.parsed_content ?? payload.output;
           const reply = typeof parsed === "string" && parsed.trim() ? parsed : chunks.join("");
-          return { reply: reply || "Hermes 已返回结果。" };
+          return { reply: reply || "Hermes 已返回结果。", sessionId };
         }
         if (eventName === "run.failed") {
           const message = payload.error || payload.message || "请求失败";
