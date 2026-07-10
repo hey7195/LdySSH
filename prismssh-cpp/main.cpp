@@ -1575,6 +1575,41 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
+        else if (action == "save_ai_attachment") {
+            std::string fileName = args[0].get<std::string>();
+            std::string b64 = args[1].get<std::string>();
+            std::string safeName;
+            for (unsigned char ch : fileName) {
+                if (ch < 32 || ch == '\\' || ch == '/' || ch == ':' || ch == '*' || ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|') {
+                    safeName.push_back('_');
+                } else {
+                    safeName.push_back(static_cast<char>(ch));
+                }
+            }
+            while (safeName.find("..") != std::string::npos) {
+                safeName.replace(safeName.find(".."), 2, ".");
+            }
+            if (safeName.empty()) {
+                safeName = "attachment";
+            }
+
+            std::wstring configDir = GetConfigDirectory();
+            CreateDirectoryW(configDir.c_str(), NULL);
+            std::wstring attachmentDir = configDir + L"\\ai_attachments";
+            CreateDirectoryW(attachmentDir.c_str(), NULL);
+            std::wstring fullPath = attachmentDir + L"\\" + Utf8ToUtf16(safeName);
+            std::string rawData = Base64Decode(b64);
+            bool success = WriteUtf8ToFile(fullPath, rawData);
+
+            nlohmann::json retObj;
+            retObj["success"] = success;
+            retObj["filePath"] = Utf16ToUtf8(fullPath);
+            if (!success) {
+                retObj["error"] = "Failed to save AI attachment";
+            }
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "resize_terminal") {
             std::string sessId = args[0].get<std::string>();
             int cols = args[1].get<int>();
@@ -2569,6 +2604,11 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
                         webviewController = controller;
                         webviewController->get_CoreWebView2(&webviewWindow);
+
+                        Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
+                        if (SUCCEEDED(webviewWindow->get_Settings(&settings)) && settings) {
+                            settings->put_AreDefaultContextMenusEnabled(FALSE);
+                        }
 
                         // Set main WebView2 default background to transparent to prevent white flashing/edges
                         Microsoft::WRL::ComPtr<ICoreWebView2Controller2> controller2;

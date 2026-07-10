@@ -98,6 +98,14 @@ export const nativeBridge = {
   writeBase64File(filePath: string, content: string) {
     return callNative<{ success: boolean; error?: string }>("write_base64_file", { success: false }, filePath, content);
   },
+  saveAiAttachment(name: string, content: string) {
+    return callNative<{ success: boolean; filePath?: string; error?: string }>(
+      "save_ai_attachment",
+      { success: false },
+      name,
+      content
+    );
+  },
   getWebFavorites() {
     return callNative<WebFavorite[]>("get_web_favorites", []);
   },

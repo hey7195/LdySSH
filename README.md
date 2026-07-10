@@ -1,64 +1,238 @@
-# LdySSH 🌌
+# LdSSH
 
-**一款采用 C++ 核心引擎构建的次世代高性能智能 SSH 客户端**
+LdSSH 是一个面向日常运维的 Windows SSH 客户端。当前版本由 C++ 桌面壳、WebView2 前端和 Python 本地 API 组成，重点放在主机管理、多终端会话、命令库、AI 辅助、监控面板和常用网页入口。
 
-LdySSH 是一款融合了 **3D 集群网络拓扑**、**本地离线大模型 AI 辅助**、**极速多会话终端** 以及 **可视化 SFTP 文件管理** 的新一代智能化桌面客户端。我们采用高性能 **C++ 核心架构** 与原生 Windows 系统级优化，搭配精美的毛玻璃特效与星空微光设计，旨在为开发者提供最极致、最科幻、低资源占用的终极终端操作体验。
+## 功能概览
 
----
+### 主机管理
 
-## ✨ 核心特色功能 (Key Features)
+- 新增、编辑、删除 SSH 主机。
+- 删除主机前弹出确认框，避免误删。
+- 已保存密码在编辑时使用 `***` 占位，未修改时保留原密码。
+- 支持密码登录和私钥登录，私钥路径可以通过本地文件选择器浏览。
+- 连接失败时弹出密码输入框，可直接补充密码并重试当前连接。
+- 最近主机和主机列表都可以直接发起连接。
 
-### 🚀 1. 纯 C++ 极速引擎 (Pure C++ Performance)
-*   **极致性能**：底层核心由高性能 C++ 驱动，拥有极快的启动速度与极低的系统资源占用。
-*   **零后台残留**：结合 Windows 原生内核级 **作业对象（Job Object）** 机制进行进程管理，在主窗口关闭时自动清退所有相关的辅助子进程，确保后台零占用、零残留。
-*   **隐藏静默拉起**：通过 Windows API 拦截与隐藏机制，**彻底屏蔽了任何后台辅助进程拉起时的黑色 CMD 命令行终端窗口闪现**，保证界面极致纯净。
+### 终端工作台
 
-### 🌐 2. 三维星尘集群拓扑看板 (3D Cluster Network Topology)
-*   **星系渲染中枢**：集成 Three.js 高性能 WebGL 渲染管线，将您连接过的所有远程主机映射为 3D 星空中的恒星与行星轨道。
-*   **实时延迟监测**：支持实时 Ping 探测，通过恒星光晕和连线颜色的明暗呼吸，直观呈现集群中各主机的健康度与通信延迟。
-*   **多维交互体验**：完美支持鼠标左键旋转视角、右键平移星系、滚轮缩放宇宙，实现人机交互的极致科幻感。
+- 支持本地终端和 SSH 终端多会话。
+- 会话支持复制、重连、断开、关闭等常用操作。
+- 切换状态栏或工作区时保留终端输出。
+- 终端内置搜索，覆盖未达到记录上限的历史输出，使用方式接近 FinalShell 查找。
+- 可配置终端背景图、背景遮罩透明度、字体、字号、前景色和背景色。
+- 支持会话侧边栏和本地侧边栏之间的会话恢复。
 
-### 🤖 3. 内置本地离线 AI 助手 (Hermes Local AI Chat)
-*   **无网纯离线推理**：内置轻量级、高性价比的本地大模型推理引擎（`llama-server.exe` 驱动），数据完全本地留存，绝对保障隐私安全。
-*   **智能下载与热加载**：在大模型未就绪时，支持以 2 秒频率动态呈现极速流式下载百分比及网络带宽；下载完成后，系统会自动热加载真实的推理服务器，告别聊天超时。
+### 命令库
 
-### 🎨 4. 精致紧凑的主机工作台 (Sleek empty-state Workbench)
-*   **极简扁平设计**：摒弃了笨重、占空间的虚线框卡片，在主机数量为 0 时，自动淡入小巧且极富质感的扁平呼吸发光 `➕ 新建连接` 按钮，界面布局更紧凑。
-*   **智能穿透技术**：大厅背景融入了 3D 宇宙尘埃粒子动画，结合精妙的鼠标事件穿透技术，点击按钮与划动背景星空互不干扰。
+- 支持命令文件夹和命令的新增、编辑、删除。
+- 删除命令和命令文件夹前弹出确认框。
+- 支持从 FinalShell 命令文件导入。
+- 支持本地导入、导出命令库 JSON。
+- 终端侧边命令文件夹固定宽度显示，长名称自动换行，不再因为选择不同分类导致位置跳动。
 
-### 🖥️ 5. 极速多会话终端与系统监控 (Modern Terminal & System Monitor)
-*   **多会话标签页**：基于现代 Web 终端技术的极速会话管理器，支持多窗口、多主机自由切换，自动重连。
-*   **一体化系统监控**：实时以可视化图表动态呈现远程主机的 CPU 占用、内存负荷、磁盘容量与进程管理器，掌控全局。
-*   **可视化 SFTP**：支持拖拽上传、双击下载、目录树浏览，让复杂的网络文件传输像本地操作一样简单。
+### AI 对话
 
----
+- 支持本地 Codex CLI 和 Hermes WebUI。
+- Hermes 使用账号密码登录，不再依赖单独填写 API Token。
+- 支持 Hermes HTTP、Socket.IO polling 和可选 WSS 地址。
+- AI 输出做了降噪处理，默认聚焦最终回复，过程信息按模式折叠。
+- 支持上传文件、上传图片和直接粘贴图片，附件会保存到本地配置目录后随提示词发送。
+- 普通对话不需要审批流程。
 
-## 🚀 快速开始 (Getting Started)
+### 监控与工具
 
-### 1. 运行绿色发布版（一键体验）
-直接进入项目发布目录，双击运行即可享受极致的 C++ 绿色原生体验：
-```bash
-LdySSH_Release/LdySSH.exe
+- 主机监控信息图形化展示，包括 CPU、内存、磁盘、进程和网络数据。
+- 浏览器状态栏支持自定义网页卡片，每张卡片包含标签和 URL，点击后调用系统浏览器打开。
+- 禁用 WebView2 默认右键菜单，避免弹出刷新、另存为、检查等浏览器菜单。
+- 支持正则高亮和常用界面主题设置。
+
+## 目录结构
+
+```text
+.
+├─ frontend/                 # React + Vite 前端源码
+├─ prismssh-cpp/             # C++ WebView2 桌面壳和原生能力
+│  ├─ ui/                    # 前端构建后同步到 C++ 工程的 UI 资源
+│  └─ x64/Release/           # Release 输出目录
+├─ src/                      # Python 本地 API、SSH、命令库、AI 桥接
+│  └─ ui/                    # Python 运行时可访问的 UI 资源
+├─ tests/                    # Python 测试
+├─ prismssh.py               # Python API 启动入口
+├─ requirements.txt          # Python 依赖
+└─ README.md
 ```
 
-### 2. 源码二次开发与编译
-本项目核心桌面壳采用 C++ 构建，您可以使用 **Visual Studio** 打开工程进行编译、调试与二次开发：
+## 开发环境
 
-1. 使用 Visual Studio 打开 [prismssh-cpp/](prismssh-cpp/) 文件夹。
-2. 配置为 `Release` 与 `x64` 平台。
-3. 点击 **生成解决方案** 编译出最新的二进制程序。
+- Windows 10/11 x64。
+- Python 3.10+。
+- Node.js 20+。
+- Visual Studio 2022 Build Tools，安装 `Desktop development with C++`，使用 v143 工具集。
+- Microsoft Edge WebView2 Runtime。
 
----
+Python 依赖：
 
-## 🛠️ 项目架构说明 (Architecture)
+```powershell
+uv venv
+uv pip install -r requirements.txt
+```
 
-*   **`prismssh-cpp/`**：C++ 核心客户端逻辑，负责窗口生命周期建立、Windows 系统级作业对象绑定、高性能 API 分配与并发会话调度。
-*   **`src/`**：高性能底层辅助运行时组件。
-*   **`src/ui/`**：基于 Vanilla CSS + HTML5 打造的极致科技感前端大厅，集成了 Three.js 拓扑及 xterm.js 终端。
-*   **`upstream-hermes-webui/`**：集成在客户端内的极简 AI 对话前端，专为开发者量身定制。
+前端依赖：
 
----
+```powershell
+cd frontend
+npm install
+```
 
-## 📄 开源协议 (License)
+## 本地开发
 
-本项目基于 [MIT License](LICENSE) 协议开源。欢迎提交 Issue、PR，共同打造最酷炫的智能 SSH 客户端！
+启动前端开发服务：
+
+```powershell
+cd frontend
+npm run dev
+```
+
+构建前端并同步 UI 资源：
+
+```powershell
+cd frontend
+npm run build
+```
+
+`npm run build` 会执行 TypeScript 编译、Vite 构建，并把最新 UI 资源同步到：
+
+- `src/ui`
+- `prismssh-cpp/ui`
+- `prismssh-cpp/x64/Release/ui`
+
+## 验证
+
+前端类型检查：
+
+```powershell
+cd frontend
+npm run typecheck
+```
+
+前端测试：
+
+```powershell
+cd frontend
+npm test
+```
+
+Python 测试：
+
+```powershell
+.\.venv\Scripts\python -m pytest
+```
+
+Release 编译：
+
+```powershell
+& 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\amd64\MSBuild.exe' prismssh-cpp\prismssh-cpp.vcxproj /p:Configuration=Release /p:Platform=x64
+```
+
+## 打包
+
+先完成前端构建和 C++ Release 编译：
+
+```powershell
+cd E:\adb\tools\LdSSH
+cd frontend
+npm run build
+cd ..
+& 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\amd64\MSBuild.exe' prismssh-cpp\prismssh-cpp.vcxproj /p:Configuration=Release /p:Platform=x64
+```
+
+推荐发布包内容：
+
+```text
+LdSSH-Release/
+├─ prismssh-cpp.exe
+├─ WebView2Loader.dll
+├─ ui/
+├─ prismssh.py
+├─ src/
+├─ requirements.txt
+├─ README.md
+└─ LICENSE
+```
+
+不要把下面这些目录或文件放入发布包：
+
+- `prismssh-cpp.exe.WebView2/`
+- `prismssh_debug.log`
+- `*.pdb`
+- `*.obj`
+- `*.tlog`
+- `__pycache__/`
+
+生成 ZIP 示例：
+
+```powershell
+$version = Get-Date -Format 'yyyyMMdd-HHmm'
+$stage = "artifacts\LdSSH-Release-$version"
+$zip = "$stage.zip"
+Remove-Item $stage, $zip -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $stage | Out-Null
+Copy-Item prismssh-cpp\x64\Release\prismssh-cpp.exe $stage
+Copy-Item prismssh-cpp\x64\Release\WebView2Loader.dll $stage
+Copy-Item prismssh-cpp\x64\Release\ui $stage -Recurse
+Copy-Item prismssh.py, requirements.txt, README.md, LICENSE $stage
+Copy-Item src $stage -Recurse -Exclude __pycache__
+Get-ChildItem $stage -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force
+```
+
+## 部署与运行
+
+1. 在目标 Windows 机器安装 Python 3.10+ 和 Microsoft Edge WebView2 Runtime。
+2. 解压发布包到固定目录，例如 `D:\tools\LdSSH`。
+3. 在解压目录安装 Python 依赖：
+
+```powershell
+uv venv
+uv pip install -r requirements.txt
+```
+
+4. 双击运行：
+
+```powershell
+.\prismssh-cpp.exe
+```
+
+也可以用 PowerShell 启动，便于排查问题：
+
+```powershell
+.\prismssh-cpp.exe
+```
+
+程序会在本机启动 Python API，C++ 壳会通过 WebView2 加载打包后的 UI。用户配置、命令库、AI 附件和连接信息保存在本机用户配置目录，不建议放进发布包。
+
+## 常见问题
+
+### Hermes 提示未认证
+
+在 AI 配置里填写 Hermes Base URL、用户名和登录密码。新版 Hermes WebUI 走账号密码登录，LdSSH 会先登录再发起会话。
+
+### Hermes Socket.IO 超时
+
+先确认 Base URL 能访问，账号密码能登录 WebUI。如果内网代理或反向代理不支持 Socket.IO polling，可以改填 WSS 地址。
+
+### 连接失败后没有密码
+
+如果主机没有保存密码，或者保存的密码不可用，连接失败后会弹出密码输入框。输入后会重试当前会话。
+
+### 终端背景被黑色遮住
+
+到设置里调整背景遮罩透明度。数值越低，背景图越明显。
+
+### FinalShell 命令怎么导入
+
+在命令库面板点击 `导入 FinalShell`，选择 FinalShell 导出的命令 JSON 文件。导入后可以继续用 LdSSH 的本地导入、导出功能备份。
+
+## 许可证
+
+本项目使用 [MIT License](LICENSE)。

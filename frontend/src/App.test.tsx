@@ -111,6 +111,7 @@ beforeEach(() => {
       show_save_file_dialog: vi.fn().mockResolvedValue({ filePath: "C:\\Users\\1111\\Downloads\\ldyssh-commands.json" }),
       read_base64_file: vi.fn().mockResolvedValue({ content: "" }),
       write_base64_file: vi.fn().mockResolvedValue({ success: true }),
+      save_ai_attachment: vi.fn((name: unknown) => Promise.resolve({ success: true, filePath: `C:\\Users\\1111\\.ldyssh\\ai_attachments\\${String(name)}` })),
       run_codex: vi.fn().mockResolvedValue({ success: true, output: "Codex 已完成分析", exitCode: 0 }),
       start_codex_run: vi.fn().mockResolvedValue({ success: true, jobId: "codex-job-1", commandPreview: "codex exec -C E:\\adb\\tools\\LdSSH <prompt>" }),
       get_codex_run: vi.fn().mockResolvedValue({ success: true, running: false, completed: true, output: "Codex 已完成分析", exitCode: 0 }),
@@ -159,6 +160,15 @@ afterEach(() => {
 });
 
 describe("AI tools panel", () => {
+  test("prevents the WebView default context menu", () => {
+    render(<App />);
+
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    screen.getByTestId("app-root").dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   test("uses Chinese labels in the activity sidebar", () => {
     render(<App />);
 
@@ -244,6 +254,55 @@ describe("AI tools panel", () => {
     expect(call?.[0]).toContain("WARN disk usage 92%");
     expect(call?.[0]).toContain("优先给修复命令");
     expect(await screen.findByText("Codex 已完成分析")).toBeInTheDocument();
+  });
+
+  test("uploads a text file and includes it in the Codex prompt", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+
+    const file = new File(["ERROR disk full\ncleanup failed"], "error.log", { type: "text/plain" });
+    fireEvent.change(await screen.findByTestId("ai-attachment-input"), { target: { files: [file] } });
+
+    expect(await screen.findByText("error.log")).toBeInTheDocument();
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "分析附件" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(window.pywebview?.api?.start_codex_run).toHaveBeenCalled());
+    const call = (window.pywebview?.api?.start_codex_run as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(call?.[0]).toContain("error.log");
+    expect(call?.[0]).toContain("C:\\\\Users\\\\1111\\\\.ldyssh\\\\ai_attachments\\\\error.log");
+    expect(call?.[0]).toContain("ERROR disk full");
+    expect(await screen.findByText("Codex 已完成分析")).toBeInTheDocument();
+  });
+
+  test("pastes an image into the AI composer and includes its local path in the prompt", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+
+    const image = new File([new Uint8Array([137, 80, 78, 71])], "shot.png", { type: "image/png" });
+    fireEvent.paste(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      clipboardData: { files: [image] }
+    });
+
+    expect(await screen.findByAltText("shot.png")).toBeInTheDocument();
+    fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
+      target: { value: "看这张图" }
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(window.pywebview?.api?.start_codex_run).toHaveBeenCalled());
+    const call = (window.pywebview?.api?.start_codex_run as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(call?.[0]).toContain("shot.png");
+    expect(call?.[0]).toContain("image/png");
+    expect(call?.[0]).toContain("C:\\\\Users\\\\1111\\\\.ldyssh\\\\ai_attachments\\\\shot.png");
   });
 
   test("starts Codex in a background job without approval", async () => {
@@ -732,6 +791,10 @@ describe("command library", () => {
     const deleteButtons = await screen.findAllByRole("button", { name: "删除 prod-delete" });
     fireEvent.click(deleteButtons[0]);
 
+    expect(window.pywebview?.api?.delete_saved_connection).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { name: "确认删除" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
     await waitFor(() => expect(window.pywebview?.api?.delete_saved_connection).toHaveBeenCalledWith("prod-delete"));
   });
 
@@ -956,7 +1019,7 @@ describe("command library", () => {
       target: { value: "ADB" }
     });
     fireEvent.click(screen.getByRole("button", { name: "新建文件夹" }));
-    fireEvent.click(screen.getByRole("button", { name: /ADB/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^ADB\s*0$/ }));
 
     fireEvent.change(screen.getByPlaceholderText("命令名称"), {
       target: { value: "列出设备" }
@@ -969,6 +1032,93 @@ describe("command library", () => {
     expect(await screen.findByText("列出设备")).toBeInTheDocument();
     expect(screen.getByText("adb devices")).toBeInTheDocument();
     expect(window.pywebview?.api?.save_command_library).toHaveBeenCalled();
+  });
+
+  test("deletes a command folder and persists the library", async () => {
+    (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      folders: [
+        { id: "ops", name: "Ops", commands: [{ id: "uptime", name: "Uptime", command: "uptime" }] },
+        { id: "adb", name: "ADB", commands: [{ id: "devices", name: "Devices", command: "adb devices" }] }
+      ]
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("命令库"));
+    fireEvent.click(await screen.findByRole("button", { name: /^ADB\s*1$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "删除文件夹 ADB" }));
+
+    expect(window.pywebview?.api?.save_command_library).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { name: "确认删除" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    expect(screen.queryByRole("button", { name: /ADB/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(window.pywebview?.api?.save_command_library).toHaveBeenCalled());
+    const call = (window.pywebview?.api?.save_command_library as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(call?.[0]).toContain("Ops");
+    expect(call?.[0]).not.toContain("ADB");
+  });
+
+  test("confirms before deleting a command", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("命令库"));
+    fireEvent.click(await screen.findByRole("button", { name: "删除命令 磁盘使用" }));
+
+    expect(screen.getByText("磁盘使用")).toBeInTheDocument();
+    expect(window.pywebview?.api?.save_command_library).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { name: "确认删除" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    expect(screen.queryByText("磁盘使用")).not.toBeInTheDocument();
+    await waitFor(() => expect(window.pywebview?.api?.save_command_library).toHaveBeenCalled());
+    const call = (window.pywebview?.api?.save_command_library as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(call?.[0]).not.toContain("磁盘使用");
+  });
+
+  test("wraps long command folder names in the terminal command sidebar", async () => {
+    const longName = "ADB package and network maintenance commands";
+    (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      folders: [{ id: "long", name: longName, commands: [{ id: "devices", name: "Devices", command: "adb devices" }] }]
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+
+    const folderButton = await screen.findByRole("button", { name: new RegExp(longName) });
+    expect(folderButton.parentElement).toHaveClass("flex");
+    expect(folderButton.parentElement).toHaveClass("flex-wrap");
+    expect(folderButton).toHaveClass("min-w-0");
+    expect(folderButton).toHaveClass("w-28");
+    expect(folderButton).toHaveClass("h-12");
+    expect(folderButton).toHaveClass("flex-col");
+    expect(folderButton).toHaveClass("whitespace-normal");
+    expect(folderButton).toHaveClass("break-words");
+  });
+
+  test("wraps the default command folder without changing folder slot size", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+
+    const defaultFolder = await screen.findByRole("button", { name: /^默认分类\s*2$/ });
+    const serviceFolder = await screen.findByRole("button", { name: /^服务操作\s*1$/ });
+    expect(defaultFolder).toHaveClass("w-28");
+    expect(defaultFolder).toHaveClass("h-12");
+    expect(defaultFolder).toHaveClass("flex-col");
+    expect(defaultFolder).toHaveClass("whitespace-normal");
+
+    fireEvent.click(serviceFolder);
+
+    expect(defaultFolder).toHaveClass("w-28");
+    expect(serviceFolder).toHaveClass("w-28");
+    expect(serviceFolder).toHaveClass("h-12");
+    expect(serviceFolder).toHaveClass("flex-col");
   });
 
   test("imports FinalShell commands through the command panel", async () => {

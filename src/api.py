@@ -1276,6 +1276,21 @@ class PrismSSHAPI:
             self.logger.error(f"API: Error writing local file {file_path}: {e}")
             return json.dumps({'success': False, 'error': str(e)})
 
+    def save_ai_attachment(self, name: str, content: str) -> str:
+        """Save an AI chat attachment under the local config directory."""
+        try:
+            safe_name = ''.join('_' if ch in '\\/:*?"<>|' or ord(ch) < 32 else ch for ch in name).replace('..', '.').strip()
+            if not safe_name:
+                safe_name = 'attachment'
+            attachment_dir = Path(self.config.config_dir) / 'ai_attachments'
+            attachment_dir.mkdir(parents=True, exist_ok=True)
+            path = attachment_dir / safe_name
+            path.write_bytes(base64.b64decode(content))
+            return json.dumps({'success': True, 'filePath': str(path)})
+        except Exception as e:
+            self.logger.error(f"API: Error saving AI attachment {name}: {e}")
+            return json.dumps({'success': False, 'error': str(e)})
+
     def start_download_with_progress(self, session_id: str, remote_path: str, download_id: str) -> str:
         """Start a download with progress tracking."""
         try:

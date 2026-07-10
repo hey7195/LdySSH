@@ -45,6 +45,21 @@ def test_local_base64_file_round_trip(tmp_path):
         api.cleanup()
 
 
+def test_save_ai_attachment_writes_under_config_dir(tmp_path):
+    api = make_api(tmp_path)
+    payload = base64.b64encode(b"ERROR disk full").decode("ascii")
+
+    try:
+        result = json.loads(api.save_ai_attachment("error.log", payload))
+
+        assert result["success"] is True
+        path = Path(result["filePath"])
+        assert path == tmp_path / "ai_attachments" / "error.log"
+        assert path.read_bytes() == b"ERROR disk full"
+    finally:
+        api.cleanup()
+
+
 def test_run_codex_invokes_cli(monkeypatch, tmp_path):
     api = make_api(tmp_path)
     calls = []

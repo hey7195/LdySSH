@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -17,10 +17,12 @@ import {
   Globe2,
   HardDrive,
   Home,
+  Image as ImageIcon,
   KeyRound,
   Menu,
   MessageSquare,
   Minimize2,
+  Paperclip,
   Monitor,
   Pencil,
   Plus,
@@ -108,6 +110,19 @@ interface AiChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  attachments?: AiAttachment[];
+}
+
+interface AiAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  kind: "image" | "text" | "file";
+  localPath?: string;
+  previewUrl?: string;
+  textContent?: string;
+  error?: string;
 }
 
 interface AiSession {
@@ -121,6 +136,12 @@ interface AiSession {
   messages: AiChatMessage[];
   createdAt: number;
   updatedAt: number;
+}
+
+interface DeleteConfirmation {
+  description: string;
+  confirmLabel?: string;
+  onConfirm: () => void | Promise<void>;
 }
 
 interface AiConfig {
@@ -455,6 +476,7 @@ export function App() {
   const [terminalHistories, setTerminalHistories] = useState<Record<string, string>>({});
   const [passwordPrompt, setPasswordPrompt] = useState<RetryPasswordPrompt | null>(null);
   const [webFavorites, setWebFavorites] = useState<WebFavorite[]>([]);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
 
   useEffect(() => {
     void refreshConnections();
@@ -615,6 +637,14 @@ export function App() {
     setForm(toConnectionForm(connection));
     setConnectError("");
     setConnectOpen(true);
+  }
+
+  function requestDeleteSavedConnection(connection: SavedConnection) {
+    const label = connection.name || connection.hostname || "未命名主机";
+    setDeleteConfirmation({
+      description: `确定删除主机“${label}”？`,
+      onConfirm: () => deleteSavedConnection(connection)
+    });
   }
 
   async function deleteSavedConnection(connection: SavedConnection) {
@@ -929,6 +959,21 @@ export function App() {
     setActiveCommandFolderId(folder.id);
   }
 
+  function requestDeleteCommandFolder(folderId: string) {
+    if (commandFolders.length <= 1) return;
+    const folder = commandFolders.find((item) => item.id === folderId);
+    setDeleteConfirmation({
+      description: `确定删除文件夹“${folder?.name || "未命名文件夹"}”？文件夹内命令也会一起删除。`,
+      onConfirm: () => deleteCommandFolder(folderId)
+    });
+  }
+
+  function deleteCommandFolder(folderId: string) {
+    const next = commandFolders.filter((folder) => folder.id !== folderId);
+    updateCommandFolders(next);
+    setActiveCommandFolderId((current) => (current === folderId ? next[0]?.id || "" : current));
+  }
+
   function saveCommand(folderId: string, command: Omit<CommandItem, "id">, commandId?: string) {
     if (!command.name.trim() || !command.command.trim()) return;
     const next = commandFolders.map((folder) => {
@@ -948,6 +993,15 @@ export function App() {
       };
     });
     updateCommandFolders(next);
+  }
+
+  function requestDeleteCommand(folderId: string, commandId: string) {
+    const folder = commandFolders.find((item) => item.id === folderId);
+    const command = folder?.commands.find((item) => item.id === commandId);
+    setDeleteConfirmation({
+      description: `确定删除命令“${command?.name || "未命名命令"}”？`,
+      onConfirm: () => deleteCommand(folderId, commandId)
+    });
   }
 
   function deleteCommand(folderId: string, commandId: string) {
@@ -1007,11 +1061,19 @@ export function App() {
     setTerminalSidePanel("commands");
   }
 
+  async function confirmDelete() {
+    const pending = deleteConfirmation;
+    if (!pending) return;
+    setDeleteConfirmation(null);
+    await pending.onConfirm();
+  }
+
   return (
     <div
       data-testid="app-root"
       data-theme={getThemeAttribute(theme)}
       className="app-root h-screen w-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]"
+      onContextMenu={(event) => event.preventDefault()}
     >
       <div className="grid h-full grid-cols-[54px_244px_minmax(0,1fr)] grid-rows-[36px_minmax(0,1fr)] border border-[var(--app-line)] bg-[var(--app-bg)]">
         <TitleBar />
@@ -1026,7 +1088,7 @@ export function App() {
           onRefresh={refreshConnections}
           onConnect={connectHost}
           onEditConnection={openEditConnectionDialog}
-          onDeleteConnection={deleteSavedConnection}
+          onDeleteConnection={requestDeleteSavedConnection}
           onCreateLocal={openLocalSession}
           onActivateSession={activateSession}
         />
@@ -1040,7 +1102,7 @@ export function App() {
               onRefresh={refreshConnections}
               onConnect={connectHost}
               onEditConnection={openEditConnectionDialog}
-              onDeleteConnection={deleteSavedConnection}
+              onDeleteConnection={requestDeleteSavedConnection}
             />
           )}
           {activeTool === "cmd" && (
@@ -1050,8 +1112,9 @@ export function App() {
               activeSession={activeSession}
               onActiveFolderChange={setActiveCommandFolderId}
               onAddFolder={addCommandFolder}
+              onDeleteFolder={requestDeleteCommandFolder}
               onSaveCommand={saveCommand}
-              onDeleteCommand={deleteCommand}
+              onDeleteCommand={requestDeleteCommand}
               onSendCommand={sendCommandToActiveSession}
               onImportCommands={importCommandLibrary}
               onExportCommands={exportCommandLibrary}
@@ -1136,6 +1199,11 @@ export function App() {
         onPasswordChange={(password) => setPasswordPrompt((current) => current ? { ...current, password } : current)}
         onRetry={submitRetryPassword}
         onClose={() => setPasswordPrompt(null)}
+      />
+      <DeleteConfirmationDialog
+        confirmation={deleteConfirmation}
+        onCancel={() => setDeleteConfirmation(null)}
+        onConfirm={confirmDelete}
       />
     </div>
   );
@@ -2049,15 +2117,15 @@ function TerminalCommandSidebar({
               <button
                 key={folder.id}
                 className={cn(
-                  "rounded-md border px-2.5 py-1.5 text-xs font-semibold",
+                  "flex h-12 w-28 min-w-0 flex-col justify-center overflow-hidden rounded-md border px-2.5 text-left text-xs font-semibold leading-4 whitespace-normal break-words",
                   folder.id === activeFolder?.id
                     ? "border-slate-900 bg-slate-900 text-white"
                     : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
                 )}
                 onClick={() => onActiveFolderChange(folder.id)}
               >
-                {folder.name}
-                <span className="ml-1 opacity-60">{folder.commands.length}</span>
+                <span className="max-h-8 min-w-0 overflow-hidden break-words">{folder.name}</span>
+                <span className="mt-0.5 shrink-0 text-[11px] opacity-60">{folder.commands.length}</span>
               </button>
             ))}
           </div>
@@ -2113,6 +2181,104 @@ function bytesToBase64(bytes: Uint8Array) {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
+}
+
+const textAttachmentExtensions = new Set([
+  ".txt",
+  ".log",
+  ".md",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".xml",
+  ".csv",
+  ".sh",
+  ".ps1",
+  ".py",
+  ".js",
+  ".ts",
+  ".tsx",
+  ".css",
+  ".html"
+]);
+
+function safeAttachmentName(name: string) {
+  const fallback = "attachment";
+  const cleaned = (name || fallback).replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").replace(/\.\.+/g, ".").trim();
+  return cleaned || fallback;
+}
+
+function attachmentNameForFile(file: File) {
+  if (file.name.trim()) {
+    return safeAttachmentName(file.name);
+  }
+  if (file.type === "image/png") return "pasted-image.png";
+  if (file.type === "image/jpeg") return "pasted-image.jpg";
+  if (file.type === "image/gif") return "pasted-image.gif";
+  if (file.type === "image/webp") return "pasted-image.webp";
+  return "attachment";
+}
+
+function isTextAttachment(file: File) {
+  if (file.type.startsWith("text/")) return true;
+  const lowerName = file.name.toLowerCase();
+  return Array.from(textAttachmentExtensions).some((extension) => lowerName.endsWith(extension));
+}
+
+function getAttachmentKind(file: File): AiAttachment["kind"] {
+  if (file.type.startsWith("image/")) return "image";
+  if (isTextAttachment(file)) return "text";
+  return "file";
+}
+
+async function fileToBase64(file: File) {
+  return bytesToBase64(new Uint8Array(await readFileArrayBuffer(file)));
+}
+
+async function readTextAttachment(file: File) {
+  const text = await readFileText(file);
+  return text.length > 20000 ? `${text.slice(0, 20000)}\n...[truncated]` : text;
+}
+
+function readFileArrayBuffer(file: File) {
+  if (typeof file.arrayBuffer === "function") {
+    return file.arrayBuffer();
+  }
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = () => reject(reader.error || new Error("读取附件失败"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function readFileText(file: File) {
+  if (typeof file.text === "function") {
+    return file.text();
+  }
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("读取附件失败"));
+    reader.readAsText(file);
+  });
+}
+
+function createImagePreviewUrl(file: File, base64: string) {
+  if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+    try {
+      return URL.createObjectURL(file);
+    } catch {
+      // Fall through to a data URL when the test/browser environment blocks object URLs.
+    }
+  }
+  return `data:${file.type || "application/octet-stream"};base64,${base64}`;
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function TerminalRightSidebar({
@@ -2628,6 +2794,7 @@ function CommandPanel({
   activeSession,
   onActiveFolderChange,
   onAddFolder,
+  onDeleteFolder,
   onSaveCommand,
   onDeleteCommand,
   onSendCommand,
@@ -2640,6 +2807,7 @@ function CommandPanel({
   activeSession?: SessionTab;
   onActiveFolderChange: (folderId: string) => void;
   onAddFolder: (name: string) => void;
+  onDeleteFolder: (folderId: string) => void;
   onSaveCommand: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
   onDeleteCommand: (folderId: string, commandId: string) => void;
   onSendCommand: (command: string) => void;
@@ -2736,19 +2904,38 @@ function CommandPanel({
 
         <div className="mt-4 space-y-1">
           {folders.map((folder) => (
-            <button
+            <div
               key={folder.id}
               className={cn(
-                "flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm font-medium",
+                "grid grid-cols-[minmax(0,1fr)_32px] overflow-hidden rounded-md text-sm font-medium",
                 folder.id === activeFolder?.id ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-white"
               )}
-              onClick={() => onActiveFolderChange(folder.id)}
             >
-              <span className="truncate">{folder.name}</span>
-              <span className={cn("text-xs", folder.id === activeFolder?.id ? "text-slate-300" : "text-slate-400")}>
-                {folder.commands.length}
-              </span>
-            </button>
+              <button
+                className="flex min-w-0 items-center justify-between gap-2 px-3 py-2 text-left"
+                onClick={() => onActiveFolderChange(folder.id)}
+              >
+                <span className="min-w-0 whitespace-normal break-words">{folder.name}</span>
+                <span className={cn("shrink-0 text-xs", folder.id === activeFolder?.id ? "text-slate-300" : "text-slate-400")}>
+                  {folder.commands.length}
+                </span>
+              </button>
+              <button
+                aria-label={`删除文件夹 ${folder.name}`}
+                title="删除文件夹"
+                className={cn(
+                  "flex h-full min-h-9 items-center justify-center border-l",
+                  folder.id === activeFolder?.id
+                    ? "border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white"
+                    : "border-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-600",
+                  folders.length <= 1 && "cursor-not-allowed opacity-40"
+                )}
+                disabled={folders.length <= 1}
+                onClick={() => onDeleteFolder(folder.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ))}
         </div>
       </aside>
@@ -2805,7 +2992,12 @@ function CommandPanel({
                   <Button variant="ghost" className="h-8 px-2" onClick={() => editCommand(command)}>
                     编辑
                   </Button>
-                  <Button variant="ghost" className="h-8 px-2" onClick={() => onDeleteCommand(command.folderId, command.id)}>
+                  <Button
+                    variant="ghost"
+                    className="h-8 px-2"
+                    aria-label={`删除命令 ${command.name}`}
+                    onClick={() => onDeleteCommand(command.folderId, command.id)}
+                  >
                     删除
                   </Button>
                 </div>
@@ -3136,6 +3328,8 @@ function AiWorkspacePanel({
   const [aiSessions, setAiSessions] = useState<AiSession[]>(() => loadStoredAiSessions());
   const [activeAiSessionId, setActiveAiSessionId] = useState(() => aiSessions[0]?.id || "");
   const [prompt, setPrompt] = useState("");
+  const [attachments, setAttachments] = useState<AiAttachment[]>([]);
+  const [attachmentStatus, setAttachmentStatus] = useState("");
   const [running, setRunning] = useState(false);
   const [runStatus, setRunStatus] = useState("");
   const [hermesStatus, setHermesStatus] = useState("等待检查");
@@ -3146,6 +3340,7 @@ function AiWorkspacePanel({
   const selectedTool = activeAiSession?.tool || "codex";
   const messages = activeAiSession?.messages || [];
   const isCodex = selectedTool === "codex";
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const sessionContext = useMemo(() => createSessionContext(activeSession), [activeSession]);
   const contextChips = useMemo(() => {
     const contexts = [sessionContext, ...quotes.map((quote) => createQuoteContext(quote))].filter(Boolean) as AiContextChip[];
@@ -3212,17 +3407,93 @@ function AiWorkspacePanel({
     }
   }
 
+  async function addAttachmentFiles(fileList: FileList | File[]) {
+    const files = Array.from(fileList as ArrayLike<File>).filter(Boolean);
+    if (files.length === 0) return;
+
+    setAttachmentStatus("正在保存附件...");
+    const nextAttachments: AiAttachment[] = [];
+
+    for (const file of files) {
+      const name = attachmentNameForFile(file);
+      const kind = getAttachmentKind(file);
+      try {
+        const content = await fileToBase64(file);
+        const saved = await nativeBridge.saveAiAttachment(name, content);
+        const textContent = kind === "text" ? await readTextAttachment(file) : undefined;
+        const previewUrl = kind === "image" ? createImagePreviewUrl(file, content) : undefined;
+
+        nextAttachments.push({
+          id: `attachment_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          name,
+          type: file.type || "application/octet-stream",
+          size: file.size,
+          kind,
+          localPath: saved.filePath || "",
+          previewUrl,
+          textContent,
+          error: saved.success ? undefined : saved.error || "保存附件失败"
+        });
+      } catch (error) {
+        nextAttachments.push({
+          id: `attachment_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          name,
+          type: file.type || "application/octet-stream",
+          size: file.size,
+          kind,
+          error: error instanceof Error ? error.message : "保存附件失败"
+        });
+      }
+    }
+
+    setAttachments((current) => [...current, ...nextAttachments]);
+    const failed = nextAttachments.filter((attachment) => attachment.error).length;
+    setAttachmentStatus(failed ? `${failed} 个附件保存失败` : "");
+  }
+
+  function handleAttachmentInputChange(event: ChangeEvent<HTMLInputElement>) {
+    if (event.target.files?.length) {
+      void addAttachmentFiles(event.target.files);
+    }
+    event.target.value = "";
+  }
+
+  function handlePromptPaste(event: ReactClipboardEvent<HTMLInputElement>) {
+    const files = Array.from((event.clipboardData.files || []) as ArrayLike<File>).filter(Boolean);
+    const itemFiles = files.length
+      ? []
+      : Array.from(event.clipboardData.items || [])
+          .map((item) => (item.kind === "file" ? item.getAsFile() : null))
+          .filter((file): file is File => Boolean(file));
+    const pastedFiles = files.length ? files : itemFiles;
+    if (pastedFiles.length === 0) return;
+
+    event.preventDefault();
+    void addAttachmentFiles(pastedFiles);
+  }
+
+  function removeAttachment(attachmentId: string) {
+    setAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
+  }
+
   async function sendPrompt() {
     const text = prompt.trim();
-    if (!text || running) return;
+    const currentAttachments = attachments;
+    if ((!text && currentAttachments.length === 0) || running) return;
 
+    const userText = text || "查看附件";
     setPrompt("");
+    setAttachments([]);
+    setAttachmentStatus("");
     setRunStatus("");
-    setMessages((current) => [...current, { id: `user_${Date.now()}`, role: "user", text }]);
+    setMessages((current) => [
+      ...current,
+      { id: `user_${Date.now()}`, role: "user", text: userText, attachments: currentAttachments }
+    ]);
 
     const model = activeAiSession?.model || "";
     const noiseMode = activeAiSession?.noiseMode || "standard";
-    const fullPrompt = buildAiPrompt(text, contextChips, activeSession, activeAiSession);
+    const fullPrompt = buildAiPrompt(userText, contextChips, activeSession, activeAiSession, currentAttachments);
     void executeAiRun({
       id: `run_${Date.now()}`,
       tool: selectedTool,
@@ -3482,7 +3753,7 @@ function AiWorkspacePanel({
 
         <div data-testid="ai-chat-transcript" className="space-y-3 px-4 py-4">
           {messages.map((message) => (
-            <AiMessage key={message.id} role={message.role}>{message.text}</AiMessage>
+            <AiMessage key={message.id} role={message.role} attachments={message.attachments}>{message.text}</AiMessage>
           ))}
           {messages.length === 0 && (
             <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-400">
@@ -3500,12 +3771,42 @@ function AiWorkspacePanel({
           <span className="rounded-full bg-slate-100 px-2 py-1">附加终端输出</span>
           <span className="rounded-full bg-slate-100 px-2 py-1">附加选区日志</span>
         </div>
-        <div className="grid grid-cols-[1fr_44px] gap-2">
+        {attachments.length > 0 && (
+          <div className="mb-3 grid gap-2">
+            {attachments.map((attachment) => (
+              <AiAttachmentCard
+                key={attachment.id}
+                attachment={attachment}
+                onRemove={() => removeAttachment(attachment.id)}
+              />
+            ))}
+          </div>
+        )}
+        {attachmentStatus && <div className="mb-2 text-xs text-amber-600">{attachmentStatus}</div>}
+        <input
+          ref={attachmentInputRef}
+          data-testid="ai-attachment-input"
+          type="file"
+          multiple
+          className="hidden"
+          accept="image/*,.txt,.log,.md,.json,.yaml,.yml,.xml,.csv,.sh,.ps1,.py,.js,.ts,.tsx,.css,.html"
+          onChange={handleAttachmentInputChange}
+        />
+        <div className="grid grid-cols-[40px_1fr_44px] gap-2">
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+            title="添加附件"
+            disabled={running}
+            onClick={() => attachmentInputRef.current?.click()}
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
           <input
             className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
             value={prompt}
             placeholder="输入任务，选择 Codex 或 Hermes 执行..."
             onChange={(event) => setPrompt(event.target.value)}
+            onPaste={handlePromptPaste}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 void sendPrompt();
@@ -3591,7 +3892,13 @@ function AiQuoteCard({ quote }: { quote: AiQuote }) {
   );
 }
 
-function buildAiPrompt(prompt: string, contexts: AiContextChip[], activeSession?: SessionTab, aiSession?: AiSession) {
+function buildAiPrompt(
+  prompt: string,
+  contexts: AiContextChip[],
+  activeSession?: SessionTab,
+  aiSession?: AiSession,
+  attachments: AiAttachment[] = []
+) {
   const modelConfig = JSON.stringify({
     provider: aiSession?.tool || "codex",
     model: aiSession?.model || "",
@@ -3614,6 +3921,7 @@ function buildAiPrompt(prompt: string, contexts: AiContextChip[], activeSession?
       return `<session_metadata title="${context.sourceTitle}">\n${context.text}\n</session_metadata>`;
     })
     .join("\n\n");
+  const formattedAttachments = buildAttachmentPrompt(attachments);
   const context = [
     "你正在 LdySSH 内置 AI 对话栏中工作。",
     modelConfig,
@@ -3626,12 +3934,28 @@ function buildAiPrompt(prompt: string, contexts: AiContextChip[], activeSession?
           .join("\n")}`
       : "",
     formattedContexts ? `附加上下文:\n${formattedContexts}` : "",
+    formattedAttachments ? `附件上下文:\n${formattedAttachments}` : "",
     `用户任务:\n${prompt}`,
     "输出要求:\n- 先给结论，再给依据。\n- 如需命令，给可复制命令。\n- 不要编造未看到的日志。"
   ]
     .filter(Boolean)
     .join("\n\n");
   return context;
+}
+
+function buildAttachmentPrompt(attachments: AiAttachment[]) {
+  return attachments
+    .map((attachment) => {
+      const lines = [
+        `<attachment name="${attachment.name}" kind="${attachment.kind}" type="${attachment.type}" size="${attachment.size}">`,
+        attachment.localPath ? `local_path: ${attachment.localPath}` : "",
+        attachment.error ? `error: ${attachment.error}` : "",
+        attachment.textContent ? `content:\n${attachment.textContent}` : "",
+        "</attachment>"
+      ].filter(Boolean);
+      return lines.join("\n");
+    })
+    .join("\n\n");
 }
 
 function normalizeBaseUrl(value: string) {
@@ -4098,7 +4422,15 @@ function AiConfigPanel({
   );
 }
 
-function AiMessage({ role, children }: { role: "user" | "assistant"; children: React.ReactNode }) {
+function AiMessage({
+  role,
+  attachments = [],
+  children
+}: {
+  role: "user" | "assistant";
+  attachments?: AiAttachment[];
+  children: React.ReactNode;
+}) {
   const user = role === "user";
   return (
     <div className={cn("flex", user ? "justify-end" : "justify-start")}>
@@ -4109,7 +4441,68 @@ function AiMessage({ role, children }: { role: "user" | "assistant"; children: R
         )}
       >
         {children}
+        {attachments.length > 0 && (
+          <div className="mt-2 grid gap-2">
+            {attachments.map((attachment) => (
+              <AiAttachmentCard key={attachment.id} attachment={attachment} compact />
+            ))}
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+function AiAttachmentCard({
+  attachment,
+  compact = false,
+  onRemove
+}: {
+  attachment: AiAttachment;
+  compact?: boolean;
+  onRemove?: () => void;
+}) {
+  const icon = attachment.kind === "image"
+    ? <ImageIcon className="h-4 w-4" />
+    : <Paperclip className="h-4 w-4" />;
+  return (
+    <div className={cn(
+      "flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white p-2 text-slate-700",
+      compact ? "text-xs" : "text-sm"
+    )}>
+      {attachment.kind === "image" && attachment.previewUrl ? (
+        <img
+          src={attachment.previewUrl}
+          alt={attachment.name}
+          className="h-12 w-12 shrink-0 rounded border border-slate-200 object-cover"
+        />
+      ) : (
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 text-slate-500">
+          {icon}
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-semibold">{attachment.name}</div>
+        <div className="mt-0.5 truncate text-xs text-slate-500">
+          {attachment.type || "application/octet-stream"} · {formatFileSize(attachment.size)}
+        </div>
+        {attachment.localPath && (
+          <div className="mt-0.5 truncate text-[11px] text-slate-400">{attachment.localPath}</div>
+        )}
+        {attachment.error && (
+          <div className="mt-0.5 truncate text-[11px] text-rose-600">{attachment.error}</div>
+        )}
+      </div>
+      {onRemove && (
+        <button
+          aria-label={`删除附件 ${attachment.name}`}
+          title="删除附件"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-slate-500 hover:bg-rose-50 hover:text-rose-600"
+          onClick={onRemove}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -4182,6 +4575,34 @@ function SimplePage({
         {children}
       </div>
     </div>
+  );
+}
+
+function DeleteConfirmationDialog({
+  confirmation,
+  onCancel,
+  onConfirm
+}: {
+  confirmation: DeleteConfirmation | null;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  return (
+    <Dialog.Root open={Boolean(confirmation)} onOpenChange={(open) => !open && onCancel()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 w-[360px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+          <Dialog.Title className="text-lg font-semibold text-slate-950">确认删除</Dialog.Title>
+          <Dialog.Description className="mt-2 text-sm leading-6 text-slate-600">
+            {confirmation?.description}
+          </Dialog.Description>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="outline" onClick={onCancel}>取消</Button>
+            <Button onClick={onConfirm}>{confirmation?.confirmLabel || "确认删除"}</Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
