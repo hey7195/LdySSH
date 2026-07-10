@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSPropert
 import * as Dialog from "@radix-ui/react-dialog";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
-import { io, type Socket } from "socket.io-client";
 import {
   Bot,
   CheckCircle2,
@@ -3773,74 +3772,103 @@ function makeHermesRunId(prefix: string) {
   return `${prefix}_${id}`;
 }
 
-function sendHermesStudioSocket(baseUrl: string, prompt: string, token: string) {
+function buildHermesEngineUrl(baseUrl: string, sid?: string) {
+  const params = new URLSearchParams();
+  params.set("EIO", "4");
+  params.set("transport", "polling");
+  params.set("profile", "default");
+  params.set("t", makeHermesRunId("t"));
+  if (sid) params.set("sid", sid);
+  return `${baseUrl}/socket.io/?${params.toString()}`;
+}
+
+function splitHermesEnginePackets(body: string) {
+  return body.split("\x1e").map((packet) => packet.trim()).filter(Boolean);
+}
+
+function parseHermesEngineSid(body: string) {
+  for (const packet of splitHermesEnginePackets(body)) {
+    if (!packet.startsWith("0")) continue;
+    const data = JSON.parse(packet.slice(1) || "{}") as Record<string, unknown>;
+    return typeof data.sid === "string" ? data.sid : "";
+  }
+  return "";
+}
+
+function parseHermesSocketEvent(packet: string): [string, HermesRunEvent] | null {
+  const prefix = "42/chat-run,";
+  if (!packet.startsWith(prefix)) return null;
+  const jsonStart = packet.indexOf("[", prefix.length);
+  if (jsonStart < 0) return null;
+  const data = JSON.parse(packet.slice(jsonStart)) as unknown;
+  if (!Array.isArray(data) || typeof data[0] !== "string") return null;
+  const payload = data[1];
+  return [data[0], payload && typeof payload === "object" ? payload as HermesRunEvent : { text: String(payload ?? "") }];
+}
+
+async function requestHermesEngine(method: "GET" | "POST", url: string, body?: string) {
+  const response = await nativeBridge.hermesHttpRequest({ method, url, body });
+  if (!response.success) {
+    throw new Error(`Hermes Socket.IO HTTP ${response.status || 0}: ${response.error || response.body || "请求失败"}`);
+  }
+  return response.body || "";
+}
+
+async function sendHermesStudioSocket(baseUrl: string, prompt: string, token: string) {
   const sessionId = makeHermesRunId("ldyssh");
   const queueId = makeHermesRunId("queue");
-  return new Promise<Record<string, string>>((resolve, reject) => {
-    let socket: Socket | null = null;
-    let settled = false;
-    let timer = 0;
-    const chunks: string[] = [];
+  const chunks: string[] = [];
+  let sid = "";
 
-    const cleanup = () => {
-      window.clearTimeout(timer);
-      socket?.removeAllListeners();
-      socket?.disconnect();
-    };
-    const finish = (error?: Error, reply?: string) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve({ reply: reply || chunks.join("") || "Hermes 已返回结果。" });
-    };
-    const handleEvent = (event: HermesRunEvent, handler: (payload: HermesRunEvent) => void) => {
-      if (event.session_id && event.session_id !== sessionId) return;
-      handler(event);
-    };
+  try {
+    sid = parseHermesEngineSid(await requestHermesEngine("GET", buildHermesEngineUrl(baseUrl)));
+    if (!sid) {
+      throw new Error("Hermes Socket.IO 未返回连接 ID。");
+    }
 
-    timer = window.setTimeout(() => {
-      finish(new Error("Hermes Socket.IO 响应超时"));
-    }, 120000);
-
-    socket = io(`${baseUrl}/chat-run`, {
-      auth: { token },
-      query: { profile: "default" },
-      transports: ["websocket", "polling"],
-      reconnection: false,
-      timeout: 30000
-    });
-    socket.on("message.delta", (event: HermesRunEvent) => handleEvent(event, (payload) => {
-      const delta = payload.delta ?? payload.text;
-      if (typeof delta === "string") chunks.push(delta);
-    }));
-    socket.on("run.completed", (event: HermesRunEvent) => handleEvent(event, (payload) => {
-      const parsed = payload.parsed_content ?? payload.output;
-      finish(undefined, typeof parsed === "string" && parsed.trim() ? parsed : chunks.join(""));
-    }));
-    socket.on("run.failed", (event: HermesRunEvent) => handleEvent(event, (payload) => {
-      const message = payload.error || payload.message || "请求失败";
-      finish(new Error(`Hermes Socket.IO 运行失败：${String(message)}`));
-    }));
-    socket.on("connect_error", (error: Error) => {
-      finish(new Error(`Hermes Socket.IO 连接失败：${error.message}`));
-    });
-    socket.on("disconnect", (reason: string) => {
-      if (!settled && reason !== "io client disconnect") {
-        finish(new Error(`Hermes Socket.IO 已断开：${reason}`));
-      }
-    });
-    socket.emit("run", {
+    await requestHermesEngine("POST", buildHermesEngineUrl(baseUrl, sid), `40/chat-run,${JSON.stringify({ token })}`);
+    await requestHermesEngine("GET", buildHermesEngineUrl(baseUrl, sid));
+    await requestHermesEngine("POST", buildHermesEngineUrl(baseUrl, sid), `42/chat-run,["run",${JSON.stringify({
       input: prompt,
       session_id: sessionId,
       profile: "default",
       source: "cli",
       queue_id: queueId
-    });
-  });
+    })}]`);
+
+    const deadline = Date.now() + 120000;
+    while (Date.now() < deadline) {
+      const pollBody = await requestHermesEngine("GET", buildHermesEngineUrl(baseUrl, sid));
+      for (const packet of splitHermesEnginePackets(pollBody)) {
+        if (packet === "2") {
+          await requestHermesEngine("POST", buildHermesEngineUrl(baseUrl, sid), "3");
+          continue;
+        }
+        const event = parseHermesSocketEvent(packet);
+        if (!event) continue;
+        const [eventName, payload] = event;
+        if (eventName === "message.delta") {
+          const delta = payload.delta ?? payload.text;
+          if (typeof delta === "string") chunks.push(delta);
+          continue;
+        }
+        if (eventName === "run.completed") {
+          const parsed = payload.parsed_content ?? payload.output;
+          const reply = typeof parsed === "string" && parsed.trim() ? parsed : chunks.join("");
+          return { reply: reply || "Hermes 已返回结果。" };
+        }
+        if (eventName === "run.failed") {
+          const message = payload.error || payload.message || "请求失败";
+          throw new Error(`Hermes Socket.IO 运行失败：${String(message)}`);
+        }
+      }
+    }
+    throw new Error("Hermes Socket.IO 响应超时");
+  } finally {
+    if (sid) {
+      await requestHermesEngine("POST", buildHermesEngineUrl(baseUrl, sid), "41/chat-run,").catch(() => undefined);
+    }
+  }
 }
 
 function sendHermesWebSocket(wsUrl: string, prompt: string, sessionTitle: string) {
