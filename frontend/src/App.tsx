@@ -2112,12 +2112,12 @@ function TerminalCommandSidebar({
       <div className="flex min-h-0 flex-col">
         <div className="border-b border-slate-200 px-3 py-3">
           <div className="mb-2 text-[11px] font-semibold text-slate-500">文件夹</div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-3 gap-2 overflow-x-hidden">
             {folders.map((folder) => (
               <button
                 key={folder.id}
                 className={cn(
-                  "flex h-12 w-28 min-w-0 flex-col justify-center overflow-hidden rounded-md border px-2.5 text-left text-xs font-semibold leading-4 whitespace-normal break-words",
+                  "flex h-12 w-full min-w-0 flex-col justify-center overflow-hidden rounded-md border px-2.5 text-left text-xs font-semibold leading-4 whitespace-normal break-words",
                   folder.id === activeFolder?.id
                     ? "border-slate-900 bg-slate-900 text-white"
                     : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"

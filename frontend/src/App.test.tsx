@@ -1090,10 +1090,11 @@ describe("command library", () => {
     fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
 
     const folderButton = await screen.findByRole("button", { name: new RegExp(longName) });
-    expect(folderButton.parentElement).toHaveClass("flex");
-    expect(folderButton.parentElement).toHaveClass("flex-wrap");
+    expect(folderButton.parentElement).toHaveClass("grid");
+    expect(folderButton.parentElement).toHaveClass("grid-cols-3");
+    expect(folderButton.parentElement).toHaveClass("overflow-x-hidden");
     expect(folderButton).toHaveClass("min-w-0");
-    expect(folderButton).toHaveClass("w-28");
+    expect(folderButton).toHaveClass("w-full");
     expect(folderButton).toHaveClass("h-12");
     expect(folderButton).toHaveClass("flex-col");
     expect(folderButton).toHaveClass("whitespace-normal");
@@ -1108,17 +1109,55 @@ describe("command library", () => {
 
     const defaultFolder = await screen.findByRole("button", { name: /^默认分类\s*2$/ });
     const serviceFolder = await screen.findByRole("button", { name: /^服务操作\s*1$/ });
-    expect(defaultFolder).toHaveClass("w-28");
+    expect(defaultFolder.parentElement).toHaveClass("grid");
+    expect(defaultFolder.parentElement).toHaveClass("grid-cols-3");
+    expect(defaultFolder.parentElement).toHaveClass("overflow-x-hidden");
+    expect(defaultFolder).toHaveClass("w-full");
     expect(defaultFolder).toHaveClass("h-12");
     expect(defaultFolder).toHaveClass("flex-col");
     expect(defaultFolder).toHaveClass("whitespace-normal");
 
     fireEvent.click(serviceFolder);
 
-    expect(defaultFolder).toHaveClass("w-28");
-    expect(serviceFolder).toHaveClass("w-28");
+    expect(defaultFolder).toHaveClass("w-full");
+    expect(serviceFolder).toHaveClass("w-full");
     expect(serviceFolder).toHaveClass("h-12");
     expect(serviceFolder).toHaveClass("flex-col");
+  });
+
+  test("keeps command folder chips in a fixed three column grid", async () => {
+    (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      folders: [
+        { id: "default", name: "Default category", commands: [{ id: "one", name: "One", command: "echo one" }] },
+        { id: "ops", name: "Operations", commands: [{ id: "two", name: "Two", command: "echo two" }] },
+        { id: "adb", name: "adb", commands: [{ id: "three", name: "Three", command: "adb devices" }] },
+        { id: "long", name: "adb install package maintenance", commands: [{ id: "four", name: "Four", command: "echo four" }] },
+        { id: "safe", name: "Security", commands: [{ id: "five", name: "Five", command: "echo five" }] },
+        { id: "misc", name: "Misc", commands: [{ id: "six", name: "Six", command: "echo six" }] }
+      ]
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+
+    const defaultFolder = await screen.findByRole("button", { name: /Default category/ });
+    const grid = defaultFolder.parentElement;
+    expect(grid).toHaveClass("grid");
+    expect(grid).toHaveClass("grid-cols-3");
+    expect(grid).toHaveClass("overflow-x-hidden");
+
+    const longFolder = await screen.findByRole("button", { name: /adb install package maintenance/ });
+    fireEvent.click(longFolder);
+
+    for (const folderButton of [defaultFolder, longFolder]) {
+      expect(folderButton).toHaveClass("w-full");
+      expect(folderButton).toHaveClass("min-w-0");
+      expect(folderButton).toHaveClass("whitespace-normal");
+      expect(folderButton).toHaveClass("break-words");
+    }
   });
 
   test("imports FinalShell commands through the command panel", async () => {
