@@ -19,4 +19,5 @@ for (const target of targets) {
   rmSync(resolve(target, "assets"), { recursive: true, force: true });
   cpSync(resolve(dist, "index.html"), resolve(target, "template.html"));
   cpSync(resolve(dist, "assets"), resolve(target, "assets"), { recursive: true });
+  cpSync(resolve(dist, "favicon.ico"), resolve(target, "favicon.ico"));
 }

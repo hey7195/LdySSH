@@ -110,6 +110,7 @@
   <Target Name="CopyUiAssets" AfterTargets="Build">
     <ItemGroup>
       <UiTemplate Include="$(ProjectDir)ui\template.html" />
+      <UiFavicon Include="$(ProjectDir)ui\favicon.ico" />
       <UiAssetFiles Include="$(ProjectDir)ui\assets\**\*.*" />
       <UiCommandFiles Include="$(ProjectDir)ui\static\commands.json" />
     </ItemGroup>
@@ -117,6 +118,7 @@
     <RemoveDir Directories="$(OutDir)ui\assets" />
     <MakeDir Directories="$(OutDir)ui\assets;$(OutDir)ui\static" />
     <Copy SourceFiles="@(UiTemplate)" DestinationFolder="$(OutDir)ui" />
+    <Copy SourceFiles="@(UiFavicon)" DestinationFolder="$(OutDir)ui" />
     <Copy
       SourceFiles="@(UiAssetFiles)"
       DestinationFiles="@(UiAssetFiles->'$(OutDir)ui\assets\%(RecursiveDir)%(Filename)%(Extension)')" />
