@@ -105,6 +105,12 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
   }
 ];
 
+type CompiledHighlightRule = { rule: HighlightRule; regex: RegExp };
+
+const terminalControlSequencePattern = "\\x1b\\[[0-9;?]*[ -/]*[@-~]|\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)";
+const terminalControlSequenceSplitter = new RegExp(`(${terminalControlSequencePattern})`, "g");
+const terminalControlSequenceExact = new RegExp(`^(?:${terminalControlSequencePattern})$`);
+
 export function applyHighlightRules(text: string, rules: HighlightRule[]) {
   if (!text || rules.length === 0) return text;
 
@@ -120,17 +126,27 @@ export function applyHighlightRules(text: string, rules: HighlightRule[]) {
     .split(/(\r?\n)/)
     .map((part) => {
       if (part === "\n" || part === "\r\n") return part;
-      for (const entry of compiled) {
-        entry.regex.lastIndex = 0;
-        if (!entry.regex.test(part)) continue;
-        entry.regex.lastIndex = 0;
-        const prefix = toAnsiPrefix(entry.rule);
-        if (!prefix) return part;
-        return part.replace(entry.regex, (match) => `${prefix}${match}\x1b[0m`);
-      }
-      return part;
+      return part
+        .split(terminalControlSequenceSplitter)
+        .map((segment) => {
+          if (!segment || terminalControlSequenceExact.test(segment)) return segment;
+          return highlightPlainTerminalSegment(segment, compiled);
+        })
+        .join("");
     })
     .join("");
+}
+
+function highlightPlainTerminalSegment(part: string, compiled: CompiledHighlightRule[]) {
+  for (const entry of compiled) {
+    entry.regex.lastIndex = 0;
+    if (!entry.regex.test(part)) continue;
+    entry.regex.lastIndex = 0;
+    const prefix = toAnsiPrefix(entry.rule);
+    if (!prefix) return part;
+    return part.replace(entry.regex, (match) => `${prefix}${match}\x1b[0m`);
+  }
+  return part;
 }
 
 export function getThemeAttribute(theme: ThemeMode) {

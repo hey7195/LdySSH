@@ -22,6 +22,7 @@ std::string DpapiDecrypt(const std::string& ciphertext);
 // Fernet symmetric cryptography declarations
 std::string EncryptFernetPassword(const std::string& fernetKeyBase64, const std::string& plainText);
 std::string DecryptFernetPassword(const std::string& fernetKeyBase64, const std::string& cipherTextBase64);
+std::string LoadFernetKey();
 std::string GetOrCreateFernetKey();
 
 #endif // CRYPTO_UTILS_H

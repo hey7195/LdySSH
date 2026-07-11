@@ -140,22 +140,46 @@ SSHSession::~SSHSession() {
 
 // Session virtual interfaces implementation
 bool SSHSession::SendInput(const std::string& data) {
-    if (!running || !sshChannel) return false;
-    std::lock_guard<std::mutex> lock(sshMutex);
+    const std::string inputSummary = SummarizeTerminalInputBytes(data);
+    if (!running || !sshChannel) {
+        PrismLog("WARN", "SSHSession::SendInput rejected for session " + sessionId + ": " + inputSummary);
+        return false;
+    }
     int written = 0;
     int totalWritten = 0;
     int size = (int)data.size();
     while (totalWritten < size && running) {
-        written = libssh2_channel_write(sshChannel, data.data() + totalWritten, size - totalWritten);
+        {
+            std::lock_guard<std::mutex> lock(sshMutex);
+            if (!running || !sshChannel) return false;
+            written = libssh2_channel_write(sshChannel, data.data() + totalWritten, size - totalWritten);
+        }
         if (written < 0) {
             if (written == LIBSSH2_ERROR_EAGAIN) {
                 Sleep(5);
                 continue;
             }
+            char* errMsg = NULL;
+            int errLen = 0;
+            int errNo = 0;
+            {
+                std::lock_guard<std::mutex> lock(sshMutex);
+                if (sshSession) {
+                    errNo = libssh2_session_last_errno(sshSession);
+                    libssh2_session_last_error(sshSession, &errMsg, &errLen, 0);
+                }
+            }
+            std::string detail = (errMsg && errLen > 0) ? std::string(errMsg, errLen) : "unknown";
+            PrismLog("WARN", "SSHSession::SendInput failed for session " + sessionId + ": " + inputSummary + ", rc=" + std::to_string(written) + ", err=" + std::to_string(errNo) + ", detail=" + detail);
             return false;
+        }
+        if (written == 0) {
+            Sleep(5);
+            continue;
         }
         totalWritten += written;
     }
+    PrismLog("DEBUG", "SSHSession::SendInput wrote for session " + sessionId + ": " + inputSummary + ", written=" + std::to_string(totalWritten));
     return true;
 }
 
@@ -748,7 +772,7 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
     }
 
     libssh2_channel_request_pty_size(sshChannel, cols, rows);
-    sftpSession = libssh2_sftp_init(sshSession);
+
     libssh2_session_set_blocking(sshSession, 0);
 
     // Configure keepalive: send keepalive every 10 seconds, timeout after 3 failed attempts
@@ -760,13 +784,63 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
     return true;
 }
 
+static std::string ErrorJson(const std::string& error) {
+    nlohmann::json response;
+    response["success"] = false;
+    response["error"] = error;
+    return response.dump();
+}
+
+bool SSHSession::EnsureSftpSession(std::string& error) {
+    if (sftpSession) return true;
+    if (!running || !sshSession) {
+        error = "SSH session not connected";
+        lastError = error;
+        return false;
+    }
+
+    PrismLog("INFO", "SFTP lazy init started for session " + sessionId);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (running && sshSession && std::chrono::steady_clock::now() < deadline) {
+        {
+            std::lock_guard<std::mutex> lock(sshMutex);
+            if (sftpSession) return true;
+
+            sftpSession = libssh2_sftp_init(sshSession);
+            if (sftpSession) {
+                PrismLog("INFO", "SFTP lazy init success for session " + sessionId);
+                return true;
+            }
+
+            int err = libssh2_session_last_errno(sshSession);
+            if (err != LIBSSH2_ERROR_EAGAIN) {
+                char *err_msg = NULL;
+                int err_msg_len = 0;
+                libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
+                std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
+                error = "SFTP init failed: " + detail;
+                lastError = error;
+                PrismLog("ERROR", error);
+                return false;
+            }
+        }
+        Sleep(20);
+    }
+
+    error = "SFTP init timed out";
+    lastError = error;
+    PrismLog("ERROR", error + " for session " + sessionId);
+    return false;
+}
+
 // SFTP operations implementation
 std::string SSHSession::ListFiles(const std::string& path) {
     return ListDirectory(path);
 }
 
 std::string SSHSession::DownloadFileContent(const std::string& path) {
-    if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+    std::string sftpError;
+    if (!EnsureSftpSession(sftpError)) return ErrorJson(sftpError);
     LIBSSH2_SFTP_HANDLE* handle = NULL;
     while (true) {
         {
@@ -830,7 +904,8 @@ std::string SSHSession::DownloadFileContent(const std::string& path) {
 }
 
 std::string SSHSession::UploadFileContent(const std::string& base64Content, const std::string& path) {
-    if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+    std::string sftpError;
+    if (!EnsureSftpSession(sftpError)) return ErrorJson(sftpError);
     LIBSSH2_SFTP_HANDLE* handle = NULL;
     while (true) {
         {
@@ -988,7 +1063,8 @@ void SSHSession::ReadLoop() {
 
 // Inner SFTP operations helper implementations
 std::string SSHSession::ListDirectory(const std::string& path) {
-    if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+    std::string sftpError;
+    if (!EnsureSftpSession(sftpError)) return ErrorJson(sftpError);
     LIBSSH2_SFTP_HANDLE* handle = NULL;
     while (true) {
         {
@@ -1090,7 +1166,8 @@ std::string SSHSession::ListDirectory(const std::string& path) {
 }
 
 std::string SSHSession::CreateDirectory(const std::string& path) {
-    if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+    std::string sftpError;
+    if (!EnsureSftpSession(sftpError)) return ErrorJson(sftpError);
     int rc = 0;
     while (true) {
         {
@@ -1111,7 +1188,8 @@ std::string SSHSession::CreateDirectory(const std::string& path) {
 }
 
 std::string SSHSession::DeleteFile(const std::string& path) {
-    if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+    std::string sftpError;
+    if (!EnsureSftpSession(sftpError)) return ErrorJson(sftpError);
     int rc = 0;
     while (true) {
         {
@@ -1132,7 +1210,8 @@ std::string SSHSession::DeleteFile(const std::string& path) {
 }
 
 std::string SSHSession::DeleteDirectory(const std::string& path) {
-    if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+    std::string sftpError;
+    if (!EnsureSftpSession(sftpError)) return ErrorJson(sftpError);
     int rc = 0;
     while (true) {
         {
@@ -1153,7 +1232,8 @@ std::string SSHSession::DeleteDirectory(const std::string& path) {
 }
 
 std::string SSHSession::RenameFile(const std::string& oldPath, const std::string& newPath) {
-    if (!sftpSession) return "{\"success\":false,\"error\":\"SFTP session not initialized\"}";
+    std::string sftpError;
+    if (!EnsureSftpSession(sftpError)) return ErrorJson(sftpError);
     int rc = 0;
     while (true) {
         {
@@ -2788,8 +2868,9 @@ void SSHSession::RelayData(SOCKET localSock, LIBSSH2_CHANNEL* channel, std::shar
 
 // =================== UploadFile ===================
 bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& remotePath) {
-    if (!sftpSession) {
-        lastError = "SFTP session not initialized";
+    std::string sftpError;
+    if (!EnsureSftpSession(sftpError)) {
+        lastError = sftpError;
         return false;
     }
     
@@ -2898,8 +2979,9 @@ bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& re
 
 // =================== DownloadFile ===================
 bool SSHSession::DownloadFile(const std::string& remotePath, const std::wstring& localPath) {
-    if (!sftpSession) {
-        lastError = "SFTP session not initialized";
+    std::string sftpError;
+    if (!EnsureSftpSession(sftpError)) {
+        lastError = sftpError;
         return false;
     }
     

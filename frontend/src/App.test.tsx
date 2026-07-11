@@ -24,14 +24,19 @@ const terminalMock = vi.hoisted(() => ({
   selectionText: "",
   selectionHandler: undefined as undefined | (() => void),
   keyHandler: undefined as undefined | ((event: KeyboardEvent) => boolean),
+  dataHandler: undefined as undefined | ((data: string) => void),
   options: [] as unknown[],
   writes: [] as string[],
+  focusCalls: 0,
+  fitCalls: 0,
   instances: [] as Array<{ writes: string[] }>
 }));
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
-    fit() {}
+    fit() {
+      terminalMock.fitCalls += 1;
+    }
   }
 }));
 
@@ -45,12 +50,15 @@ vi.mock("@xterm/xterm", () => ({
       terminalMock.instances.push(this.instance);
     }
     dispose() {}
-    focus() {}
+    focus() {
+      terminalMock.focusCalls += 1;
+    }
     loadAddon() {}
     attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
       terminalMock.keyHandler = handler;
     }
-    onData() {
+    onData(handler: (data: string) => void) {
+      terminalMock.dataHandler = handler;
       return { dispose() {} };
     }
     onSelectionChange(handler: () => void) {
@@ -60,6 +68,10 @@ vi.mock("@xterm/xterm", () => ({
     getSelection() {
       return terminalMock.selectionText;
     }
+    clearSelection() {
+      terminalMock.selectionText = "";
+    }
+    selectAll() {}
     open() {}
     write(data: string) {
       terminalMock.writes.push(data);
@@ -76,10 +88,17 @@ beforeEach(() => {
   terminalMock.selectionText = "";
   terminalMock.selectionHandler = undefined;
   terminalMock.keyHandler = undefined;
+  terminalMock.dataHandler = undefined;
   terminalMock.options = [];
   terminalMock.writes = [];
+  terminalMock.focusCalls = 0;
+  terminalMock.fitCalls = 0;
   terminalMock.instances = [];
   window.localStorage.clear();
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: vi.fn().mockResolvedValue(undefined) }
+  });
 
   window.pywebview = {
     api: {
@@ -103,12 +122,14 @@ beforeEach(() => {
         ]
       }),
       save_command_library: vi.fn().mockResolvedValue({ success: true }),
+      list_directory: vi.fn().mockResolvedValue({ success: true, files: [] }),
       save_saved_connection: vi.fn().mockResolvedValue({ success: true }),
       delete_saved_connection: vi.fn().mockResolvedValue({ success: true }),
       create_session: vi.fn().mockResolvedValue("ssh-1"),
       connect: vi.fn().mockResolvedValue({ success: true }),
       show_open_file_dialog: vi.fn().mockResolvedValue({ filePath: "C:\\Users\\1111\\.ssh\\id_rsa" }),
       show_save_file_dialog: vi.fn().mockResolvedValue({ filePath: "C:\\Users\\1111\\Downloads\\ldyssh-commands.json" }),
+      download_file_to_path: vi.fn().mockResolvedValue({ success: true }),
       read_base64_file: vi.fn().mockResolvedValue({ content: "" }),
       write_base64_file: vi.fn().mockResolvedValue({ success: true }),
       save_ai_attachment: vi.fn((name: unknown) => Promise.resolve({ success: true, filePath: `C:\\Users\\1111\\.ldyssh\\ai_attachments\\${String(name)}` })),
@@ -132,6 +153,8 @@ beforeEach(() => {
       get_output: vi.fn().mockResolvedValue({}),
       resize_terminal: vi.fn().mockResolvedValue({ success: true }),
       send_input_base64: vi.fn().mockResolvedValue({ success: true }),
+      clipboard_copy: vi.fn().mockResolvedValue({ success: true }),
+      clipboard_paste: vi.fn().mockResolvedValue({ success: true, text: "echo LDSSH_PASTE_OK\n" }),
       disconnect: vi.fn().mockResolvedValue({ success: true }),
       get_system_info: vi.fn().mockResolvedValue({ success: true, info: {} }),
       get_system_stats: vi.fn().mockResolvedValue({ success: true, stats: {} }),
@@ -1120,6 +1143,251 @@ describe("command library", () => {
     expect(atob(lastCall?.[1] as string)).toBe("df -h\n");
   });
 
+  test("focuses the terminal after sending a right sidebar command", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    await screen.findByTestId("terminal-shell");
+    terminalMock.focusCalls = 0;
+
+    const quickCommandList = await screen.findByLabelText("\u5feb\u6377\u547d\u4ee4\u5217\u8868");
+    fireEvent.click(within(quickCommandList).getByRole("button", { name: "\u53d1\u9001 \u78c1\u76d8\u4f7f\u7528" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled());
+    expect(terminalMock.focusCalls).toBeGreaterThan(0);
+  });
+
+  test("keeps sending vim keystrokes after a right sidebar command starts vim", async () => {
+    (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      folders: [
+        {
+          id: "default",
+          name: "默认分类",
+          commands: [{ id: "vim", name: "编辑文件", command: "vim a.txt", description: "" }]
+        }
+      ]
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
+
+    const quickCommandList = await screen.findByLabelText("快捷命令列表");
+    fireEvent.click(within(quickCommandList).getByRole("button", { name: "发送 编辑文件" }));
+    await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled());
+    (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mockClear();
+
+    terminalMock.dataHandler?.("i");
+    terminalMock.dataHandler?.("\x1b");
+    terminalMock.dataHandler?.(":wq\r");
+
+    await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalledTimes(3));
+    const payloads = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.map((call) => atob(call[1] as string));
+    expect(payloads).toEqual(["i", "\x1b", ":wq\r"]);
+  });
+
+  test("does not bypass xterm when focus stays on the terminal shell wrapper", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    const shell = await screen.findByTestId("terminal-shell");
+    (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mockClear();
+
+    fireEvent.keyDown(shell, { key: "i" });
+    fireEvent.keyDown(shell, { key: "Escape" });
+    fireEvent.keyDown(shell, { key: ":" });
+    fireEvent.keyDown(shell, { key: "w" });
+    fireEvent.keyDown(shell, { key: "q" });
+    fireEvent.keyDown(shell, { key: "Enter" });
+
+    expect(window.pywebview?.api?.send_input_base64).not.toHaveBeenCalled();
+  });
+
+  test("does not bypass xterm when focus stays on the right command button", async () => {
+    (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      folders: [
+        {
+          id: "default",
+          name: "默认分类",
+          commands: [{ id: "vim", name: "编辑文件", command: "vim a.txt", description: "" }]
+        }
+      ]
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    const quickCommandList = await screen.findByLabelText("快捷命令列表");
+    const vimButton = within(quickCommandList).getByRole("button", { name: "发送 编辑文件" });
+    fireEvent.click(vimButton);
+    await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled());
+    (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mockClear();
+
+    fireEvent.keyDown(vimButton, { key: "i" });
+    fireEvent.keyDown(vimButton, { key: "Escape" });
+    fireEvent.keyDown(vimButton, { key: ":" });
+    fireEvent.keyDown(vimButton, { key: "w" });
+    fireEvent.keyDown(vimButton, { key: "q" });
+    fireEvent.keyDown(vimButton, { key: "Enter" });
+
+    expect(window.pywebview?.api?.send_input_base64).not.toHaveBeenCalled();
+  });
+
+  test("focuses the terminal when the terminal surface is clicked", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    const shell = await screen.findByTestId("terminal-shell");
+    terminalMock.focusCalls = 0;
+
+    fireEvent.pointerDown(shell);
+
+    expect(terminalMock.focusCalls).toBeGreaterThan(0);
+  });
+
+  test("uses JumpServer-style xterm interaction options for TUI apps", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    await screen.findByTestId("terminal-shell");
+
+    expect(terminalMock.options.at(-1)).toMatchObject({
+      allowProposedApi: true,
+      cursorBlink: true,
+      cursorStyle: "block",
+      customGlyphs: true,
+      rightClickSelectsWord: true,
+      scrollOnUserInput: true,
+      scrollback: 5000
+    });
+  });
+
+  test("focuses and refits the terminal when the pointer enters the terminal surface", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    const shell = await screen.findByTestId("terminal-shell");
+    terminalMock.focusCalls = 0;
+    terminalMock.fitCalls = 0;
+
+    fireEvent.mouseEnter(shell);
+
+    expect(terminalMock.focusCalls).toBeGreaterThan(0);
+    expect(terminalMock.fitCalls).toBeGreaterThan(0);
+  });
+
+  test("uses responsive compact command library cards without narrow fixed columns", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("命令库"));
+
+    const commandTitle = await screen.findByText("磁盘使用");
+    const commandCard = commandTitle.closest(".rounded-lg");
+    const commandGrid = commandCard?.parentElement;
+    expect(commandGrid).toHaveClass("grid");
+    expect(commandGrid).toHaveClass("grid-cols-[repeat(auto-fit,minmax(220px,1fr))]");
+    expect(commandGrid).toHaveClass("2xl:grid-cols-4");
+    expect(commandGrid).toHaveClass("gap-2");
+    expect(commandCard).toHaveClass("p-3");
+    expect(commandCard).toHaveClass("min-w-0");
+
+    const sendButton = within(commandCard as HTMLElement).getByRole("button", { name: "发送 磁盘使用" });
+    expect(sendButton).toHaveClass("h-7");
+    expect(sendButton).toHaveClass("px-2");
+  });
+
+  test("shows quick commands as name chips with details behind the gear and parameter footer", async () => {
+    (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      folders: [
+        {
+          id: "default",
+          name: "默认分类",
+          commands: [
+            { id: "nat", name: "查看 NAT", command: "sudo iptables -t nat -nL | grep [p#1 端口]", description: "按端口筛选 NAT" }
+          ]
+        }
+      ]
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+
+    const quickCommandList = await screen.findByLabelText("快捷命令列表");
+    const quickCommand = within(quickCommandList).getByRole("button", { name: "发送 查看 NAT" });
+    expect(within(quickCommandList).getByText("命令")).toBeInTheDocument();
+    expect(screen.queryByText("sudo iptables -t nat -nL | grep [p#1 端口]")).not.toBeInTheDocument();
+    expect(screen.queryByText("按端口筛选 NAT")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看命令详情 查看 NAT" }));
+    expect(screen.getByText("sudo iptables -t nat -nL | grep [p#1 端口]")).toBeInTheDocument();
+    expect(screen.getByText("按端口筛选 NAT")).toBeInTheDocument();
+
+    fireEvent.click(quickCommand);
+    const parameterPanel = screen.getByLabelText("快捷命令参数 查看 NAT");
+    fireEvent.change(within(parameterPanel).getByLabelText("参数 端口"), { target: { value: "34285" } });
+    fireEvent.click(within(parameterPanel).getByRole("button", { name: "发送 查看 NAT" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled());
+    const lastCall = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(atob(lastCall?.[1] as string)).toBe("sudo iptables -t nat -nL | grep 34285\n");
+  });
+
+  test("copies a right sidebar command from the context menu", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+
+    const quickCommandList = await screen.findByLabelText("快捷命令列表");
+    const quickCommand = within(quickCommandList).getByRole("button", { name: "发送 磁盘使用" });
+    fireEvent.contextMenu(quickCommand, { clientX: 120, clientY: 160 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "复制命令" }));
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("df -h");
+  });
+
+  test("pastes terminal clipboard through the native bridge instead of sending Ctrl+V to xterm", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    await waitFor(() => expect(terminalMock.keyHandler).toBeTruthy());
+
+    const handled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "v", ctrlKey: true }));
+
+    expect(handled).toBe(false);
+    await waitFor(() => expect(window.pywebview?.api?.clipboard_paste).toHaveBeenCalled());
+    await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled());
+    const lastCall = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(lastCall?.[0]).toBe("local-1");
+    expect(atob(lastCall?.[1] as string)).toBe("echo LDSSH_PASTE_OK\n");
+  });
+
+  test("copies terminal selection on Ctrl+C and does not send SIGINT", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    await waitFor(() => expect(terminalMock.keyHandler).toBeTruthy());
+    terminalMock.selectionText = "selected output";
+
+    const handled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "c", ctrlKey: true }));
+
+    expect(handled).toBe(false);
+    expect(window.pywebview?.api?.clipboard_copy).toHaveBeenCalledWith("selected output");
+    expect(window.pywebview?.api?.send_input_base64).not.toHaveBeenCalled();
+  });
+
   test("switches the terminal right sidebar to files", async () => {
     render(<App />);
 
@@ -1129,6 +1397,65 @@ describe("command library", () => {
 
     expect(await screen.findByRole("heading", { name: "文件浏览" })).toBeInTheDocument();
     expect(screen.getByText(/当前会话：Local CMD/)).toBeInTheDocument();
+  });
+
+  test("loads remote files for a connected SSH session", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { name: "prod-files", hostname: "10.0.0.20", port: 22, username: "root", password: "secret" }
+    ]);
+    (window.pywebview?.api?.list_directory as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      files: [
+        { name: "logs", type: "directory", size: "0 B", date: "2026-07-10 14:00:00", permissions: 16877 },
+        { name: "app.log", type: "file", size: "8.0 KB", date: "2026-07-10 14:01:00", permissions: 33188 }
+      ]
+    });
+
+    render(<App />);
+
+    const recentHost = await screen.findAllByRole("button", { name: /prod-files/ });
+    fireEvent.click(recentHost[0]);
+    await waitFor(() => expect(window.pywebview?.api?.connect).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("tab", { name: "文件" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.list_directory).toHaveBeenCalledWith("ssh-1", "/"));
+    expect(await screen.findByText("logs")).toBeInTheDocument();
+    expect(screen.getByText("app.log")).toBeInTheDocument();
+    expect(screen.queryByText("文件列表接入中。")).not.toBeInTheDocument();
+  });
+
+  test("shows file icons and downloads a remote file from the context menu", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { name: "prod-download", hostname: "10.0.0.21", port: 22, username: "root", password: "secret" }
+    ]);
+    (window.pywebview?.api?.list_directory as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      files: [
+        { name: "logs", type: "directory", size: "0 B", date: "2026-07-10 14:00:00" },
+        { name: "app.log", type: "file", size: "8.0 KB", date: "2026-07-10 14:01:00" }
+      ]
+    });
+    (window.pywebview?.api?.show_save_file_dialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      filePath: "C:\\Users\\1111\\Downloads\\app.log"
+    });
+
+    render(<App />);
+
+    const recentHost = await screen.findAllByRole("button", { name: /prod-download/ });
+    fireEvent.click(recentHost[0]);
+    await waitFor(() => expect(window.pywebview?.api?.connect).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("tab", { name: "文件" }));
+
+    expect(await screen.findByLabelText("目录图标")).toBeInTheDocument();
+    expect(screen.getByLabelText("文件图标")).toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /app\.log/ }), { clientX: 220, clientY: 260 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "下载文件" }));
+
+    await waitFor(() => {
+      expect(window.pywebview?.api?.show_save_file_dialog).toHaveBeenCalledWith("app.log");
+      expect(window.pywebview?.api?.download_file_to_path).toHaveBeenCalledWith("ssh-1", "/app.log", "C:\\Users\\1111\\Downloads\\app.log");
+    });
   });
 
   test("adds command folders and commands then persists them", async () => {
@@ -1152,6 +1479,19 @@ describe("command library", () => {
     expect(await screen.findByText("列出设备")).toBeInTheDocument();
     expect(screen.getByText("adb devices")).toBeInTheDocument();
     expect(window.pywebview?.api?.save_command_library).toHaveBeenCalled();
+  });
+
+  test("inserts FinalShell-style parameter placeholders while adding a command", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("命令库"));
+
+    const commandInput = await screen.findByPlaceholderText("命令内容");
+    fireEvent.click(screen.getByRole("button", { name: "参数1" }));
+    expect(commandInput).toHaveValue("[p#1 参数名]");
+
+    fireEvent.click(screen.getByRole("button", { name: "参数3" }));
+    expect(commandInput).toHaveValue("[p#1 参数名][p#3 参数名]");
   });
 
   test("deletes a command folder and persists the library", async () => {
@@ -1210,15 +1550,15 @@ describe("command library", () => {
     fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
 
     const folderButton = await screen.findByRole("button", { name: new RegExp(longName) });
-    expect(folderButton.parentElement).toHaveClass("grid");
-    expect(folderButton.parentElement).toHaveClass("grid-cols-3");
+    expect(folderButton.parentElement).toHaveClass("flex");
+    expect(folderButton.parentElement).toHaveClass("flex-wrap");
     expect(folderButton.parentElement).toHaveClass("overflow-x-hidden");
     expect(folderButton).toHaveClass("min-w-0");
-    expect(folderButton).toHaveClass("w-full");
-    expect(folderButton).toHaveClass("h-12");
+    expect(folderButton).toHaveClass("basis-[calc((100%_-_1rem)/3)]");
+    expect(folderButton).toHaveClass("h-[48px]");
     expect(folderButton).toHaveClass("flex-col");
-    expect(folderButton).toHaveClass("whitespace-normal");
-    expect(folderButton).toHaveClass("break-words");
+    expect(folderButton).toHaveClass("text-[12px]");
+    expect(folderButton).toHaveClass("[overflow-wrap:anywhere]");
   });
 
   test("wraps the default command folder without changing folder slot size", async () => {
@@ -1229,23 +1569,23 @@ describe("command library", () => {
 
     const defaultFolder = await screen.findByRole("button", { name: /^默认分类\s*2$/ });
     const serviceFolder = await screen.findByRole("button", { name: /^服务操作\s*1$/ });
-    expect(defaultFolder.parentElement).toHaveClass("grid");
-    expect(defaultFolder.parentElement).toHaveClass("grid-cols-3");
+    expect(defaultFolder.parentElement).toHaveClass("flex");
+    expect(defaultFolder.parentElement).toHaveClass("flex-wrap");
     expect(defaultFolder.parentElement).toHaveClass("overflow-x-hidden");
-    expect(defaultFolder).toHaveClass("w-full");
-    expect(defaultFolder).toHaveClass("h-12");
+    expect(defaultFolder).toHaveClass("basis-[calc((100%_-_1rem)/3)]");
+    expect(defaultFolder).toHaveClass("h-[48px]");
     expect(defaultFolder).toHaveClass("flex-col");
-    expect(defaultFolder).toHaveClass("whitespace-normal");
+    expect(defaultFolder).toHaveClass("text-[12px]");
 
     fireEvent.click(serviceFolder);
 
-    expect(defaultFolder).toHaveClass("w-full");
-    expect(serviceFolder).toHaveClass("w-full");
-    expect(serviceFolder).toHaveClass("h-12");
+    expect(defaultFolder).toHaveClass("basis-[calc((100%_-_1rem)/3)]");
+    expect(serviceFolder).toHaveClass("basis-[calc((100%_-_1rem)/3)]");
+    expect(serviceFolder).toHaveClass("h-[48px]");
     expect(serviceFolder).toHaveClass("flex-col");
   });
 
-  test("keeps command folder chips in a fixed three column grid", async () => {
+  test("keeps command folder chips in fixed three-wide slots", async () => {
     (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       success: true,
       folders: [
@@ -1265,18 +1605,28 @@ describe("command library", () => {
 
     const defaultFolder = await screen.findByRole("button", { name: /Default category/ });
     const grid = defaultFolder.parentElement;
-    expect(grid).toHaveClass("grid");
-    expect(grid).toHaveClass("grid-cols-3");
+    const sidebar = defaultFolder.closest("aside");
+    expect(sidebar).toHaveClass("w-[420px]");
+    expect(sidebar).toHaveClass("min-w-0");
+    expect(sidebar).toHaveClass("max-w-[420px]");
+    expect(sidebar).toHaveClass("overflow-hidden");
+    expect(grid).toHaveClass("flex");
+    expect(grid).toHaveClass("flex-wrap");
+    expect(grid).toHaveClass("w-full");
+    expect(grid).toHaveClass("min-w-0");
+    expect(grid).toHaveClass("max-w-full");
     expect(grid).toHaveClass("overflow-x-hidden");
 
     const longFolder = await screen.findByRole("button", { name: /adb install package maintenance/ });
+    const safeFolder = await screen.findByRole("button", { name: /^Security\s*1$/ });
     fireEvent.click(longFolder);
 
-    for (const folderButton of [defaultFolder, longFolder]) {
-      expect(folderButton).toHaveClass("w-full");
+    for (const folderButton of [defaultFolder, longFolder, safeFolder]) {
+      expect(folderButton).toHaveClass("basis-[calc((100%_-_1rem)/3)]");
       expect(folderButton).toHaveClass("min-w-0");
-      expect(folderButton).toHaveClass("whitespace-normal");
-      expect(folderButton).toHaveClass("break-words");
+      expect(folderButton).toHaveClass("h-[48px]");
+      expect(folderButton).toHaveClass("text-[12px]");
+      expect(folderButton).toHaveClass("[overflow-wrap:anywhere]");
     }
   });
 
@@ -1383,10 +1733,14 @@ describe("settings panel", () => {
     fireEvent.change(screen.getByPlaceholderText("正则表达式"), {
       target: { value: "panic|crash" }
     });
+    const colorPicker = screen.getByLabelText("规则颜色") as HTMLInputElement;
+    expect(colorPicker.type).toBe("color");
+    fireEvent.change(colorPicker, { target: { value: "#00aa88" } });
     fireEvent.click(screen.getByRole("button", { name: "添加规则" }));
 
     expect(screen.getByText("自定义错误")).toBeInTheDocument();
     expect(screen.getByText("panic|crash")).toBeInTheDocument();
+    expect(window.localStorage.getItem("ldyssh.terminal.highlightRules")).toContain("#00aa88");
   });
 
   test("deletes a custom terminal highlight rule", async () => {

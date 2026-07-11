@@ -49,6 +49,12 @@ def test_templates_reference_cache_busted_stylesheet():
         assert "static/modern-framework.css" not in html
 
 
+def test_build_sync_updates_release_webview_assets():
+    script = read("frontend/scripts/sync-ui.mjs")
+
+    assert 'resolve(root, "prismssh-cpp/x64/Release/ui")' in script
+
+
 def test_release_template_references_existing_react_assets():
     html = read("prismssh-cpp/x64/Release/ui/template.html")
     asset_paths = re.findall(r'(?:src|href)="\./([^"]+)"', html)
@@ -79,6 +85,118 @@ def test_native_bridge_proxies_hermes_http_requests():
     assert "hermesHttpRequest" in bridge
     assert "cookie?: string" in bridge
     assert "token?: string" in bridge
+
+
+def test_cpp_saved_connections_decrypts_dpapi_wrapped_fernet_key():
+    source = read("prismssh-cpp/main.cpp")
+    match = re.search(
+        r'if \(action == "get_saved_connections"\).*?else if \(action == "delete_saved_connection"\)',
+        source,
+        re.S,
+    )
+
+    assert match
+    block = match.group(0)
+    assert "LoadFernetKey()" in block
+    assert "ReadFileToUtf8(keyPath)" not in block
+
+
+def test_cpp_applies_pending_terminal_resize_after_connection():
+    source = read("prismssh-cpp/main.cpp")
+    connect_args_match = re.search(
+        r'std::thread\(\[sessId, hostname.*?session->Connect\((.*?)\);',
+        source,
+        re.S,
+    )
+    thread_match = re.search(
+        r'std::thread\(\[sessId, hostname.*?\}\)\.detach\(\);',
+        source,
+        re.S,
+    )
+    resize_match = re.search(
+        r'else if \(action == "resize_terminal"\).*?else if \(action == "disconnect"\)',
+        source,
+        re.S,
+    )
+
+    assert connect_args_match
+    assert thread_match
+    assert resize_match
+    connect_block = thread_match.group(0)
+    resize_block = resize_match.group(0)
+    assert "WaitForPendingTerminalSize(sessId" not in connect_block
+    assert "80, 24, jc, pc" in connect_args_match.group(1)
+    assert "TakePendingTerminalSize(sessId, lateTerminalSize)" in connect_block
+    assert "session->Resize(lateTerminalSize.cols, lateTerminalSize.rows)" in connect_block
+    assert "StorePendingTerminalSize(sessId, cols, rows)" in resize_block
+
+
+def test_cpp_requests_terminal_size_after_starting_shell_for_jumpserver():
+    source = read("prismssh-cpp/ssh_session.cpp")
+    connect_match = re.search(
+        r'bool SSHSession::Connect\(.*?\n}\n\nstatic std::string ErrorJson',
+        source,
+        re.S,
+    )
+
+    assert connect_match
+    connect_block = connect_match.group(0)
+    assert connect_block.index("libssh2_channel_shell") < connect_block.index("libssh2_channel_request_pty_size(sshChannel, cols, rows)")
+
+
+def test_cpp_connect_does_not_block_terminal_on_sftp_init():
+    source = read("prismssh-cpp/ssh_session.cpp")
+    connect_match = re.search(
+        r'bool SSHSession::Connect\(.*?\n}\n\nstatic std::string ErrorJson',
+        source,
+        re.S,
+    )
+
+    assert connect_match
+    connect_block = connect_match.group(0)
+    assert "libssh2_sftp_init" not in connect_block
+    assert connect_block.index("libssh2_session_set_blocking(sshSession, 0)") < connect_block.index("running = true")
+    assert "EnsureSftpSession(" in read("prismssh-cpp/ssh_session.h")
+
+
+def test_cpp_send_input_does_not_sleep_while_holding_ssh_mutex():
+    source = read("prismssh-cpp/ssh_session.cpp")
+    match = re.search(
+        r'bool SSHSession::SendInput\(.*?\n}\n\nstd::string SSHSession::GetOutput',
+        source,
+        re.S,
+    )
+
+    assert match
+    block = match.group(0)
+    assert block.index("while (totalWritten < size && running)") < block.index("std::lock_guard<std::mutex> lock(sshMutex)")
+    eagain_match = re.search(r'if \(written == LIBSSH2_ERROR_EAGAIN\).*?continue;', block, re.S)
+    assert eagain_match
+    assert "Sleep(5)" in eagain_match.group(0)
+    assert "std::lock_guard" not in eagain_match.group(0)
+
+
+def test_cpp_terminal_input_is_queued_off_webview_ui_thread():
+    source = read("prismssh-cpp/main.cpp")
+    send_match = re.search(
+        r'else if \(action == "send_input"\).*?else if \(action == "write_log"\)',
+        source,
+        re.S,
+    )
+    send_b64_match = re.search(
+        r'else if \(action == "send_input_base64"\).*?else if \(action == "show_open_file_dialog"\)',
+        source,
+        re.S,
+    )
+
+    assert send_match
+    assert send_b64_match
+    assert "EnqueueSessionInput(sessId, data)" in send_match.group(0)
+    assert "EnqueueSessionInput(sessId, decodedData)" in send_b64_match.group(0)
+    assert "session->SendInput" not in send_match.group(0)
+    assert "session->SendInput" not in send_b64_match.group(0)
+    assert "ProcessSessionInputQueue" in source
+    assert "std::deque<std::string>" in source
 
 
 def test_codex_runs_as_background_job_from_the_ui():

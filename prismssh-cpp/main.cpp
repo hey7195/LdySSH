@@ -16,8 +16,10 @@
 #include <unordered_map>
 #include <memory>
 #include <mutex>
+#include <deque>
 #include <nlohmann/json.hpp>
 #include <thread>
+#include <chrono>
 #include <algorithm>
 #include <cctype>
 #include <atomic>
@@ -66,8 +68,97 @@ struct HeartbeatUpdate {
     std::string status;
 };
 
+struct TerminalSize {
+    int cols;
+    int rows;
+};
+
+static std::mutex pendingTerminalSizeMutex;
+static std::unordered_map<std::string, TerminalSize> pendingTerminalSizes;
+
+struct SessionInputQueue {
+    std::deque<std::string> items;
+    bool running = false;
+};
+
+static std::mutex sessionInputQueuesMutex;
+static std::unordered_map<std::string, SessionInputQueue> sessionInputQueues;
+
 // Forward declaration
 std::wstring Utf8ToUtf16(const std::string& utf8);
+
+static void StorePendingTerminalSize(const std::string& sessionId, int cols, int rows) {
+    std::lock_guard<std::mutex> lock(pendingTerminalSizeMutex);
+    pendingTerminalSizes[sessionId] = { cols, rows };
+}
+
+static bool TakePendingTerminalSize(const std::string& sessionId, TerminalSize& size) {
+    std::lock_guard<std::mutex> lock(pendingTerminalSizeMutex);
+    auto it = pendingTerminalSizes.find(sessionId);
+    if (it == pendingTerminalSizes.end()) {
+        return false;
+    }
+    size = it->second;
+    pendingTerminalSizes.erase(it);
+    return true;
+}
+
+static void ClearPendingTerminalSize(const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(pendingTerminalSizeMutex);
+    pendingTerminalSizes.erase(sessionId);
+}
+
+static void ProcessSessionInputQueue(std::string sessionId) {
+    for (;;) {
+        std::string data;
+        {
+            std::lock_guard<std::mutex> lock(sessionInputQueuesMutex);
+            auto it = sessionInputQueues.find(sessionId);
+            if (it == sessionInputQueues.end() || it->second.items.empty()) {
+                if (it != sessionInputQueues.end()) {
+                    it->second.running = false;
+                }
+                return;
+            }
+            data = std::move(it->second.items.front());
+            it->second.items.pop_front();
+        }
+
+        auto session = globalSessionManager.GetSession(sessionId);
+        if (!session || !session->IsConnected()) {
+            continue;
+        }
+        if (!session->SendInput(data)) {
+            PrismLog("WARN", "Queued terminal input failed for session " + sessionId + ", bytes=" + std::to_string(data.size()));
+        }
+    }
+}
+
+static bool EnqueueSessionInput(const std::string& sessionId, const std::string& data) {
+    if (data.empty()) return true;
+    if (!globalSessionManager.GetSession(sessionId)) return false;
+
+    bool shouldStartWorker = false;
+    {
+        std::lock_guard<std::mutex> lock(sessionInputQueuesMutex);
+        auto& queue = sessionInputQueues[sessionId];
+        queue.items.push_back(data);
+        if (!queue.running) {
+            queue.running = true;
+            shouldStartWorker = true;
+        }
+    }
+
+    if (shouldStartWorker) {
+        std::thread(ProcessSessionInputQueue, sessionId).detach();
+    }
+    return true;
+}
+
+static void ClearSessionInputQueue(const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(sessionInputQueuesMutex);
+    sessionInputQueues.erase(sessionId);
+}
 
 // Non-blocking socket ping thread
 void PingHostThread(std::string hostname, int port) {
@@ -943,10 +1034,9 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             NamedMutexLock lock(L"Global\\LdySSHConfigMutex");
             std::wstring configDir = GetConfigDirectory();
             std::wstring connPath = configDir + L"\\connections.json";
-            std::wstring keyPath = configDir + L"\\.key";
             
             std::string connData = ReadConnectionConfigWithRecovery(connPath);
-            std::string keyData = ReadFileToUtf8(keyPath);
+            std::string fernetKey = LoadFernetKey();
             
             nlohmann::json result = nlohmann::json::array();
             if (!connData.empty()) {
@@ -958,8 +1048,8 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                     
                     if (conn.contains("password_encrypted") && conn["password_encrypted"].get<bool>()) {
                         std::string encryptedPassword = conn["password"].get<std::string>();
-                        if (!keyData.empty()) {
-                            std::string decrypted = DecryptFernetPassword(keyData, encryptedPassword);
+                        if (!fernetKey.empty()) {
+                            std::string decrypted = DecryptFernetPassword(fernetKey, encryptedPassword);
                             if (!decrypted.empty()) {
                                 conn["password"] = decrypted;
                             } else {
@@ -975,8 +1065,8 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
 
                     if (conn.contains("jumpPass_encrypted") && conn["jumpPass_encrypted"].get<bool>()) {
                         std::string encryptedJumpPass = conn["jumpPass"].get<std::string>();
-                        if (!keyData.empty()) {
-                            std::string decrypted = DecryptFernetPassword(keyData, encryptedJumpPass);
+                        if (!fernetKey.empty()) {
+                            std::string decrypted = DecryptFernetPassword(fernetKey, encryptedJumpPass);
                             if (!decrypted.empty()) {
                                 conn["jumpPass"] = decrypted;
                             } else {
@@ -990,8 +1080,8 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
 
                     if (conn.contains("proxyPass_encrypted") && conn["proxyPass_encrypted"].get<bool>()) {
                         std::string encryptedProxyPass = conn["proxyPass"].get<std::string>();
-                        if (!keyData.empty()) {
-                            std::string decrypted = DecryptFernetPassword(keyData, encryptedProxyPass);
+                        if (!fernetKey.empty()) {
+                            std::string decrypted = DecryptFernetPassword(fernetKey, encryptedProxyPass);
                             if (!decrypted.empty()) {
                                 conn["proxyPass"] = decrypted;
                             } else {
@@ -1481,8 +1571,14 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 if (success) {
                     PrismLog("INFO", "SSHSession connect success for " + storeKey);
                     globalSessionManager.AddSession(sessId, session);
+                    TerminalSize lateTerminalSize{ 80, 24 };
+                    if (TakePendingTerminalSize(sessId, lateTerminalSize)) {
+                        session->Resize(lateTerminalSize.cols, lateTerminalSize.rows);
+                    }
                     retObj["success"] = true;
                 } else {
+                    ClearPendingTerminalSize(sessId);
+                    ClearSessionInputQueue(sessId);
                     PrismLog("ERROR", "SSHSession connect failed for " + storeKey + ", error: " + (session->lastError.empty() ? "unknown" : session->lastError));
                     retObj["success"] = false;
                     retObj["error"] = session->lastError.empty() ? "SSH connection failed before opening a shell" : session->lastError;
@@ -1501,11 +1597,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
         else if (action == "send_input") {
             std::string sessId = args[0].get<std::string>();
             std::string data = args[1].get<std::string>();
-            auto session = globalSessionManager.GetSession(sessId);
-            bool success = false;
-            if (session) {
-                success = session->SendInput(data);
-            }
+            bool success = EnqueueSessionInput(sessId, data);
             
             nlohmann::json retObj;
             retObj["success"] = success;
@@ -1541,12 +1633,9 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
         else if (action == "send_input_base64") {
             std::string sessId = args[0].get<std::string>();
             std::string base64Data = args[1].get<std::string>();
-            auto session = globalSessionManager.GetSession(sessId);
-            bool success = false;
-            if (session) {
-                std::string decodedData = Base64Decode(base64Data);
-                success = session->SendInput(decodedData);
-            }
+            std::string decodedData = Base64Decode(base64Data);
+            PrismLog("DEBUG", "terminal input bridge for session " + sessId + ": " + SummarizeTerminalInputBytes(decodedData));
+            bool success = EnqueueSessionInput(sessId, decodedData);
             
             nlohmann::json retObj;
             retObj["success"] = success;
@@ -1635,6 +1724,8 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             auto session = globalSessionManager.GetSession(sessId);
             if (session) {
                 session->Resize(cols, rows);
+            } else {
+                StorePendingTerminalSize(sessId, cols, rows);
             }
             
             nlohmann::json retObj;
@@ -1644,6 +1735,8 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
         }
         else if (action == "disconnect") {
             std::string sessId = args[0].get<std::string>();
+            ClearPendingTerminalSize(sessId);
+            ClearSessionInputQueue(sessId);
             globalSessionManager.DisconnectSession(sessId);
             
             nlohmann::json retObj;

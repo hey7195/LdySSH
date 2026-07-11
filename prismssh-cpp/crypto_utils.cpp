@@ -379,16 +379,22 @@ static bool LocalWriteBinaryFile(const std::wstring& path, const std::string& da
     return true;
 }
 
+std::string LoadFernetKey() {
+    std::wstring configDir = GetConfigDirectory();
+    std::wstring keyPath = configDir + L"\\.key";
+
+    std::string encryptedKey = LocalReadBinaryFile(keyPath);
+    if (encryptedKey.empty()) return "";
+    return DpapiDecrypt(encryptedKey);
+}
+
 std::string GetOrCreateFernetKey() {
     std::wstring configDir = GetConfigDirectory();
     std::wstring keyPath = configDir + L"\\.key";
     
-    std::string encryptedKey = LocalReadBinaryFile(keyPath);
-    if (!encryptedKey.empty()) {
-        std::string decryptedKey = DpapiDecrypt(encryptedKey);
-        if (!decryptedKey.empty()) {
-            return decryptedKey;
-        }
+    std::string existingKey = LoadFernetKey();
+    if (!existingKey.empty()) {
+        return existingKey;
     }
 
     std::string rawKey(32, '\0');

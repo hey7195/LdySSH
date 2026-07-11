@@ -73,6 +73,41 @@ inline std::vector<std::string> SplitStringWhitespace(const std::string& str) {
     return tokens;
 }
 
+inline std::string SummarizeTerminalInputBytes(const std::string& data) {
+    size_t printableCount = 0;
+    size_t controlCount = 0;
+    size_t highCount = 0;
+    size_t controlShown = 0;
+    std::ostringstream controlHex;
+    controlHex << std::hex << std::setfill('0');
+
+    for (unsigned char byte : data) {
+        if ((byte < 0x20) || byte == 0x7f) {
+            controlCount++;
+            if (controlShown < 8) {
+                if (controlShown > 0) controlHex << ' ';
+                controlHex << std::setw(2) << static_cast<int>(byte);
+                controlShown++;
+            }
+        } else if (byte < 0x80) {
+            printableCount++;
+        } else {
+            highCount++;
+        }
+    }
+
+    std::ostringstream summary;
+    summary << "bytes=" << data.size()
+            << ", printable=" << printableCount
+            << ", control=" << controlCount
+            << ", high=" << highCount;
+    if (controlCount > 0) {
+        summary << ", control_hex=" << controlHex.str();
+        if (controlCount > controlShown) summary << " ...";
+    }
+    return summary.str();
+}
+
 // File Helpers
 inline std::string ReadFileToUtf8(const std::wstring& path) {
     std::ifstream f(path, std::ios::binary);

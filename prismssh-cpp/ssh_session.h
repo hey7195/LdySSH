@@ -78,6 +78,7 @@ public:
     bool Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath = "", const std::string& keyPassphrase = "", int cols = 80, int rows = 24, const JumpHostConfig& jumpConfig = {}, const ProxyConfig& proxyConfig = {});
 
     // SFTP operations
+    bool EnsureSftpSession(std::string& error);
     std::string ListFiles(const std::string& path);
     std::string DownloadFileContent(const std::string& remotePath);
     std::string UploadFileContent(const std::string& base64Data, const std::string& remotePath);

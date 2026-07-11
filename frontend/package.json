@@ -13,8 +13,8 @@
   "dependencies": {
     "@radix-ui/react-dialog": "latest",
     "@tailwindcss/vite": "latest",
-    "@xterm/addon-fit": "latest",
-    "@xterm/xterm": "latest",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
     "clsx": "latest",
     "lucide-react": "latest",
     "react": "latest",

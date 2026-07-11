@@ -47,6 +47,25 @@ describe("terminal highlight settings", () => {
 
     expect(applyHighlightRules("ERROR failed", [disabled, invalid])).toBe("ERROR failed");
   });
+
+  test("does not inject highlight escapes into terminal control sequences", () => {
+    const pathRule: HighlightRule = {
+      id: "path",
+      name: "璺緞",
+      pattern: "(/[^\\s]+)",
+      flags: "g",
+      enabled: true,
+      scope: "terminal",
+      foreground: "#0f766e",
+      priority: 10
+    };
+    const oscTitle = "\x1b]0;vim /tmp/app.log\x07";
+
+    expect(applyHighlightRules(oscTitle, [pathRule])).toBe(oscTitle);
+    expect(applyHighlightRules(`${oscTitle} /tmp/app.log`, [pathRule])).toBe(
+      `${oscTitle} \x1b[38;2;15;118;110m/tmp/app.log\x1b[0m`
+    );
+  });
 });
 
 describe("terminal theme settings", () => {

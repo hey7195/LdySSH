@@ -7,6 +7,7 @@ const root = resolve(here, "../..");
 const dist = resolve(root, "frontend/dist");
 const targets = [
   resolve(root, "prismssh-cpp/ui"),
+  resolve(root, "prismssh-cpp/x64/Release/ui"),
   resolve(root, "src/ui")
 ];
 

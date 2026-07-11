@@ -62,6 +62,11 @@ void CleanupEditMappings() {
 void UploadThread(std::shared_ptr<SSHSession> session, std::string fileData, std::string remotePath, std::string uploadId) {
     long long totalBytes = fileData.size();
     long long transferred = 0;
+    std::string sftpError;
+    if (!session->EnsureSftpSession(sftpError)) {
+        globalProgressManager.SetProgress(uploadId, 0, totalBytes, true, sftpError);
+        return;
+    }
     
     LIBSSH2_SFTP_HANDLE* handle = NULL;
     while (true) {
@@ -143,6 +148,12 @@ void UploadFromPathThread(std::shared_ptr<SSHSession> session, std::wstring loca
     localFile.seekg(0, std::ios::beg);
     
     globalProgressManager.SetProgress(uploadId, 0, totalBytes);
+    std::string sftpError;
+    if (!session->EnsureSftpSession(sftpError)) {
+        localFile.close();
+        globalProgressManager.SetProgress(uploadId, 0, totalBytes, true, sftpError);
+        return;
+    }
     
     LIBSSH2_SFTP_HANDLE* handle = NULL;
     while (true) {
@@ -228,6 +239,12 @@ void UploadFromPathThread(std::shared_ptr<SSHSession> session, std::wstring loca
 }
 
 void DownloadThread(std::shared_ptr<SSHSession> session, std::string remotePath, std::string downloadId) {
+    std::string sftpError;
+    if (!session->EnsureSftpSession(sftpError)) {
+        globalProgressManager.SetProgress(downloadId, 0, 0, true, sftpError);
+        return;
+    }
+
     LIBSSH2_SFTP_HANDLE* handle = NULL;
     LIBSSH2_SFTP_ATTRIBUTES attrs;
     long long totalBytes = 0;
@@ -314,6 +331,12 @@ void DownloadThread(std::shared_ptr<SSHSession> session, std::string remotePath,
 }
 
 void DownloadToPathThread(std::shared_ptr<SSHSession> session, std::string remotePath, std::wstring localPath, std::string downloadId) {
+    std::string sftpError;
+    if (!session->EnsureSftpSession(sftpError)) {
+        globalProgressManager.SetProgress(downloadId, 0, 0, true, sftpError);
+        return;
+    }
+
     std::ofstream localFile(localPath, std::ios::binary);
     if (!localFile.is_open()) {
         globalProgressManager.SetProgress(downloadId, 0, 0, true, "Failed to open local file for writing");

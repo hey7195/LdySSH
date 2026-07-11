@@ -10,6 +10,33 @@ const DEFAULT_IMPORT_FOLDER = "导入命令";
 const COMMAND_KEYS = ["command", "cmd", "commandText", "script", "shell", "content"];
 const NAME_KEYS = ["name", "title", "label"];
 const DESCRIPTION_KEYS = ["description", "desc", "remark", "memo"];
+const PARAMETER_PATTERN = /\[p#(\d+)(?:\s+([^\]]+))?\]/g;
+
+export interface CommandParameter {
+  key: string;
+  name: string;
+  token: string;
+}
+
+export function extractCommandParameters(command: string): CommandParameter[] {
+  const parameters: CommandParameter[] = [];
+  const seen = new Set<string>();
+  for (const match of command.matchAll(PARAMETER_PATTERN)) {
+    const key = `p#${match[1]}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    parameters.push({
+      key,
+      name: (match[2] || key).trim(),
+      token: match[0]
+    });
+  }
+  return parameters;
+}
+
+export function fillCommandParameters(command: string, values: Record<string, string>) {
+  return command.replace(PARAMETER_PATTERN, (_token, index: string) => values[`p#${index}`]?.trim() || "");
+}
 
 export function serializeCommandLibraryExport(folders: CommandFolder[]) {
   return JSON.stringify(

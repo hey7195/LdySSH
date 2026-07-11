@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type { CommandFolder } from "./bridge";
 import {
+  extractCommandParameters,
+  fillCommandParameters,
   mergeCommandFolders,
   parseCommandLibraryImport,
   serializeCommandLibraryExport
@@ -66,5 +68,12 @@ describe("command library import/export", () => {
 
     expect(merged).toHaveLength(1);
     expect(merged[0].commands.map((command) => command.command)).toEqual(["df -h", "free -m"]);
+  });
+
+  test("extracts and fills FinalShell-style command parameters", () => {
+    const command = "sudo iptables -t nat -nL | grep [p#1 参数名] && echo [p#1 参数名]";
+
+    expect(extractCommandParameters(command)).toEqual([{ key: "p#1", name: "参数名", token: "[p#1 参数名]" }]);
+    expect(fillCommandParameters(command, { "p#1": "34285" })).toBe("sudo iptables -t nat -nL | grep 34285 && echo 34285");
   });
 });

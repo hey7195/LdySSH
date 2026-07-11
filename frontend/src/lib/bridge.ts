@@ -72,6 +72,18 @@ export const nativeBridge = {
   saveCommandLibrary(folders: CommandFolder[]) {
     return callNative<{ success: boolean; error?: string }>("save_command_library", { success: false }, JSON.stringify(folders));
   },
+  listDirectory(sessionId: string, path: string) {
+    return callNative<DirectoryListResult>("list_directory", { success: false, files: [] }, sessionId, path);
+  },
+  downloadFile(sessionId: string, remotePath: string, localPath: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "download_file_to_path",
+      { success: false, error: "Download bridge unavailable" },
+      sessionId,
+      remotePath,
+      localPath
+    );
+  },
   connect(sessionId: string, params: ConnectParams) {
     return callNative<{ success: boolean; error?: string }>("connect", { success: false }, sessionId, JSON.stringify(params));
   },
@@ -145,6 +157,12 @@ export const nativeBridge = {
   sendInputBase64(sessionId: string, data: string) {
     return callNative<{ success: boolean }>("send_input_base64", { success: false }, sessionId, data);
   },
+  clipboardCopy(text: string) {
+    return callNative<{ success: boolean }>("clipboard_copy", { success: false }, text);
+  },
+  clipboardPaste() {
+    return callNative<{ success: boolean; text?: string }>("clipboard_paste", { success: false, text: "" });
+  },
   getOutput(sessionId: string) {
     return callNative<{ output?: string }>("get_output", {}, sessionId);
   },
@@ -196,6 +214,22 @@ export interface CommandFolder {
 export interface CommandLibraryResult {
   success: boolean;
   folders: CommandFolder[];
+  error?: string;
+}
+
+export interface DirectoryEntry {
+  name: string;
+  type?: "directory" | "file" | string;
+  size?: string | number;
+  raw_size?: number;
+  date?: string;
+  mtime?: number;
+  permissions?: string | number;
+}
+
+export interface DirectoryListResult {
+  success: boolean;
+  files: DirectoryEntry[];
   error?: string;
 }
 
