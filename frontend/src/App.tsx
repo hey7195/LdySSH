@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { Button, EmptyState, Input, Panel } from "./components/ui";
 import { extractCommandParameters, fillCommandParameters, mergeCommandFolders, parseCommandLibraryImport, serializeCommandLibraryExport } from "./lib/commandLibrary";
+import { buildCommandSuggestions, isFullScreenCommand, recordCommandHistory, type CommandSuggestion } from "./lib/commandSuggestions";
 import { cn } from "./lib/utils";
 import {
   nativeBridge,
@@ -81,6 +82,11 @@ interface SessionTab {
   status?: "connecting" | "connected" | "failed" | "disconnected";
   error?: string;
   connectParams?: ConnectParams;
+}
+
+interface TerminalCommandNotice {
+  sessionId: string;
+  command: string;
 }
 
 interface ConnectionForm {
@@ -257,6 +263,7 @@ const storageKeys = {
   terminalBackground: "ldyssh.terminal.background",
   terminalBackgroundImage: "ldyssh.terminal.backgroundImage",
   terminalBackgroundOverlay: "ldyssh.terminal.backgroundOverlay",
+  commandSuggestionsEnabled: "ldyssh.terminal.commandSuggestionsEnabled",
   highlightRules: "ldyssh.terminal.highlightRules",
   aiConfig: "ldyssh.ai.config",
   aiSessions: "ldyssh.ai.sessions"
@@ -312,6 +319,10 @@ function loadStoredTerminalBackgroundImage() {
 function loadStoredTerminalBackgroundOverlay() {
   const value = Number(window.localStorage.getItem(storageKeys.terminalBackgroundOverlay) || 50);
   return Number.isFinite(value) ? value : 50;
+}
+
+function loadStoredCommandSuggestionsEnabled() {
+  return window.localStorage.getItem(storageKeys.commandSuggestionsEnabled) !== "false";
 }
 
 function loadStoredTerminalAppearance(): TerminalAppearance {
@@ -478,6 +489,7 @@ export function App() {
   const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearance>(() => loadStoredTerminalAppearance());
   const [terminalBackgroundImage, setTerminalBackgroundImage] = useState(() => loadStoredTerminalBackgroundImage());
   const [terminalBackgroundOverlay, setTerminalBackgroundOverlay] = useState(() => loadStoredTerminalBackgroundOverlay());
+  const [commandSuggestionsEnabled, setCommandSuggestionsEnabled] = useState(() => loadStoredCommandSuggestionsEnabled());
   const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(() => loadStoredHighlightRules());
   const [aiQuotes, setAiQuotes] = useState<AiQuote[]>([]);
   const [commandFolders, setCommandFolders] = useState<CommandFolder[]>(defaultCommandFolders);
@@ -487,6 +499,7 @@ export function App() {
   const [terminalSidePanel, setTerminalSidePanel] = useState<TerminalSidePanel>("commands");
   const [terminalHistories, setTerminalHistories] = useState<Record<string, string>>({});
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
+  const [terminalCommandNotice, setTerminalCommandNotice] = useState<TerminalCommandNotice | null>(null);
   const [passwordPrompt, setPasswordPrompt] = useState<RetryPasswordPrompt | null>(null);
   const [webFavorites, setWebFavorites] = useState<WebFavorite[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
@@ -532,6 +545,10 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(storageKeys.terminalBackgroundOverlay, String(terminalBackgroundOverlay));
   }, [terminalBackgroundOverlay]);
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.commandSuggestionsEnabled, String(commandSuggestionsEnabled));
+  }, [commandSuggestionsEnabled]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKeys.highlightRules, JSON.stringify(highlightRules));
@@ -1070,6 +1087,7 @@ export function App() {
     if (!activeSession) return;
     const data = command.endsWith("\n") ? command : `${command}\n`;
     void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(data)));
+    setTerminalCommandNotice({ sessionId: activeSession.id, command });
     setTerminalFocusRequest((current) => current + 1);
     setActiveTool("local");
     setTerminalSidePanel("commands");
@@ -1153,11 +1171,13 @@ export function App() {
               terminalAppearance={terminalAppearance}
               terminalBackgroundImage={terminalBackgroundImage}
               terminalBackgroundOverlay={terminalBackgroundOverlay}
+              commandSuggestionsEnabled={commandSuggestionsEnabled}
               highlightRules={highlightRules}
               commandFolders={commandFolders}
               activeCommandFolderId={activeCommandFolderId}
               sidePanel={terminalSidePanel}
               terminalFocusRequest={terminalFocusRequest}
+              terminalCommandNotice={terminalCommandNotice}
               aiQuotes={aiQuotes}
               aiConfig={aiConfig}
               terminalHistory={activeSession ? terminalHistories[activeSession.id] || "" : ""}
@@ -1184,12 +1204,14 @@ export function App() {
               terminalAppearance={terminalAppearance}
               terminalBackgroundImage={terminalBackgroundImage}
               terminalBackgroundOverlay={terminalBackgroundOverlay}
+              commandSuggestionsEnabled={commandSuggestionsEnabled}
               highlightRules={highlightRules}
               onThemeChange={setTheme}
               onTerminalThemeChange={setTerminalTheme}
               onTerminalAppearanceChange={setTerminalAppearance}
               onTerminalBackgroundImageChange={setTerminalBackgroundImage}
               onTerminalBackgroundOverlayChange={setTerminalBackgroundOverlay}
+              onCommandSuggestionsEnabledChange={setCommandSuggestionsEnabled}
               onToggleHighlightRule={toggleHighlightRule}
               onAddHighlightRule={addHighlightRule}
               onDeleteHighlightRule={deleteHighlightRule}
@@ -1593,11 +1615,13 @@ function TerminalWorkspace({
   terminalAppearance,
   terminalBackgroundImage,
   terminalBackgroundOverlay,
+  commandSuggestionsEnabled,
   highlightRules,
   commandFolders,
   activeCommandFolderId,
   sidePanel,
   terminalFocusRequest,
+  terminalCommandNotice,
   aiQuotes,
   aiConfig,
   terminalHistory,
@@ -1622,11 +1646,13 @@ function TerminalWorkspace({
   terminalAppearance: TerminalAppearance;
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
+  commandSuggestionsEnabled: boolean;
   highlightRules: HighlightRule[];
   commandFolders: CommandFolder[];
   activeCommandFolderId: string;
   sidePanel: TerminalSidePanel;
   terminalFocusRequest: number;
+  terminalCommandNotice: TerminalCommandNotice | null;
   aiQuotes: AiQuote[];
   aiConfig: AiConfig;
   terminalHistory: string;
@@ -1749,9 +1775,12 @@ function TerminalWorkspace({
           terminalAppearance={terminalAppearance}
           terminalBackgroundImage={terminalBackgroundImage}
           terminalBackgroundOverlay={terminalBackgroundOverlay}
+          commandSuggestionsEnabled={commandSuggestionsEnabled}
+          commandFolders={commandFolders}
           highlightRules={highlightRules}
           initialTranscript={terminalHistory}
           focusRequest={terminalFocusRequest}
+          commandNotice={terminalCommandNotice}
           onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
           onOutput={onTerminalOutput}
         />
@@ -1792,9 +1821,12 @@ function TerminalSurface({
   terminalAppearance,
   terminalBackgroundImage,
   terminalBackgroundOverlay,
+  commandSuggestionsEnabled,
+  commandFolders,
   highlightRules,
   initialTranscript,
   focusRequest,
+  commandNotice,
   onAddAiQuote,
   onOutput
 }: {
@@ -1803,9 +1835,12 @@ function TerminalSurface({
   terminalAppearance: TerminalAppearance;
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
+  commandSuggestionsEnabled: boolean;
+  commandFolders: CommandFolder[];
   highlightRules: HighlightRule[];
   initialTranscript: string;
   focusRequest: number;
+  commandNotice: TerminalCommandNotice | null;
   onAddAiQuote: (text: string) => void;
   onOutput: (sessionId: string, text: string) => void;
 }) {
@@ -1825,6 +1860,18 @@ function TerminalSurface({
   );
   const visibleMatchIndex = searchMatches.length === 0 ? 0 : Math.min(activeMatchIndex, searchMatches.length - 1);
   const activeMatch = searchMatches[visibleMatchIndex];
+  const [commandSuggestions, setCommandSuggestions] = useState<CommandSuggestion[]>([]);
+  const [activeCommandSuggestionIndex, setActiveCommandSuggestionIndexState] = useState(0);
+  const commandFoldersRef = useRef(commandFolders);
+  const commandSuggestionsEnabledRef = useRef(commandSuggestionsEnabled);
+  const commandSuggestionsRef = useRef<CommandSuggestion[]>([]);
+  const activeCommandSuggestionIndexRef = useRef(0);
+  const commandInputRef = useRef("");
+  const commandHistoryRef = useRef<string[]>([]);
+  const rawCommandModeRef = useRef(false);
+
+  commandFoldersRef.current = commandFolders;
+  commandSuggestionsEnabledRef.current = commandSuggestionsEnabled;
 
   function focusTerminal() {
     terminalRef.current?.focus();
@@ -1835,9 +1882,152 @@ function TerminalSurface({
     focusTerminal();
   }
 
+  function setActiveCommandSuggestionIndex(index: number) {
+    activeCommandSuggestionIndexRef.current = index;
+    setActiveCommandSuggestionIndexState(index);
+  }
+
+  function setCommandSuggestionList(next: CommandSuggestion[]) {
+    commandSuggestionsRef.current = next;
+    setCommandSuggestions(next);
+    setActiveCommandSuggestionIndex(0);
+  }
+
+  function refreshCommandSuggestionList(draft = commandInputRef.current) {
+    if (!commandSuggestionsEnabledRef.current || rawCommandModeRef.current) {
+      setCommandSuggestionList([]);
+      return;
+    }
+    setCommandSuggestionList(buildCommandSuggestions(draft, commandHistoryRef.current, commandFoldersRef.current));
+  }
+
+  function resetCommandInput() {
+    commandInputRef.current = "";
+    setCommandSuggestionList([]);
+  }
+
+  function updateCommandInputFromData(data: string) {
+    if (data.includes("\x03")) {
+      rawCommandModeRef.current = false;
+      resetCommandInput();
+      return;
+    }
+
+    if (rawCommandModeRef.current) return;
+    if (data.startsWith("\x1b")) {
+      setCommandSuggestionList([]);
+      return;
+    }
+
+    let draft = commandInputRef.current;
+    let submittedCommand = "";
+
+    for (const char of data) {
+      if (char === "\r" || char === "\n") {
+        submittedCommand = draft.trim();
+        draft = "";
+        continue;
+      }
+      if (char === "\x7f" || char === "\b") {
+        draft = draft.slice(0, -1);
+        continue;
+      }
+      if (char === "\x15") {
+        draft = "";
+        continue;
+      }
+      if (char < " ") continue;
+      draft += char;
+    }
+
+    commandInputRef.current = draft;
+    if (submittedCommand) {
+      commandHistoryRef.current = recordCommandHistory(commandHistoryRef.current, submittedCommand);
+      rawCommandModeRef.current = isFullScreenCommand(submittedCommand);
+    }
+    refreshCommandSuggestionList(draft);
+  }
+
+  function maybeLeaveRawCommandMode(output: string) {
+    if (!rawCommandModeRef.current) return;
+    const clean = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+    if (/(^|\r?\n)[^\r\n]{0,120}[$#>]\s?$/.test(clean)) {
+      rawCommandModeRef.current = false;
+    }
+  }
+
+  function moveCommandSuggestion(direction: 1 | -1) {
+    const count = commandSuggestionsRef.current.length;
+    if (count === 0) return;
+    setActiveCommandSuggestionIndex((activeCommandSuggestionIndexRef.current + direction + count) % count);
+  }
+
+  function applyCommandSuggestion(suggestion: CommandSuggestion) {
+    const sessionId = activeIdRef.current;
+    const draft = commandInputRef.current;
+    const suffix = suggestion.command.toLowerCase().startsWith(draft.toLowerCase())
+      ? suggestion.command.slice(draft.length)
+      : suggestion.command;
+
+    commandInputRef.current = suggestion.command;
+    setCommandSuggestionList([]);
+    if (!sessionId || !suffix) return;
+    void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(suffix)));
+  }
+
+  function handleCommandSuggestionKey(event: globalThis.KeyboardEvent) {
+    if (event.type !== "keydown" || commandSuggestionsRef.current.length === 0) return true;
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      event.stopPropagation();
+      moveCommandSuggestion(event.key === "ArrowDown" ? 1 : -1);
+      return false;
+    }
+
+    if (event.key === "Tab" || event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      applyCommandSuggestion(commandSuggestionsRef.current[activeCommandSuggestionIndexRef.current] || commandSuggestionsRef.current[0]);
+      return false;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setCommandSuggestionList([]);
+      return false;
+    }
+
+    return true;
+  }
+
+  function commandSuggestionSourceLabel(source: CommandSuggestion["source"]) {
+    if (source === "history") return "历史";
+    if (source === "shortcut") return "快捷";
+    return "Linux";
+  }
+
   useEffect(() => {
     activeIdRef.current = activeSession?.id || "";
   }, [activeSession?.id]);
+
+  useEffect(() => {
+    rawCommandModeRef.current = false;
+    resetCommandInput();
+  }, [activeSession?.id]);
+
+  useEffect(() => {
+    if (!commandSuggestionsEnabled) {
+      setCommandSuggestionList([]);
+    }
+  }, [commandSuggestionsEnabled]);
+
+  useEffect(() => {
+    if (!commandNotice || commandNotice.sessionId !== activeSession?.id) return;
+    resetCommandInput();
+    rawCommandModeRef.current = isFullScreenCommand(commandNotice.command);
+  }, [activeSession?.id, commandNotice]);
 
   const onOutputRef = useRef(onOutput);
 
@@ -1939,6 +2129,9 @@ function TerminalSurface({
         }
         return false;
       }
+      if (!handleCommandSuggestionKey(event)) {
+        return false;
+      }
       return true;
     });
     terminal.writeln(`\x1b[36m${activeSession.title}\x1b[0m`);
@@ -1948,6 +2141,7 @@ function TerminalSurface({
     }
     decoderRef.current = new TextDecoder("utf-8");
     terminal.onData((data) => {
+      updateCommandInputFromData(data);
       void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(data)));
     });
     const selectionDisposable = terminal.onSelectionChange(() => {
@@ -1969,6 +2163,7 @@ function TerminalSurface({
       const result = await nativeBridge.getOutput(activeSession.id);
       if (result.output) {
         const output = decodeTerminalOutput(result.output, decoderRef);
+        maybeLeaveRawCommandMode(output);
         terminal.write(applyHighlightRules(output, highlightRules));
         onOutput(activeSession.id, output);
       }
@@ -1990,6 +2185,7 @@ function TerminalSurface({
     window.handlePushOutput = (sessionId, data) => {
       if (sessionId === activeIdRef.current) {
         const output = decodeTerminalOutput(data, decoderRef);
+        maybeLeaveRawCommandMode(output);
         terminalRef.current?.write(applyHighlightRules(output, highlightRules));
         onOutputRef.current(sessionId, output);
       }
@@ -2070,6 +2266,38 @@ function TerminalSurface({
       onContextMenu={openTerminalMenu}
     >
       <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
+      {commandSuggestions.length > 0 && (
+        <div
+          data-testid="command-suggestion-panel"
+          role="listbox"
+          className="absolute bottom-5 left-5 z-20 w-[min(720px,calc(100%-40px))] overflow-hidden rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] text-xs text-[var(--app-text)] shadow-xl"
+        >
+          {commandSuggestions.map((suggestion, index) => (
+            <button
+              key={suggestion.id}
+              type="button"
+              role="option"
+              aria-selected={index === activeCommandSuggestionIndex}
+              className={cn(
+                "grid w-full grid-cols-[minmax(0,1fr)_52px] items-center gap-3 px-3 py-2 text-left",
+                index === activeCommandSuggestionIndex ? "bg-blue-50 text-blue-700" : "hover:bg-[var(--subtle-bg)]"
+              )}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                applyCommandSuggestion(suggestion);
+              }}
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-semibold">{suggestion.command}</span>
+                {suggestion.label !== suggestion.command && <span className="block truncate text-[11px] text-[var(--app-muted)]">{suggestion.label}</span>}
+              </span>
+              <span className="rounded bg-[var(--subtle-bg)] px-2 py-1 text-center text-[10px] font-semibold text-[var(--app-muted)]">
+                {commandSuggestionSourceLabel(suggestion.source)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
       <button
         aria-label="查找终端输出"
         title="查找终端输出"
@@ -3556,12 +3784,14 @@ function SettingsPanel({
   terminalAppearance,
   terminalBackgroundImage,
   terminalBackgroundOverlay,
+  commandSuggestionsEnabled,
   highlightRules,
   onThemeChange,
   onTerminalThemeChange,
   onTerminalAppearanceChange,
   onTerminalBackgroundImageChange,
   onTerminalBackgroundOverlayChange,
+  onCommandSuggestionsEnabledChange,
   onToggleHighlightRule,
   onAddHighlightRule,
   onDeleteHighlightRule
@@ -3571,12 +3801,14 @@ function SettingsPanel({
   terminalAppearance: TerminalAppearance;
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
+  commandSuggestionsEnabled: boolean;
   highlightRules: HighlightRule[];
   onThemeChange: (theme: ThemeMode) => void;
   onTerminalThemeChange: (theme: TerminalThemeMode) => void;
   onTerminalAppearanceChange: (appearance: TerminalAppearance) => void;
   onTerminalBackgroundImageChange: (value: string) => void;
   onTerminalBackgroundOverlayChange: (value: number) => void;
+  onCommandSuggestionsEnabledChange: (value: boolean) => void;
   onToggleHighlightRule: (ruleId: string) => void;
   onAddHighlightRule: (rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) => void;
   onDeleteHighlightRule: (ruleId: string) => void;
@@ -3741,6 +3973,16 @@ function SettingsPanel({
                   step="5"
                   value={terminalBackgroundOverlay}
                   onChange={(event) => onTerminalBackgroundOverlayChange(Number(event.target.value))}
+                />
+              </label>
+              <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 py-2 text-sm font-semibold text-[var(--app-text)]">
+                <span>命令智能提示</span>
+                <input
+                  aria-label="命令智能提示"
+                  className="h-4 w-4 accent-blue-600"
+                  type="checkbox"
+                  checked={commandSuggestionsEnabled}
+                  onChange={(event) => onCommandSuggestionsEnabledChange(event.target.checked)}
                 />
               </label>
             </div>

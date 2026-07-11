@@ -1189,6 +1189,36 @@ describe("command library", () => {
     expect(payloads).toEqual(["i", "\x1b", ":wq\r"]);
   });
 
+  test("shows command suggestions and applies the selected suffix", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
+    await waitFor(() => expect(terminalMock.keyHandler).toBeTypeOf("function"));
+
+    const sendInput = window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>;
+    sendInput.mockClear();
+
+    await act(async () => {
+      terminalMock.dataHandler?.("d");
+    });
+
+    expect(await screen.findByTestId("command-suggestion-panel")).toHaveTextContent("df -h");
+    await waitFor(() => expect(sendInput).toHaveBeenCalledWith("local-1", bytesToBase64(new TextEncoder().encode("d"))));
+    sendInput.mockClear();
+
+    let handled = true;
+    await act(async () => {
+      handled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Tab", cancelable: true })) ?? true;
+    });
+
+    expect(handled).toBe(false);
+    await waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1));
+    expect(atob(sendInput.mock.calls.at(-1)?.[1] as string)).toBe("f -h");
+    expect(screen.queryByTestId("command-suggestion-panel")).not.toBeInTheDocument();
+  });
+
   test("does not bypass xterm when focus stays on the terminal shell wrapper", async () => {
     render(<App />);
 
@@ -1720,6 +1750,27 @@ describe("settings panel", () => {
       expect(options.theme?.foreground).toBe("#00ff88");
       expect(options.theme?.background).toBe("#101820");
     });
+  });
+
+  test("turns command suggestions off from terminal settings", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u8bbe\u7f6e"));
+    const toggle = await screen.findByLabelText("\u547d\u4ee4\u667a\u80fd\u63d0\u793a");
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+    expect(window.localStorage.getItem("ldyssh.terminal.commandSuggestionsEnabled")).toBe("false");
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
+
+    await act(async () => {
+      terminalMock.dataHandler?.("d");
+    });
+
+    expect(screen.queryByTestId("command-suggestion-panel")).not.toBeInTheDocument();
   });
 
   test("adds a custom terminal highlight rule from settings", async () => {
