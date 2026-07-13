@@ -40,7 +40,17 @@ import {
 } from "lucide-react";
 import { Button, EmptyState, Input, Panel } from "./components/ui";
 import { extractCommandParameters, fillCommandParameters, mergeCommandFolders, parseCommandLibraryImport, serializeCommandLibraryExport } from "./lib/commandLibrary";
-import { buildCommandSuggestions, isFullScreenCommand, recordCommandHistory, type CommandSuggestion } from "./lib/commandSuggestions";
+import {
+  buildCommandSuggestions,
+  defaultCommandSuggestionApplyKey,
+  defaultCommandSuggestionSources,
+  isFullScreenCommand,
+  recordCommandHistory,
+  type CommandSuggestion,
+  type CommandSuggestionApplyKey,
+  type CommandSuggestionCustomApplyKey,
+  type CommandSuggestionSources
+} from "./lib/commandSuggestions";
 import { cn } from "./lib/utils";
 import {
   nativeBridge,
@@ -87,6 +97,18 @@ interface SessionTab {
 interface TerminalCommandNotice {
   sessionId: string;
   command: string;
+}
+
+interface ShortcutParameterRequest {
+  folderId: string;
+  commandId: string;
+  requestId: number;
+}
+
+interface CommandSuggestionView {
+  suggestions: CommandSuggestion[];
+  activeIndex: number;
+  onApply: (suggestion: CommandSuggestion) => void;
 }
 
 interface ConnectionForm {
@@ -264,6 +286,11 @@ const storageKeys = {
   terminalBackgroundImage: "ldyssh.terminal.backgroundImage",
   terminalBackgroundOverlay: "ldyssh.terminal.backgroundOverlay",
   commandSuggestionsEnabled: "ldyssh.terminal.commandSuggestionsEnabled",
+  commandSuggestionHistory: "ldyssh.terminal.commandSuggestions.history",
+  commandSuggestionShortcuts: "ldyssh.terminal.commandSuggestions.shortcuts",
+  commandSuggestionLinux: "ldyssh.terminal.commandSuggestions.linux",
+  commandSuggestionApplyKey: "ldyssh.terminal.commandSuggestions.applyKey",
+  commandSuggestionCustomApplyKey: "ldyssh.terminal.commandSuggestions.customApplyKey",
   highlightRules: "ldyssh.terminal.highlightRules",
   aiConfig: "ldyssh.ai.config",
   aiSessions: "ldyssh.ai.sessions"
@@ -323,6 +350,55 @@ function loadStoredTerminalBackgroundOverlay() {
 
 function loadStoredCommandSuggestionsEnabled() {
   return window.localStorage.getItem(storageKeys.commandSuggestionsEnabled) !== "false";
+}
+
+function loadStoredCommandSuggestionSources(): CommandSuggestionSources {
+  const history = window.localStorage.getItem(storageKeys.commandSuggestionHistory);
+  const shortcuts = window.localStorage.getItem(storageKeys.commandSuggestionShortcuts);
+  const linux = window.localStorage.getItem(storageKeys.commandSuggestionLinux);
+  return {
+    history: history === null ? defaultCommandSuggestionSources.history : history !== "false",
+    shortcuts: shortcuts === null ? defaultCommandSuggestionSources.shortcuts : shortcuts !== "false",
+    linux: linux === null ? defaultCommandSuggestionSources.linux : linux !== "false"
+  };
+}
+
+function loadStoredCommandSuggestionApplyKey(): CommandSuggestionApplyKey {
+  const value = window.localStorage.getItem(storageKeys.commandSuggestionApplyKey);
+  return value === "ctrlSpace" || value === "altEnter" || value === "custom" ? value : defaultCommandSuggestionApplyKey;
+}
+
+function loadStoredCommandSuggestionCustomApplyKey(): CommandSuggestionCustomApplyKey | null {
+  const value = window.localStorage.getItem(storageKeys.commandSuggestionCustomApplyKey);
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as CommandSuggestionCustomApplyKey;
+    return parsed && parsed.key && parsed.code && parsed.label ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function createCommandSuggestionCustomApplyKey(event: globalThis.KeyboardEvent): CommandSuggestionCustomApplyKey | null {
+  if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return null;
+
+  const parts = [
+    event.ctrlKey ? "Ctrl" : "",
+    event.altKey ? "Alt" : "",
+    event.shiftKey ? "Shift" : "",
+    event.metaKey ? "Meta" : "",
+    event.key === " " ? "Space" : event.key
+  ].filter(Boolean);
+
+  return {
+    key: event.key,
+    code: event.code,
+    ctrlKey: event.ctrlKey,
+    altKey: event.altKey,
+    shiftKey: event.shiftKey,
+    metaKey: event.metaKey,
+    label: parts.join("+")
+  };
 }
 
 function loadStoredTerminalAppearance(): TerminalAppearance {
@@ -490,6 +566,9 @@ export function App() {
   const [terminalBackgroundImage, setTerminalBackgroundImage] = useState(() => loadStoredTerminalBackgroundImage());
   const [terminalBackgroundOverlay, setTerminalBackgroundOverlay] = useState(() => loadStoredTerminalBackgroundOverlay());
   const [commandSuggestionsEnabled, setCommandSuggestionsEnabled] = useState(() => loadStoredCommandSuggestionsEnabled());
+  const [commandSuggestionSources, setCommandSuggestionSources] = useState<CommandSuggestionSources>(() => loadStoredCommandSuggestionSources());
+  const [commandSuggestionApplyKey, setCommandSuggestionApplyKey] = useState<CommandSuggestionApplyKey>(() => loadStoredCommandSuggestionApplyKey());
+  const [commandSuggestionCustomApplyKey, setCommandSuggestionCustomApplyKey] = useState<CommandSuggestionCustomApplyKey | null>(() => loadStoredCommandSuggestionCustomApplyKey());
   const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(() => loadStoredHighlightRules());
   const [aiQuotes, setAiQuotes] = useState<AiQuote[]>([]);
   const [commandFolders, setCommandFolders] = useState<CommandFolder[]>(defaultCommandFolders);
@@ -551,6 +630,24 @@ export function App() {
   }, [commandSuggestionsEnabled]);
 
   useEffect(() => {
+    window.localStorage.setItem(storageKeys.commandSuggestionHistory, String(commandSuggestionSources.history));
+    window.localStorage.setItem(storageKeys.commandSuggestionShortcuts, String(commandSuggestionSources.shortcuts));
+    window.localStorage.setItem(storageKeys.commandSuggestionLinux, String(commandSuggestionSources.linux));
+  }, [commandSuggestionSources]);
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.commandSuggestionApplyKey, commandSuggestionApplyKey);
+  }, [commandSuggestionApplyKey]);
+
+  useEffect(() => {
+    if (commandSuggestionCustomApplyKey) {
+      window.localStorage.setItem(storageKeys.commandSuggestionCustomApplyKey, JSON.stringify(commandSuggestionCustomApplyKey));
+    } else {
+      window.localStorage.removeItem(storageKeys.commandSuggestionCustomApplyKey);
+    }
+  }, [commandSuggestionCustomApplyKey]);
+
+  useEffect(() => {
     window.localStorage.setItem(storageKeys.highlightRules, JSON.stringify(highlightRules));
   }, [highlightRules]);
 
@@ -603,7 +700,7 @@ export function App() {
     if (!sessionId) return;
     const tab: SessionTab = {
       id: sessionId,
-      title: "Local CMD",
+      title: "Local Shell",
       kind: "local",
       connected: true,
       status: "connected"
@@ -1172,6 +1269,9 @@ export function App() {
               terminalBackgroundImage={terminalBackgroundImage}
               terminalBackgroundOverlay={terminalBackgroundOverlay}
               commandSuggestionsEnabled={commandSuggestionsEnabled}
+              commandSuggestionSources={commandSuggestionSources}
+              commandSuggestionApplyKey={commandSuggestionApplyKey}
+              commandSuggestionCustomApplyKey={commandSuggestionCustomApplyKey}
               highlightRules={highlightRules}
               commandFolders={commandFolders}
               activeCommandFolderId={activeCommandFolderId}
@@ -1205,6 +1305,9 @@ export function App() {
               terminalBackgroundImage={terminalBackgroundImage}
               terminalBackgroundOverlay={terminalBackgroundOverlay}
               commandSuggestionsEnabled={commandSuggestionsEnabled}
+              commandSuggestionSources={commandSuggestionSources}
+              commandSuggestionApplyKey={commandSuggestionApplyKey}
+              commandSuggestionCustomApplyKey={commandSuggestionCustomApplyKey}
               highlightRules={highlightRules}
               onThemeChange={setTheme}
               onTerminalThemeChange={setTerminalTheme}
@@ -1212,6 +1315,9 @@ export function App() {
               onTerminalBackgroundImageChange={setTerminalBackgroundImage}
               onTerminalBackgroundOverlayChange={setTerminalBackgroundOverlay}
               onCommandSuggestionsEnabledChange={setCommandSuggestionsEnabled}
+              onCommandSuggestionSourcesChange={setCommandSuggestionSources}
+              onCommandSuggestionApplyKeyChange={setCommandSuggestionApplyKey}
+              onCommandSuggestionCustomApplyKeyChange={setCommandSuggestionCustomApplyKey}
               onToggleHighlightRule={toggleHighlightRule}
               onAddHighlightRule={addHighlightRule}
               onDeleteHighlightRule={deleteHighlightRule}
@@ -1433,7 +1539,7 @@ function HostSidebar({
             onClick={onCreateLocal}
           >
             <Terminal className="h-4 w-4 text-slate-500" />
-            打开 Local CMD
+            打开 Local Shell
           </button>
         </SidebarSection>
       </div>
@@ -1616,6 +1722,9 @@ function TerminalWorkspace({
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   commandSuggestionsEnabled,
+  commandSuggestionSources,
+  commandSuggestionApplyKey,
+  commandSuggestionCustomApplyKey,
   highlightRules,
   commandFolders,
   activeCommandFolderId,
@@ -1647,6 +1756,9 @@ function TerminalWorkspace({
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   commandSuggestionsEnabled: boolean;
+  commandSuggestionSources: CommandSuggestionSources;
+  commandSuggestionApplyKey: CommandSuggestionApplyKey;
+  commandSuggestionCustomApplyKey: CommandSuggestionCustomApplyKey | null;
   highlightRules: HighlightRule[];
   commandFolders: CommandFolder[];
   activeCommandFolderId: string;
@@ -1673,6 +1785,8 @@ function TerminalWorkspace({
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const [commandSuggestionView, setCommandSuggestionView] = useState<CommandSuggestionView | null>(null);
+  const [shortcutParameterRequest, setShortcutParameterRequest] = useState<ShortcutParameterRequest | null>(null);
   const menuSession = tabMenu ? sessions.find((session) => session.id === tabMenu.sessionId) : undefined;
 
   function openTabMenu(event: ReactMouseEvent, sessionId: string) {
@@ -1687,10 +1801,18 @@ function TerminalWorkspace({
     setTabMenu(null);
   }
 
+  function requestShortcutParameters(shortcut: NonNullable<CommandSuggestion["shortcut"]>) {
+    onSidePanelChange("commands");
+    setShortcutParameterRequest((current) => ({
+      ...shortcut,
+      requestId: (current?.requestId || 0) + 1
+    }));
+  }
+
   return (
     <div className="grid h-full grid-rows-[34px_minmax(0,1fr)_34px] bg-white">
       <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 pl-3 pr-4">
-        <div className="flex h-full min-w-0 items-center gap-1">
+        <div className="flex h-full min-w-0 flex-1 items-center gap-1">
           <button
             className="mr-2 flex h-7 w-8 items-center justify-center rounded-md bg-slate-900 text-white"
             onClick={onCreateLocal}
@@ -1718,6 +1840,7 @@ function TerminalWorkspace({
             </div>
           ))}
         </div>
+        {commandSuggestionView && <CommandSuggestionPanel view={commandSuggestionView} />}
         <Button variant="ghost" className="h-7 px-2">
           <Menu className="h-4 w-4" />
         </Button>
@@ -1776,20 +1899,26 @@ function TerminalWorkspace({
           terminalBackgroundImage={terminalBackgroundImage}
           terminalBackgroundOverlay={terminalBackgroundOverlay}
           commandSuggestionsEnabled={commandSuggestionsEnabled}
+          commandSuggestionSources={commandSuggestionSources}
+          commandSuggestionApplyKey={commandSuggestionApplyKey}
+          commandSuggestionCustomApplyKey={commandSuggestionCustomApplyKey}
           commandFolders={commandFolders}
           highlightRules={highlightRules}
           initialTranscript={terminalHistory}
           focusRequest={terminalFocusRequest}
           commandNotice={terminalCommandNotice}
+          onCommandSuggestionViewChange={setCommandSuggestionView}
+          onShortcutParameterRequest={requestShortcutParameters}
           onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
           onOutput={onTerminalOutput}
         />
         <TerminalRightSidebar
-          activePanel={sidePanel}
-          activeSession={activeSession}
-          commandFolders={commandFolders}
-          activeCommandFolderId={activeCommandFolderId}
-          aiQuotes={aiQuotes}
+            activePanel={sidePanel}
+            activeSession={activeSession}
+            commandFolders={commandFolders}
+            activeCommandFolderId={activeCommandFolderId}
+            shortcutParameterRequest={shortcutParameterRequest}
+            aiQuotes={aiQuotes}
           aiConfig={aiConfig}
           onPanelChange={onSidePanelChange}
           onActiveCommandFolderChange={onActiveCommandFolderChange}
@@ -1815,6 +1944,36 @@ function TerminalWorkspace({
   );
 }
 
+function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
+  return (
+    <div
+      data-testid="command-suggestion-panel"
+      role="listbox"
+      className="ml-2 flex h-7 w-[420px] max-w-[42vw] shrink-0 items-center gap-1 overflow-hidden rounded-md border border-slate-200 bg-white px-1 shadow-sm"
+    >
+      {view.suggestions.slice(0, 5).map((suggestion, index) => (
+        <button
+          key={suggestion.id}
+          type="button"
+          role="option"
+          aria-selected={index === view.activeIndex}
+          title={suggestion.command}
+          className={cn(
+            "h-5 w-20 shrink-0 truncate rounded px-1.5 text-left text-[11px] font-semibold",
+            index === view.activeIndex ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100"
+          )}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            view.onApply(suggestion);
+          }}
+        >
+          {suggestion.command}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function TerminalSurface({
   activeSession,
   terminalTheme,
@@ -1822,11 +1981,16 @@ function TerminalSurface({
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   commandSuggestionsEnabled,
+  commandSuggestionSources,
+  commandSuggestionApplyKey,
+  commandSuggestionCustomApplyKey,
   commandFolders,
   highlightRules,
   initialTranscript,
   focusRequest,
   commandNotice,
+  onCommandSuggestionViewChange,
+  onShortcutParameterRequest,
   onAddAiQuote,
   onOutput
 }: {
@@ -1836,11 +2000,16 @@ function TerminalSurface({
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   commandSuggestionsEnabled: boolean;
+  commandSuggestionSources: CommandSuggestionSources;
+  commandSuggestionApplyKey: CommandSuggestionApplyKey;
+  commandSuggestionCustomApplyKey: CommandSuggestionCustomApplyKey | null;
   commandFolders: CommandFolder[];
   highlightRules: HighlightRule[];
   initialTranscript: string;
   focusRequest: number;
   commandNotice: TerminalCommandNotice | null;
+  onCommandSuggestionViewChange: (view: CommandSuggestionView | null) => void;
+  onShortcutParameterRequest: (shortcut: NonNullable<CommandSuggestion["shortcut"]>) => void;
   onAddAiQuote: (text: string) => void;
   onOutput: (sessionId: string, text: string) => void;
 }) {
@@ -1864,6 +2033,9 @@ function TerminalSurface({
   const [activeCommandSuggestionIndex, setActiveCommandSuggestionIndexState] = useState(0);
   const commandFoldersRef = useRef(commandFolders);
   const commandSuggestionsEnabledRef = useRef(commandSuggestionsEnabled);
+  const commandSuggestionSourcesRef = useRef(commandSuggestionSources);
+  const commandSuggestionApplyKeyRef = useRef(commandSuggestionApplyKey);
+  const commandSuggestionCustomApplyKeyRef = useRef(commandSuggestionCustomApplyKey);
   const commandSuggestionsRef = useRef<CommandSuggestion[]>([]);
   const activeCommandSuggestionIndexRef = useRef(0);
   const commandInputRef = useRef("");
@@ -1872,6 +2044,9 @@ function TerminalSurface({
 
   commandFoldersRef.current = commandFolders;
   commandSuggestionsEnabledRef.current = commandSuggestionsEnabled;
+  commandSuggestionSourcesRef.current = commandSuggestionSources;
+  commandSuggestionApplyKeyRef.current = commandSuggestionApplyKey;
+  commandSuggestionCustomApplyKeyRef.current = commandSuggestionCustomApplyKey;
 
   function focusTerminal() {
     terminalRef.current?.focus();
@@ -1898,7 +2073,7 @@ function TerminalSurface({
       setCommandSuggestionList([]);
       return;
     }
-    setCommandSuggestionList(buildCommandSuggestions(draft, commandHistoryRef.current, commandFoldersRef.current));
+    setCommandSuggestionList(buildCommandSuggestions(draft, commandHistoryRef.current, commandFoldersRef.current, commandSuggestionSourcesRef.current));
   }
 
   function resetCommandInput() {
@@ -1965,6 +2140,18 @@ function TerminalSurface({
   function applyCommandSuggestion(suggestion: CommandSuggestion) {
     const sessionId = activeIdRef.current;
     const draft = commandInputRef.current;
+    const shortcutParameters = suggestion.shortcut ? extractCommandParameters(suggestion.command) : [];
+    if (suggestion.shortcut && shortcutParameters.length > 0) {
+      const eraseDraft = "\x7f".repeat(Array.from(draft).length);
+      commandInputRef.current = "";
+      setCommandSuggestionList([]);
+      if (sessionId && eraseDraft) {
+        void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(eraseDraft)));
+      }
+      onShortcutParameterRequest(suggestion.shortcut);
+      return;
+    }
+
     const suffix = suggestion.command.toLowerCase().startsWith(draft.toLowerCase())
       ? suggestion.command.slice(draft.length)
       : suggestion.command;
@@ -1973,6 +2160,24 @@ function TerminalSurface({
     setCommandSuggestionList([]);
     if (!sessionId || !suffix) return;
     void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(suffix)));
+  }
+
+  function isCommandSuggestionApplyKey(event: globalThis.KeyboardEvent) {
+    const applyKey = commandSuggestionApplyKeyRef.current;
+    if (applyKey === "tab") return event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey;
+    if (applyKey === "ctrlSpace") return event.ctrlKey && !event.altKey && !event.metaKey && (event.code === "Space" || event.key === " ");
+    if (applyKey === "altEnter") return event.altKey && !event.ctrlKey && !event.metaKey && event.key === "Enter";
+
+    const custom = commandSuggestionCustomApplyKeyRef.current;
+    return Boolean(
+      custom &&
+        event.key === custom.key &&
+        event.code === custom.code &&
+        event.ctrlKey === custom.ctrlKey &&
+        event.altKey === custom.altKey &&
+        event.shiftKey === custom.shiftKey &&
+        event.metaKey === custom.metaKey
+    );
   }
 
   function handleCommandSuggestionKey(event: globalThis.KeyboardEvent) {
@@ -1985,7 +2190,7 @@ function TerminalSurface({
       return false;
     }
 
-    if (event.key === "Tab" || event.key === "Enter") {
+    if (isCommandSuggestionApplyKey(event)) {
       event.preventDefault();
       event.stopPropagation();
       applyCommandSuggestion(commandSuggestionsRef.current[activeCommandSuggestionIndexRef.current] || commandSuggestionsRef.current[0]);
@@ -2002,12 +2207,6 @@ function TerminalSurface({
     return true;
   }
 
-  function commandSuggestionSourceLabel(source: CommandSuggestion["source"]) {
-    if (source === "history") return "历史";
-    if (source === "shortcut") return "快捷";
-    return "Linux";
-  }
-
   useEffect(() => {
     activeIdRef.current = activeSession?.id || "";
   }, [activeSession?.id]);
@@ -2021,7 +2220,22 @@ function TerminalSurface({
     if (!commandSuggestionsEnabled) {
       setCommandSuggestionList([]);
     }
-  }, [commandSuggestionsEnabled]);
+    refreshCommandSuggestionList();
+  }, [commandSuggestionsEnabled, commandSuggestionSources]);
+
+  useEffect(() => {
+    if (commandSuggestions.length === 0) {
+      onCommandSuggestionViewChange(null);
+      return;
+    }
+    onCommandSuggestionViewChange({
+      suggestions: commandSuggestions,
+      activeIndex: activeCommandSuggestionIndex,
+      onApply: applyCommandSuggestion
+    });
+  }, [activeCommandSuggestionIndex, commandSuggestions, onCommandSuggestionViewChange]);
+
+  useEffect(() => () => onCommandSuggestionViewChange(null), [onCommandSuggestionViewChange]);
 
   useEffect(() => {
     if (!commandNotice || commandNotice.sessionId !== activeSession?.id) return;
@@ -2237,7 +2451,7 @@ function TerminalSurface({
       <div className="flex h-full items-center justify-center bg-slate-50">
         <EmptyState
           title="暂无活动会话"
-          description="打开 Local CMD 或连接 SSH 主机后，终端会显示在这里。"
+          description="打开 Local Shell 或连接 SSH 主机后，终端会显示在这里。"
         />
       </div>
     );
@@ -2266,38 +2480,6 @@ function TerminalSurface({
       onContextMenu={openTerminalMenu}
     >
       <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
-      {commandSuggestions.length > 0 && (
-        <div
-          data-testid="command-suggestion-panel"
-          role="listbox"
-          className="absolute bottom-5 left-5 z-20 w-[min(720px,calc(100%-40px))] overflow-hidden rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] text-xs text-[var(--app-text)] shadow-xl"
-        >
-          {commandSuggestions.map((suggestion, index) => (
-            <button
-              key={suggestion.id}
-              type="button"
-              role="option"
-              aria-selected={index === activeCommandSuggestionIndex}
-              className={cn(
-                "grid w-full grid-cols-[minmax(0,1fr)_52px] items-center gap-3 px-3 py-2 text-left",
-                index === activeCommandSuggestionIndex ? "bg-blue-50 text-blue-700" : "hover:bg-[var(--subtle-bg)]"
-              )}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                applyCommandSuggestion(suggestion);
-              }}
-            >
-              <span className="min-w-0">
-                <span className="block truncate font-semibold">{suggestion.command}</span>
-                {suggestion.label !== suggestion.command && <span className="block truncate text-[11px] text-[var(--app-muted)]">{suggestion.label}</span>}
-              </span>
-              <span className="rounded bg-[var(--subtle-bg)] px-2 py-1 text-center text-[10px] font-semibold text-[var(--app-muted)]">
-                {commandSuggestionSourceLabel(suggestion.source)}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
       <button
         aria-label="查找终端输出"
         title="查找终端输出"
@@ -2422,12 +2604,14 @@ function TerminalCommandSidebar({
   folders,
   activeFolderId,
   activeSession,
+  shortcutParameterRequest,
   onActiveFolderChange,
   onSendCommand
 }: {
   folders: CommandFolder[];
   activeFolderId: string;
   activeSession?: SessionTab;
+  shortcutParameterRequest: ShortcutParameterRequest | null;
   onActiveFolderChange: (folderId: string) => void;
   onSendCommand: (command: string) => void;
 }) {
@@ -2457,6 +2641,19 @@ function TerminalCommandSidebar({
   const detailCommand = commands.find((command) => commandKey(command) === detailCommandKey);
   const pendingCommand = commands.find((command) => commandKey(command) === pendingCommandKey);
   const pendingParameters = pendingCommand ? extractCommandParameters(pendingCommand.command) : [];
+
+  useEffect(() => {
+    if (!shortcutParameterRequest) return;
+    const folder = folders.find((item) => item.id === shortcutParameterRequest.folderId);
+    const command = folder?.commands.find((item) => item.id === shortcutParameterRequest.commandId);
+    if (!folder || !command) return;
+
+    onActiveFolderChange(folder.id);
+    setQuery("");
+    setDetailCommandKey("");
+    setPendingCommandKey(`${folder.id}:${command.id}`);
+    setParameterValues({});
+  }, [shortcutParameterRequest, folders, onActiveFolderChange]);
 
   function runCommand(command: CommandItem & { folderId: string }) {
     const parameters = extractCommandParameters(command.command);
@@ -2761,6 +2958,7 @@ function TerminalRightSidebar({
   activeSession,
   commandFolders,
   activeCommandFolderId,
+  shortcutParameterRequest,
   aiQuotes,
   aiConfig,
   onPanelChange,
@@ -2772,6 +2970,7 @@ function TerminalRightSidebar({
   activeSession?: SessionTab;
   commandFolders: CommandFolder[];
   activeCommandFolderId: string;
+  shortcutParameterRequest: ShortcutParameterRequest | null;
   aiQuotes: AiQuote[];
   aiConfig: AiConfig;
   onPanelChange: (panel: TerminalSidePanel) => void;
@@ -2813,6 +3012,7 @@ function TerminalRightSidebar({
             folders={commandFolders}
             activeFolderId={activeCommandFolderId}
             activeSession={activeSession}
+            shortcutParameterRequest={shortcutParameterRequest}
             onActiveFolderChange={onActiveCommandFolderChange}
             onSendCommand={onSendCommand}
           />
@@ -3785,6 +3985,9 @@ function SettingsPanel({
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   commandSuggestionsEnabled,
+  commandSuggestionSources,
+  commandSuggestionApplyKey,
+  commandSuggestionCustomApplyKey,
   highlightRules,
   onThemeChange,
   onTerminalThemeChange,
@@ -3792,6 +3995,9 @@ function SettingsPanel({
   onTerminalBackgroundImageChange,
   onTerminalBackgroundOverlayChange,
   onCommandSuggestionsEnabledChange,
+  onCommandSuggestionSourcesChange,
+  onCommandSuggestionApplyKeyChange,
+  onCommandSuggestionCustomApplyKeyChange,
   onToggleHighlightRule,
   onAddHighlightRule,
   onDeleteHighlightRule
@@ -3802,6 +4008,9 @@ function SettingsPanel({
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   commandSuggestionsEnabled: boolean;
+  commandSuggestionSources: CommandSuggestionSources;
+  commandSuggestionApplyKey: CommandSuggestionApplyKey;
+  commandSuggestionCustomApplyKey: CommandSuggestionCustomApplyKey | null;
   highlightRules: HighlightRule[];
   onThemeChange: (theme: ThemeMode) => void;
   onTerminalThemeChange: (theme: TerminalThemeMode) => void;
@@ -3809,11 +4018,15 @@ function SettingsPanel({
   onTerminalBackgroundImageChange: (value: string) => void;
   onTerminalBackgroundOverlayChange: (value: number) => void;
   onCommandSuggestionsEnabledChange: (value: boolean) => void;
+  onCommandSuggestionSourcesChange: (value: CommandSuggestionSources) => void;
+  onCommandSuggestionApplyKeyChange: (value: CommandSuggestionApplyKey) => void;
+  onCommandSuggestionCustomApplyKeyChange: (value: CommandSuggestionCustomApplyKey | null) => void;
   onToggleHighlightRule: (ruleId: string) => void;
   onAddHighlightRule: (rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) => void;
   onDeleteHighlightRule: (ruleId: string) => void;
 }) {
   const [draft, setDraft] = useState({ name: "", pattern: "", foreground: "#2563eb" });
+  const [recordingApplyKey, setRecordingApplyKey] = useState(false);
   const resolvedTerminalAppearance = getTerminalAppearance(terminalAppearance);
   const terminalPreviewColors = getTerminalColors(terminalTheme, resolvedTerminalAppearance);
   const terminalPreviewOverlayAlpha = terminalBackgroundOverlay / 100;
@@ -3846,6 +4059,17 @@ function SettingsPanel({
 
   function updateTerminalAppearance(patch: Partial<TerminalAppearance>) {
     onTerminalAppearanceChange({ ...terminalAppearance, ...patch });
+  }
+
+  function recordCustomApplyKey(event: KeyboardEvent<HTMLButtonElement>) {
+    if (!recordingApplyKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const customKey = createCommandSuggestionCustomApplyKey(event.nativeEvent);
+    if (!customKey) return;
+    onCommandSuggestionApplyKeyChange("custom");
+    onCommandSuggestionCustomApplyKeyChange(customKey);
+    setRecordingApplyKey(false);
   }
 
   return (
@@ -3985,6 +4209,72 @@ function SettingsPanel({
                   onChange={(event) => onCommandSuggestionsEnabledChange(event.target.checked)}
                 />
               </label>
+              <div className="mt-2 space-y-2 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 text-xs text-[var(--app-text)]">
+                <label className="flex cursor-pointer items-center justify-between gap-3 font-semibold">
+                  <span>显示历史命令</span>
+                  <input
+                    aria-label="显示历史命令"
+                    className="h-4 w-4 accent-blue-600"
+                    type="checkbox"
+                    checked={commandSuggestionSources.history}
+                    disabled={!commandSuggestionsEnabled}
+                    onChange={(event) => onCommandSuggestionSourcesChange({ ...commandSuggestionSources, history: event.target.checked })}
+                  />
+                </label>
+                <label className="flex cursor-pointer items-center justify-between gap-3 font-semibold">
+                  <span>显示快捷命令</span>
+                  <input
+                    aria-label="显示快捷命令"
+                    className="h-4 w-4 accent-blue-600"
+                    type="checkbox"
+                    checked={commandSuggestionSources.shortcuts}
+                    disabled={!commandSuggestionsEnabled}
+                    onChange={(event) => onCommandSuggestionSourcesChange({ ...commandSuggestionSources, shortcuts: event.target.checked })}
+                  />
+                </label>
+                <label className="flex cursor-pointer items-center justify-between gap-3 font-semibold">
+                  <span>显示 Linux 命令</span>
+                  <input
+                    aria-label="显示 Linux 命令"
+                    className="h-4 w-4 accent-blue-600"
+                    type="checkbox"
+                    checked={commandSuggestionSources.linux}
+                    disabled={!commandSuggestionsEnabled}
+                    onChange={(event) => onCommandSuggestionSourcesChange({ ...commandSuggestionSources, linux: event.target.checked })}
+                  />
+                </label>
+                <label className="block font-semibold">
+                  <span>候选应用按键</span>
+                  <select
+                    aria-label="候选应用按键"
+                    className="mt-2 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
+                    value={commandSuggestionApplyKey}
+                    disabled={!commandSuggestionsEnabled}
+                    onChange={(event) => onCommandSuggestionApplyKeyChange(event.target.value as CommandSuggestionApplyKey)}
+                  >
+                    <option value="altEnter">Alt+Enter</option>
+                    <option value="ctrlSpace">Ctrl+Space</option>
+                    <option value="tab">Tab</option>
+                    <option value="custom">自定义</option>
+                  </select>
+                </label>
+                {commandSuggestionApplyKey === "custom" && (
+                  <div className="grid grid-cols-[minmax(0,1fr)_92px] items-center gap-2">
+                    <div className="truncate rounded-md border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-700">
+                      {commandSuggestionCustomApplyKey?.label || "未配置"}
+                    </div>
+                    <Button
+                      className="h-9 px-2 text-xs"
+                      variant={recordingApplyKey ? "default" : "outline"}
+                      disabled={!commandSuggestionsEnabled}
+                      onClick={() => setRecordingApplyKey(true)}
+                      onKeyDown={recordCustomApplyKey}
+                    >
+                      {recordingApplyKey ? "正在录入按键" : "录入按键"}
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="mt-4 rounded-md border border-[var(--app-line)] bg-[var(--subtle-bg)] p-3">
               <div className="text-xs font-semibold text-[var(--app-muted)]">终端预览</div>

@@ -1,6 +1,17 @@
 import type { CommandFolder } from "./bridge";
 
 export type CommandSuggestionSource = "history" | "shortcut" | "linux";
+export type CommandSuggestionApplyKey = "tab" | "ctrlSpace" | "altEnter" | "custom";
+
+export interface CommandSuggestionCustomApplyKey {
+  key: string;
+  code: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+  label: string;
+}
 
 export interface CommandSuggestion {
   id: string;
@@ -8,11 +19,28 @@ export interface CommandSuggestion {
   label: string;
   description?: string;
   source: CommandSuggestionSource;
+  shortcut?: {
+    folderId: string;
+    commandId: string;
+  };
+}
+
+export interface CommandSuggestionSources {
+  history: boolean;
+  shortcuts: boolean;
+  linux: boolean;
 }
 
 const MAX_HISTORY_ITEMS = 80;
 const MAX_SUGGESTIONS = 6;
 const FULL_SCREEN_COMMANDS = new Set(["vi", "vim", "nvim", "nano", "less", "more", "man", "top", "htop", "watch", "tmux", "screen"]);
+
+export const defaultCommandSuggestionApplyKey: CommandSuggestionApplyKey = "altEnter";
+export const defaultCommandSuggestionSources: CommandSuggestionSources = {
+  history: true,
+  shortcuts: true,
+  linux: true
+};
 
 const LINUX_COMMANDS: Array<Omit<CommandSuggestion, "id" | "source">> = [
   { label: "ls", command: "ls -la", description: "list files" },
@@ -44,10 +72,19 @@ export function recordCommandHistory(history: string[], command: string) {
   return [trimmed, ...history.filter((item) => item !== trimmed)].slice(0, MAX_HISTORY_ITEMS);
 }
 
-export function buildCommandSuggestions(prefix: string, history: string[], folders: CommandFolder[], limit = MAX_SUGGESTIONS): CommandSuggestion[] {
+type CommandSuggestionBuildOptions = Partial<CommandSuggestionSources> & { limit?: number };
+
+export function buildCommandSuggestions(
+  prefix: string,
+  history: string[],
+  folders: CommandFolder[],
+  optionsOrLimit: CommandSuggestionBuildOptions | number = MAX_SUGGESTIONS
+): CommandSuggestion[] {
   const query = normalizeCommand(prefix);
   if (!query) return [];
 
+  const sources = typeof optionsOrLimit === "number" ? defaultCommandSuggestionSources : { ...defaultCommandSuggestionSources, ...optionsOrLimit };
+  const limit = typeof optionsOrLimit === "number" ? optionsOrLimit : optionsOrLimit.limit ?? MAX_SUGGESTIONS;
   const suggestions: CommandSuggestion[] = [];
   const seen = new Set<string>();
   const add = (suggestion: CommandSuggestion) => {
@@ -57,34 +94,44 @@ export function buildCommandSuggestions(prefix: string, history: string[], folde
     suggestions.push(suggestion);
   };
 
-  history.forEach((command, index) => {
-    add({
-      id: `history-${index}-${command}`,
-      label: command,
-      command,
-      source: "history"
-    });
-  });
-
-  folders.forEach((folder) => {
-    folder.commands.forEach((command) => {
+  if (sources.history) {
+    history.forEach((command, index) => {
       add({
-        id: `shortcut-${folder.id}-${command.id}`,
-        label: command.name,
-        command: command.command,
-        description: command.description,
-        source: "shortcut"
+        id: `history-${index}-${command}`,
+        label: command,
+        command,
+        source: "history"
       });
     });
-  });
+  }
 
-  LINUX_COMMANDS.forEach((command, index) => {
-    add({
-      id: `linux-${index}`,
-      ...command,
-      source: "linux"
+  if (sources.shortcuts) {
+    folders.forEach((folder) => {
+      folder.commands.forEach((command) => {
+        add({
+          id: `shortcut-${folder.id}-${command.id}`,
+          label: command.name,
+          command: command.command,
+          description: command.description,
+          source: "shortcut",
+          shortcut: {
+            folderId: folder.id,
+            commandId: command.id
+          }
+        });
+      });
     });
-  });
+  }
+
+  if (sources.linux) {
+    LINUX_COMMANDS.forEach((command, index) => {
+      add({
+        id: `linux-${index}`,
+        ...command,
+        source: "linux"
+      });
+    });
+  }
 
   return suggestions.slice(0, limit);
 }

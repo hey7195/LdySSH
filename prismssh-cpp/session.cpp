@@ -12,6 +12,90 @@ extern HWND hWnd;
 std::unordered_map<std::wstring, EditMapping> editMappings;
 std::mutex editMappingMutex;
 
+struct LocalShellCommand {
+    std::wstring executable;
+    std::wstring commandLine;
+    std::string label;
+};
+
+static bool FileExists(const std::wstring& path) {
+    DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+static std::wstring QuoteArg(const std::wstring& value) {
+    return L"\"" + value + L"\"";
+}
+
+static std::wstring GetEnvString(const wchar_t* name) {
+    wchar_t value[MAX_PATH] = { 0 };
+    size_t len = 0;
+    if (_wgetenv_s(&len, value, MAX_PATH, name) == 0 && len > 0 && value[0] != L'\0') {
+        return value;
+    }
+    return L"";
+}
+
+static std::wstring GetSystemPath(const std::wstring& relativePath) {
+    wchar_t systemDir[MAX_PATH] = { 0 };
+    UINT len = GetSystemDirectoryW(systemDir, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) return relativePath;
+    return std::wstring(systemDir) + L"\\" + relativePath;
+}
+
+static std::wstring GetExecutableDirectory() {
+    wchar_t modulePath[MAX_PATH] = { 0 };
+    DWORD len = GetModuleFileNameW(NULL, modulePath, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) return L"";
+
+    std::wstring path(modulePath, len);
+    size_t slash = path.find_last_of(L"\\/");
+    if (slash == std::wstring::npos) return L"";
+    return path.substr(0, slash);
+}
+
+static void AddBundledShellCandidate(std::vector<LocalShellCommand>& candidates) {
+    std::wstring exeDir = GetExecutableDirectory();
+    if (exeDir.empty()) return;
+
+    std::wstring busybox = exeDir + L"\\tools\\busybox\\busybox.exe";
+    candidates.push_back({ busybox, QuoteArg(busybox) + L" sh -l", "Built-in BusyBox" });
+}
+
+static void AddProgramFilesShellCandidates(std::vector<LocalShellCommand>& candidates, const wchar_t* envName) {
+    std::wstring root = GetEnvString(envName);
+    if (root.empty()) return;
+
+    std::wstring gitBash = root + L"\\Git\\bin\\bash.exe";
+    candidates.push_back({ gitBash, QuoteArg(gitBash) + L" --login -i", "Git Bash" });
+}
+
+static LocalShellCommand ResolveLocalShellCommandLine() {
+    std::vector<LocalShellCommand> candidates;
+    AddBundledShellCandidate(candidates);
+
+    AddProgramFilesShellCandidates(candidates, L"ProgramW6432");
+    AddProgramFilesShellCandidates(candidates, L"ProgramFiles");
+    AddProgramFilesShellCandidates(candidates, L"ProgramFiles(x86)");
+
+    std::wstring wslPath = GetSystemPath(L"wsl.exe");
+    candidates.push_back({ wslPath, QuoteArg(wslPath), "WSL" });
+
+    std::wstring powershellPath = GetSystemPath(L"WindowsPowerShell\\v1.0\\powershell.exe");
+    candidates.push_back({ powershellPath, QuoteArg(powershellPath) + L" -NoLogo", "PowerShell" });
+
+    std::wstring cmdPath = GetSystemPath(L"cmd.exe");
+    candidates.push_back({ cmdPath, QuoteArg(cmdPath) + L" /K \"chcp 65001 >nul\"", "CMD" });
+
+    for (const auto& candidate : candidates) {
+        if (FileExists(candidate.executable)) {
+            return candidate;
+        }
+    }
+
+    return { L"cmd.exe", L"cmd.exe /K \"chcp 65001 >nul\"", "CMD" };
+}
+
 LocalSession::LocalSession(const std::string& id) : sessionId(id) {}
 
 LocalSession::~LocalSession() {
@@ -72,17 +156,10 @@ bool LocalSession::Connect(int cols, int rows) {
         return false;
     }
 
-    wchar_t cmdPath[MAX_PATH] = L"C:\\Windows\\System32\\cmd.exe";
-    wchar_t envPath[MAX_PATH] = { 0 };
-    size_t len = 0;
-    if (_wgetenv_s(&len, envPath, MAX_PATH, L"COMSPEC") == 0 && len > 0 && envPath[0] != L'\0') {
-        wcscpy_s(cmdPath, envPath);
-    }
-    PrismLog("INFO", "LocalSession::Connect: Using cmdPath=" + Utf16ToUtf8(cmdPath));
-
     PROCESS_INFORMATION pi = { 0 };
-    std::wstring cmdLine = L"\"" + std::wstring(cmdPath) + L"\" /K \"chcp 65001 >nul\"";
-    std::vector<wchar_t> cmdLineBuf(cmdLine.begin(), cmdLine.end());
+    LocalShellCommand shellCommand = ResolveLocalShellCommandLine();
+    PrismLog("INFO", "LocalSession::Connect: Using local shell=" + shellCommand.label + ", commandLine=" + Utf16ToUtf8(shellCommand.commandLine));
+    std::vector<wchar_t> cmdLineBuf(shellCommand.commandLine.begin(), shellCommand.commandLine.end());
     cmdLineBuf.push_back(L'\0');
 
     BOOL success = CreateProcessW(

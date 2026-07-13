@@ -205,7 +205,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     expect(await screen.findByRole("tab", { name: "命令" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "文件" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "AI" }));
@@ -226,7 +226,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
 
     await waitFor(() => expect(terminalMock.selectionHandler).toBeTypeOf("function"));
 
@@ -247,7 +247,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     await waitFor(() => expect(terminalMock.selectionHandler).toBeTypeOf("function"));
 
     terminalMock.selectionText = "WARN disk usage 92%\nERROR cleanup failed";
@@ -282,7 +282,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
 
     const file = new File(["ERROR disk full\ncleanup failed"], "error.log", { type: "text/plain" });
@@ -306,7 +306,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
 
     const image = new File([new Uint8Array([137, 80, 78, 71])], "shot.png", { type: "image/png" });
@@ -331,7 +331,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.change(await screen.findByTestId("ai-memory-input"), {
       target: { value: "记住：优先检查最新日志" }
@@ -375,7 +375,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
 
     fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
@@ -405,7 +405,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
       target: { value: "分析当前错误" }
@@ -441,7 +441,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.change(await screen.findByTestId("ai-memory-input"), {
       target: { value: "记住：优先检查最新日志" }
@@ -497,7 +497,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.change(await screen.findByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行..."), {
       target: { value: "hi" }
@@ -525,7 +525,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
     fireEvent.change(await screen.findByLabelText("Hermes Base URL"), {
@@ -567,7 +567,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
     fireEvent.change(await screen.findByLabelText("Hermes Base URL"), {
@@ -638,7 +638,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
     fireEvent.change(await screen.findByLabelText("Hermes Base URL"), {
@@ -715,7 +715,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
     fireEvent.change(await screen.findByLabelText("Hermes Base URL"), {
@@ -755,7 +755,7 @@ describe("AI tools panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     fireEvent.click(await screen.findByRole("button", { name: /Hermes/ }));
     fireEvent.change(await screen.findByLabelText("Hermes WSS URL"), {
@@ -772,9 +772,9 @@ describe("AI tools panel", () => {
     expect(screen.getByTestId("app-root")).toHaveAttribute("data-theme", "light");
     fireEvent.click(screen.getByTitle("本地终端"));
     await waitFor(() => {
-      expect(screen.getAllByRole("button").some((button) => button.textContent?.includes("Local CMD"))).toBe(true);
+      expect(screen.getAllByRole("button").some((button) => button.textContent?.includes("Local Shell"))).toBe(true);
     });
-    const openLocalButton = screen.getAllByRole("button").find((button) => button.textContent?.includes("Local CMD"));
+    const openLocalButton = screen.getAllByRole("button").find((button) => button.textContent?.includes("Local Shell"));
     fireEvent.click(openLocalButton!);
 
     expect(await screen.findByTestId("terminal-shell")).toHaveAttribute("data-terminal-theme", "dark");
@@ -804,7 +804,7 @@ describe("AI tools panel", () => {
     expect(window.localStorage.getItem("ldyssh.terminal.backgroundOverlay")).toBe("20");
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
 
     expect(await screen.findByTestId("terminal-shell")).toHaveStyle({
       backgroundImage: 'linear-gradient(rgba(2, 6, 23, 0.2), rgba(2, 6, 23, 0.2)), url("data:image/png;base64,bg")'
@@ -817,16 +817,16 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     await screen.findByTestId("terminal-shell");
 
     fireEvent.click(screen.getByTitle(/SSH/));
 
-    const sessionButton = await screen.findByRole("button", { name: /切换到 Local CMD/ });
+    const sessionButton = await screen.findByRole("button", { name: /切换到 Local Shell/ });
     fireEvent.click(sessionButton);
 
     expect(await screen.findByTestId("terminal-shell")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /切换到 Local CMD/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /切换到 Local Shell/ })).toBeInTheDocument();
   });
 
   test("keeps terminal output after switching left activity pages", async () => {
@@ -837,7 +837,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     await waitFor(() => expect(terminalMock.writes.join("")).toContain("persisted terminal output"));
 
     fireEvent.click(screen.getByTitle("设置"));
@@ -857,7 +857,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     await waitFor(() => expect(terminalMock.writes.join("")).toContain("second needle result"));
 
     expect(await screen.findByRole("button", { name: "查找终端输出" })).toBeInTheDocument();
@@ -1004,9 +1004,9 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
 
-    const tab = await screen.findByRole("button", { name: "Local CMD" });
+    const tab = await screen.findByRole("button", { name: "Local Shell" });
     fireEvent.contextMenu(tab);
     fireEvent.click(await screen.findByRole("menuitem", { name: "复制标签" }));
 
@@ -1104,7 +1104,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
 
     expect(await screen.findByText("快捷命令栏")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "命令" })).toHaveAttribute("aria-selected", "true");
@@ -1122,8 +1122,8 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
-    await waitFor(() => expect(screen.getAllByText("Local CMD").length).toBeGreaterThan(0));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    await waitFor(() => expect(screen.getAllByText("Local Shell").length).toBeGreaterThan(0));
 
     expect(await screen.findByText("快捷命令栏")).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("搜索命令或文件夹"), {
@@ -1147,7 +1147,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
-    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
     await screen.findByTestId("terminal-shell");
     terminalMock.focusCalls = 0;
 
@@ -1172,7 +1172,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
 
     const quickCommandList = await screen.findByLabelText("快捷命令列表");
@@ -1193,7 +1193,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
-    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
     await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
     await waitFor(() => expect(terminalMock.keyHandler).toBeTypeOf("function"));
 
@@ -1208,9 +1208,25 @@ describe("command library", () => {
     await waitFor(() => expect(sendInput).toHaveBeenCalledWith("local-1", bytesToBase64(new TextEncoder().encode("d"))));
     sendInput.mockClear();
 
+    let enterHandled = false;
+    await act(async () => {
+      enterHandled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Enter", cancelable: true })) ?? false;
+    });
+
+    expect(enterHandled).toBe(true);
+    expect(sendInput).not.toHaveBeenCalled();
+
+    let tabHandled = false;
+    await act(async () => {
+      tabHandled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Tab", cancelable: true })) ?? false;
+    });
+
+    expect(tabHandled).toBe(true);
+    expect(sendInput).not.toHaveBeenCalled();
+
     let handled = true;
     await act(async () => {
-      handled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Tab", cancelable: true })) ?? true;
+      handled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true })) ?? true;
     });
 
     expect(handled).toBe(false);
@@ -1219,11 +1235,45 @@ describe("command library", () => {
     expect(screen.queryByTestId("command-suggestion-panel")).not.toBeInTheDocument();
   });
 
+  test("opens shortcut parameter input when applying a parameterized command suggestion", async () => {
+    (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      folders: [
+        {
+          id: "ops",
+          name: "Ops",
+          commands: [{ id: "nat", name: "NAT check", command: "sudo iptables -t nat -nL | grep [p#1 port]", description: "" }]
+        }
+      ]
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
+    await waitFor(() => expect(terminalMock.keyHandler).toBeTypeOf("function"));
+    const sendInput = window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>;
+    sendInput.mockClear();
+
+    await act(async () => {
+      terminalMock.dataHandler?.("s");
+      terminalMock.dataHandler?.("u");
+    });
+    expect(await screen.findByTestId("command-suggestion-panel")).toHaveTextContent("sudo iptables");
+
+    await act(async () => {
+      terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true }));
+    });
+
+    await screen.findByLabelText("快捷命令参数 NAT check");
+    expect(atob(sendInput.mock.calls.at(-1)?.[1] as string)).toBe("\x7f\x7f");
+  });
+
   test("does not bypass xterm when focus stays on the terminal shell wrapper", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     const shell = await screen.findByTestId("terminal-shell");
     (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mockClear();
 
@@ -1251,7 +1301,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     const quickCommandList = await screen.findByLabelText("快捷命令列表");
     const vimButton = within(quickCommandList).getByRole("button", { name: "发送 编辑文件" });
     fireEvent.click(vimButton);
@@ -1272,7 +1322,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
-    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
     const shell = await screen.findByTestId("terminal-shell");
     terminalMock.focusCalls = 0;
 
@@ -1285,7 +1335,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
-    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
     await screen.findByTestId("terminal-shell");
 
     expect(terminalMock.options.at(-1)).toMatchObject({
@@ -1303,7 +1353,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
-    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
     const shell = await screen.findByTestId("terminal-shell");
     terminalMock.focusCalls = 0;
     terminalMock.fitCalls = 0;
@@ -1350,7 +1400,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
 
     const quickCommandList = await screen.findByLabelText("快捷命令列表");
     const quickCommand = within(quickCommandList).getByRole("button", { name: "发送 查看 NAT" });
@@ -1376,7 +1426,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
 
     const quickCommandList = await screen.findByLabelText("快捷命令列表");
     const quickCommand = within(quickCommandList).getByRole("button", { name: "发送 磁盘使用" });
@@ -1390,7 +1440,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     await waitFor(() => expect(terminalMock.keyHandler).toBeTruthy());
 
     const handled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "v", ctrlKey: true }));
@@ -1407,7 +1457,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     await waitFor(() => expect(terminalMock.keyHandler).toBeTruthy());
     terminalMock.selectionText = "selected output";
 
@@ -1422,11 +1472,11 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "文件" }));
 
     expect(await screen.findByRole("heading", { name: "文件浏览" })).toBeInTheDocument();
-    expect(screen.getByText(/当前会话：Local CMD/)).toBeInTheDocument();
+    expect(screen.getByText(/当前会话：Local Shell/)).toBeInTheDocument();
   });
 
   test("loads remote files for a connected SSH session", async () => {
@@ -1577,7 +1627,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
 
     const folderButton = await screen.findByRole("button", { name: new RegExp(longName) });
     expect(folderButton.parentElement).toHaveClass("flex");
@@ -1595,7 +1645,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
 
     const defaultFolder = await screen.findByRole("button", { name: /^默认分类\s*2$/ });
     const serviceFolder = await screen.findByRole("button", { name: /^服务操作\s*1$/ });
@@ -1631,7 +1681,7 @@ describe("command library", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
 
     const defaultFolder = await screen.findByRole("button", { name: /Default category/ });
     const grid = defaultFolder.parentElement;
@@ -1737,7 +1787,7 @@ describe("settings panel", () => {
     });
 
     fireEvent.click(screen.getByTitle("本地终端"));
-    fireEvent.click(await screen.findByRole("button", { name: /打开 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
 
     expect(await screen.findByTestId("terminal-shell")).toHaveStyle({
       backgroundColor: "#101820",
@@ -1763,7 +1813,7 @@ describe("settings panel", () => {
     expect(window.localStorage.getItem("ldyssh.terminal.commandSuggestionsEnabled")).toBe("false");
 
     fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
-    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local CMD/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
     await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
 
     await act(async () => {
@@ -1771,6 +1821,26 @@ describe("settings panel", () => {
     });
 
     expect(screen.queryByTestId("command-suggestion-panel")).not.toBeInTheDocument();
+  });
+
+  test("configures command suggestion sources and custom apply key", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u8bbe\u7f6e"));
+    fireEvent.click(await screen.findByLabelText("\u663e\u793a\u5feb\u6377\u547d\u4ee4"));
+    fireEvent.click(screen.getByLabelText("\u663e\u793a Linux \u547d\u4ee4"));
+    fireEvent.change(screen.getByLabelText("\u5019\u9009\u5e94\u7528\u6309\u952e"), { target: { value: "custom" } });
+    fireEvent.click(screen.getByRole("button", { name: "\u5f55\u5165\u6309\u952e" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "\u6b63\u5728\u5f55\u5165\u6309\u952e" }), {
+      key: "k",
+      code: "KeyK",
+      ctrlKey: true
+    });
+
+    expect(window.localStorage.getItem("ldyssh.terminal.commandSuggestions.shortcuts")).toBe("false");
+    expect(window.localStorage.getItem("ldyssh.terminal.commandSuggestions.linux")).toBe("false");
+    expect(window.localStorage.getItem("ldyssh.terminal.commandSuggestions.applyKey")).toBe("custom");
+    expect(window.localStorage.getItem("ldyssh.terminal.commandSuggestions.customApplyKey")).toContain("Ctrl+k");
   });
 
   test("adds a custom terminal highlight rule from settings", async () => {

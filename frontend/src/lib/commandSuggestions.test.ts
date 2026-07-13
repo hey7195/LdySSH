@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { CommandFolder } from "./bridge";
-import { buildCommandSuggestions, isFullScreenCommand, recordCommandHistory } from "./commandSuggestions";
+import { buildCommandSuggestions, defaultCommandSuggestionApplyKey, isFullScreenCommand, recordCommandHistory } from "./commandSuggestions";
 
 describe("command suggestions", () => {
   const folders: CommandFolder[] = [
@@ -14,6 +14,10 @@ describe("command suggestions", () => {
     }
   ];
 
+  test("defaults suggestion apply key to Alt+Enter", () => {
+    expect(defaultCommandSuggestionApplyKey).toBe("altEnter");
+  });
+
   test("prioritizes session history before local shortcuts and built-in Linux commands", () => {
     const history = recordCommandHistory([], "docker ps -a");
     const suggestions = buildCommandSuggestions("d", history, folders);
@@ -22,6 +26,18 @@ describe("command suggestions", () => {
     expect(suggestions[0].source).toBe("history");
     expect(suggestions[1].source).toBe("shortcut");
     expect(suggestions[2].source).toBe("linux");
+  });
+
+  test("filters suggestions by selected sources", () => {
+    const history = recordCommandHistory([], "docker ps -a");
+    const suggestions = buildCommandSuggestions("d", history, folders, {
+      history: false,
+      shortcuts: false,
+      linux: true
+    });
+
+    expect(suggestions.map((item) => item.source)).toEqual(["linux", "linux", "linux"]);
+    expect(suggestions.map((item) => item.command)).toEqual(["docker ps", "df -h", "du -sh *"]);
   });
 
   test("records submitted commands once and moves repeated commands to the front", () => {

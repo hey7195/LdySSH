@@ -144,6 +144,36 @@ def test_cpp_requests_terminal_size_after_starting_shell_for_jumpserver():
     assert connect_block.index("libssh2_channel_shell") < connect_block.index("libssh2_channel_request_pty_size(sshChannel, cols, rows)")
 
 
+def test_local_terminal_prefers_bundled_linux_shell_before_system_shells():
+    source = read("prismssh-cpp/session.cpp")
+    connect_match = re.search(
+        r'bool LocalSession::Connect\(.*?\n}\n\nbool LocalSession::SendInput',
+        source,
+        re.S,
+    )
+
+    assert connect_match
+    connect_block = connect_match.group(0)
+    assert "ResolveLocalShellCommandLine" in source
+    assert r"tools\\busybox\\busybox.exe" in source
+    assert "Built-in BusyBox" in source
+    assert " sh -l" in source
+    assert r"Git\\bin\\bash.exe" in source
+    assert "--login -i" in source
+    assert "wsl.exe" in source
+    assert "powershell.exe" in source
+    assert "cmd.exe" in source
+    assert (
+        source.index(r"tools\\busybox\\busybox.exe")
+        < source.index(r"Git\\bin\\bash.exe")
+        < source.index("wsl.exe")
+        < source.index("powershell.exe")
+        < source.index("cmd.exe")
+    )
+    assert connect_block.index("ResolveLocalShellCommandLine") < connect_block.index("CreateProcessW")
+    assert "COMSPEC" not in connect_block
+
+
 def test_cpp_connect_does_not_block_terminal_on_sftp_init():
     source = read("prismssh-cpp/ssh_session.cpp")
     connect_match = re.search(

@@ -34,7 +34,7 @@ public:
     virtual bool IsConnected() = 0;
 };
 
-// Local CMD Pseudo Console Session Class
+// Local Shell Pseudo Console Session Class
 class LocalSession : public Session {
 public:
     std::string sessionId;
