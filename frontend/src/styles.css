@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --app-bg: #f6f8fb;
+  --app-text: #0f172a;
+  --app-muted: #64748b;
+  --app-line: #d9e2ef;
+  --panel-bg: #ffffff;
+  --subtle-bg: #f8fafc;
+  --terminal-bg: #020617;
+  --terminal-text: #e5e7eb;
+}
+
+.app-root[data-theme="dark"] {
+  color-scheme: dark;
+  --app-bg: #0f172a;
+  --app-text: #e5e7eb;
+  --app-muted: #94a3b8;
+  --app-line: #334155;
+  --panel-bg: #111827;
+  --subtle-bg: #1e293b;
+  --terminal-bg: #020617;
+  --terminal-text: #e5e7eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font-family:
+    Inter,
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    Arial,
+    sans-serif;
+  text-rendering: geometricPrecision;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.xterm {
+  height: 100%;
+  padding: 14px;
+}
+
+.xterm .xterm-viewport {
+  background: transparent !important;
+}
+
+.xterm .xterm-screen {
+  outline: none;
+}
+
+.terminal-shell {
+  background-color: var(--terminal-bg);
+  background-position: center;
+  background-size: cover;
+  color: var(--terminal-text);
+}
+
+.terminal-shell .xterm {
+  background: transparent;
+}
+
+.app-root[data-theme="dark"] .bg-white,
+.app-root[data-theme="dark"] .bg-slate-50,
+.app-root[data-theme="dark"] .bg-\[\#eef2f7\],
+.app-root[data-theme="dark"] .bg-\[\#f6f8fb\] {
+  background-color: var(--panel-bg) !important;
+}
+
+.app-root[data-theme="dark"] .bg-slate-100 {
+  background-color: var(--subtle-bg) !important;
+}
+
+.app-root[data-theme="dark"] .text-slate-950,
+.app-root[data-theme="dark"] .text-slate-900,
+.app-root[data-theme="dark"] .text-slate-800,
+.app-root[data-theme="dark"] .text-slate-700 {
+  color: var(--app-text) !important;
+}
+
+.app-root[data-theme="dark"] .text-slate-600,
+.app-root[data-theme="dark"] .text-slate-500,
+.app-root[data-theme="dark"] .text-slate-400 {
+  color: var(--app-muted) !important;
+}
+
+.app-root[data-theme="dark"] .border-slate-200,
+.app-root[data-theme="dark"] .border-slate-300 {
+  border-color: var(--app-line) !important;
+}
+
+.pywebview-drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag,
+button,
+input,
+textarea {
+  -webkit-app-region: no-drag;
+}

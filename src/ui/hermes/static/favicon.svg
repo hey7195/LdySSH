@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="LdySSH">
+  <rect width="64" height="64" rx="14" fill="#05080a"/>
+  <path d="M0 14C0 6.268 6.268 0 14 0h36c7.732 0 14 6.268 14 14v2C64 8.268 57.732 2 50 2H14C6.268 2 0 8.268 0 16v-2z" fill="#303538" opacity="0.78"/>
+  <text x="32" y="31" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="800" fill="#fff">SSH</text>
+  <path d="M25 39l5.8 5.8L25 50.6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M36 50.5h8" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+</svg>

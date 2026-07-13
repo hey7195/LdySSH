@@ -1,0 +1,754 @@
+[
+  {
+    "command": "find . -type f -name \"*.log\" -delete",
+    "description": "递归删除当前目录下所有的 .log 文件"
+  },
+  {
+    "command": "find . -type f -mtime +30 -exec rm {} \\;",
+    "description": "查找并删除 30 天前修改的文件"
+  },
+  {
+    "command": "find . -type f -size +100M",
+    "description": "查找当前目录下大于 100MB 的文件"
+  },
+  {
+    "command": "du -ah -d 1 | sort -hr",
+    "description": "列出当前目录下所有文件和目录的大小并从大到小排序"
+  },
+  {
+    "command": "tar -czvf archive.tar.gz /path/to/directory",
+    "description": "将目录打包并使用 gzip 压缩"
+  },
+  {
+    "command": "tar -xzvf archive.tar.gz -C /target/dir",
+    "description": "解压 tar.gz 文件到指定目录"
+  },
+  {
+    "command": "rsync -avz --progress source/ user@remote:/dest/",
+    "description": "增量同步本地文件到远程服务器并显示进度"
+  },
+  {
+    "command": "grep -rnw '/path/' -e 'pattern'",
+    "description": "递归在目录下搜索包含特定字符串的文件及行号"
+  },
+  {
+    "command": "sed -i 's/old/new/g' file.txt",
+    "description": "在文件中批量替换 old 为 new"
+  },
+  {
+    "command": "awk -F':' '{ print $1 }' /etc/passwd",
+    "description": "使用 awk 以冒号分隔提取所有用户名"
+  },
+  {
+    "command": "chmod -R 755 /path/to/dir",
+    "description": "递归修改目录及其文件权限为 755"
+  },
+  {
+    "command": "chown -R user:group /path/to/dir",
+    "description": "递归修改目录的所有者和所属组"
+  },
+  {
+    "command": "ls -lhS",
+    "description": "按文件大小降序列出详细信息"
+  },
+  {
+    "command": "ls -lht",
+    "description": "按文件修改时间降序列出详细信息"
+  },
+  {
+    "command": "tail -f -n 100 /var/log/syslog",
+    "description": "实时查看日志最新 100 行"
+  },
+  {
+    "command": "cat /dev/null > file.log",
+    "description": "清空文件内容但不删除文件"
+  },
+  {
+    "command": "top -o %MEM",
+    "description": "查看进程并按内存使用率排序"
+  },
+  {
+    "command": "htop",
+    "description": "友好的交互式进程及系统资源监控"
+  },
+  {
+    "command": "ps aux | sort -nk +4 | tail",
+    "description": "查找消耗内存最多的 10 个进程"
+  },
+  {
+    "command": "kill -9 $(lsof -t -i:8080)",
+    "description": "强制杀掉占用 8080 端口的所有进程"
+  },
+  {
+    "command": "pkill -f \"pattern\"",
+    "description": "根据完整的命令行字符串匹配杀掉进程"
+  },
+  {
+    "command": "free -m",
+    "description": "以 MB 为单位查看系统内存及 Swap 使用情况"
+  },
+  {
+    "command": "df -Th",
+    "description": "查看所有挂载磁盘的文件系统类型及容量"
+  },
+  {
+    "command": "uptime",
+    "description": "查看系统运行时间及负载"
+  },
+  {
+    "command": "journalctl -u nginx -f",
+    "description": "实时跟踪 nginx 服务的系统日志"
+  },
+  {
+    "command": "journalctl --vacuum-size=1G",
+    "description": "清理 Systemd 日志，只保留 1GB"
+  },
+  {
+    "command": "systemctl daemon-reload",
+    "description": "重新加载 Systemd 配置（新增服务后必须执行）"
+  },
+  {
+    "command": "systemctl enable --now service",
+    "description": "设置服务开机自启并立即启动"
+  },
+  {
+    "command": "uname -a",
+    "description": "显示全部系统和内核信息"
+  },
+  {
+    "command": "netstat -tulpn",
+    "description": "显示所有监听中的 TCP/UDP 端口及进程"
+  },
+  {
+    "command": "ss -tulpn",
+    "description": "更快速地显示所有监听中的 TCP/UDP 端口及进程"
+  },
+  {
+    "command": "lsof -i :80",
+    "description": "列出占用 80 端口的进程"
+  },
+  {
+    "command": "ping -c 4 google.com",
+    "description": "发送 4 个 ICMP 请求包测试网络连通性"
+  },
+  {
+    "command": "curl -O https://example.com/file",
+    "description": "使用 curl 下载文件并保留原文件名"
+  },
+  {
+    "command": "curl -I https://example.com",
+    "description": "只获取 HTTP 响应头不下载主体"
+  },
+  {
+    "command": "wget -c https://example.com/file",
+    "description": "断点续传下载文件"
+  },
+  {
+    "command": "iptables -L -n -v",
+    "description": "查看所有 iptables 防火墙规则详细信息"
+  },
+  {
+    "command": "ufw status verbose",
+    "description": "查看 UFW 防火墙状态及规则"
+  },
+  {
+    "command": "docker ps -a",
+    "description": "列出所有容器（包括已停止的）"
+  },
+  {
+    "command": "docker logs -f --tail 100 container_name",
+    "description": "查看容器的最新 100 行日志并持续跟踪"
+  },
+  {
+    "command": "docker exec -it container_name /bin/bash",
+    "description": "进入正在运行的容器执行 bash"
+  },
+  {
+    "command": "docker rm -f $(docker ps -aq)",
+    "description": "强制删除本机所有 Docker 容器"
+  },
+  {
+    "command": "docker rmi $(docker images -q)",
+    "description": "删除本机所有 Docker 镜像"
+  },
+  {
+    "command": "docker system prune -a --volumes",
+    "description": "清理所有未使用容器、网络、镜像和数据卷"
+  },
+  {
+    "command": "docker build -t name:tag .",
+    "description": "根据当前目录的 Dockerfile 构建镜像"
+  },
+  {
+    "command": "docker-compose up -d",
+    "description": "后台启动 docker-compose 编排的所有服务"
+  },
+  {
+    "command": "docker-compose down -v",
+    "description": "停止 docker-compose 服务并清理对应数据卷"
+  },
+  {
+    "command": "git status",
+    "description": "查看当前 Git 仓库的状态"
+  },
+  {
+    "command": "git log --oneline --graph --all",
+    "description": "以单行图形化方式查看所有分支提交历史"
+  },
+  {
+    "command": "git commit -m \"message\"",
+    "description": "提交暂存区到本地仓库"
+  },
+  {
+    "command": "git push origin main",
+    "description": "将本地 main 分支推送到远程仓库"
+  },
+  {
+    "command": "git pull --rebase",
+    "description": "拉取远程更新并变基，保持历史干净"
+  },
+  {
+    "command": "git checkout -b new-branch",
+    "description": "创建并切换到新的本地分支"
+  },
+  {
+    "command": "git stash && git stash pop",
+    "description": "暂存未提交的修改，并在之后恢复"
+  },
+  {
+    "command": "git reset --hard HEAD",
+    "description": "丢弃所有未提交的修改，恢复到最后一次提交"
+  },
+  {
+    "command": "git clean -fd",
+    "description": "清理所有未被 Git 追踪的文件和目录"
+  },
+  {
+    "command": "apt update && apt upgrade -y",
+    "description": "更新 Ubuntu/Debian 软件包列表并全自动升级"
+  },
+  {
+    "command": "apt install -y package",
+    "description": "非交互式安装软件"
+  },
+  {
+    "command": "yum update -y",
+    "description": "全自动更新 CentOS/RHEL 系统的所有包"
+  },
+  {
+    "command": "yum clean all",
+    "description": "清理所有 yum 缓存"
+  },
+  {
+    "command": "ls -lah",
+    "description": "列出包含隐藏项在内的文件详细信息"
+  },
+  {
+    "command": "cd /var/log",
+    "description": "跳转到常见系统日志目录"
+  },
+  {
+    "command": "pwd",
+    "description": "打印当前工作目录"
+  },
+  {
+    "command": "cat /etc/os-release",
+    "description": "显示当前 Linux 发行版系统版本"
+  },
+  {
+    "command": "tail -f /var/log/syslog",
+    "description": "实时跟随查看系统日志输出"
+  },
+  {
+    "command": "journalctl -xe --no-pager",
+    "description": "检查近期 Systemd 服务错误日志"
+  },
+  {
+    "command": "journalctl -u nginx -n 120 --no-pager",
+    "description": "查看特定服务最新的 120 行日志"
+  },
+  {
+    "command": "systemctl status nginx",
+    "description": "检查系统服务运行状态"
+  },
+  {
+    "command": "systemctl restart nginx",
+    "description": "重启系统服务"
+  },
+  {
+    "command": "ps aux | grep ",
+    "description": "查找特定运行中的进程"
+  },
+  {
+    "command": "top",
+    "description": "实时监控系统资源与进程"
+  },
+  {
+    "command": "free -h",
+    "description": "显示系统内存与 Swap 使用情况"
+  },
+  {
+    "command": "df -h",
+    "description": "显示所有磁盘分区容量使用情况"
+  },
+  {
+    "command": "du -sh *",
+    "description": "统计并查找当前目录下的大文件"
+  },
+  {
+    "command": "find / -name ",
+    "description": "根据文件名全局搜索文件"
+  },
+  {
+    "command": "grep -R \"text\" .",
+    "description": "在目录内递归搜索特定文本"
+  },
+  {
+    "command": "ip addr",
+    "description": "查看网卡信息与 IP 地址"
+  },
+  {
+    "command": "wget https://example.com/file",
+    "description": "从网络下载文件"
+  },
+  {
+    "command": "tar -czf archive.tar.gz folder/",
+    "description": "创建 gzip 压缩包 (tar.gz)"
+  },
+  {
+    "command": "tar -xzf archive.tar.gz",
+    "description": "解压缩 gzip 格式压缩包"
+  },
+  {
+    "command": "chmod +x script.sh",
+    "description": "赋予脚本文件可执行权限"
+  },
+  {
+    "command": "chown user:user file",
+    "description": "更改文件所有者和所属组"
+  },
+  {
+    "command": "scp file user@host:/path/",
+    "description": "通过 SSH 拷贝文件到远程服务器"
+  },
+  {
+    "command": "ssh user@host",
+    "description": "通过 OpenSSH 建立远程连接"
+  },
+  {
+    "command": "docker ps",
+    "description": "列出当前正在运行的容器"
+  },
+  {
+    "command": "docker logs -f container",
+    "description": "实时跟随查看容器运行日志"
+  },
+  {
+    "command": "apt update && apt list --upgradable",
+    "description": "更新 APT 软件源并列出可升级包"
+  },
+  {
+    "command": "dnf check-update",
+    "description": "检查 Fedora/RHEL 系统中可用的更新"
+  },
+  {
+    "command": "mv",
+    "description": "移动或改名文件"
+  },
+  {
+    "command": "cp",
+    "description": "复制文件或目录"
+  },
+  {
+    "command": "mkdir",
+    "description": "创建目录文件"
+  },
+  {
+    "command": "rm",
+    "description": "删除文件或目录"
+  },
+  {
+    "command": "echo",
+    "description": "输出字符串或提取后的变量值"
+  },
+  {
+    "command": "rmdir",
+    "description": "删除空目录文件"
+  },
+  {
+    "command": "vi",
+    "description": "文本编辑器"
+  },
+  {
+    "command": "sed",
+    "description": "批量编辑文本文件"
+  },
+  {
+    "command": "rpm",
+    "description": "RPM软件包管理器"
+  },
+  {
+    "command": "kill",
+    "description": "杀死进程"
+  },
+  {
+    "command": "uname",
+    "description": "显示系统内核信息"
+  },
+  {
+    "command": "startx",
+    "description": "初始化X-window系统"
+  },
+  {
+    "command": "resize2fs",
+    "description": "同步文件系统容量到内核"
+  },
+  {
+    "command": "useradd",
+    "description": "创建并设置用户信息"
+  },
+  {
+    "command": "fdisk",
+    "description": "管理磁盘分区"
+  },
+  {
+    "command": "mkfs-ext4",
+    "description": "对磁盘设备进行EXT4格式化"
+  },
+  {
+    "command": "vgextend",
+    "description": "扩展卷组设备"
+  },
+  {
+    "command": "lvcreate",
+    "description": "创建逻辑卷设备"
+  },
+  {
+    "command": "hdparm",
+    "description": "显示与设定硬盘参数"
+  },
+  {
+    "command": "pvcreate",
+    "description": "创建物理卷设备"
+  },
+  {
+    "command": "tftp",
+    "description": "上传及下载文件"
+  },
+  {
+    "command": "fsck",
+    "description": "检查与修复文件系统"
+  },
+  {
+    "command": "rsync",
+    "description": "远程数据同步工具"
+  },
+  {
+    "command": "ftp",
+    "description": "文件传输协议客户端"
+  },
+  {
+    "command": "lprm",
+    "description": "移除打印队列中的任务"
+  },
+  {
+    "command": "ftpwho",
+    "description": "显示FTP会话信息"
+  },
+  {
+    "command": "lftp",
+    "description": "行FTP客户端"
+  },
+  {
+    "command": "netstat",
+    "description": "显示网络状态"
+  },
+  {
+    "command": "dhclient",
+    "description": "动态获取或释放IP地址"
+  },
+  {
+    "command": "ifconfig",
+    "description": "显示或设置网络设备参数信息"
+  },
+  {
+    "command": "ping",
+    "description": "测试主机间网络连通性"
+  },
+  {
+    "command": "smbpasswd",
+    "description": "修改用户的SMB密码"
+  },
+  {
+    "command": "mount",
+    "description": "将文件系统挂载到目录"
+  },
+  {
+    "command": "sensors",
+    "description": "检测服务器硬件信息"
+  },
+  {
+    "command": "rfkill",
+    "description": "管理蓝牙和Wi-Fi设备"
+  },
+  {
+    "command": "hciconfig",
+    "description": "配置蓝牙设备"
+  },
+  {
+    "command": "setpci",
+    "description": "配置PCI硬件设备参数"
+  },
+  {
+    "command": "setleds",
+    "description": "设置键盘的LED灯光状态"
+  },
+  {
+    "command": "zip",
+    "description": "压缩文件"
+  },
+  {
+    "command": "unzip",
+    "description": "解压缩zip格式文件"
+  },
+  {
+    "command": "gzip",
+    "description": "压缩和解压文件"
+  },
+  {
+    "command": "zipinfo",
+    "description": "查看压缩文件信息"
+  },
+  {
+    "command": "gunzip",
+    "description": "解压提取文件内容"
+  },
+  {
+    "command": "unarj",
+    "description": "解压.arj文件"
+  },
+  {
+    "command": "zipsplit",
+    "description": "分割压缩包"
+  },
+  {
+    "command": "history",
+    "description": "记录"
+  },
+  {
+    "command": "hash",
+    "description": "运行时查询的哈希表"
+  },
+  {
+    "command": "wait",
+    "description": "等待指令执行完毕"
+  },
+  {
+    "command": "bc",
+    "description": "数字计算器"
+  },
+  {
+    "command": "rmmod",
+    "description": "移除内核模块"
+  },
+  {
+    "command": "pigz",
+    "description": "多线程的解压缩文件"
+  },
+  {
+    "command": "xargs",
+    "description": "传参数的过滤器"
+  },
+  {
+    "command": "Linux",
+    "description": "行也能玩游戏？这5款不用显卡的linux系统游戏太有趣了"
+  },
+  {
+    "command": "linux",
+    "description": "中文乱码 Linux是什么？与其他操作系统有啥区别？新手老手都能看"
+  },
+  {
+    "command": "grub2",
+    "description": "行启动linux后，用WinBoat跑Win软件"
+  },
+  {
+    "command": "arm-linux-gcc",
+    "description": "解决armlinuxgcc找不到的Ubuntu编译错误"
+  },
+  {
+    "command": "Docker",
+    "description": "手册 常用命令大全 镜像删除与容器进入操作指南"
+  },
+  {
+    "command": "git config --global user.name \"Name\"",
+    "description": "设置全局 Git 用户名"
+  },
+  {
+    "command": "git config --global user.email \"email@example.com\"",
+    "description": "设置全局 Git 邮箱"
+  },
+  {
+    "command": "git log --graph --abbrev-commit --decorate --all",
+    "description": "图形化查看所有分支的完整提交树"
+  },
+  {
+    "command": "git rebase -i HEAD~3",
+    "description": "交互式变基最近的 3 次提交（可用于合并或修改历史）"
+  },
+  {
+    "command": "git cherry-pick commit_hash",
+    "description": "将指定 commit 的修改应用到当前分支"
+  },
+  {
+    "command": "git branch -d branch_name",
+    "description": "安全删除本地分支（如果已合并）"
+  },
+  {
+    "command": "git branch -D branch_name",
+    "description": "强制删除本地分支"
+  },
+  {
+    "command": "git push origin --delete branch_name",
+    "description": "删除远程分支"
+  },
+  {
+    "command": "git diff --staged",
+    "description": "查看已暂存但未提交的修改"
+  },
+  {
+    "command": "git remote -v",
+    "description": "查看所有配置的远程仓库地址"
+  },
+  {
+    "command": "docker stats",
+    "description": "实时查看所有容器的 CPU、内存、网络使用情况"
+  },
+  {
+    "command": "docker inspect container_name",
+    "description": "获取容器的详细 JSON 格式信息"
+  },
+  {
+    "command": "docker network ls",
+    "description": "列出所有的 Docker 网络"
+  },
+  {
+    "command": "docker volume prune",
+    "description": "删除所有未被容器使用的游离数据卷"
+  },
+  {
+    "command": "kubectl get pods --all-namespaces",
+    "description": "获取 K8s 集群中所有命名空间的 Pod 状态"
+  },
+  {
+    "command": "kubectl describe pod my-pod",
+    "description": "查看指定 Pod 的详细事件和状态信息"
+  },
+  {
+    "command": "kubectl logs -f deployment/my-app",
+    "description": "实时跟踪 K8s Deployment 下所有 Pod 的日志"
+  },
+  {
+    "command": "kubectl get nodes -o wide",
+    "description": "查看所有 K8s 节点的详细信息"
+  },
+  {
+    "command": "lsof +D /path/to/dir",
+    "description": "列出当前目录下所有被进程打开的文件"
+  },
+  {
+    "command": "lsof -iTCP -sTCP:LISTEN",
+    "description": "列出所有处于 LISTEN 状态的 TCP 端口"
+  },
+  {
+    "command": "strace -p pid",
+    "description": "跟踪某个运行中进程的系统调用"
+  },
+  {
+    "command": "dmesg -T | tail -n 50",
+    "description": "查看内核环形缓冲区的最新 50 条消息（带人类可读时间戳）"
+  },
+  {
+    "command": "lsblk",
+    "description": "以树状图列出所有块设备（磁盘、分区、逻辑卷）"
+  },
+  {
+    "command": "fdisk -l",
+    "description": "列出所有磁盘的分区表信息"
+  },
+  {
+    "command": "nc -zv host port",
+    "description": "使用 netcat 测试远程主机的特定端口是否开放"
+  },
+  {
+    "command": "ip a",
+    "description": "查看所有网络接口及 IP 地址分配"
+  },
+  {
+    "command": "ip route show",
+    "description": "查看当前主机的路由表"
+  },
+  {
+    "command": "tcpdump -i eth0 port 80",
+    "description": "抓取 eth0 网卡上所有目标或源端口为 80 的网络包"
+  },
+  {
+    "command": "awk '{sum+=$1} END {print sum}' file.txt",
+    "description": "对文件中第一列的所有数字求和"
+  },
+  {
+    "command": "sed -n '10,20p' file.txt",
+    "description": "仅打印文件中的第 10 到第 20 行"
+  },
+  {
+    "command": "sort file.txt | uniq -c | sort -nr",
+    "description": "统计文件中各行出现的次数并按频率降序排列"
+  },
+  {
+    "command": "cut -d',' -f2 file.csv",
+    "description": "以逗号为分隔符，提取 CSV 文件的第二列"
+  },
+  {
+    "command": "xargs -a list.txt rm",
+    "description": "将文本文件中的每一行作为参数传递给 rm 命令进行删除"
+  },
+  {
+    "command": "zip -r archive.zip folder/",
+    "description": "将目录递归压缩为 zip 格式"
+  },
+  {
+    "command": "unzip archive.zip -d /target/dir",
+    "description": "将 zip 文件解压到指定目录"
+  },
+  {
+    "command": "tar -cJvf archive.tar.xz folder/",
+    "description": "使用极高压缩率的 xz 格式打包目录"
+  },
+  {
+    "command": "usermod -aG sudo username",
+    "description": "将用户添加到 sudo 组，赋予管理员权限"
+  },
+  {
+    "command": "chattr +i file.txt",
+    "description": "给文件加锁，防止被任何人（包括 root）修改或删除"
+  },
+  {
+    "command": "chattr -i file.txt",
+    "description": "解锁已被加锁的文件"
+  },
+  {
+    "command": "find . -type d -empty -delete",
+    "description": "查找并删除当前目录下的所有空文件夹"
+  },
+  {
+    "command": "find . -mmin -60",
+    "description": "查找最近 60 分钟内被修改过的文件"
+  },
+  {
+    "command": "locate filename",
+    "description": "利用本地索引数据库极速查找文件（需配合 updatedb）"
+  },
+  {
+    "command": "which command_name",
+    "description": "查找命令对应的可执行文件绝对路径"
+  }
+]

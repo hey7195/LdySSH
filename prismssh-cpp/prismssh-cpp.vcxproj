@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{4F040E03-345C-479D-86D7-D7FB8DFB8DFB}</ProjectGuid>
+    <RootNamespace>prismsshcpp</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <RestoreProjectStyle>PackageReference</RestoreProjectStyle>
+    <TargetFramework>native</TargetFramework>
+    <ResolveNuGetPackageAssets>false</ResolveNuGetPackageAssets>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\include\v140\x64\Debug\static;$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\include;$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\lib\v140\x64\Debug\static;$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\lib\v140\x64\Debug\static;$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\lib\v140\x64\Debug\static;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libssh2.lib;libssl.lib;libcrypto.lib;zlibstat.lib;ws2_32.lib;crypt32.lib;shlwapi.lib;user32.lib;gdi32.lib;dwmapi.lib;bcrypt.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\include\v140\x64\Release\static;$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\include;$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\lib\v140\x64\Release\static;$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\lib\v140\x64\Release\static;$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\lib\v140\x64\Release\static;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libssh2.lib;libssl.lib;libcrypto.lib;zlibstat.lib;ws2_32.lib;crypt32.lib;shlwapi.lib;user32.lib;gdi32.lib;dwmapi.lib;bcrypt.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="session.cpp" />
+    <ClCompile Include="ssh_session.cpp" />
+    <ClCompile Include="crypto_utils.cpp" />
+    <ClCompile Include="sftp_worker.cpp" />
+    <ClCompile Include="chatgpt_subwindow.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="session.h" />
+    <ClInclude Include="ssh_session.h" />
+    <ClInclude Include="crypto_utils.h" />
+    <ClInclude Include="sftp_worker.h" />
+    <ClInclude Include="chatgpt_subwindow.h" />
+    <ClInclude Include="common_utils.h" />
+    <ClInclude Include="sftp_pipeline.hpp" />
+    <ClInclude Include="ui_assets.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2210.55" />
+    <PackageReference Include="nlohmann.json" Version="3.11.2" />
+    <PackageReference Include="rmt_libssh2" Version="1.8.0" />
+    <PackageReference Include="rmt_openssl" Version="1.1.0.3" />
+    <PackageReference Include="rmt_zlib" Version="1.2.8.7" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+  <Target Name="CopyUiAssets" AfterTargets="Build">
+    <ItemGroup>
+      <UiTemplate Include="$(ProjectDir)ui\template.html" />
+      <UiFavicon Include="$(ProjectDir)ui\favicon.ico" />
+      <UiAssetFiles Include="$(ProjectDir)ui\assets\**\*.*" />
+      <UiCommandFiles Include="$(ProjectDir)ui\static\commands.json" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutDir)ui" />
+    <RemoveDir Directories="$(OutDir)ui\assets" />
+    <MakeDir Directories="$(OutDir)ui\assets;$(OutDir)ui\static" />
+    <Copy SourceFiles="@(UiTemplate)" DestinationFolder="$(OutDir)ui" />
+    <Copy SourceFiles="@(UiFavicon)" DestinationFolder="$(OutDir)ui" />
+    <Copy
+      SourceFiles="@(UiAssetFiles)"
+      DestinationFiles="@(UiAssetFiles->'$(OutDir)ui\assets\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(UiCommandFiles)" DestinationFolder="$(OutDir)ui\static" />
+  </Target>
+  <Target Name="ResolveNuGetPackageAssets" />
+</Project>
