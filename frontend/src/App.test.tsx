@@ -849,6 +849,24 @@ describe("command library", () => {
     });
   });
 
+  test("keeps the local terminal instance while switching left activity pages", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
+
+    terminalMock.dataHandler?.("l");
+    terminalMock.dataHandler?.("s");
+    expect(terminalMock.instances).toHaveLength(1);
+
+    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(screen.getByTitle("本地终端"));
+
+    await screen.findByTestId("terminal-shell");
+    expect(terminalMock.instances).toHaveLength(1);
+  });
+
   test("searches terminal history beyond the visible terminal area", async () => {
     (window.pywebview?.api?.get_output as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       output: btoa(["first line", "needle in old command output", "another line", "second needle result"].join("\n"))
