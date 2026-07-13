@@ -1260,8 +1260,9 @@ export function App() {
               onOpen={openWebFavorite}
             />
           )}
-          {activeTool === "local" && (
+          <div className={cn("h-full", activeTool === "local" ? "block" : "hidden")} aria-hidden={activeTool !== "local"}>
             <TerminalWorkspace
+              visible={activeTool === "local"}
               sessions={sessions}
               activeSessionId={activeSessionId}
               terminalTheme={terminalTheme}
@@ -1296,7 +1297,7 @@ export function App() {
               onSidePanelChange={setTerminalSidePanel}
               onAiConfigChange={setAiConfig}
             />
-          )}
+          </div>
           {activeTool === "settings" && (
             <SettingsPanel
               theme={theme}
@@ -1715,6 +1716,7 @@ function Metric({
 }
 
 function TerminalWorkspace({
+  visible,
   sessions,
   activeSessionId,
   terminalTheme,
@@ -1749,6 +1751,7 @@ function TerminalWorkspace({
   onSidePanelChange,
   onAiConfigChange
 }: {
+  visible: boolean;
   sessions: SessionTab[];
   activeSessionId: string;
   terminalTheme: TerminalThemeMode;
@@ -1912,19 +1915,21 @@ function TerminalWorkspace({
           onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
           onOutput={onTerminalOutput}
         />
-        <TerminalRightSidebar
+        {visible && (
+          <TerminalRightSidebar
             activePanel={sidePanel}
             activeSession={activeSession}
             commandFolders={commandFolders}
             activeCommandFolderId={activeCommandFolderId}
             shortcutParameterRequest={shortcutParameterRequest}
             aiQuotes={aiQuotes}
-          aiConfig={aiConfig}
-          onPanelChange={onSidePanelChange}
-          onActiveCommandFolderChange={onActiveCommandFolderChange}
-          onSendCommand={onSendCommand}
-          onAiConfigChange={onAiConfigChange}
-        />
+            aiConfig={aiConfig}
+            onPanelChange={onSidePanelChange}
+            onActiveCommandFolderChange={onActiveCommandFolderChange}
+            onSendCommand={onSendCommand}
+            onAiConfigChange={onAiConfigChange}
+          />
+        )}
       </div>
       <div className="flex items-center gap-3 border-t border-slate-200 bg-slate-50 px-5 text-xs text-slate-500">
         <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500" : "bg-slate-300")} />
