@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import {
@@ -291,12 +293,60 @@ const storageKeys = {
   commandSuggestionLinux: "ldyssh.terminal.commandSuggestions.linux",
   commandSuggestionApplyKey: "ldyssh.terminal.commandSuggestions.applyKey",
   commandSuggestionCustomApplyKey: "ldyssh.terminal.commandSuggestions.customApplyKey",
+  commandSuggestionPanel: "ldyssh.terminal.commandSuggestions.panel",
   highlightRules: "ldyssh.terminal.highlightRules",
   aiConfig: "ldyssh.ai.config",
   aiSessions: "ldyssh.ai.sessions"
 };
 
 const TERMINAL_HISTORY_LIMIT = 2_000_000;
+
+interface CommandSuggestionPanelLayout {
+  left: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+const defaultCommandSuggestionPanelLayout: CommandSuggestionPanelLayout = {
+  left: 80,
+  bottom: 24,
+  width: 260,
+  height: 180
+};
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeCommandSuggestionPanelLayout(layout: CommandSuggestionPanelLayout): CommandSuggestionPanelLayout {
+  const viewportWidth = window.innerWidth || 1280;
+  const viewportHeight = window.innerHeight || 720;
+  const width = clampNumber(layout.width, 180, Math.min(520, viewportWidth - 24));
+  const height = clampNumber(layout.height, 120, Math.min(420, viewportHeight - 24));
+  return {
+    left: clampNumber(layout.left, 8, Math.max(8, viewportWidth - width - 8)),
+    bottom: clampNumber(layout.bottom, 8, Math.max(8, viewportHeight - height - 8)),
+    width,
+    height
+  };
+}
+
+function loadStoredCommandSuggestionPanelLayout() {
+  const raw = window.localStorage.getItem(storageKeys.commandSuggestionPanel);
+  if (!raw) return defaultCommandSuggestionPanelLayout;
+  try {
+    const parsed = JSON.parse(raw) as Partial<CommandSuggestionPanelLayout>;
+    return normalizeCommandSuggestionPanelLayout({
+      left: Number(parsed.left ?? defaultCommandSuggestionPanelLayout.left),
+      bottom: Number(parsed.bottom ?? defaultCommandSuggestionPanelLayout.bottom),
+      width: Number(parsed.width ?? defaultCommandSuggestionPanelLayout.width),
+      height: Number(parsed.height ?? defaultCommandSuggestionPanelLayout.height)
+    });
+  } catch {
+    return defaultCommandSuggestionPanelLayout;
+  }
+}
 const PASSWORD_PLACEHOLDER = "***";
 const COMMAND_PARAMETER_SLOTS = [1, 2, 3, 4, 5];
 const defaultTerminalAppearance: TerminalAppearance = {
@@ -579,6 +629,7 @@ export function App() {
   const [terminalHistories, setTerminalHistories] = useState<Record<string, string>>({});
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
   const [terminalCommandNotice, setTerminalCommandNotice] = useState<TerminalCommandNotice | null>(null);
+  const [commandSuggestionView, setCommandSuggestionView] = useState<CommandSuggestionView | null>(null);
   const [passwordPrompt, setPasswordPrompt] = useState<RetryPasswordPrompt | null>(null);
   const [webFavorites, setWebFavorites] = useState<WebFavorite[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
@@ -1211,6 +1262,7 @@ export function App() {
           savedConnections={filteredConnections}
           sessions={sessions}
           activeSessionId={activeSessionId}
+          commandSuggestionView={activeTool === "local" ? commandSuggestionView : null}
           query={query}
           onQueryChange={setQuery}
           onOpenDialog={openNewConnectionDialog}
@@ -1289,9 +1341,11 @@ export function App() {
               onDisconnect={disconnectSession}
               onCloseOther={closeOtherTabs}
               onCloseAll={closeAllTabs}
+              onReturnHome={() => setActiveTool("ssh")}
               onCreateLocal={openLocalSession}
               onAddAiQuote={addAiQuote}
               onTerminalOutput={appendTerminalHistory}
+              onCommandSuggestionViewChange={setCommandSuggestionView}
               onActiveCommandFolderChange={setActiveCommandFolderId}
               onSendCommand={sendCommandToActiveSession}
               onSidePanelChange={setTerminalSidePanel}
@@ -1420,6 +1474,7 @@ function HostSidebar({
   savedConnections,
   sessions,
   activeSessionId,
+  commandSuggestionView,
   query,
   onQueryChange,
   onOpenDialog,
@@ -1433,6 +1488,7 @@ function HostSidebar({
   savedConnections: SavedConnection[];
   sessions: SessionTab[];
   activeSessionId: string;
+  commandSuggestionView: CommandSuggestionView | null;
   query: string;
   onQueryChange: (value: string) => void;
   onOpenDialog: () => void;
@@ -1543,6 +1599,9 @@ function HostSidebar({
             打开 Local Shell
           </button>
         </SidebarSection>
+        <div className="mt-auto px-6 pb-6" data-testid="left-command-suggestion-slot">
+          {commandSuggestionView && <CommandSuggestionPanel view={commandSuggestionView} />}
+        </div>
       </div>
     </aside>
   );
@@ -1743,9 +1802,11 @@ function TerminalWorkspace({
   onDisconnect,
   onCloseOther,
   onCloseAll,
+  onReturnHome,
   onCreateLocal,
   onAddAiQuote,
   onTerminalOutput,
+  onCommandSuggestionViewChange,
   onActiveCommandFolderChange,
   onSendCommand,
   onSidePanelChange,
@@ -1778,9 +1839,11 @@ function TerminalWorkspace({
   onDisconnect: (sessionId: string) => void;
   onCloseOther: (sessionId: string) => void;
   onCloseAll: () => void;
+  onReturnHome: () => void;
   onCreateLocal: () => void;
   onAddAiQuote: (text: string, sourceTitle: string) => void;
   onTerminalOutput: (sessionId: string, text: string) => void;
+  onCommandSuggestionViewChange: (view: CommandSuggestionView | null) => void;
   onActiveCommandFolderChange: (folderId: string) => void;
   onSendCommand: (command: string) => void;
   onSidePanelChange: (panel: TerminalSidePanel) => void;
@@ -1788,7 +1851,6 @@ function TerminalWorkspace({
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
-  const [commandSuggestionView, setCommandSuggestionView] = useState<CommandSuggestionView | null>(null);
   const [shortcutParameterRequest, setShortcutParameterRequest] = useState<ShortcutParameterRequest | null>(null);
   const menuSession = tabMenu ? sessions.find((session) => session.id === tabMenu.sessionId) : undefined;
 
@@ -1817,11 +1879,18 @@ function TerminalWorkspace({
       <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 pl-3 pr-4">
         <div className="flex h-full min-w-0 flex-1 items-center gap-1">
           <button
-            className="mr-2 flex h-7 w-8 items-center justify-center rounded-md bg-slate-900 text-white"
+            className="flex h-7 w-8 items-center justify-center rounded-md bg-slate-900 text-white"
+            onClick={onReturnHome}
+            title="回到桌面"
+          >
+            <Home className="h-4 w-4" />
+          </button>
+          <button
+            className="mr-2 flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900"
             onClick={onCreateLocal}
             title="新建本地终端"
           >
-            <Home className="h-4 w-4" />
+            <Plus className="h-4 w-4" />
           </button>
           {sessions.map((session) => (
             <div
@@ -1843,7 +1912,6 @@ function TerminalWorkspace({
             </div>
           ))}
         </div>
-        {commandSuggestionView && <CommandSuggestionPanel view={commandSuggestionView} />}
         <Button variant="ghost" className="h-7 px-2">
           <Menu className="h-4 w-4" />
         </Button>
@@ -1896,6 +1964,7 @@ function TerminalWorkspace({
       </div>
       <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_420px]">
         <TerminalSurface
+          visible={visible}
           activeSession={activeSession}
           terminalTheme={terminalTheme}
           terminalAppearance={terminalAppearance}
@@ -1910,7 +1979,7 @@ function TerminalWorkspace({
           initialTranscript={terminalHistory}
           focusRequest={terminalFocusRequest}
           commandNotice={terminalCommandNotice}
-          onCommandSuggestionViewChange={setCommandSuggestionView}
+          onCommandSuggestionViewChange={onCommandSuggestionViewChange}
           onShortcutParameterRequest={requestShortcutParameters}
           onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
           onOutput={onTerminalOutput}
@@ -1950,36 +2019,113 @@ function TerminalWorkspace({
 }
 
 function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
+  const [layout, setLayout] = useState<CommandSuggestionPanelLayout>(() => loadStoredCommandSuggestionPanelLayout());
+
+  function updateLayout(next: CommandSuggestionPanelLayout) {
+    const normalized = normalizeCommandSuggestionPanelLayout(next);
+    setLayout(normalized);
+    window.localStorage.setItem(storageKeys.commandSuggestionPanel, JSON.stringify(normalized));
+  }
+
+  function startMove(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startLayout = layout;
+
+    function move(moveEvent: MouseEvent) {
+      updateLayout({
+        ...startLayout,
+        left: startLayout.left + moveEvent.clientX - startX,
+        bottom: startLayout.bottom - (moveEvent.clientY - startY)
+      });
+    }
+
+    function stopMove() {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stopMove);
+    }
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stopMove);
+  }
+
+  function startResize(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startLayout = layout;
+
+    function resize(moveEvent: MouseEvent) {
+      updateLayout({
+        ...startLayout,
+        width: startLayout.width + moveEvent.clientX - startX,
+        height: startLayout.height + moveEvent.clientY - startY
+      });
+    }
+
+    function stopResize() {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResize);
+    }
+
+    window.addEventListener("mousemove", resize);
+    window.addEventListener("mouseup", stopResize);
+  }
+
   return (
     <div
       data-testid="command-suggestion-panel"
       role="listbox"
-      className="ml-2 flex h-7 w-[420px] max-w-[42vw] shrink-0 items-center gap-1 overflow-hidden rounded-md border border-slate-200 bg-white px-1 shadow-sm"
+      className="fixed z-30 flex min-w-0 flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg"
+      style={{ left: layout.left, bottom: layout.bottom, width: layout.width, height: layout.height }}
     >
-      {view.suggestions.slice(0, 5).map((suggestion, index) => (
-        <button
-          key={suggestion.id}
-          type="button"
-          role="option"
-          aria-selected={index === view.activeIndex}
-          title={suggestion.command}
-          className={cn(
-            "h-5 w-20 shrink-0 truncate rounded px-1.5 text-left text-[11px] font-semibold",
-            index === view.activeIndex ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100"
-          )}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            view.onApply(suggestion);
-          }}
-        >
-          {suggestion.command}
-        </button>
-      ))}
+      <button
+        type="button"
+        aria-label="移动命令提示"
+        className="h-4 shrink-0 cursor-move border-b border-slate-100 bg-slate-50 hover:bg-blue-50"
+        onMouseDown={startMove}
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto p-1 pr-3">
+        {view.suggestions.slice(0, 6).map((suggestion, index) => (
+          <button
+            key={suggestion.id}
+            type="button"
+            role="option"
+            aria-selected={index === view.activeIndex}
+            title={suggestion.command}
+            className={cn(
+              "min-h-10 w-full min-w-0 shrink-0 rounded px-2 py-1 text-left",
+              index === view.activeIndex ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100"
+            )}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              view.onApply(suggestion);
+            }}
+          >
+            <span className="block truncate text-[11px] font-semibold">{suggestion.command}</span>
+            <span className="mt-0.5 block truncate text-[10px] font-normal text-slate-400">
+              {suggestion.description || suggestion.label || suggestion.source}
+            </span>
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        role="separator"
+        aria-label="调整命令提示大小"
+        aria-orientation="vertical"
+        className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize rounded-br-md border-l border-t border-slate-200 bg-slate-50 hover:bg-blue-50"
+        onMouseDown={startResize}
+      />
     </div>
   );
 }
 
 function TerminalSurface({
+  visible,
   activeSession,
   terminalTheme,
   terminalAppearance,
@@ -1999,6 +2145,7 @@ function TerminalSurface({
   onAddAiQuote,
   onOutput
 }: {
+  visible: boolean;
   activeSession?: SessionTab;
   terminalTheme: TerminalThemeMode;
   terminalAppearance: TerminalAppearance;
@@ -2023,6 +2170,7 @@ function TerminalSurface({
   const fitRef = useRef<FitAddon | null>(null);
   const decoderRef = useRef<TextDecoder | null>(null);
   const activeIdRef = useRef("");
+  const visibleRef = useRef(visible);
   const [selectedText, setSelectedText] = useState("");
   const [terminalMenu, setTerminalMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -2052,13 +2200,17 @@ function TerminalSurface({
   commandSuggestionSourcesRef.current = commandSuggestionSources;
   commandSuggestionApplyKeyRef.current = commandSuggestionApplyKey;
   commandSuggestionCustomApplyKeyRef.current = commandSuggestionCustomApplyKey;
+  visibleRef.current = visible;
 
   function focusTerminal() {
+    if (!visibleRef.current) return;
     terminalRef.current?.focus();
   }
 
   function refitAndFocusTerminal() {
+    if (!visibleRef.current) return;
     fitRef.current?.fit();
+    terminalRef.current?.refresh(0, terminalRef.current.rows - 1);
     focusTerminal();
   }
 
@@ -2217,6 +2369,33 @@ function TerminalSurface({
   }, [activeSession?.id]);
 
   useEffect(() => {
+    if (visible && activeSession) {
+      refitAndFocusTerminal();
+      window.requestAnimationFrame(refitAndFocusTerminal);
+    }
+  }, [visible, activeSession?.id]);
+
+  useEffect(() => {
+    if (!activeSession) return;
+
+    function restoreTerminalRender() {
+      refitAndFocusTerminal();
+      window.requestAnimationFrame(refitAndFocusTerminal);
+    }
+
+    function handleVisibilityChange() {
+      if (!document.hidden) restoreTerminalRender();
+    }
+
+    window.addEventListener("focus", restoreTerminalRender);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", restoreTerminalRender);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [activeSession?.id]);
+
+  useEffect(() => {
     rawCommandModeRef.current = false;
     resetCommandInput();
   }, [activeSession?.id]);
@@ -2267,7 +2446,7 @@ function TerminalSurface({
   async function pasteTerminalClipboard(sessionId: string) {
     const result = await nativeBridge.clipboardPaste();
     if (result.success && result.text) {
-      await nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(result.text)));
+      await nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(normalizePasteText(result.text))));
     }
   }
 
@@ -2361,7 +2540,10 @@ function TerminalSurface({
     decoderRef.current = new TextDecoder("utf-8");
     terminal.onData((data) => {
       updateCommandInputFromData(data);
-      void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(data)));
+      const input = stripTerminalGeneratedReplies(data);
+      if (input) {
+        void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(input)));
+      }
     });
     const selectionDisposable = terminal.onSelectionChange(() => {
       setSelectedText(terminal.getSelection().trim());
@@ -2371,6 +2553,7 @@ function TerminalSurface({
     fitRef.current = fitAddon;
 
     const resize = () => {
+      if (!visibleRef.current) return;
       fitAddon.fit();
       void nativeBridge.resizeTerminal(activeSession.id, terminal.cols, terminal.rows);
     };
@@ -2841,6 +3024,16 @@ function decodeTerminalOutput(base64: string, decoderRef: React.MutableRefObject
     decoderRef.current = new TextDecoder("utf-8");
   }
   return decoderRef.current.decode(bytes, { stream: true });
+}
+
+function normalizePasteText(text: string) {
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function stripTerminalGeneratedReplies(data: string) {
+  return data
+    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1bP[\s\S]*?\x1b\\/g, "");
 }
 
 function base64ToBytes(base64: string) {
@@ -5068,6 +5261,33 @@ function isCodexTokenCount(text: string) {
   return /^\d{1,3}(?:,\d{3})+$/.test(text);
 }
 
+function removeCodexRuntimeJsonFences(output: string) {
+  const lines = output.split(/\r?\n/);
+  const kept: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!/^```json\s*$/i.test(line.trim())) {
+      kept.push(line);
+      continue;
+    }
+
+    const closeIndex = lines.findIndex((candidate, candidateIndex) => candidateIndex > index && candidate.trim() === "```");
+    if (closeIndex === -1) {
+      kept.push(line);
+      continue;
+    }
+
+    const body = lines.slice(index + 1, closeIndex).join("\n").trim();
+    if (/^\{[\s\S]*"(type|delta)"\s*:[\s\S]*\}$/.test(body) && /"(message_delta|delta)"/.test(body)) {
+      index = closeIndex;
+      continue;
+    }
+
+    kept.push(line);
+  }
+  return kept.join("\n");
+}
+
 function sanitizeCodexOutput(output: string, prompt: string) {
   const promptLines = new Set(
     prompt
@@ -5076,7 +5296,7 @@ function sanitizeCodexOutput(output: string, prompt: string) {
       .filter((line) => line.length > 3)
   );
 
-  const withoutPrompt = output;
+  const withoutPrompt = removeCodexRuntimeJsonFences(output);
   return withoutPrompt
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
@@ -5098,7 +5318,6 @@ function sanitizeCodexOutput(output: string, prompt: string) {
       if (/^tokens used:/i.test(text)) return false;
       if (/^succeeded in /i.test(text)) return false;
       if (/^---+$/.test(text)) return false;
-      if (/^```(?:json)?$/i.test(text)) return false;
       if (/^\{.*"(type|delta)"\s*:.*\}$/.test(text) && /"(message_delta|delta)"/.test(text)) return false;
       if (/codex_core_plugins/i.test(text)) return false;
       if (/curated plugin cache/i.test(text)) return false;
@@ -5466,6 +5685,60 @@ function AiConfigPanel({
   );
 }
 
+const aiMarkdownComponents: Components = {
+  h1: ({ children }) => <h1 className="mb-2 mt-1 text-lg font-semibold leading-6 text-slate-950">{children}</h1>,
+  h2: ({ children }) => <h2 className="mb-2 mt-1 text-base font-semibold leading-6 text-slate-950">{children}</h2>,
+  h3: ({ children }) => <h3 className="mb-1.5 mt-1 text-sm font-semibold leading-6 text-slate-900">{children}</h3>,
+  p: ({ children }) => <p className="my-1 leading-6">{children}</p>,
+  ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
+  ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,
+  li: ({ children }) => <li className="pl-0.5">{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote className="my-2 border-l-4 border-slate-200 pl-3 text-slate-600">{children}</blockquote>
+  ),
+  a: ({ href, children }) => (
+    <a className="font-medium text-blue-600 underline underline-offset-2" href={href} target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  ),
+  code: ({ className, children, ...props }) => {
+    const inline = !className;
+    if (inline) {
+      return (
+        <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[12px] text-slate-800" {...props}>
+          {children}
+        </code>
+      );
+    }
+    return (
+      <code className={cn("block font-mono text-[12px] leading-5 text-slate-100", className)} {...props}>
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children }) => (
+    <pre className="my-2 max-h-72 overflow-auto rounded-md bg-slate-950 p-3 text-left">
+      {children}
+    </pre>
+  ),
+  table: ({ children }) => (
+    <div className="my-2 overflow-auto rounded-md border border-slate-200">
+      <table className="min-w-full border-collapse text-left text-xs">{children}</table>
+    </div>
+  ),
+  th: ({ children }) => <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 font-semibold text-slate-700">{children}</th>,
+  td: ({ children }) => <td className="border-b border-slate-100 px-2 py-1.5 align-top text-slate-700">{children}</td>,
+  hr: () => <hr className="my-3 border-slate-200" />
+};
+
+function AiMarkdown({ text }: { text: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={aiMarkdownComponents}>
+      {text}
+    </ReactMarkdown>
+  );
+}
+
 function AiMessage({
   role,
   attachments = [],
@@ -5473,18 +5746,18 @@ function AiMessage({
 }: {
   role: "user" | "assistant";
   attachments?: AiAttachment[];
-  children: React.ReactNode;
+  children: string;
 }) {
   const user = role === "user";
   return (
     <div className={cn("flex", user ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[86%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm leading-6",
+          "max-w-[86%] break-words rounded-lg px-3 py-2 text-sm leading-6",
           user ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700"
         )}
       >
-        {children}
+        {user ? <div className="whitespace-pre-wrap">{children}</div> : <AiMarkdown text={children} />}
         {attachments.length > 0 && (
           <div className="mt-2 grid gap-2">
             {attachments.map((attachment) => (

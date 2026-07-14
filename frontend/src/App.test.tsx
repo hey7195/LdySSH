@@ -27,8 +27,10 @@ const terminalMock = vi.hoisted(() => ({
   dataHandler: undefined as undefined | ((data: string) => void),
   options: [] as unknown[],
   writes: [] as string[],
+  resizeHandler: undefined as undefined | (() => void),
   focusCalls: 0,
   fitCalls: 0,
+  refreshCalls: 0,
   instances: [] as Array<{ writes: string[] }>
 }));
 
@@ -52,6 +54,9 @@ vi.mock("@xterm/xterm", () => ({
     dispose() {}
     focus() {
       terminalMock.focusCalls += 1;
+    }
+    refresh() {
+      terminalMock.refreshCalls += 1;
     }
     loadAddon() {}
     attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
@@ -91,8 +96,10 @@ beforeEach(() => {
   terminalMock.dataHandler = undefined;
   terminalMock.options = [];
   terminalMock.writes = [];
+  terminalMock.resizeHandler = undefined;
   terminalMock.focusCalls = 0;
   terminalMock.fitCalls = 0;
+  terminalMock.refreshCalls = 0;
   terminalMock.instances = [];
   window.localStorage.clear();
   Object.defineProperty(navigator, "clipboard", {
@@ -172,7 +179,12 @@ beforeEach(() => {
   }) as typeof fetch;
 
   window.ResizeObserver = class implements ResizeObserver {
-    observe() {}
+    constructor(callback: ResizeObserverCallback) {
+      terminalMock.resizeHandler = () => callback([] as unknown as ResizeObserverEntry[], this);
+    }
+    observe() {
+      terminalMock.resizeHandler?.();
+    }
     unobserve() {}
     disconnect() {}
   };
@@ -508,7 +520,8 @@ describe("AI tools panel", () => {
     await waitFor(() => {
       expect(transcript).toHaveTextContent("结论：我在。直接发要查的问题、文件路径、日志或命令目标。");
     });
-    expect(transcript).toHaveTextContent("依据：当前只收到 `hi`，没有具体任务或日志，我不会编造未看到的内容。");
+    expect(transcript).toHaveTextContent("依据：当前只收到 hi，没有具体任务或日志，我不会编造未看到的内容。");
+    expect(transcript.querySelector("code")).toHaveTextContent("hi");
     expect(within(transcript).queryByText(/workdir:/)).not.toBeInTheDocument();
     expect(within(transcript).queryByText(/model:/)).not.toBeInTheDocument();
     expect(within(transcript).queryByText(/provider:/)).not.toBeInTheDocument();
@@ -519,6 +532,40 @@ describe("AI tools panel", () => {
     expect(within(transcript).queryByText(/Skill Types/)).not.toBeInTheDocument();
     expect(within(transcript).queryByText(/tokens used/)).not.toBeInTheDocument();
     expect(within(transcript).queryByText(/19,367/)).not.toBeInTheDocument();
+  });
+
+  test("renders assistant markdown replies instead of raw markdown fences", async () => {
+    (window.pywebview?.api?.get_codex_run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      running: false,
+      completed: true,
+      output: [
+        "## Result",
+        "",
+        "- Check Wi-Fi interface",
+        "",
+        "```bash",
+        "ip link show wlan0",
+        "```"
+      ].join("\n"),
+      error: ""
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /Local Shell/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.change(await screen.findByPlaceholderText("\u8f93\u5165\u4efb\u52a1\uff0c\u9009\u62e9 Codex \u6216 Hermes \u6267\u884c..."), {
+      target: { value: "render markdown" }
+    });
+    fireEvent.click(screen.getByTitle("\u53d1\u9001"));
+
+    const transcript = screen.getByTestId("ai-chat-transcript");
+    expect(await within(transcript).findByRole("heading", { name: "Result" })).toBeInTheDocument();
+    const code = transcript.querySelector("pre code");
+    expect(code).toHaveTextContent("ip link show wlan0");
+    expect(within(transcript).queryByText(/```bash/)).not.toBeInTheDocument();
   });
 
   test("checks Hermes connection through the native bridge proxy", async () => {
@@ -867,6 +914,65 @@ describe("command library", () => {
     expect(terminalMock.instances).toHaveLength(1);
   });
 
+  test("keeps the current local terminal when returning home and entering terminal again", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
+
+    terminalMock.dataHandler?.("l");
+    terminalMock.dataHandler?.("s");
+    const fitCallsBeforeHome = terminalMock.fitCalls;
+    const refreshCallsBeforeHome = terminalMock.refreshCalls;
+    fireEvent.click(screen.getByTitle("回到桌面"));
+    window.dispatchEvent(new Event("focus"));
+    expect(terminalMock.fitCalls).toBe(fitCallsBeforeHome);
+    expect(terminalMock.refreshCalls).toBe(refreshCallsBeforeHome);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+
+    await screen.findByTestId("terminal-shell");
+    expect(terminalMock.instances).toHaveLength(1);
+    expect(window.pywebview?.api?.create_local_session).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(terminalMock.fitCalls).toBeGreaterThan(fitCallsBeforeHome);
+      expect(terminalMock.refreshCalls).toBeGreaterThan(refreshCallsBeforeHome);
+    });
+  });
+
+  test("does not resize a hidden local terminal while staying on the desktop", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.resizeHandler).toBeTypeOf("function"));
+    const resizeTerminal = window.pywebview?.api?.resize_terminal as ReturnType<typeof vi.fn>;
+    resizeTerminal.mockClear();
+
+    fireEvent.click(screen.getByTitle("回到桌面"));
+    terminalMock.resizeHandler?.();
+
+    expect(resizeTerminal).not.toHaveBeenCalled();
+  });
+
+  test("redraws the current terminal after returning from the Windows desktop", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
+
+    const fitCallsBeforeFocus = terminalMock.fitCalls;
+    const focusCallsBeforeFocus = terminalMock.focusCalls;
+    window.dispatchEvent(new Event("focus"));
+
+    expect(terminalMock.instances).toHaveLength(1);
+    expect(terminalMock.fitCalls).toBeGreaterThan(fitCallsBeforeFocus);
+    expect(terminalMock.focusCalls).toBeGreaterThan(focusCallsBeforeFocus);
+    expect(terminalMock.refreshCalls).toBeGreaterThan(0);
+  });
+
   test("searches terminal history beyond the visible terminal area", async () => {
     (window.pywebview?.api?.get_output as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       output: btoa(["first line", "needle in old command output", "another line", "second needle result"].join("\n"))
@@ -1207,6 +1313,20 @@ describe("command library", () => {
     expect(payloads).toEqual(["i", "\x1b", ":wq\r"]);
   });
 
+  test("does not forward terminal-generated OSC and DCS query replies as shell input", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
+    const sendInput = window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>;
+    sendInput.mockClear();
+
+    terminalMock.dataHandler?.("\x1b]10;rgb:e5e5/e7e7/ebeb\x07\x1b]11;rgb:0202/0606/1717\x07\x1bP1$r0;276;0c\x1b\\");
+
+    expect(sendInput).not.toHaveBeenCalled();
+  });
+
   test("shows command suggestions and applies the selected suffix", async () => {
     render(<App />);
 
@@ -1222,7 +1342,35 @@ describe("command library", () => {
       terminalMock.dataHandler?.("d");
     });
 
-    expect(await screen.findByTestId("command-suggestion-panel")).toHaveTextContent("df -h");
+    const suggestionPanel = await screen.findByTestId("command-suggestion-panel");
+    expect(suggestionPanel).toHaveTextContent("df -h");
+    expect(suggestionPanel.closest('[data-testid="left-command-suggestion-slot"]')).toBeInTheDocument();
+    expect(suggestionPanel.closest("aside")?.querySelector('[aria-label="终端右侧工作栏"]')).not.toBeInTheDocument();
+    expect(suggestionPanel).toHaveClass("flex-col");
+    expect(suggestionPanel).toHaveStyle({ width: "260px", height: "180px" });
+    const options = within(suggestionPanel).getAllByRole("option");
+    expect(options.length).toBeGreaterThan(1);
+    const shortcutOption = options.find((option) => option.textContent?.includes("df -h"));
+    expect(shortcutOption).toBeTruthy();
+    const shortcutDescription = within(shortcutOption as HTMLElement).getByText("磁盘使用");
+    expect(shortcutDescription).toHaveClass("text-[10px]");
+    options.forEach((option) => {
+      expect(option).toHaveClass("w-full");
+      expect(option).toHaveClass("min-h-10");
+    });
+    const moveHandle = within(suggestionPanel).getByRole("button", { name: "移动命令提示" });
+    fireEvent.mouseDown(moveHandle, { clientX: 60, clientY: 700 });
+    fireEvent.mouseMove(window, { clientX: 80, clientY: 650 });
+    fireEvent.mouseUp(window);
+    expect(suggestionPanel).toHaveStyle({ left: "100px", bottom: "74px" });
+    expect(window.localStorage.getItem("ldyssh.terminal.commandSuggestions.panel")).toContain("\"left\":100");
+
+    const resizeHandle = within(suggestionPanel).getByRole("separator", { name: "调整命令提示大小" });
+    fireEvent.mouseDown(resizeHandle, { clientX: 260, clientY: 180 });
+    fireEvent.mouseMove(window, { clientX: 340, clientY: 240 });
+    fireEvent.mouseUp(window);
+    expect(suggestionPanel).toHaveStyle({ width: "340px", height: "240px" });
+    expect(window.localStorage.getItem("ldyssh.terminal.commandSuggestions.panel")).toContain("\"width\":340");
     await waitFor(() => expect(sendInput).toHaveBeenCalledWith("local-1", bytesToBase64(new TextEncoder().encode("d"))));
     sendInput.mockClear();
 
@@ -1285,6 +1433,36 @@ describe("command library", () => {
 
     await screen.findByLabelText("快捷命令参数 NAT check");
     expect(atob(sendInput.mock.calls.at(-1)?.[1] as string)).toBe("\x7f\x7f");
+  });
+
+  test("shows fallback notes under shortcut command suggestions without remarks", async () => {
+    (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      folders: [
+        {
+          id: "ops",
+          name: "Ops",
+          commands: [{ id: "open", name: "开放永久访问", command: "echo 1 > /tmp/open", description: "" }]
+        }
+      ]
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
+
+    await act(async () => {
+      terminalMock.dataHandler?.("e");
+      terminalMock.dataHandler?.("c");
+      terminalMock.dataHandler?.("h");
+      terminalMock.dataHandler?.("o");
+    });
+
+    const suggestionPanel = await screen.findByTestId("command-suggestion-panel");
+    const shortcutOption = within(suggestionPanel).getAllByRole("option").find((option) => option.textContent?.includes("echo 1 > /tmp/open"));
+    expect(shortcutOption).toBeTruthy();
+    expect(within(shortcutOption as HTMLElement).getByText("开放永久访问")).toHaveClass("text-[10px]");
   });
 
   test("does not bypass xterm when focus stays on the terminal shell wrapper", async () => {
@@ -1469,6 +1647,24 @@ describe("command library", () => {
     const lastCall = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.at(-1);
     expect(lastCall?.[0]).toBe("local-1");
     expect(atob(lastCall?.[1] as string)).toBe("echo LDSSH_PASTE_OK\n");
+  });
+
+  test("normalizes CRLF clipboard text before pasting into terminal editors", async () => {
+    (window.pywebview?.api?.clipboard_paste as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: true,
+      text: "7bcbeb36256c4e5988fe259d472dbef6\r\n3d007a341f134098b122d1617f50ab14\r\n"
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.keyHandler).toBeTruthy());
+
+    terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "v", ctrlKey: true }));
+
+    await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled());
+    const lastCall = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(atob(lastCall?.[1] as string)).toBe("7bcbeb36256c4e5988fe259d472dbef6\n3d007a341f134098b122d1617f50ab14\n");
   });
 
   test("copies terminal selection on Ctrl+C and does not send SIGINT", async () => {

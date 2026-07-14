@@ -78,9 +78,6 @@ static LocalShellCommand ResolveLocalShellCommandLine() {
     AddProgramFilesShellCandidates(candidates, L"ProgramFiles");
     AddProgramFilesShellCandidates(candidates, L"ProgramFiles(x86)");
 
-    std::wstring wslPath = GetSystemPath(L"wsl.exe");
-    candidates.push_back({ wslPath, QuoteArg(wslPath), "WSL" });
-
     std::wstring powershellPath = GetSystemPath(L"WindowsPowerShell\\v1.0\\powershell.exe");
     candidates.push_back({ powershellPath, QuoteArg(powershellPath) + L" -NoLogo", "PowerShell" });
 

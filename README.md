@@ -36,7 +36,7 @@ tools\busybox\busybox.exe sh -l
 - 如果内置 BusyBox 缺失，会按顺序回退：
 
 ```text
-Git Bash -> WSL -> PowerShell -> CMD
+Git Bash -> PowerShell -> CMD
 ```
 
 - BusyBox 提供常用类 Linux 命令，例如 `sh`、`ls`、`cat`、`grep`、`find`、`awk`、`sed`、`tar`、`wget` 等，目标是接近 MobaXterm 本地终端的基础体验。
@@ -421,7 +421,7 @@ git push github vYYYY.MM.DD
 tools\busybox\busybox.exe
 ```
 
-缺失时程序会回退 Git Bash、WSL、PowerShell、CMD。
+缺失时程序会回退 Git Bash、PowerShell、CMD。
 
 ### 11.2 智能提示挡住输入
 

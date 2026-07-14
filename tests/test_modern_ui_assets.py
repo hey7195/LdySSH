@@ -144,7 +144,7 @@ def test_cpp_requests_terminal_size_after_starting_shell_for_jumpserver():
     assert connect_block.index("libssh2_channel_shell") < connect_block.index("libssh2_channel_request_pty_size(sshChannel, cols, rows)")
 
 
-def test_local_terminal_prefers_bundled_linux_shell_before_system_shells():
+def test_local_terminal_prefers_bundled_linux_shell_and_skips_wsl_fallback():
     source = read("prismssh-cpp/session.cpp")
     connect_match = re.search(
         r'bool LocalSession::Connect\(.*?\n}\n\nbool LocalSession::SendInput',
@@ -160,18 +160,23 @@ def test_local_terminal_prefers_bundled_linux_shell_before_system_shells():
     assert " sh -l" in source
     assert r"Git\\bin\\bash.exe" in source
     assert "--login -i" in source
-    assert "wsl.exe" in source
+    assert "wsl.exe" not in source
+    assert '"WSL"' not in source
     assert "powershell.exe" in source
     assert "cmd.exe" in source
     assert (
         source.index(r"tools\\busybox\\busybox.exe")
         < source.index(r"Git\\bin\\bash.exe")
-        < source.index("wsl.exe")
         < source.index("powershell.exe")
         < source.index("cmd.exe")
     )
     assert connect_block.index("ResolveLocalShellCommandLine") < connect_block.index("CreateProcessW")
     assert "COMSPEC" not in connect_block
+
+
+def test_bundled_busybox_shell_asset_exists_for_release_packaging():
+    assert (ROOT / "tools" / "busybox" / "busybox.exe").is_file()
+    assert (ROOT / "tools" / "busybox" / "README.txt").is_file()
 
 
 def test_cpp_connect_does_not_block_terminal_on_sftp_init():
