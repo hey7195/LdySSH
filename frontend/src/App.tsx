@@ -2171,6 +2171,7 @@ function TerminalSurface({
   const decoderRef = useRef<TextDecoder | null>(null);
   const activeIdRef = useRef("");
   const visibleRef = useRef(visible);
+  const lastValidTerminalSizeRef = useRef({ cols: 80, rows: 24 });
   const [selectedText, setSelectedText] = useState("");
   const [terminalMenu, setTerminalMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -2210,6 +2211,10 @@ function TerminalSurface({
   function refitAndFocusTerminal() {
     if (!visibleRef.current) return;
     fitRef.current?.fit();
+    const terminal = terminalRef.current;
+    if (terminal && terminal.cols >= 20 && terminal.rows >= 5) {
+      lastValidTerminalSizeRef.current = { cols: terminal.cols, rows: terminal.rows };
+    }
     terminalRef.current?.refresh(0, terminalRef.current.rows - 1);
     focusTerminal();
   }
@@ -2555,6 +2560,12 @@ function TerminalSurface({
     const resize = () => {
       if (!visibleRef.current) return;
       fitAddon.fit();
+      if (terminal.cols < 20 || terminal.rows < 5) {
+        const previous = lastValidTerminalSizeRef.current;
+        terminal.resize(previous.cols, previous.rows);
+        return;
+      }
+      lastValidTerminalSizeRef.current = { cols: terminal.cols, rows: terminal.rows };
       void nativeBridge.resizeTerminal(activeSession.id, terminal.cols, terminal.rows);
     };
     const observer = new ResizeObserver(resize);

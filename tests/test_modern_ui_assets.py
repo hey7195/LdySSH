@@ -131,6 +131,21 @@ def test_cpp_applies_pending_terminal_resize_after_connection():
     assert "StorePendingTerminalSize(sessId, cols, rows)" in resize_block
 
 
+def test_cpp_ignores_collapsed_terminal_resize():
+    source = read("prismssh-cpp/main.cpp")
+    resize_match = re.search(
+        r'else if \(action == "resize_terminal"\).*?else if \(action == "disconnect"\)',
+        source,
+        re.S,
+    )
+
+    assert resize_match
+    resize_block = resize_match.group(0)
+    assert "cols >= 20 && rows >= 5" in resize_block
+    assert "session->Resize(cols, rows)" in resize_block
+    assert "StorePendingTerminalSize(sessId, cols, rows)" in resize_block
+
+
 def test_cpp_requests_terminal_size_after_starting_shell_for_jumpserver():
     source = read("prismssh-cpp/ssh_session.cpp")
     connect_match = re.search(
@@ -172,6 +187,116 @@ def test_local_terminal_prefers_bundled_linux_shell_and_skips_wsl_fallback():
     )
     assert connect_block.index("ResolveLocalShellCommandLine") < connect_block.index("CreateProcessW")
     assert "COMSPEC" not in connect_block
+
+
+def test_local_terminal_process_tree_is_bound_to_session_job():
+    header = read("prismssh-cpp/session.h")
+    source = read("prismssh-cpp/session.cpp")
+    connect_match = re.search(
+        r'bool LocalSession::Connect\(.*?\n}\n\nbool LocalSession::SendInput',
+        source,
+        re.S,
+    )
+    disconnect_match = re.search(
+        r'void LocalSession::Disconnect\(.*?\n}\n\nbool LocalSession::IsConnected',
+        source,
+        re.S,
+    )
+
+    assert connect_match
+    assert disconnect_match
+    connect_block = connect_match.group(0)
+    disconnect_block = disconnect_match.group(0)
+    assert "HANDLE hJob" in header
+    assert "CreateJobObjectW" in connect_block
+    assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in connect_block
+    assert "AssignProcessToJobObject" in connect_block
+    assert "CloseHandle(hJob)" in disconnect_block
+
+
+def test_local_terminal_read_loop_does_not_block_shutdown():
+    source = read("prismssh-cpp/session.cpp")
+    read_loop_match = re.search(
+        r'void LocalSession::ReadLoop\(.*?\n}\n$',
+        source,
+        re.S,
+    )
+    disconnect_match = re.search(
+        r'void LocalSession::Disconnect\(.*?\n}\n\nbool LocalSession::IsConnected',
+        source,
+        re.S,
+    )
+
+    assert read_loop_match
+    assert disconnect_match
+    read_loop = read_loop_match.group(0)
+    disconnect_block = disconnect_match.group(0)
+    assert read_loop.index("PeekNamedPipe") < read_loop.index("ReadFile")
+    assert "WaitForSingleObject(hReadThread, INFINITE)" not in disconnect_block
+
+
+def test_main_window_close_uses_single_cleanup_path():
+    source = read("prismssh-cpp/main.cpp")
+    api_close_match = re.search(
+        r'else if \(action == "window_close"\).*?else if \(action == "create_session"\)',
+        source,
+        re.S,
+    )
+    close_fn_match = re.search(
+        r'static void CloseApplication\(HWND targetHWnd\) \{.*?\n}\n\nLRESULT CALLBACK WndProc',
+        source,
+        re.S,
+    )
+    wndproc_match = re.search(
+        r'LRESULT CALLBACK WndProc\(.*?\n}\n$',
+        source,
+        re.S,
+    )
+
+    assert api_close_match
+    assert close_fn_match
+    assert wndproc_match
+    api_close = api_close_match.group(0)
+    close_fn = close_fn_match.group(0)
+    wndproc = wndproc_match.group(0)
+    assert "PostMessageW(hWnd, WM_CLOSE" in api_close
+    assert "DestroyWindow(hWnd)" not in api_close
+    assert "globalSessionManager.Cleanup()" in close_fn
+    assert "webviewController->Close()" in close_fn
+    assert "DestroyWindow(targetHWnd)" in close_fn
+    assert "case WM_CLOSE" in wndproc
+    assert "CloseApplication(hWnd)" in wndproc
+    destroy_block = re.search(r'case WM_DESTROY:.*?break;', wndproc, re.S).group(0)
+    assert "PostQuitMessage(0)" in destroy_block
+    assert "globalSessionManager.Cleanup()" not in destroy_block
+
+
+def test_background_child_processes_are_killed_with_app_job():
+    source = read("prismssh-cpp/main.cpp")
+    hidden_process_match = re.search(
+        r'ProcessRunResult RunHiddenProcessCapture\(.*?\n}\n\nstatic void PutEncryptedSecret',
+        source,
+        re.S,
+    )
+    python_backend_match = re.search(
+        r'void LaunchPythonBackend\(.*?\n}\n\nint CALLBACK WinMain',
+        source,
+        re.S,
+    )
+    close_fn_match = re.search(
+        r'static void CloseApplication\(HWND targetHWnd\) \{.*?\n}\n\nLRESULT CALLBACK WndProc',
+        source,
+        re.S,
+    )
+
+    assert hidden_process_match
+    assert python_backend_match
+    assert close_fn_match
+    assert "EnsureChildProcessJobLocked" in source
+    assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in source
+    assert "AssignProcessToChildJob(pi.hProcess)" in hidden_process_match.group(0)
+    assert "AssignProcessToChildJob(pi.hProcess)" in python_backend_match.group(0)
+    assert "CloseChildProcessJob()" in close_fn_match.group(0)
 
 
 def test_bundled_busybox_shell_asset_exists_for_release_packaging():

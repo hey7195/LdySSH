@@ -159,13 +159,31 @@ bool LocalSession::Connect(int cols, int rows) {
     std::vector<wchar_t> cmdLineBuf(shellCommand.commandLine.begin(), shellCommand.commandLine.end());
     cmdLineBuf.push_back(L'\0');
 
+    hJob = CreateJobObjectW(NULL, NULL);
+    if (!hJob) {
+        PrismLog("ERROR", "LocalSession::Connect: CreateJobObjectW failed. Error=" + std::to_string(GetLastError()));
+        ClosePseudoConsole(hPC); hPC = NULL;
+        CleanupPipes();
+        return false;
+    }
+
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = { 0 };
+    jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli))) {
+        PrismLog("ERROR", "LocalSession::Connect: SetInformationJobObject failed. Error=" + std::to_string(GetLastError()));
+        CloseHandle(hJob); hJob = NULL;
+        ClosePseudoConsole(hPC); hPC = NULL;
+        CleanupPipes();
+        return false;
+    }
+
     BOOL success = CreateProcessW(
         NULL,
         cmdLineBuf.data(),
         NULL,
         NULL,
         TRUE,
-        EXTENDED_STARTUPINFO_PRESENT,
+        EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
         NULL,
         NULL,
         (LPSTARTUPINFOW)&siEx,
@@ -177,15 +195,29 @@ bool LocalSession::Connect(int cols, int rows) {
 
     if (!success) {
         PrismLog("ERROR", "LocalSession::Connect: CreateProcessW failed. Error=" + std::to_string(GetLastError()));
+        CloseHandle(hJob); hJob = NULL;
         ClosePseudoConsole(hPC); hPC = NULL;
         CleanupPipes();
         return false;
     }
     PrismLog("INFO", "LocalSession::Connect: CreateProcessW success. ProcessID=" + std::to_string(pi.dwProcessId));
 
+    if (!AssignProcessToJobObject(hJob, pi.hProcess)) {
+        PrismLog("ERROR", "LocalSession::Connect: AssignProcessToJobObject failed. Error=" + std::to_string(GetLastError()));
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 1000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        CloseHandle(hJob); hJob = NULL;
+        ClosePseudoConsole(hPC); hPC = NULL;
+        CleanupPipes();
+        return false;
+    }
+
     hProcess = pi.hProcess;
     hThread = pi.hThread;
     running = true;
+    ResumeThread(hThread);
 
     hReadThread = CreateThread(NULL, 0, StaticReadThread, this, 0, NULL);
     if (!hReadThread) {
@@ -226,7 +258,7 @@ void LocalSession::Resize(int cols, int rows) {
 }
 
 void LocalSession::Disconnect() {
-    if (!running) return;
+    if (!running && !hJob && !hProcess && !hPC && !hReadThread) return;
     running = false;
 
     PrismLog("INFO", "LocalSession::Disconnect initiated.");
@@ -236,9 +268,12 @@ void LocalSession::Disconnect() {
         hPipeInWrite = NULL;
     }
 
+    if (hJob) {
+        CloseHandle(hJob);
+        hJob = NULL;
+    }
     if (hProcess) {
-        WaitForSingleObject(hProcess, 300);
-        TerminateProcess(hProcess, 0);
+        WaitForSingleObject(hProcess, 1000);
         CloseHandle(hProcess);
         hProcess = NULL;
     }
@@ -256,10 +291,15 @@ void LocalSession::Disconnect() {
 
     if (hReadThread) {
         PrismLog("INFO", "LocalSession::Disconnect: Waiting for hReadThread to exit...");
-        WaitForSingleObject(hReadThread, INFINITE);
+        DWORD waitResult = WaitForSingleObject(hReadThread, 2000);
+        if (waitResult == WAIT_TIMEOUT) {
+            PrismLog("WARN", "LocalSession::Disconnect: hReadThread did not exit within timeout.");
+        }
         CloseHandle(hReadThread);
         hReadThread = NULL;
-        PrismLog("INFO", "LocalSession::Disconnect: hReadThread exited cleanly.");
+        if (waitResult == WAIT_OBJECT_0) {
+            PrismLog("INFO", "LocalSession::Disconnect: hReadThread exited cleanly.");
+        }
     }
 }
 
@@ -283,48 +323,61 @@ void LocalSession::ReadLoop() {
     char buffer[8192];
     DWORD readBytes = 0;
     while (running && hPipeOutRead) {
-        if (ReadFile(hPipeOutRead, buffer, sizeof(buffer) - 1, &readBytes, NULL)) {
-            if (readBytes > 0) {
-                std::string accum(buffer, readBytes);
-                
-                DWORD bytesAvail = 0;
-                while (PeekNamedPipe(hPipeOutRead, NULL, 0, NULL, &bytesAvail, NULL) && bytesAvail > 0) {
-                    DWORD toRead = (bytesAvail < (DWORD)(sizeof(buffer) - 1)) ? bytesAvail : (DWORD)(sizeof(buffer) - 1);
-                    DWORD readNow = 0;
-                    if (ReadFile(hPipeOutRead, buffer, toRead, &readNow, NULL) && readNow > 0) {
-                        accum.append(buffer, readNow);
-                    } else {
-                        break;
-                    }
-                    if (accum.size() >= 65536) break;
-                }
-
-                nlohmann::json pushMsg;
-                pushMsg["action"] = "push_output";
-                pushMsg["sessionId"] = sessionId;
-                pushMsg["data"] = Base64Encode(accum);
-                
-                if (hWnd != NULL) {
-                    std::wstring* pStr = new std::wstring(Utf8ToUtf16(pushMsg.dump()));
-                    if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pStr)) {
-                        delete pStr;
-                    }
-                }
+        DWORD bytesAvail = 0;
+        if (!PeekNamedPipe(hPipeOutRead, NULL, 0, NULL, &bytesAvail, NULL)) {
+            break;
+        }
+        if (bytesAvail == 0) {
+            if (hProcess && WaitForSingleObject(hProcess, 0) == WAIT_OBJECT_0) {
+                break;
             }
-        } else {
+            Sleep(10);
+            continue;
+        }
+
+        DWORD toRead = (bytesAvail < (DWORD)(sizeof(buffer) - 1)) ? bytesAvail : (DWORD)(sizeof(buffer) - 1);
+        if (ReadFile(hPipeOutRead, buffer, toRead, &readBytes, NULL) && readBytes > 0) {
+            std::string accum(buffer, readBytes);
+
+            while (PeekNamedPipe(hPipeOutRead, NULL, 0, NULL, &bytesAvail, NULL) && bytesAvail > 0) {
+                toRead = (bytesAvail < (DWORD)(sizeof(buffer) - 1)) ? bytesAvail : (DWORD)(sizeof(buffer) - 1);
+                DWORD readNow = 0;
+                if (ReadFile(hPipeOutRead, buffer, toRead, &readNow, NULL) && readNow > 0) {
+                    accum.append(buffer, readNow);
+                } else {
+                    break;
+                }
+                if (accum.size() >= 65536) break;
+            }
+
             nlohmann::json pushMsg;
             pushMsg["action"] = "push_output";
             pushMsg["sessionId"] = sessionId;
-            pushMsg["data"] = Base64Encode("\r\n[Process exited]\r\n");
-            
+            pushMsg["data"] = Base64Encode(accum);
+
             if (hWnd != NULL) {
                 std::wstring* pStr = new std::wstring(Utf8ToUtf16(pushMsg.dump()));
                 if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pStr)) {
                     delete pStr;
                 }
             }
-            running = false;
+        } else {
             break;
         }
+    }
+
+    if (running) {
+        nlohmann::json pushMsg;
+        pushMsg["action"] = "push_output";
+        pushMsg["sessionId"] = sessionId;
+        pushMsg["data"] = Base64Encode("\r\n[Process exited]\r\n");
+
+        if (hWnd != NULL) {
+            std::wstring* pStr = new std::wstring(Utf8ToUtf16(pushMsg.dump()));
+            if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pStr)) {
+                delete pStr;
+            }
+        }
+        running = false;
     }
 }

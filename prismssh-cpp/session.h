@@ -45,6 +45,7 @@ public:
     HANDLE hPipeOutRead = NULL;
     HANDLE hPipeInRead = NULL;
     HANDLE hPipeOutWrite = NULL;
+    HANDLE hJob = NULL;
     
     std::string outputBuffer;
     std::mutex bufferMutex;

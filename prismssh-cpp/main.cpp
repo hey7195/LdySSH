@@ -415,6 +415,39 @@ struct CodexJob {
 std::mutex codexJobsMutex;
 std::unordered_map<std::string, CodexJob> codexJobs;
 std::atomic<unsigned long long> codexJobCounter{ 0 };
+static bool g_appClosing = false;
+static std::mutex g_childJobMutex;
+
+static HANDLE EnsureChildProcessJobLocked() {
+    if (g_appClosing) return NULL;
+    if (hJob != NULL) return hJob;
+
+    hJob = CreateJobObjectW(NULL, NULL);
+    if (hJob != NULL) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = { 0 };
+        jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+    }
+    return hJob;
+}
+
+static void AssignProcessToChildJob(HANDLE hProcess) {
+    std::lock_guard<std::mutex> lock(g_childJobMutex);
+    HANDLE job = EnsureChildProcessJobLocked();
+    if (job != NULL) {
+        AssignProcessToJobObject(job, hProcess);
+    } else if (g_appClosing) {
+        TerminateProcess(hProcess, 0);
+    }
+}
+
+static void CloseChildProcessJob() {
+    std::lock_guard<std::mutex> lock(g_childJobMutex);
+    if (hJob != NULL) {
+        CloseHandle(hJob);
+        hJob = NULL;
+    }
+}
 
 struct HttpRunResult {
     bool success = false;
@@ -844,6 +877,7 @@ ProcessRunResult RunHiddenProcessCapture(
         CloseHandle(readPipe);
         return result;
     }
+    AssignProcessToChildJob(pi.hProcess);
 
     std::thread stdinThread;
     if (inputWrite) {
@@ -1721,11 +1755,13 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string sessId = args[0].get<std::string>();
             int cols = args[1].get<int>();
             int rows = args[2].get<int>();
-            auto session = globalSessionManager.GetSession(sessId);
-            if (session) {
-                session->Resize(cols, rows);
-            } else {
-                StorePendingTerminalSize(sessId, cols, rows);
+            if (cols >= 20 && rows >= 5) {
+                auto session = globalSessionManager.GetSession(sessId);
+                if (session) {
+                    session->Resize(cols, rows);
+                } else {
+                    StorePendingTerminalSize(sessId, cols, rows);
+                }
             }
             
             nlohmann::json retObj;
@@ -1777,7 +1813,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["result"] = "null";
         }
         else if (action == "window_close") {
-            DestroyWindow(hWnd);
+            PostMessageW(hWnd, WM_CLOSE, 0, 0);
             response["status"] = "success";
             response["result"] = "null";
         }
@@ -2591,19 +2627,10 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
     webviewWindow->PostWebMessageAsJson(responseW.c_str());
 }
 
+static void CloseApplication(HWND targetHWnd);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
 void LaunchPythonBackend(const wchar_t* scriptPath) {
-    // Lazy-initialize the Job Object once
-    if (hJob == NULL) {
-        hJob = CreateJobObjectW(NULL, NULL);
-        if (hJob != NULL) {
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = { 0 };
-            jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
-        }
-    }
-
     std::wstring cmd = L"pythonw.exe \"";
     cmd += scriptPath;
     cmd += L"\" --backend-only";
@@ -2632,9 +2659,7 @@ void LaunchPythonBackend(const wchar_t* scriptPath) {
     );
 
     if (success) {
-        if (hJob != NULL) {
-            AssignProcessToJobObject(hJob, pi.hProcess);
-        }
+        AssignProcessToChildJob(pi.hProcess);
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     }
@@ -2935,6 +2960,29 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     return (int)msg.wParam;
 }
 
+static void CloseApplication(HWND targetHWnd) {
+    if (g_appClosing) return;
+    g_appClosing = true;
+
+    if (chatgptHWnd != NULL) {
+        DestroyWindow(chatgptHWnd);
+        chatgptHWnd = NULL;
+    }
+
+    if (webviewController != nullptr) {
+        webviewController->Close();
+        webviewController = nullptr;
+    }
+    webviewWindow = nullptr;
+
+    CloseChildProcessJob();
+
+    globalSessionManager.Cleanup();
+    CleanupEditMappings();
+
+    DestroyWindow(targetHWnd);
+}
+
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_GETMINMAXINFO: {
@@ -3017,13 +3065,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         return 0;
     }
+    case WM_CLOSE:
+        CloseApplication(hWnd);
+        return 0;
     case WM_DESTROY:
-        if (hJob != NULL) {
-            CloseHandle(hJob); // Terminates all processes associated with the job
-            hJob = NULL;
-        }
-        globalSessionManager.Cleanup();
-        CleanupEditMappings();
         PostQuitMessage(0);
         break;
     default:

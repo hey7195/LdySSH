@@ -31,20 +31,26 @@ const terminalMock = vi.hoisted(() => ({
   focusCalls: 0,
   fitCalls: 0,
   refreshCalls: 0,
-  instances: [] as Array<{ writes: string[] }>
+  nextFitSize: undefined as undefined | { cols: number; rows: number },
+  instances: [] as Array<{ writes: string[]; terminal: { cols: number; rows: number } }>
 }));
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
     fit() {
       terminalMock.fitCalls += 1;
+      const latest = terminalMock.instances.at(-1)?.terminal;
+      if (latest && terminalMock.nextFitSize) {
+        latest.cols = terminalMock.nextFitSize.cols;
+        latest.rows = terminalMock.nextFitSize.rows;
+      }
     }
   }
 }));
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
-    private instance = { writes: [] as string[] };
+    private instance = { writes: [] as string[], terminal: this as { cols: number; rows: number } };
     cols = 80;
     rows = 24;
     constructor(options: unknown) {
@@ -57,6 +63,10 @@ vi.mock("@xterm/xterm", () => ({
     }
     refresh() {
       terminalMock.refreshCalls += 1;
+    }
+    resize(cols: number, rows: number) {
+      this.cols = cols;
+      this.rows = rows;
     }
     loadAddon() {}
     attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
@@ -100,6 +110,7 @@ beforeEach(() => {
   terminalMock.focusCalls = 0;
   terminalMock.fitCalls = 0;
   terminalMock.refreshCalls = 0;
+  terminalMock.nextFitSize = undefined;
   terminalMock.instances = [];
   window.localStorage.clear();
   Object.defineProperty(navigator, "clipboard", {
@@ -971,6 +982,22 @@ describe("command library", () => {
     expect(terminalMock.fitCalls).toBeGreaterThan(fitCallsBeforeFocus);
     expect(terminalMock.focusCalls).toBeGreaterThan(focusCallsBeforeFocus);
     expect(terminalMock.refreshCalls).toBeGreaterThan(0);
+  });
+
+  test("does not sync a collapsed terminal width to the remote pty", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.resizeHandler).toBeTypeOf("function"));
+    const resizeTerminal = window.pywebview?.api?.resize_terminal as ReturnType<typeof vi.fn>;
+    resizeTerminal.mockClear();
+
+    terminalMock.nextFitSize = { cols: 2, rows: 24 };
+    window.dispatchEvent(new Event("focus"));
+    terminalMock.resizeHandler?.();
+
+    expect(resizeTerminal).not.toHaveBeenCalledWith("local-1", 2, 24);
   });
 
   test("searches terminal history beyond the visible terminal area", async () => {
