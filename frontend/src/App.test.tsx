@@ -1000,6 +1000,25 @@ describe("command library", () => {
     expect(resizeTerminal).not.toHaveBeenCalledWith("local-1", 2, 24);
   });
 
+  test("keeps the local xterm width after returning from desktop with a collapsed fit", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.resizeHandler).toBeTypeOf("function"));
+    const terminal = terminalMock.instances.at(-1)?.terminal;
+    expect(terminal?.cols).toBe(80);
+
+    const fitCallsBeforeHome = terminalMock.fitCalls;
+    terminalMock.nextFitSize = { cols: 2, rows: 24 };
+    fireEvent.click(screen.getByTitle("回到桌面"));
+    fireEvent.click(screen.getByTitle("本地终端"));
+
+    await waitFor(() => expect(terminalMock.fitCalls).toBeGreaterThan(fitCallsBeforeHome));
+    expect(terminal?.cols).toBe(80);
+    expect(terminal?.rows).toBe(24);
+  });
+
   test("searches terminal history beyond the visible terminal area", async () => {
     (window.pywebview?.api?.get_output as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       output: btoa(["first line", "needle in old command output", "another line", "second needle result"].join("\n"))
@@ -1027,6 +1046,23 @@ describe("command library", () => {
 
     expect(screen.getByText("2 / 2")).toBeInTheDocument();
     expect(screen.getByText(/second needle result/)).toBeInTheDocument();
+  });
+
+  test("keeps keyboard input inside the terminal search box", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /Local Shell/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "查找终端输出" }));
+
+    const searchInput = await screen.findByPlaceholderText("查找终端输出");
+    terminalMock.focusCalls = 0;
+    fireEvent.pointerDown(searchInput);
+    fireEvent.change(searchInput, { target: { value: "needle" } });
+    fireEvent.keyDown(searchInput, { key: "n" });
+
+    expect(searchInput).toHaveValue("needle");
+    expect(terminalMock.focusCalls).toBe(0);
   });
 
   test("connects from the recent-host sidebar and opens a terminal session immediately", async () => {

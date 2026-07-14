@@ -2212,8 +2212,13 @@ function TerminalSurface({
     if (!visibleRef.current) return;
     fitRef.current?.fit();
     const terminal = terminalRef.current;
-    if (terminal && terminal.cols >= 20 && terminal.rows >= 5) {
-      lastValidTerminalSizeRef.current = { cols: terminal.cols, rows: terminal.rows };
+    if (terminal) {
+      if (terminal.cols < 20 || terminal.rows < 5) {
+        const previous = lastValidTerminalSizeRef.current;
+        terminal.resize(previous.cols, previous.rows);
+      } else {
+        lastValidTerminalSizeRef.current = { cols: terminal.cols, rows: terminal.rows };
+      }
     }
     terminalRef.current?.refresh(0, terminalRef.current.rows - 1);
     focusTerminal();
@@ -2683,12 +2688,17 @@ function TerminalSurface({
         aria-label="查找终端输出"
         title="查找终端输出"
         className="absolute right-5 top-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] shadow-lg hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)]"
+        onPointerDown={(event) => event.stopPropagation()}
         onClick={() => setSearchOpen(true)}
       >
         <Search className="h-3.5 w-3.5" />
       </button>
       {searchOpen && (
-        <div className="absolute right-5 top-14 z-20 w-[min(380px,calc(100%-40px))] rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 text-xs text-[var(--app-text)] shadow-xl">
+        <div
+          className="absolute right-5 top-14 z-20 w-[min(380px,calc(100%-40px))] rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 text-xs text-[var(--app-text)] shadow-xl"
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
           <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-2">
             <Input
               autoFocus
