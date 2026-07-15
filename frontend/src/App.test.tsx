@@ -1154,6 +1154,26 @@ describe("command library", () => {
     expect(window.pywebview?.api?.create_session).toHaveBeenCalledTimes(1);
   });
 
+  test("does not ask for a password when SSH fails before authentication", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { name: "prod-kex", hostname: "10.0.0.13", port: 22, username: "root", keyPath: "E:\\keys\\id_rsa" }
+    ]);
+    (window.pywebview?.api?.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      success: false,
+      error: "libssh2 handshake failed (code: -5, detail: Unable to exchange encryption keys)"
+    });
+
+    render(<App />);
+
+    const recentHost = await screen.findAllByRole("button", { name: /prod-kex/ });
+    fireEvent.click(recentHost[0]);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Unable to exchange encryption keys/).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByTestId("retry-password-dialog")).not.toBeInTheDocument();
+  });
+
   test("disconnects and reconnects an SSH session from the tab context menu", async () => {
     (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       { name: "prod-menu", hostname: "10.0.0.11", port: 22, username: "root", password: "secret" }
@@ -1836,6 +1856,26 @@ describe("command library", () => {
     expect(await screen.findByText("列出设备")).toBeInTheDocument();
     expect(screen.getByText("adb devices")).toBeInTheDocument();
     expect(window.pywebview?.api?.save_command_library).toHaveBeenCalled();
+  });
+
+  test("adds multiline commands without flattening line breaks", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("命令库"));
+    fireEvent.change(screen.getByPlaceholderText("命令名称"), {
+      target: { value: "multi line" }
+    });
+
+    const commandInput = await screen.findByPlaceholderText("命令内容");
+    expect(commandInput.tagName).toBe("TEXTAREA");
+    fireEvent.change(commandInput, {
+      target: { value: "echo first\necho second" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加命令" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.save_command_library).toHaveBeenCalled());
+    const call = (window.pywebview?.api?.save_command_library as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(call?.[0]).toContain("echo first\\necho second");
   });
 
   test("inserts FinalShell-style parameter placeholders while adding a command", async () => {

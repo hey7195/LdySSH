@@ -34,6 +34,19 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   );
 }
 
+export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      className={cn(
+        "min-h-20 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-5 text-slate-900 outline-none",
+        "placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200",
+        props.className
+      )}
+    />
+  );
+}
+
 export function Panel({
   title,
   children,

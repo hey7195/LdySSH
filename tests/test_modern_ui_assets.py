@@ -319,6 +319,24 @@ def test_cpp_connect_does_not_block_terminal_on_sftp_init():
     assert "EnsureSftpSession(" in read("prismssh-cpp/ssh_session.h")
 
 
+def test_cpp_handshake_error_reports_auth_was_not_reached_and_supported_algorithms():
+    source = read("prismssh-cpp/ssh_session.cpp")
+    connect_match = re.search(
+        r'bool SSHSession::Connect\(.*?\n}\n\nstatic std::string ErrorJson',
+        source,
+        re.S,
+    )
+
+    assert connect_match
+    connect_block = connect_match.group(0)
+    assert "private key was not used" in connect_block
+    assert "BuildLibssh2AlgorithmSummary(sshSession)" in connect_block
+    assert "libssh2_session_supported_algs(session, methodType" in source
+    assert "JoinSupportedLibssh2Algorithms(session, LIBSSH2_METHOD_KEX)" in source
+    assert "JoinSupportedLibssh2Algorithms(session, LIBSSH2_METHOD_HOSTKEY)" in source
+    assert "JoinSupportedLibssh2Algorithms(session, LIBSSH2_METHOD_CRYPT_CS)" in source
+
+
 def test_cpp_send_input_does_not_sleep_while_holding_ssh_mutex():
     source = read("prismssh-cpp/ssh_session.cpp")
     match = re.search(

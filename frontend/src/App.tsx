@@ -40,7 +40,7 @@ import {
   Upload,
   X
 } from "lucide-react";
-import { Button, EmptyState, Input, Panel } from "./components/ui";
+import { Button, EmptyState, Input, Panel, Textarea } from "./components/ui";
 import { extractCommandParameters, fillCommandParameters, mergeCommandFolders, parseCommandLibraryImport, serializeCommandLibraryExport } from "./lib/commandLibrary";
 import {
   buildCommandSuggestions,
@@ -538,6 +538,11 @@ function createAiSession(tool: AiTool = "codex"): AiSession {
   };
 }
 
+function shouldPromptForRetryPassword(error: string) {
+  const message = error.toLowerCase();
+  return message.includes("auth failed") || message.includes("authentication failed") || message.includes("permission denied");
+}
+
 function hydrateAiSession(session: Partial<AiSession>, fallbackTool: AiTool = "codex"): AiSession {
   return {
     ...createAiSession(session.tool || fallbackTool),
@@ -941,7 +946,9 @@ export function App() {
           session.id === sessionId ? { ...session, connected: false, status: "failed", error, connectParams: params } : session
         )
       );
-      setPasswordPrompt({ sessionId, title, error, password: "" });
+      if (shouldPromptForRetryPassword(error)) {
+        setPasswordPrompt({ sessionId, title, error, password: "" });
+      }
       return;
     }
 
@@ -1000,7 +1007,9 @@ export function App() {
           item.id === targetSessionId ? { ...item, connected: false, status: "failed", error, connectParams: params } : item
         )
       );
-      setPasswordPrompt({ sessionId: targetSessionId, title: params.name || `${params.username}@${params.hostname}`, error, password: "" });
+      if (shouldPromptForRetryPassword(error)) {
+        setPasswordPrompt({ sessionId: targetSessionId, title: params.name || `${params.username}@${params.hostname}`, error, password: "" });
+      }
       return;
     }
 
@@ -4069,7 +4078,8 @@ function CommandPanel({
               placeholder="命令名称"
               onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
             />
-            <Input
+            <Textarea
+              className="min-h-20 resize-y text-sm"
               value={draft.command}
               placeholder="命令内容"
               onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))}
@@ -4149,7 +4159,7 @@ function CommandPanel({
                   </Button>
                 </div>
               </div>
-              <code className="mt-2 block truncate rounded-md bg-slate-50 px-2 py-1.5 text-xs text-slate-800">
+              <code className="mt-2 block max-h-24 overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-50 px-2 py-1.5 text-xs leading-5 text-slate-800">
                 {command.command}
               </code>
               {command.description && <p className="mt-2 truncate text-xs text-slate-500">{command.description}</p>}

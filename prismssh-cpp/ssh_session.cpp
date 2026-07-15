@@ -42,6 +42,34 @@ struct JumpTunnelArgs {
     int targetPort;
 };
 
+static std::string JoinSupportedLibssh2Algorithms(LIBSSH2_SESSION* session, int methodType) {
+    const char** algorithms = NULL;
+    int count = libssh2_session_supported_algs(session, methodType, &algorithms);
+    if (count <= 0 || !algorithms) {
+        return "unknown";
+    }
+
+    std::ostringstream joined;
+    for (int i = 0; i < count; ++i) {
+        if (i > 0) {
+            joined << ",";
+        }
+        joined << (algorithms[i] ? algorithms[i] : "");
+    }
+    libssh2_free(session, (void*)algorithms);
+    return joined.str();
+}
+
+static std::string BuildLibssh2AlgorithmSummary(LIBSSH2_SESSION* session) {
+    if (!session) {
+        return "";
+    }
+    return " local supported algorithms: kex=[" + JoinSupportedLibssh2Algorithms(session, LIBSSH2_METHOD_KEX) +
+        "], hostkey=[" + JoinSupportedLibssh2Algorithms(session, LIBSSH2_METHOD_HOSTKEY) +
+        "], cipher_cs=[" + JoinSupportedLibssh2Algorithms(session, LIBSSH2_METHOD_CRYPT_CS) +
+        "], cipher_sc=[" + JoinSupportedLibssh2Algorithms(session, LIBSSH2_METHOD_CRYPT_SC) + "]";
+}
+
 static void SockToChannelPump(SOCKET sock, LIBSSH2_CHANNEL* channel, bool* active) {
     char buf[16384];
     while (*active) {
@@ -691,7 +719,9 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
         int err_msg_len = 0;
         libssh2_session_last_error(sshSession, &err_msg, &err_msg_len, 0);
         std::string detail = (err_msg && err_msg_len > 0) ? std::string(err_msg, err_msg_len) : "unknown error";
-        lastError = "libssh2 handshake failed (code: " + std::to_string(handshake_res) + ", detail: " + detail + ")";
+        lastError = "libssh2 handshake failed (code: " + std::to_string(handshake_res) + ", detail: " + detail +
+            "). SSH negotiation failed before authentication; private key was not used." +
+            BuildLibssh2AlgorithmSummary(sshSession);
         libssh2_session_free(sshSession);
         sshSession = NULL;
         closesocket(sock);
