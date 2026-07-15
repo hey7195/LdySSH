@@ -1878,6 +1878,27 @@ describe("command library", () => {
     expect(call?.[0]).toContain("echo first\\necho second");
   });
 
+  test("edits an existing command in a dialog instead of filling the add form", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("命令库"));
+    const addCommandInput = await screen.findByPlaceholderText("命令内容");
+    fireEvent.click(screen.getAllByRole("button", { name: "编辑" })[0]);
+
+    const dialog = await screen.findByRole("dialog", { name: "编辑命令" });
+    expect(addCommandInput).toHaveValue("");
+    expect(within(dialog).getByDisplayValue("磁盘使用")).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByDisplayValue("df -h"), {
+      target: { value: "df -h /data" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存命令" }));
+
+    await waitFor(() => expect(window.pywebview?.api?.save_command_library).toHaveBeenCalled());
+    const call = (window.pywebview?.api?.save_command_library as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    expect(call?.[0]).toContain("df -h /data");
+    expect(screen.queryByRole("dialog", { name: "编辑命令" })).not.toBeInTheDocument();
+  });
+
   test("inserts FinalShell-style parameter placeholders while adding a command", async () => {
     render(<App />);
 

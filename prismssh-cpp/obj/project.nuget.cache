@@ -1,14 +1,11 @@
 {
   "version": 2,
-  "dgSpecHash": "5cD3ssUsUbc=",
+  "dgSpecHash": "essVF7AysCA=",
   "success": true,
-  "projectFilePath": "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\prismssh-cpp.vcxproj",
+  "projectFilePath": "E:\\adb\\tools\\LdSSH\\prismssh-cpp\\prismssh-cpp.vcxproj",
   "expectedPackageFiles": [
-    "C:\\Users\\28391\\.nuget\\packages\\microsoft.web.webview2\\1.0.2210.55\\microsoft.web.webview2.1.0.2210.55.nupkg.sha512",
-    "C:\\Users\\28391\\.nuget\\packages\\nlohmann.json\\3.11.2\\nlohmann.json.3.11.2.nupkg.sha512",
-    "C:\\Users\\28391\\.nuget\\packages\\rmt_libssh2\\1.8.0\\rmt_libssh2.1.8.0.nupkg.sha512",
-    "C:\\Users\\28391\\.nuget\\packages\\rmt_openssl\\1.1.0.3\\rmt_openssl.1.1.0.3.nupkg.sha512",
-    "C:\\Users\\28391\\.nuget\\packages\\rmt_zlib\\1.2.8.7\\rmt_zlib.1.2.8.7.nupkg.sha512"
+    "$(UserProfile)\\.nuget\\packages\\microsoft.web.webview2\\1.0.2210.55\\microsoft.web.webview2.1.0.2210.55.nupkg.sha512",
+    "$(UserProfile)\\.nuget\\packages\\nlohmann.json\\3.11.2\\nlohmann.json.3.11.2.nupkg.sha512"
   ],
   "logs": []
 }

@@ -38,7 +38,10 @@
   <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="Shared" />
   <ImportGroup Label="PropertySheets" />
-  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="UserMacros">
+    <VcpkgRoot>$(ProjectDir)..\..\.tools\vcpkg\</VcpkgRoot>
+    <VcpkgTriplet>x64-windows-static-md</VcpkgTriplet>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -46,14 +49,14 @@
       <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\include\v140\x64\Debug\static;$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\include;$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(VcpkgRoot)installed\$(VcpkgTriplet)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\lib\v140\x64\Debug\static;$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\lib\v140\x64\Debug\static;$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\lib\v140\x64\Debug\static;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>libssh2.lib;libssl.lib;libcrypto.lib;zlibstat.lib;ws2_32.lib;crypt32.lib;shlwapi.lib;user32.lib;gdi32.lib;dwmapi.lib;bcrypt.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(VcpkgRoot)installed\$(VcpkgTriplet)\debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libssh2.lib;ws2_32.lib;crypt32.lib;bcrypt.lib;shlwapi.lib;user32.lib;gdi32.lib;dwmapi.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -65,7 +68,7 @@
       <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\include\v140\x64\Release\static;$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\include;$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(VcpkgRoot)installed\$(VcpkgTriplet)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -73,8 +76,8 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(NuGetPackageRoot)rmt_libssh2\1.8.0\build\native\lib\v140\x64\Release\static;$(NuGetPackageRoot)rmt_openssl\1.1.0.3\build\native\lib\v140\x64\Release\static;$(NuGetPackageRoot)rmt_zlib\1.2.8.7\build\native\lib\v140\x64\Release\static;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>libssh2.lib;libssl.lib;libcrypto.lib;zlibstat.lib;ws2_32.lib;crypt32.lib;shlwapi.lib;user32.lib;gdi32.lib;dwmapi.lib;bcrypt.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(VcpkgRoot)installed\$(VcpkgTriplet)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libssh2.lib;ws2_32.lib;crypt32.lib;bcrypt.lib;shlwapi.lib;user32.lib;gdi32.lib;dwmapi.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -101,9 +104,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2210.55" />
     <PackageReference Include="nlohmann.json" Version="3.11.2" />
-    <PackageReference Include="rmt_libssh2" Version="1.8.0" />
-    <PackageReference Include="rmt_openssl" Version="1.1.0.3" />
-    <PackageReference Include="rmt_zlib" Version="1.2.8.7" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

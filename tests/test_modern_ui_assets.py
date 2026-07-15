@@ -337,6 +337,27 @@ def test_cpp_handshake_error_reports_auth_was_not_reached_and_supported_algorith
     assert "JoinSupportedLibssh2Algorithms(session, LIBSSH2_METHOD_CRYPT_CS)" in source
 
 
+def test_cpp_project_links_modern_vcpkg_libssh2_instead_of_legacy_nuget_package():
+    project = read("prismssh-cpp/prismssh-cpp.vcxproj")
+
+    assert "rmt_libssh2" not in project
+    assert "rmt_openssl" not in project
+    assert "rmt_zlib" not in project
+    assert "VcpkgRoot" in project
+    assert "x64-windows-static-md" in project
+    assert "libssh2.lib" in project
+
+    manifest = read("prismssh-cpp/vcpkg.json")
+    assert '"name": "libssh2"' in manifest
+    assert '"version>=": "1.11.1"' in manifest
+
+
+def test_cpp_jump_tunnel_uses_direct_tcpip_ex_for_modern_libssh2_headers():
+    source = read("prismssh-cpp/ssh_session.cpp")
+    assert "libssh2_channel_direct_tcpip_ex(" in source
+    assert "LIBSSH2_CHANNEL* jumpChannel = libssh2_channel_direct_tcpip(" not in source
+
+
 def test_cpp_send_input_does_not_sleep_while_holding_ssh_mutex():
     source = read("prismssh-cpp/ssh_session.cpp")
     match = re.search(

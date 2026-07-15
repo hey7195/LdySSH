@@ -5,10 +5,8 @@
   "dependencies": [
     {
       "name": "libssh2",
-      "default-features": false,
-      "features": [
-        "zlib"
-      ]
+      "version>=": "1.11.1",
+      "default-features": false
     }
   ]
 }

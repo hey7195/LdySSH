@@ -127,7 +127,7 @@ static DWORD WINAPI JumpTunnelListenerThread(LPVOID param) {
         return 0;
     }
     
-    LIBSSH2_CHANNEL* jumpChannel = libssh2_channel_direct_tcpip(
+    LIBSSH2_CHANNEL* jumpChannel = libssh2_channel_direct_tcpip_ex(
         args->jumpSshSession, 
         args->targetHost.c_str(), 
         args->targetPort, 

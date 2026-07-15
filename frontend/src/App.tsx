@@ -3912,6 +3912,7 @@ function CommandPanel({
   const [query, setQuery] = useState("");
   const [folderName, setFolderName] = useState("");
   const [draft, setDraft] = useState({ id: "", name: "", command: "", description: "" });
+  const [editingCommand, setEditingCommand] = useState<(CommandItem & { folderId: string }) | null>(null);
   const [pendingCommandKey, setPendingCommandKey] = useState("");
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
@@ -3943,12 +3944,23 @@ function CommandPanel({
 
   function submitCommand() {
     if (!activeFolder) return;
-    onSaveCommand(activeFolder.id, draft, draft.id || undefined);
+    onSaveCommand(activeFolder.id, draft);
     setDraft({ id: "", name: "", command: "", description: "" });
   }
 
-  function editCommand(command: CommandItem) {
-    setDraft({
+  function submitEditedCommand() {
+    if (!editingCommand) return;
+    onSaveCommand(editingCommand.folderId, {
+      name: editingCommand.name,
+      command: editingCommand.command,
+      description: editingCommand.description || ""
+    }, editingCommand.id);
+    setEditingCommand(null);
+  }
+
+  function editCommand(command: CommandItem & { folderId: string }) {
+    setEditingCommand({
+      folderId: command.folderId,
       id: command.id,
       name: command.name,
       command: command.command,
@@ -3958,6 +3970,10 @@ function CommandPanel({
 
   function insertCommandParameter(index: number) {
     setDraft((current) => ({ ...current, command: `${current.command}[p#${index} 参数名]` }));
+  }
+
+  function insertEditingCommandParameter(index: number) {
+    setEditingCommand((current) => current ? { ...current, command: `${current.command}[p#${index} 参数名]` } : current);
   }
 
   function sendCommand(command: CommandItem & { folderId: string }) {
@@ -4071,7 +4087,7 @@ function CommandPanel({
           </span>
         </div>
 
-        <Panel title={draft.id ? "编辑命令" : "添加命令"}>
+        <Panel title="添加命令">
           <div className="grid grid-cols-[180px_minmax(0,1fr)] gap-2">
             <Input
               value={draft.name}
@@ -4101,14 +4117,69 @@ function CommandPanel({
             />
           </div>
           <div className="mt-3 flex justify-end gap-2">
-            {draft.id && (
-              <Button variant="outline" onClick={() => setDraft({ id: "", name: "", command: "", description: "" })}>
-                取消编辑
-              </Button>
-            )}
-            <Button onClick={submitCommand}>{draft.id ? "保存命令" : "添加命令"}</Button>
+            <Button onClick={submitCommand}>添加命令</Button>
           </div>
         </Panel>
+
+        <Dialog.Root open={Boolean(editingCommand)} onOpenChange={(open) => !open && setEditingCommand(null)}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
+            <Dialog.Content className="fixed left-1/2 top-1/2 w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+              <div className="mb-5 flex items-start justify-between">
+                <div>
+                  <Dialog.Title className="text-lg font-semibold text-slate-950">编辑命令</Dialog.Title>
+                  <Dialog.Description className="mt-1 text-sm text-slate-500">
+                    修改当前快捷命令，保存后立即写回命令库。
+                  </Dialog.Description>
+                </div>
+                <Dialog.Close asChild>
+                  <button className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                    <X className="h-4 w-4" />
+                  </button>
+                </Dialog.Close>
+              </div>
+
+              {editingCommand && (
+                <div className="grid gap-3">
+                  <Field label="命令名称">
+                    <Input
+                      value={editingCommand.name}
+                      onChange={(event) => setEditingCommand((current) => current ? { ...current, name: event.target.value } : current)}
+                    />
+                  </Field>
+                  <Field label="命令内容">
+                    <Textarea
+                      className="min-h-32 resize-y text-sm"
+                      value={editingCommand.command}
+                      onChange={(event) => setEditingCommand((current) => current ? { ...current, command: event.target.value } : current)}
+                    />
+                  </Field>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span>插入参数</span>
+                    {COMMAND_PARAMETER_SLOTS.map((index) => (
+                      <Button key={index} variant="outline" className="h-7 px-3 text-xs" onClick={() => insertEditingCommandParameter(index)}>
+                        参数{index}
+                      </Button>
+                    ))}
+                  </div>
+                  <Field label="命令描述">
+                    <Input
+                      value={editingCommand.description || ""}
+                      onChange={(event) => setEditingCommand((current) => current ? { ...current, description: event.target.value } : current)}
+                    />
+                  </Field>
+                </div>
+              )}
+
+              <div className="mt-5 flex justify-end gap-2">
+                <Dialog.Close asChild>
+                  <Button variant="outline">取消</Button>
+                </Dialog.Close>
+                <Button onClick={submitEditedCommand}>保存命令</Button>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
 
         {pendingCommand && (
           <Panel title={`${pendingCommand.name} 参数`}>

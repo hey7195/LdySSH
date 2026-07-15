@@ -1,21 +1,21 @@
 {
   "format": 1,
   "restore": {
-    "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\prismssh-cpp.vcxproj": {}
+    "E:\\adb\\tools\\LdSSH\\prismssh-cpp\\prismssh-cpp.vcxproj": {}
   },
   "projects": {
-    "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\prismssh-cpp.vcxproj": {
+    "E:\\adb\\tools\\LdSSH\\prismssh-cpp\\prismssh-cpp.vcxproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\prismssh-cpp.vcxproj",
+        "projectUniqueName": "E:\\adb\\tools\\LdSSH\\prismssh-cpp\\prismssh-cpp.vcxproj",
         "projectName": "prismssh-cpp",
-        "projectPath": "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\prismssh-cpp.vcxproj",
-        "packagesPath": "C:\\Users\\28391\\.nuget\\packages\\",
-        "outputPath": "C:\\雷电\\GPT\\ssh\\prismssh-cpp\\obj\\",
+        "projectPath": "E:\\adb\\tools\\LdSSH\\prismssh-cpp\\prismssh-cpp.vcxproj",
+        "packagesPath": "$(UserProfile)\\.nuget\\packages\\",
+        "outputPath": "E:\\adb\\tools\\LdSSH\\prismssh-cpp\\obj\\",
         "projectStyle": "PackageReference",
         "UsingMicrosoftNETSdk": false,
         "configFilePaths": [
-          "C:\\Users\\28391\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "$(AppData)\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "native"
@@ -46,10 +46,6 @@
             "nlohmann.json": {
               "target": "Package",
               "version": "[3.11.2, )"
-            },
-            "rmt_libssh2": {
-              "target": "Package",
-              "version": "[1.8.0, )"
             }
           }
         }
