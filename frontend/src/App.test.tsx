@@ -31,6 +31,11 @@ const terminalMock = vi.hoisted(() => ({
   focusCalls: 0,
   fitCalls: 0,
   refreshCalls: 0,
+  scrollToLineCalls: [] as number[],
+  findNextCalls: [] as Array<{ term: string; options?: Record<string, unknown> }>,
+  findPreviousCalls: [] as Array<{ term: string; options?: Record<string, unknown> }>,
+  clearSearchDecorationsCalls: 0,
+  searchResultHandler: undefined as undefined | ((event: { resultIndex: number; resultCount: number }) => void),
   nextFitSize: undefined as undefined | { cols: number; rows: number },
   instances: [] as Array<{ writes: string[]; terminal: { cols: number; rows: number } }>
 }));
@@ -48,6 +53,29 @@ vi.mock("@xterm/addon-fit", () => ({
   }
 }));
 
+vi.mock("@xterm/addon-search", () => ({
+  SearchAddon: class {
+    onDidChangeResults(handler: (event: { resultIndex: number; resultCount: number }) => void) {
+      terminalMock.searchResultHandler = handler;
+      return { dispose() {} };
+    }
+    findNext(term: string, options?: Record<string, unknown>) {
+      terminalMock.findNextCalls.push({ term, options });
+      terminalMock.searchResultHandler?.({ resultIndex: 1, resultCount: 2 });
+      return true;
+    }
+    findPrevious(term: string, options?: Record<string, unknown>) {
+      terminalMock.findPreviousCalls.push({ term, options });
+      terminalMock.searchResultHandler?.({ resultIndex: 0, resultCount: 2 });
+      return true;
+    }
+    clearDecorations() {
+      terminalMock.clearSearchDecorationsCalls += 1;
+    }
+    dispose() {}
+  }
+}));
+
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
     private instance = { writes: [] as string[], terminal: this as { cols: number; rows: number } };
@@ -58,6 +86,9 @@ vi.mock("@xterm/xterm", () => ({
       terminalMock.instances.push(this.instance);
     }
     dispose() {}
+    scrollToLine(line: number) {
+      terminalMock.scrollToLineCalls.push(line);
+    }
     focus() {
       terminalMock.focusCalls += 1;
     }
@@ -110,6 +141,11 @@ beforeEach(() => {
   terminalMock.focusCalls = 0;
   terminalMock.fitCalls = 0;
   terminalMock.refreshCalls = 0;
+  terminalMock.scrollToLineCalls = [];
+  terminalMock.findNextCalls = [];
+  terminalMock.findPreviousCalls = [];
+  terminalMock.clearSearchDecorationsCalls = 0;
+  terminalMock.searchResultHandler = undefined;
   terminalMock.nextFitSize = undefined;
   terminalMock.instances = [];
   window.localStorage.clear();
@@ -1041,11 +1077,20 @@ describe("command library", () => {
 
     expect(await screen.findByText("1 / 2")).toBeInTheDocument();
     expect(screen.getByText(/needle in old command output/)).toBeInTheDocument();
+    expect(terminalMock.findPreviousCalls.at(-1)?.term).toBe("needle");
+    expect(terminalMock.findPreviousCalls.at(-1)?.options).toMatchObject({
+      caseSensitive: false,
+      decorations: expect.objectContaining({
+        matchBackground: expect.any(String),
+        activeMatchBackground: expect.any(String)
+      })
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "下一条" }));
 
     expect(screen.getByText("2 / 2")).toBeInTheDocument();
     expect(screen.getByText(/second needle result/)).toBeInTheDocument();
+    expect(terminalMock.findNextCalls.at(-1)?.term).toBe("needle");
   });
 
   test("keeps keyboard input inside the terminal search box", async () => {

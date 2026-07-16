@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { Terminal as XTerm } from "@xterm/xterm";
 import {
   Bot,
@@ -378,6 +379,21 @@ function findTerminalSearchMatches(transcript: string, query: string): TerminalS
 
   return matches;
 }
+
+const terminalSearchOptions: ISearchOptions = {
+  caseSensitive: false,
+  regex: false,
+  wholeWord: false,
+  incremental: false,
+  decorations: {
+    matchBackground: "#facc15",
+    matchBorder: "#fde68a",
+    matchOverviewRuler: "#facc15",
+    activeMatchBackground: "#fb923c",
+    activeMatchBorder: "#fed7aa",
+    activeMatchColorOverviewRuler: "#fb923c"
+  }
+};
 
 function loadStoredTheme(): ThemeMode {
   const value = window.localStorage.getItem(storageKeys.theme);
@@ -2177,6 +2193,7 @@ function TerminalSurface({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
   const decoderRef = useRef<TextDecoder | null>(null);
   const activeIdRef = useRef("");
   const visibleRef = useRef(visible);
@@ -2185,12 +2202,12 @@ function TerminalSurface({
   const [terminalMenu, setTerminalMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const [searchResult, setSearchResult] = useState({ resultIndex: -1, resultCount: 0 });
   const searchMatches = useMemo(
     () => findTerminalSearchMatches(initialTranscript, searchQuery),
     [initialTranscript, searchQuery]
   );
-  const visibleMatchIndex = searchMatches.length === 0 ? 0 : Math.min(activeMatchIndex, searchMatches.length - 1);
+  const visibleMatchIndex = searchResult.resultIndex >= 0 ? Math.min(searchResult.resultIndex, Math.max(0, searchMatches.length - 1)) : 0;
   const activeMatch = searchMatches[visibleMatchIndex];
   const [commandSuggestions, setCommandSuggestions] = useState<CommandSuggestion[]>([]);
   const [activeCommandSuggestionIndex, setActiveCommandSuggestionIndexState] = useState(0);
@@ -2453,14 +2470,14 @@ function TerminalSurface({
   }, [onOutput]);
 
   useEffect(() => {
-    setActiveMatchIndex(0);
-  }, [activeSession?.id, searchQuery]);
+    searchAddonRef.current?.clearDecorations();
+    setSearchResult({ resultIndex: -1, resultCount: 0 });
+  }, [activeSession?.id]);
 
   useEffect(() => {
-    if (activeMatchIndex >= searchMatches.length) {
-      setActiveMatchIndex(Math.max(0, searchMatches.length - 1));
-    }
-  }, [activeMatchIndex, searchMatches.length]);
+    if (!searchOpen) return;
+    runTerminalSearch(-1);
+  }, [searchOpen, searchQuery, activeSession?.id]);
 
   async function pasteTerminalClipboard(sessionId: string) {
     const result = await nativeBridge.clipboardPaste();
@@ -2512,7 +2529,9 @@ function TerminalSurface({
         : terminalThemeOptions
     });
     const fitAddon = new FitAddon();
+    const searchAddon = new SearchAddon({ highlightLimit: 2000 });
     terminal.loadAddon(fitAddon);
+    terminal.loadAddon(searchAddon);
     terminal.open(container);
     fitAddon.fit();
     terminal.focus();
@@ -2567,9 +2586,13 @@ function TerminalSurface({
     const selectionDisposable = terminal.onSelectionChange(() => {
       setSelectedText(terminal.getSelection().trim());
     });
+    const searchResultDisposable = searchAddon.onDidChangeResults((event) => {
+      setSearchResult({ resultIndex: event.resultIndex, resultCount: event.resultCount });
+    });
 
     terminalRef.current = terminal;
     fitRef.current = fitAddon;
+    searchAddonRef.current = searchAddon;
 
     const resize = () => {
       if (!visibleRef.current) return;
@@ -2600,6 +2623,10 @@ function TerminalSurface({
       window.clearInterval(interval);
       observer.disconnect();
       selectionDisposable.dispose();
+      searchResultDisposable.dispose();
+      if (searchAddonRef.current === searchAddon) {
+        searchAddonRef.current = null;
+      }
       terminal.dispose();
     };
   }, [activeSession?.id, highlightRules, terminalTheme, terminalAppearance, terminalBackgroundImage]);
@@ -2623,10 +2650,32 @@ function TerminalSurface({
   }, [highlightRules]);
 
   function moveSearchMatch(direction: 1 | -1) {
-    setActiveMatchIndex((current) => {
-      if (searchMatches.length === 0) return 0;
-      return (current + direction + searchMatches.length) % searchMatches.length;
-    });
+    runTerminalSearch(direction);
+  }
+
+  function runTerminalSearch(direction: 1 | -1) {
+    const term = searchQuery.trim();
+    const searchAddon = searchAddonRef.current;
+    if (!searchAddon || !term) {
+      searchAddon?.clearDecorations();
+      setSearchResult({ resultIndex: -1, resultCount: 0 });
+      return;
+    }
+
+    const found = direction === 1
+      ? searchAddon.findNext(term, terminalSearchOptions)
+      : searchAddon.findPrevious(term, terminalSearchOptions);
+    if (!found) {
+      setSearchResult({ resultIndex: -1, resultCount: 0 });
+    }
+  }
+
+  function closeTerminalSearch() {
+    setSearchOpen(false);
+    setSearchQuery("");
+    searchAddonRef.current?.clearDecorations();
+    setSearchResult({ resultIndex: -1, resultCount: 0 });
+    focusTerminal();
   }
 
   function handleTerminalKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -2638,8 +2687,7 @@ function TerminalSurface({
 
     if (event.key === "Escape" && searchOpen) {
       event.preventDefault();
-      setSearchOpen(false);
-      setSearchQuery("");
+      closeTerminalSearch();
       return;
     }
 
@@ -2649,13 +2697,12 @@ function TerminalSurface({
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.preventDefault();
-      moveSearchMatch(event.shiftKey ? -1 : 1);
+      moveSearchMatch(event.shiftKey ? 1 : -1);
     }
 
     if (event.key === "Escape") {
       event.preventDefault();
-      setSearchOpen(false);
-      setSearchQuery("");
+      closeTerminalSearch();
     }
   }
 
@@ -2718,12 +2765,14 @@ function TerminalSurface({
               onKeyDown={handleSearchKeyDown}
             />
             <span className="min-w-12 text-center font-semibold text-[var(--app-muted)]">
-              {searchQuery.trim() && searchMatches.length > 0 ? `${visibleMatchIndex + 1} / ${searchMatches.length}` : "0 / 0"}
+              {searchQuery.trim() && searchResult.resultCount > 0 && searchResult.resultIndex >= 0
+                ? `${searchResult.resultIndex + 1} / ${searchResult.resultCount}`
+                : "0 / 0"}
             </span>
             <Button
               variant="outline"
               className="h-8 px-2 text-xs"
-              disabled={searchMatches.length === 0}
+              disabled={!searchQuery.trim() || searchResult.resultCount === 0}
               onClick={() => moveSearchMatch(-1)}
             >
               上一条
@@ -2731,7 +2780,7 @@ function TerminalSurface({
             <Button
               variant="outline"
               className="h-8 px-2 text-xs"
-              disabled={searchMatches.length === 0}
+              disabled={!searchQuery.trim() || searchResult.resultCount === 0}
               onClick={() => moveSearchMatch(1)}
             >
               下一条
@@ -2740,10 +2789,7 @@ function TerminalSurface({
               aria-label="关闭查找"
               title="关闭查找"
               className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--app-muted)] hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)]"
-              onClick={() => {
-                setSearchOpen(false);
-                setSearchQuery("");
-              }}
+              onClick={closeTerminalSearch}
             >
               <X className="h-3.5 w-3.5" />
             </button>
