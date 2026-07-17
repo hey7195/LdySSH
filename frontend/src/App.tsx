@@ -603,12 +603,7 @@ function loadStoredHighlightRules(): HighlightRule[] {
   if (!raw) return DEFAULT_HIGHLIGHT_RULES;
   try {
     const parsed = JSON.parse(raw) as HighlightRule[];
-    const customRules = parsed.filter((rule) => !rule.system);
-    const storedSystemById = new Map(parsed.filter((rule) => rule.system).map((rule) => [rule.id, rule]));
-    return [
-      ...DEFAULT_HIGHLIGHT_RULES.map((rule) => ({ ...rule, enabled: storedSystemById.get(rule.id)?.enabled ?? rule.enabled })),
-      ...customRules
-    ];
+    return Array.isArray(parsed) ? parsed : DEFAULT_HIGHLIGHT_RULES;
   } catch {
     return DEFAULT_HIGHLIGHT_RULES;
   }
@@ -1228,8 +1223,24 @@ export function App() {
     ]);
   }
 
+  function updateHighlightRule(ruleId: string, patch: Pick<HighlightRule, "name" | "pattern" | "foreground">) {
+    if (!patch.name.trim() || !patch.pattern.trim()) return;
+    setHighlightRules((current) =>
+      current.map((rule) =>
+        rule.id === ruleId
+          ? {
+              ...rule,
+              name: patch.name.trim(),
+              pattern: patch.pattern.trim(),
+              foreground: patch.foreground
+            }
+          : rule
+      )
+    );
+  }
+
   function deleteHighlightRule(ruleId: string) {
-    setHighlightRules((current) => current.filter((rule) => rule.system || rule.id !== ruleId));
+    setHighlightRules((current) => current.filter((rule) => rule.id !== ruleId));
   }
 
   function updateCommandFolders(nextFolders: CommandFolder[]) {
@@ -1487,6 +1498,7 @@ export function App() {
               onCommandSuggestionCustomApplyKeyChange={setCommandSuggestionCustomApplyKey}
               onToggleHighlightRule={toggleHighlightRule}
               onAddHighlightRule={addHighlightRule}
+              onUpdateHighlightRule={updateHighlightRule}
               onDeleteHighlightRule={deleteHighlightRule}
             />
           )}
@@ -4639,6 +4651,7 @@ function SettingsPanel({
   onCommandSuggestionCustomApplyKeyChange,
   onToggleHighlightRule,
   onAddHighlightRule,
+  onUpdateHighlightRule,
   onDeleteHighlightRule
 }: {
   theme: ThemeMode;
@@ -4662,9 +4675,11 @@ function SettingsPanel({
   onCommandSuggestionCustomApplyKeyChange: (value: CommandSuggestionCustomApplyKey | null) => void;
   onToggleHighlightRule: (ruleId: string) => void;
   onAddHighlightRule: (rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) => void;
+  onUpdateHighlightRule: (ruleId: string, rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) => void;
   onDeleteHighlightRule: (ruleId: string) => void;
 }) {
   const [draft, setDraft] = useState({ name: "", pattern: "", foreground: "#2563eb" });
+  const [editingRuleId, setEditingRuleId] = useState("");
   const [recordingApplyKey, setRecordingApplyKey] = useState(false);
   const resolvedTerminalAppearance = getTerminalAppearance(terminalAppearance);
   const terminalPreviewColors = getTerminalColors(terminalTheme, resolvedTerminalAppearance);
@@ -4677,9 +4692,30 @@ function SettingsPanel({
     backgroundImage: buildTerminalBackgroundImage(terminalBackgroundImage, terminalPreviewColors.background, terminalPreviewOverlayAlpha)
   } as CSSProperties;
 
-  function addRule() {
-    onAddHighlightRule(draft);
+  function resetHighlightDraft() {
     setDraft({ name: "", pattern: "", foreground: "#2563eb" });
+    setEditingRuleId("");
+  }
+
+  function saveRule() {
+    if (editingRuleId) {
+      onUpdateHighlightRule(editingRuleId, draft);
+    } else {
+      onAddHighlightRule(draft);
+    }
+    resetHighlightDraft();
+  }
+
+  function editRule(rule: HighlightRule) {
+    setEditingRuleId(rule.id);
+    setDraft({ name: rule.name, pattern: rule.pattern, foreground: rule.foreground });
+  }
+
+  function deleteRule(ruleId: string) {
+    onDeleteHighlightRule(ruleId);
+    if (editingRuleId === ruleId) {
+      resetHighlightDraft();
+    }
   }
 
   function uploadTerminalBackground(event: ChangeEvent<HTMLInputElement>) {
@@ -4938,7 +4974,7 @@ function SettingsPanel({
           </Panel>
 
           <Panel title="终端正则高亮">
-            <div className="mb-4 grid grid-cols-[180px_minmax(0,1fr)_72px_92px] gap-2">
+            <div className="mb-4 grid grid-cols-[180px_minmax(0,1fr)_72px_92px_72px] gap-2">
               <Input
                 value={draft.name}
                 placeholder="规则名称"
@@ -4956,14 +4992,19 @@ function SettingsPanel({
                 value={draft.foreground}
                 onChange={(event) => setDraft((current) => ({ ...current, foreground: event.target.value }))}
               />
-              <Button onClick={addRule}>添加规则</Button>
+              <Button onClick={saveRule}>{editingRuleId ? "保存规则" : "添加规则"}</Button>
+              {editingRuleId && (
+                <Button variant="outline" onClick={resetHighlightDraft}>
+                  取消
+                </Button>
+              )}
             </div>
 
             <div className="space-y-2">
               {highlightRules.map((rule) => (
                 <div
                   key={rule.id}
-                  className="grid grid-cols-[170px_minmax(0,1fr)_86px_72px] items-center gap-3 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3"
+                  className="grid grid-cols-[170px_minmax(0,1fr)_86px_72px_72px] items-center gap-3 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3"
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -4984,10 +5025,18 @@ function SettingsPanel({
                     {rule.enabled ? "停用" : "启用"}
                   </Button>
                   <Button
+                    variant="outline"
+                    className="h-8"
+                    aria-label={`编辑${rule.name}`}
+                    onClick={() => editRule(rule)}
+                  >
+                    编辑
+                  </Button>
+                  <Button
                     variant="ghost"
                     className="h-8"
-                    disabled={rule.system}
-                    onClick={() => onDeleteHighlightRule(rule.id)}
+                    aria-label={`删除${rule.name}`}
+                    onClick={() => deleteRule(rule.id)}
                   >
                     删除
                   </Button>

@@ -2340,9 +2340,39 @@ describe("settings panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "添加规则" }));
 
     expect(screen.getByText("崩溃")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "删除" }).at(-1)!);
+    fireEvent.click(screen.getByRole("button", { name: "删除崩溃" }));
 
     expect(screen.queryByText("崩溃")).not.toBeInTheDocument();
+  });
+
+  test("edits and deletes terminal highlight rules from settings", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("设置"));
+
+    const editErrorButton = await screen.findByRole("button", { name: "编辑错误" });
+    fireEvent.click(editErrorButton);
+    fireEvent.change(screen.getByPlaceholderText("规则名称"), {
+      target: { value: "严重错误" }
+    });
+    fireEvent.change(screen.getByPlaceholderText("正则表达式"), {
+      target: { value: "fatal|panic" }
+    });
+    fireEvent.change(screen.getByLabelText("规则颜色"), {
+      target: { value: "#ff00aa" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存规则" }));
+
+    expect(screen.getByText("严重错误")).toBeInTheDocument();
+    expect(screen.getByText("fatal|panic")).toBeInTheDocument();
+    expect(screen.queryByText("错误")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("ldyssh.terminal.highlightRules")).toContain("fatal|panic");
+    expect(window.localStorage.getItem("ldyssh.terminal.highlightRules")).toContain("#ff00aa");
+
+    fireEvent.click(screen.getByRole("button", { name: "删除严重错误" }));
+
+    expect(screen.queryByText("严重错误")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("ldyssh.terminal.highlightRules")).not.toContain("fatal|panic");
   });
 });
 
