@@ -2221,6 +2221,7 @@ function TerminalSurface({
   const commandInputRef = useRef("");
   const commandHistoryRef = useRef<string[]>([]);
   const rawCommandModeRef = useRef(false);
+  const focusInputSuppressUntilRef = useRef(0);
 
   commandFoldersRef.current = commandFolders;
   commandSuggestionsEnabledRef.current = commandSuggestionsEnabled;
@@ -2250,6 +2251,10 @@ function TerminalSurface({
     focusTerminal();
   }
 
+  function suppressFocusInputResidue() {
+    focusInputSuppressUntilRef.current = Date.now() + 150;
+  }
+
   function setActiveCommandSuggestionIndex(index: number) {
     activeCommandSuggestionIndexRef.current = index;
     setActiveCommandSuggestionIndexState(index);
@@ -2272,6 +2277,10 @@ function TerminalSurface({
   function resetCommandInput() {
     commandInputRef.current = "";
     setCommandSuggestionList([]);
+  }
+
+  function shouldDropFocusInputResidue(data: string) {
+    return Date.now() < focusInputSuppressUntilRef.current && /^[A-Za-z]{1,3}$/.test(data);
   }
 
   function updateCommandInputFromData(data: string) {
@@ -2415,6 +2424,7 @@ function TerminalSurface({
     if (!activeSession) return;
 
     function restoreTerminalRender() {
+      suppressFocusInputResidue();
       refitAndFocusTerminal();
       window.requestAnimationFrame(refitAndFocusTerminal);
     }
@@ -2577,11 +2587,12 @@ function TerminalSurface({
     }
     decoderRef.current = new TextDecoder("utf-8");
     terminal.onData((data) => {
-      updateCommandInputFromData(data);
       const input = stripTerminalGeneratedReplies(data);
-      if (input) {
-        void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(input)));
+      if (!input || shouldDropFocusInputResidue(input)) {
+        return;
       }
+      updateCommandInputFromData(input);
+      void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(input)));
     });
     const selectionDisposable = terminal.onSelectionChange(() => {
       setSelectedText(terminal.getSelection().trim());
@@ -3107,9 +3118,34 @@ function normalizePasteText(text: string) {
 }
 
 function stripTerminalGeneratedReplies(data: string) {
-  return data
+  const stripped = data
     .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "")
-    .replace(/\x1bP[\s\S]*?\x1b\\/g, "");
+    .replace(/\x1bP[\s\S]*?\x1b\\/g, "")
+    .replace(/\x1b\[[?>]?[0-9;:]*c/g, "")
+    .replace(/\x1b\[\??[0-9;:]*n/g, "")
+    .replace(/\x1b\[\??[0-9;:]*R/g, "")
+    .replace(/\x1b\[\??[0-9;:]*\$y/g, "");
+
+  return isVisibleTerminalReplyResidue(stripped) ? "" : stripped;
+}
+
+function isVisibleTerminalReplyResidue(data: string) {
+  let offset = 0;
+  const patterns = [
+    /^2RR/,
+    /^[?>]?[0-9]+(?:;[0-9]+){1,3}c/,
+    /^\??[0-9]+;[0-9]+\$y/,
+    /^1[01];rgb:[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}/
+  ];
+
+  while (offset < data.length) {
+    const rest = data.slice(offset);
+    const match = patterns.map((pattern) => rest.match(pattern)).find(Boolean);
+    if (!match) return false;
+    offset += match[0].length;
+  }
+
+  return data.length > 0;
 }
 
 function base64ToBytes(base64: string) {
