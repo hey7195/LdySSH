@@ -27,12 +27,41 @@ describe("terminal highlight settings", () => {
     expect(DEFAULT_HIGHLIGHT_RULES.map((rule) => rule.name)).toEqual([
       "错误",
       "警告",
+      "权限拒绝",
+      "Linux 服务状态",
+      "ADB 设备",
       "IP 地址",
       "URL",
       "HTTP 5xx",
       "路径",
-      "耗时"
+      "耗时",
+      "包管理命令",
+      "端口",
+      "Android 包名",
+      "进程 ID"
     ]);
+  });
+
+  test("highlights Ubuntu CentOS and ADB terminal output", () => {
+    const highlighted = applyHighlightRules(
+      [
+        "apt-get install nginx",
+        "systemctl status nginx active (running)",
+        "cat /data/local/tmp/a.txt: Permission denied",
+        "127.0.0.1:5555 device",
+        "package:com.android.settings pid=1234 uid=1000",
+        "listen on port 10302"
+      ].join("\n"),
+      DEFAULT_HIGHLIGHT_RULES
+    );
+
+    expect(highlighted).toMatch(/\x1b\[[\d;]+mapt-get\x1b\[0m/);
+    expect(highlighted).toMatch(/\x1b\[[\d;]+mactive \(running\)\x1b\[0m/);
+    expect(highlighted).toMatch(/\x1b\[[\d;]+mPermission denied\x1b\[0m/);
+    expect(highlighted).toMatch(/\x1b\[[\d;]+m127\.0\.0\.1:5555 device\x1b\[0m/);
+    expect(highlighted).toMatch(/\x1b\[[\d;]+mcom\.android\.settings\x1b\[0m/);
+    expect(highlighted).toMatch(/\x1b\[[\d;]+mpid=1234\x1b\[0m/);
+    expect(highlighted).toMatch(/\x1b\[[\d;]+mport 10302\x1b\[0m/);
   });
 
   test("wraps matching terminal text with ANSI color sequences", () => {

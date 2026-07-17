@@ -2170,6 +2170,31 @@ describe("command library", () => {
 });
 
 describe("settings panel", () => {
+  test("uses FinalShell-style default terminal fonts", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("设置"));
+
+    expect(await screen.findByLabelText("字号")).toHaveValue(13);
+    expect(within(screen.getByRole("listbox", { name: "英文字体" })).getByRole("option", { name: "JetBrainsMono.ttf" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    expect(within(screen.getByRole("listbox", { name: "中文字体" })).getByRole("option", { name: "微软雅黑" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+
+    await waitFor(() => {
+      const options = terminalMock.options.at(-1) as { fontFamily?: string; fontSize?: number };
+      expect(options.fontFamily).toBe("JetBrains Mono, Consolas, Courier New, Microsoft YaHei, monospace");
+      expect(options.fontSize).toBe(13);
+    });
+  });
+
   test("switches theme and displays default terminal highlight rules", async () => {
     render(<App />);
 
@@ -2191,9 +2216,8 @@ describe("settings panel", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTitle("设置"));
-    fireEvent.change(await screen.findByLabelText("终端字体"), {
-      target: { value: "JetBrains Mono, monospace" }
-    });
+    fireEvent.click(within(await screen.findByRole("listbox", { name: "英文字体" })).getByRole("option", { name: "RobotoMono.ttf" }));
+    fireEvent.click(within(screen.getByRole("listbox", { name: "中文字体" })).getByRole("option", { name: "宋体" }));
     fireEvent.change(screen.getByLabelText("字号"), {
       target: { value: "16" }
     });
@@ -2205,7 +2229,8 @@ describe("settings panel", () => {
     });
 
     await waitFor(() => {
-      expect(window.localStorage.getItem("ldyssh.terminal.fontFamily")).toBe("JetBrains Mono, monospace");
+      expect(window.localStorage.getItem("ldyssh.terminal.englishFont")).toBe("RobotoMono.ttf");
+      expect(window.localStorage.getItem("ldyssh.terminal.chineseFont")).toBe("宋体");
       expect(window.localStorage.getItem("ldyssh.terminal.fontSize")).toBe("16");
       expect(window.localStorage.getItem("ldyssh.terminal.foreground")).toBe("#00ff88");
       expect(window.localStorage.getItem("ldyssh.terminal.background")).toBe("#101820");
@@ -2220,7 +2245,7 @@ describe("settings panel", () => {
     });
     await waitFor(() => {
       const options = terminalMock.options.at(-1) as { fontFamily?: string; fontSize?: number; theme?: { background?: string; foreground?: string } };
-      expect(options.fontFamily).toBe("JetBrains Mono, monospace");
+      expect(options.fontFamily).toBe("Roboto Mono, Consolas, Courier New, SimSun, Microsoft YaHei, monospace");
       expect(options.fontSize).toBe(16);
       expect(options.theme?.foreground).toBe("#00ff88");
       expect(options.theme?.background).toBe("#101820");

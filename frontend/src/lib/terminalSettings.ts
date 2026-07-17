@@ -23,7 +23,7 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
   {
     id: "error",
     name: "错误",
-    pattern: "\\b(ERROR|FATAL|Exception|failed|失败)\\b",
+    pattern: "\\b(ERROR|ERR|FATAL|Exception|Traceback|failed|failure|panic|crash|ANR|Segmentation fault|No such file or directory|not found|失败)\\b",
     flags: "gi",
     enabled: true,
     scope: "terminal",
@@ -36,7 +36,7 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
   {
     id: "warn",
     name: "警告",
-    pattern: "\\b(WARN|WARNING|警告)\\b",
+    pattern: "\\b(WARN|WARNING|deprecated|skipped|警告)\\b",
     flags: "gi",
     enabled: true,
     scope: "terminal",
@@ -47,6 +47,45 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
     system: true
   },
   {
+    id: "permission",
+    name: "权限拒绝",
+    pattern: "\\b(Permission denied|Access denied|Operation not permitted|Read-only file system|unauthorized|no permissions)\\b",
+    flags: "gi",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#b91c1c",
+    background: "#fee2e2",
+    fontWeight: "bold",
+    priority: 25,
+    system: true
+  },
+  {
+    id: "service-state",
+    name: "Linux 服务状态",
+    pattern: "\\bactive \\(running\\)|\\binactive \\(dead\\)|\\b(?:enabled|disabled|running|exited|dead)\\b",
+    flags: "gi",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#16a34a",
+    background: "#dcfce7",
+    fontWeight: "bold",
+    priority: 30,
+    system: true
+  },
+  {
+    id: "adb-device",
+    name: "ADB 设备",
+    pattern: "\\b(?:[A-Za-z0-9._-]+|(?:\\d{1,3}\\.){3}\\d{1,3}:\\d{2,5})\\s+(?:device|offline|unauthorized|no permissions)\\b",
+    flags: "gi",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#0891b2",
+    background: "#cffafe",
+    fontWeight: "bold",
+    priority: 35,
+    system: true
+  },
+  {
     id: "ip",
     name: "IP 地址",
     pattern: "\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b",
@@ -54,7 +93,7 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
     enabled: true,
     scope: "terminal",
     foreground: "#2563eb",
-    priority: 30,
+    priority: 40,
     system: true
   },
   {
@@ -65,7 +104,7 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
     enabled: true,
     scope: "terminal",
     foreground: "#7c3aed",
-    priority: 40,
+    priority: 50,
     system: true
   },
   {
@@ -78,18 +117,18 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
     foreground: "#be123c",
     background: "#ffe4e6",
     fontWeight: "bold",
-    priority: 50,
+    priority: 60,
     system: true
   },
   {
     id: "path",
     name: "路径",
-    pattern: "([A-Za-z]:\\\\[^\\s]+|/[^\\s]+)",
+    pattern: "([A-Za-z]:\\\\[^\\s]+|/(?:[^\\s:]+/?)+)",
     flags: "g",
     enabled: true,
     scope: "terminal",
     foreground: "#0f766e",
-    priority: 60,
+    priority: 70,
     system: true
   },
   {
@@ -100,12 +139,60 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
     enabled: true,
     scope: "terminal",
     foreground: "#ea580c",
-    priority: 70,
+    priority: 80,
+    system: true
+  },
+  {
+    id: "package-command",
+    name: "包管理命令",
+    pattern: "\\b(?:apt-get|apt-cache|firewall-cmd|journalctl|systemctl|setenforce|getenforce|semanage|iptables|netstat|service|dpkg|dnf|rpm|yum|apt|lsof|ss)\\b",
+    flags: "gi",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#0d9488",
+    background: "#ccfbf1",
+    fontWeight: "bold",
+    priority: 90,
+    system: true
+  },
+  {
+    id: "port",
+    name: "端口",
+    pattern: "\\b(?:port\\s+|listen\\s+|listening\\s+on\\s+)\\d{2,5}\\b|:\\d{2,5}\\b",
+    flags: "gi",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#9333ea",
+    priority: 100,
+    system: true
+  },
+  {
+    id: "android-package",
+    name: "Android 包名",
+    pattern: "\\b(?:[A-Za-z_][\\w]*\\.){2,}[A-Za-z_][\\w]*\\b",
+    flags: "g",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#2563eb",
+    background: "#dbeafe",
+    priority: 110,
+    system: true
+  },
+  {
+    id: "process-id",
+    name: "进程 ID",
+    pattern: "\\b(?:pid|ppid|tid|uid|gid)[:= ]+\\d+\\b",
+    flags: "gi",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#ca8a04",
+    priority: 120,
     system: true
   }
 ];
 
 type CompiledHighlightRule = { rule: HighlightRule; regex: RegExp };
+type HighlightMatch = { start: number; end: number; prefix: string };
 
 const terminalControlSequencePattern = "\\x1b\\[[0-9;?]*[ -/]*[@-~]|\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)";
 const terminalControlSequenceSplitter = new RegExp(`(${terminalControlSequencePattern})`, "g");
@@ -138,15 +225,50 @@ export function applyHighlightRules(text: string, rules: HighlightRule[]) {
 }
 
 function highlightPlainTerminalSegment(part: string, compiled: CompiledHighlightRule[]) {
+  const matches: HighlightMatch[] = [];
+  const occupied = new Array<boolean>(part.length).fill(false);
+
   for (const entry of compiled) {
     entry.regex.lastIndex = 0;
-    if (!entry.regex.test(part)) continue;
-    entry.regex.lastIndex = 0;
     const prefix = toAnsiPrefix(entry.rule);
-    if (!prefix) return part;
-    return part.replace(entry.regex, (match) => `${prefix}${match}\x1b[0m`);
+    if (!prefix) continue;
+
+    let match: RegExpExecArray | null;
+    while ((match = entry.regex.exec(part))) {
+      if (!match[0]) {
+        entry.regex.lastIndex += 1;
+        continue;
+      }
+
+      const start = match.index;
+      const end = start + match[0].length;
+      if (!isRangeFree(occupied, start, end)) continue;
+
+      for (let index = start; index < end; index += 1) {
+        occupied[index] = true;
+      }
+      matches.push({ start, end, prefix });
+    }
   }
-  return part;
+
+  if (matches.length === 0) return part;
+
+  matches.sort((left, right) => left.start - right.start);
+  let output = "";
+  let cursor = 0;
+  matches.forEach((match) => {
+    output += part.slice(cursor, match.start);
+    output += `${match.prefix}${part.slice(match.start, match.end)}\x1b[0m`;
+    cursor = match.end;
+  });
+  return `${output}${part.slice(cursor)}`;
+}
+
+function isRangeFree(occupied: boolean[], start: number, end: number) {
+  for (let index = start; index < end; index += 1) {
+    if (occupied[index]) return false;
+  }
+  return true;
 }
 
 export function getThemeAttribute(theme: ThemeMode) {

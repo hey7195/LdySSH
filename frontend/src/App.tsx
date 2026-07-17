@@ -223,10 +223,17 @@ interface TerminalSearchMatch {
 }
 
 interface TerminalAppearance {
-  fontFamily: string;
+  englishFont: string;
+  chineseFont: string;
   fontSize: number;
   foreground: string;
   background: string;
+}
+
+interface TerminalFontOption {
+  label: string;
+  value: string;
+  family: string;
 }
 
 const tools: Array<{ id: Tool; label: string; title: string; icon: React.ComponentType<{ className?: string }> }> = [
@@ -282,7 +289,8 @@ const aiModelOptions = ["", "gpt-5.5", "gpt-5.4-mini", "deepseek-v3.2", "hi"];
 const storageKeys = {
   theme: "ldyssh.ui.theme",
   terminalTheme: "ldyssh.terminal.theme",
-  terminalFontFamily: "ldyssh.terminal.fontFamily",
+  terminalEnglishFont: "ldyssh.terminal.englishFont",
+  terminalChineseFont: "ldyssh.terminal.chineseFont",
   terminalFontSize: "ldyssh.terminal.fontSize",
   terminalForeground: "ldyssh.terminal.foreground",
   terminalBackground: "ldyssh.terminal.background",
@@ -350,12 +358,71 @@ function loadStoredCommandSuggestionPanelLayout() {
 }
 const PASSWORD_PLACEHOLDER = "***";
 const COMMAND_PARAMETER_SLOTS = [1, 2, 3, 4, 5];
+
+const terminalEnglishFonts: TerminalFontOption[] = [
+  { label: "Consola.ttf", value: "Consola.ttf", family: "Consolas" },
+  { label: "DejaVuSansMono-Bold.ttf", value: "DejaVuSansMono-Bold.ttf", family: "DejaVu Sans Mono" },
+  { label: "DejaVuSansMono.ttf", value: "DejaVuSansMono.ttf", family: "DejaVu Sans Mono" },
+  { label: "IBMPlexMono-Bold.ttf", value: "IBMPlexMono-Bold.ttf", family: "IBM Plex Mono" },
+  { label: "IBMPlexMono-Medium.ttf", value: "IBMPlexMono-Medium.ttf", family: "IBM Plex Mono" },
+  { label: "IBMPlexMono-Regular.ttf", value: "IBMPlexMono-Regular.ttf", family: "IBM Plex Mono" },
+  { label: "Inconsolata.ttf", value: "Inconsolata.ttf", family: "Inconsolata" },
+  { label: "JetBrainsMono.ttf", value: "JetBrainsMono.ttf", family: "JetBrains Mono" },
+  { label: "NanumGothicCoding-Bold.ttf", value: "NanumGothicCoding-Bold.ttf", family: "NanumGothicCoding" },
+  { label: "NanumGothicCoding-Regular.ttf", value: "NanumGothicCoding-Regular.ttf", family: "NanumGothicCoding" },
+  { label: "NotoSansMono.ttf", value: "NotoSansMono.ttf", family: "Noto Sans Mono" },
+  { label: "NovaMono-Regular.ttf", value: "NovaMono-Regular.ttf", family: "Nova Mono" },
+  { label: "PTMono-Regular.ttf", value: "PTMono-Regular.ttf", family: "PT Mono" },
+  { label: "RobotoMono.ttf", value: "RobotoMono.ttf", family: "Roboto Mono" },
+  { label: "ShareTechMono-Regular.ttf", value: "ShareTechMono-Regular.ttf", family: "Share Tech Mono" }
+];
+
+const terminalChineseFonts: TerminalFontOption[] = [
+  { label: "仿宋", value: "仿宋", family: "FangSong" },
+  { label: "华文中宋", value: "华文中宋", family: "STZhongsong" },
+  { label: "华文仿宋", value: "华文仿宋", family: "STFangsong" },
+  { label: "华文宋体", value: "华文宋体", family: "STSong" },
+  { label: "华文楷体", value: "华文楷体", family: "STKaiti" },
+  { label: "华文细黑", value: "华文细黑", family: "STXihei" },
+  { label: "宋体", value: "宋体", family: "SimSun" },
+  { label: "幼圆", value: "幼圆", family: "YouYuan" },
+  { label: "微软雅黑", value: "微软雅黑", family: "Microsoft YaHei" },
+  { label: "微软雅黑 Light", value: "微软雅黑 Light", family: "Microsoft YaHei Light" },
+  { label: "思源黑体 CN Normal", value: "思源黑体 CN Normal", family: "Source Han Sans CN" },
+  { label: "新宋体", value: "新宋体", family: "NSimSun" },
+  { label: "楷体", value: "楷体", family: "KaiTi" },
+  { label: "等线", value: "等线", family: "DengXian" },
+  { label: "等线 Light", value: "等线 Light", family: "DengXian Light" }
+];
+
 const defaultTerminalAppearance: TerminalAppearance = {
-  fontFamily: "Cascadia Mono, Consolas, monospace",
+  englishFont: "JetBrainsMono.ttf",
+  chineseFont: "微软雅黑",
   fontSize: 13,
   foreground: "",
   background: ""
 };
+
+const terminalMonospaceFallbackFonts = ["Consolas", "Courier New"];
+const terminalChineseFallbackFontFamily = "Microsoft YaHei";
+
+function buildTerminalFontFamily(englishFontFamily: string, chineseFontFamily: string) {
+  const fonts = [englishFontFamily, ...terminalMonospaceFallbackFonts, chineseFontFamily, terminalChineseFallbackFontFamily, "monospace"];
+  const seen = new Set<string>();
+  return fonts
+    .map((font) => font.trim())
+    .filter((font) => {
+      const key = font.toLowerCase();
+      if (!font || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(", ");
+}
+
+function resolveTerminalFont(options: TerminalFontOption[], value: string, defaultValue: string) {
+  return options.find((option) => option.value === value) || options.find((option) => option.value === defaultValue) || options[0];
+}
 
 function trimTerminalHistory(text: string) {
   return text.length > TERMINAL_HISTORY_LIMIT ? text.slice(-TERMINAL_HISTORY_LIMIT) : text;
@@ -470,7 +537,8 @@ function createCommandSuggestionCustomApplyKey(event: globalThis.KeyboardEvent):
 function loadStoredTerminalAppearance(): TerminalAppearance {
   const fontSize = Number(window.localStorage.getItem(storageKeys.terminalFontSize) || defaultTerminalAppearance.fontSize);
   return {
-    fontFamily: window.localStorage.getItem(storageKeys.terminalFontFamily) || defaultTerminalAppearance.fontFamily,
+    englishFont: window.localStorage.getItem(storageKeys.terminalEnglishFont) || defaultTerminalAppearance.englishFont,
+    chineseFont: window.localStorage.getItem(storageKeys.terminalChineseFont) || defaultTerminalAppearance.chineseFont,
     fontSize: Number.isFinite(fontSize) ? fontSize : defaultTerminalAppearance.fontSize,
     foreground: window.localStorage.getItem(storageKeys.terminalForeground) || "",
     background: window.localStorage.getItem(storageKeys.terminalBackground) || ""
@@ -478,8 +546,12 @@ function loadStoredTerminalAppearance(): TerminalAppearance {
 }
 
 function getTerminalAppearance(appearance: TerminalAppearance) {
+  const englishFont = resolveTerminalFont(terminalEnglishFonts, appearance.englishFont, defaultTerminalAppearance.englishFont);
+  const chineseFont = resolveTerminalFont(terminalChineseFonts, appearance.chineseFont, defaultTerminalAppearance.chineseFont);
   return {
-    fontFamily: appearance.fontFamily.trim() || defaultTerminalAppearance.fontFamily,
+    englishFont: englishFont.value,
+    chineseFont: chineseFont.value,
+    fontFamily: buildTerminalFontFamily(englishFont.family, chineseFont.family),
     fontSize: Number.isFinite(appearance.fontSize) ? appearance.fontSize : defaultTerminalAppearance.fontSize,
     foreground: appearance.foreground,
     background: appearance.background
@@ -671,7 +743,8 @@ export function App() {
 
   useEffect(() => {
     const appearance = getTerminalAppearance(terminalAppearance);
-    window.localStorage.setItem(storageKeys.terminalFontFamily, appearance.fontFamily);
+    window.localStorage.setItem(storageKeys.terminalEnglishFont, appearance.englishFont);
+    window.localStorage.setItem(storageKeys.terminalChineseFont, appearance.chineseFont);
     window.localStorage.setItem(storageKeys.terminalFontSize, String(appearance.fontSize));
     if (appearance.foreground) {
       window.localStorage.setItem(storageKeys.terminalForeground, appearance.foreground);
@@ -4392,6 +4465,50 @@ function PortForwardPanel({ activeSession }: { activeSession?: SessionTab }) {
   );
 }
 
+function TerminalFontList({
+  label,
+  value,
+  options,
+  onChange
+}: {
+  label: string;
+  value: string;
+  options: TerminalFontOption[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 text-xs font-semibold text-[var(--app-muted)]">{label}</div>
+      <div
+        aria-label={label}
+        className="h-40 overflow-auto rounded-md border border-slate-200 bg-white py-1"
+        role="listbox"
+        tabIndex={0}
+      >
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              key={`${option.label}-${option.value}`}
+              aria-selected={selected}
+              className={cn(
+                "block h-6 w-full truncate px-2 text-left text-xs leading-6 text-slate-900",
+                selected ? "bg-slate-300" : "hover:bg-slate-100"
+              )}
+              role="option"
+              style={{ fontFamily: `${option.family}, sans-serif` }}
+              type="button"
+              onClick={() => onChange(option.value)}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SettingsPanel({
   theme,
   terminalTheme,
@@ -4533,19 +4650,9 @@ function SettingsPanel({
               </div>
               <div className="mt-3 space-y-3">
                 <label className="block text-xs font-semibold text-[var(--app-muted)]">
-                  <span>终端字体</span>
-                  <Input
-                    className="mt-2"
-                    aria-label="终端字体"
-                    value={terminalAppearance.fontFamily}
-                    placeholder={defaultTerminalAppearance.fontFamily}
-                    onChange={(event) => updateTerminalAppearance({ fontFamily: event.target.value })}
-                  />
-                </label>
-                <label className="block text-xs font-semibold text-[var(--app-muted)]">
                   <span>字号</span>
                   <Input
-                    className="mt-2"
+                    className="mt-2 w-24"
                     aria-label="字号"
                     type="number"
                     min={10}
@@ -4554,6 +4661,30 @@ function SettingsPanel({
                     onChange={(event) => updateTerminalAppearance({ fontSize: Number(event.target.value || defaultTerminalAppearance.fontSize) })}
                   />
                 </label>
+                <div
+                  className="rounded-md bg-[#d8cfbd] px-3 py-2 text-center text-slate-800"
+                  style={{
+                    fontFamily: resolvedTerminalAppearance.fontFamily,
+                    fontSize: `${resolvedTerminalAppearance.fontSize}px`
+                  }}
+                >
+                  <div>0123456789 abcdefghABCDEFGH</div>
+                  <div className="mt-1">终端中文字体预览</div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <TerminalFontList
+                    label="英文字体"
+                    options={terminalEnglishFonts}
+                    value={resolvedTerminalAppearance.englishFont}
+                    onChange={(value) => updateTerminalAppearance({ englishFont: value })}
+                  />
+                  <TerminalFontList
+                    label="中文字体"
+                    options={terminalChineseFonts}
+                    value={resolvedTerminalAppearance.chineseFont}
+                    onChange={(value) => updateTerminalAppearance({ chineseFont: value })}
+                  />
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="block text-xs font-semibold text-[var(--app-muted)]">
                     <span>文字颜色</span>
