@@ -1014,6 +1014,11 @@ describe("command library", () => {
     window.dispatchEvent(new Event("focus"));
 
     await waitFor(() => expect(terminalMock.instances.length).toBeGreaterThan(instancesBeforeFocus));
+    const fitCallsAfterRebuild = terminalMock.fitCalls;
+    const focusCallsAfterRebuild = terminalMock.focusCalls;
+    await new Promise((resolve) => window.setTimeout(resolve, 120));
+    expect(terminalMock.fitCalls).toBeGreaterThan(fitCallsAfterRebuild);
+    expect(terminalMock.focusCalls).toBeGreaterThan(focusCallsAfterRebuild);
     expect(window.pywebview?.api?.create_local_session).toHaveBeenCalledTimes(1);
   });
 

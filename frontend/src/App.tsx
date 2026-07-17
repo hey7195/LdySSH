@@ -2223,6 +2223,8 @@ function TerminalSurface({
   const commandHistoryRef = useRef<string[]>([]);
   const rawCommandModeRef = useRef(false);
   const focusInputSuppressUntilRef = useRef(0);
+  const terminalLayoutRestoreFrameRef = useRef<number | null>(null);
+  const terminalLayoutRestoreTimersRef = useRef<number[]>([]);
 
   commandFoldersRef.current = commandFolders;
   commandSuggestionsEnabledRef.current = commandSuggestionsEnabled;
@@ -2254,6 +2256,28 @@ function TerminalSurface({
 
   function suppressFocusInputResidue() {
     focusInputSuppressUntilRef.current = Date.now() + 150;
+  }
+
+  function clearScheduledTerminalLayoutRestore() {
+    if (terminalLayoutRestoreFrameRef.current !== null) {
+      window.cancelAnimationFrame(terminalLayoutRestoreFrameRef.current);
+      terminalLayoutRestoreFrameRef.current = null;
+    }
+    terminalLayoutRestoreTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    terminalLayoutRestoreTimersRef.current = [];
+  }
+
+  function scheduleTerminalLayoutRestore() {
+    if (!visibleRef.current) return;
+    clearScheduledTerminalLayoutRestore();
+    terminalLayoutRestoreFrameRef.current = window.requestAnimationFrame(() => {
+      terminalLayoutRestoreFrameRef.current = null;
+      refitAndFocusTerminal();
+    });
+    terminalLayoutRestoreTimersRef.current = [
+      window.setTimeout(refitAndFocusTerminal, 60),
+      window.setTimeout(refitAndFocusTerminal, 180)
+    ];
   }
 
   function rebuildTerminalRenderer() {
@@ -2625,6 +2649,7 @@ function TerminalSurface({
     const observer = new ResizeObserver(resize);
     observer.observe(container);
     resize();
+    scheduleTerminalLayoutRestore();
 
     const interval = window.setInterval(async () => {
       const result = await nativeBridge.getOutput(activeSession.id);
@@ -2637,6 +2662,7 @@ function TerminalSurface({
     }, 160);
 
     return () => {
+      clearScheduledTerminalLayoutRestore();
       window.clearInterval(interval);
       observer.disconnect();
       selectionDisposable.dispose();
