@@ -1742,18 +1742,26 @@ function SidebarSection({
   open?: boolean;
   children: React.ReactNode;
 }) {
+  const [isOpen, setIsOpen] = useState(open ?? true);
+
   return (
     <section className="border-t border-slate-200 px-4 py-4">
-      <div className="mb-3 flex items-center justify-between">
+      <button
+        type="button"
+        aria-label={`${isOpen ? "折叠" : "展开"}${title}`}
+        aria-expanded={isOpen}
+        className="mb-3 flex w-full items-center justify-between rounded-md text-left hover:bg-white/60"
+        onClick={() => setIsOpen((current) => !current)}
+      >
         <div className="text-sm font-semibold text-slate-950">{title}</div>
         <div className="flex items-center gap-2">
           {typeof count === "number" && (
             <span className="rounded bg-white px-1.5 py-0.5 text-xs font-medium text-slate-500">{count}</span>
           )}
-          <ChevronDown className={cn("h-4 w-4 text-slate-400", !open && "-rotate-90")} />
+          <ChevronDown className={cn("h-4 w-4 text-slate-400", !isOpen && "-rotate-90")} />
         </div>
-      </div>
-      {open && children}
+      </button>
+      {isOpen && children}
     </section>
   );
 }

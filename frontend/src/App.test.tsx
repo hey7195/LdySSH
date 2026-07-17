@@ -907,6 +907,35 @@ describe("AI tools panel", () => {
 });
 
 describe("command library", () => {
+  test("collapses and expands the left sidebar host and session sections", async () => {
+    (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { name: "fold-host", hostname: "10.0.0.7", port: 22, username: "root", password: "secret" }
+    ]);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    await screen.findByTestId("terminal-shell");
+    fireEvent.click(screen.getByTitle(/SSH/));
+
+    const recentToggle = await screen.findByRole("button", { name: "折叠最近主机" });
+    const recentSection = recentToggle.closest("section") as HTMLElement;
+    expect(within(recentSection).getByText("fold-host")).toBeInTheDocument();
+    fireEvent.click(recentToggle);
+    expect(within(recentSection).queryByText("fold-host")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开最近主机" }));
+    expect(within(recentSection).getByText("fold-host")).toBeInTheDocument();
+
+    const sessionToggle = screen.getByRole("button", { name: "折叠活动会话" });
+    const sessionSection = sessionToggle.closest("section") as HTMLElement;
+    expect(within(sessionSection).getByRole("button", { name: /切换到 Local Shell/ })).toBeInTheDocument();
+    fireEvent.click(sessionToggle);
+    expect(within(sessionSection).queryByRole("button", { name: /切换到 Local Shell/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开活动会话" }));
+    expect(within(sessionSection).getByRole("button", { name: /切换到 Local Shell/ })).toBeInTheDocument();
+  });
+
   test("shows existing terminal sessions from the session sidebar and activates them", async () => {
     render(<App />);
 
