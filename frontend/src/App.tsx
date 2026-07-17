@@ -317,6 +317,10 @@ interface CommandSuggestionPanelLayout {
   height: number;
 }
 
+const COMMAND_SUGGESTION_PANEL_MARGIN = 8;
+const COMMAND_SUGGESTION_PANEL_MIN_WIDTH = 180;
+const COMMAND_SUGGESTION_PANEL_MIN_HEIGHT = 120;
+
 const defaultCommandSuggestionPanelLayout: CommandSuggestionPanelLayout = {
   left: 80,
   bottom: 24,
@@ -328,14 +332,24 @@ function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function normalizeCommandSuggestionPanelLayout(layout: CommandSuggestionPanelLayout): CommandSuggestionPanelLayout {
+function getCommandSuggestionPanelViewport() {
   const viewportWidth = window.innerWidth || 1280;
   const viewportHeight = window.innerHeight || 720;
-  const width = clampNumber(layout.width, 180, Math.min(520, viewportWidth - 24));
-  const height = clampNumber(layout.height, 120, Math.min(420, viewportHeight - 24));
   return {
-    left: clampNumber(layout.left, 8, Math.max(8, viewportWidth - width - 8)),
-    bottom: clampNumber(layout.bottom, 8, Math.max(8, viewportHeight - height - 8)),
+    viewportWidth,
+    viewportHeight,
+    maxWidth: Math.max(COMMAND_SUGGESTION_PANEL_MIN_WIDTH, viewportWidth - COMMAND_SUGGESTION_PANEL_MARGIN * 2),
+    maxHeight: Math.max(COMMAND_SUGGESTION_PANEL_MIN_HEIGHT, viewportHeight - COMMAND_SUGGESTION_PANEL_MARGIN * 2)
+  };
+}
+
+function normalizeCommandSuggestionPanelLayout(layout: CommandSuggestionPanelLayout): CommandSuggestionPanelLayout {
+  const { viewportWidth, viewportHeight, maxWidth, maxHeight } = getCommandSuggestionPanelViewport();
+  const width = clampNumber(layout.width, COMMAND_SUGGESTION_PANEL_MIN_WIDTH, maxWidth);
+  const height = clampNumber(layout.height, COMMAND_SUGGESTION_PANEL_MIN_HEIGHT, maxHeight);
+  return {
+    left: clampNumber(layout.left, COMMAND_SUGGESTION_PANEL_MARGIN, Math.max(COMMAND_SUGGESTION_PANEL_MARGIN, viewportWidth - width - COMMAND_SUGGESTION_PANEL_MARGIN)),
+    bottom: clampNumber(layout.bottom, COMMAND_SUGGESTION_PANEL_MARGIN, Math.max(COMMAND_SUGGESTION_PANEL_MARGIN, viewportHeight - height - COMMAND_SUGGESTION_PANEL_MARGIN)),
     width,
     height
   };
@@ -2116,6 +2130,13 @@ function TerminalWorkspace({
   );
 }
 
+interface CommandSuggestionResizeEdges {
+  left?: boolean;
+  right?: boolean;
+  top?: boolean;
+  bottom?: boolean;
+}
+
 function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
   const [layout, setLayout] = useState<CommandSuggestionPanelLayout>(() => loadStoredCommandSuggestionPanelLayout());
 
@@ -2149,7 +2170,46 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
     window.addEventListener("mouseup", stopMove);
   }
 
-  function startResize(event: ReactMouseEvent<HTMLButtonElement>) {
+  function resizeCommandSuggestionPanel(startLayout: CommandSuggestionPanelLayout, deltaX: number, deltaY: number, edges: CommandSuggestionResizeEdges) {
+    const { viewportWidth, viewportHeight, maxWidth, maxHeight } = getCommandSuggestionPanelViewport();
+    const right = startLayout.left + startLayout.width;
+    const top = viewportHeight - startLayout.bottom - startLayout.height;
+    const next = { ...startLayout };
+
+    if (edges.left) {
+      next.width = clampNumber(startLayout.width - deltaX, COMMAND_SUGGESTION_PANEL_MIN_WIDTH, Math.min(maxWidth, right - COMMAND_SUGGESTION_PANEL_MARGIN));
+      next.left = right - next.width;
+    }
+
+    if (edges.right) {
+      next.width = clampNumber(
+        startLayout.width + deltaX,
+        COMMAND_SUGGESTION_PANEL_MIN_WIDTH,
+        Math.min(maxWidth, viewportWidth - startLayout.left - COMMAND_SUGGESTION_PANEL_MARGIN)
+      );
+    }
+
+    if (edges.top) {
+      next.height = clampNumber(
+        startLayout.height - deltaY,
+        COMMAND_SUGGESTION_PANEL_MIN_HEIGHT,
+        Math.min(maxHeight, viewportHeight - startLayout.bottom - COMMAND_SUGGESTION_PANEL_MARGIN)
+      );
+    }
+
+    if (edges.bottom) {
+      next.height = clampNumber(
+        startLayout.height + deltaY,
+        COMMAND_SUGGESTION_PANEL_MIN_HEIGHT,
+        Math.min(maxHeight, viewportHeight - top - COMMAND_SUGGESTION_PANEL_MARGIN)
+      );
+      next.bottom = viewportHeight - top - next.height;
+    }
+
+    updateLayout(next);
+  }
+
+  function startResize(event: ReactMouseEvent<HTMLButtonElement>, edges: CommandSuggestionResizeEdges) {
     event.preventDefault();
     event.stopPropagation();
     const startX = event.clientX;
@@ -2157,11 +2217,7 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
     const startLayout = layout;
 
     function resize(moveEvent: MouseEvent) {
-      updateLayout({
-        ...startLayout,
-        width: startLayout.width + moveEvent.clientX - startX,
-        height: startLayout.height + moveEvent.clientY - startY
-      });
+      resizeCommandSuggestionPanel(startLayout, moveEvent.clientX - startX, moveEvent.clientY - startY, edges);
     }
 
     function stopResize() {
@@ -2213,10 +2269,62 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
       <button
         type="button"
         role="separator"
-        aria-label="调整命令提示大小"
+        aria-label="向左拉伸命令提示"
         aria-orientation="vertical"
+        className="absolute bottom-4 left-0 top-4 w-2 cursor-ew-resize bg-transparent hover:bg-blue-100/60"
+        onMouseDown={(event) => startResize(event, { left: true })}
+      />
+      <button
+        type="button"
+        role="separator"
+        aria-label="向右拉伸命令提示"
+        aria-orientation="vertical"
+        className="absolute bottom-4 right-0 top-4 w-2 cursor-ew-resize bg-transparent hover:bg-blue-100/60"
+        onMouseDown={(event) => startResize(event, { right: true })}
+      />
+      <button
+        type="button"
+        role="separator"
+        aria-label="向上拉伸命令提示"
+        aria-orientation="horizontal"
+        className="absolute left-4 right-4 top-0 h-2 cursor-ns-resize bg-transparent hover:bg-blue-100/60"
+        onMouseDown={(event) => startResize(event, { top: true })}
+      />
+      <button
+        type="button"
+        role="separator"
+        aria-label="向下拉伸命令提示"
+        aria-orientation="horizontal"
+        className="absolute bottom-0 left-4 right-4 h-2 cursor-ns-resize bg-transparent hover:bg-blue-100/60"
+        onMouseDown={(event) => startResize(event, { bottom: true })}
+      />
+      <button
+        type="button"
+        role="separator"
+        aria-label="向左上角拉伸命令提示"
+        className="absolute left-0 top-0 h-4 w-4 cursor-nwse-resize rounded-tl-md bg-transparent hover:bg-blue-100/60"
+        onMouseDown={(event) => startResize(event, { left: true, top: true })}
+      />
+      <button
+        type="button"
+        role="separator"
+        aria-label="向右上角拉伸命令提示"
+        className="absolute right-0 top-0 h-4 w-4 cursor-nesw-resize rounded-tr-md bg-transparent hover:bg-blue-100/60"
+        onMouseDown={(event) => startResize(event, { right: true, top: true })}
+      />
+      <button
+        type="button"
+        role="separator"
+        aria-label="向左下角拉伸命令提示"
+        className="absolute bottom-0 left-0 h-4 w-4 cursor-nesw-resize rounded-bl-md bg-transparent hover:bg-blue-100/60"
+        onMouseDown={(event) => startResize(event, { left: true, bottom: true })}
+      />
+      <button
+        type="button"
+        role="separator"
+        aria-label="调整命令提示大小"
         className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize rounded-br-md border-l border-t border-slate-200 bg-slate-50 hover:bg-blue-50"
-        onMouseDown={startResize}
+        onMouseDown={(event) => startResize(event, { right: true, bottom: true })}
       />
     </div>
   );

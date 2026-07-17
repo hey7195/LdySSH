@@ -1541,6 +1541,19 @@ describe("command library", () => {
     fireEvent.mouseUp(window);
     expect(suggestionPanel).toHaveStyle({ width: "340px", height: "240px" });
     expect(window.localStorage.getItem("ldyssh.terminal.commandSuggestions.panel")).toContain("\"width\":340");
+
+    const rightResizeHandle = within(suggestionPanel).getByRole("separator", { name: "向右拉伸命令提示" });
+    fireEvent.mouseDown(rightResizeHandle, { clientX: 340, clientY: 240 });
+    fireEvent.mouseMove(window, { clientX: 700, clientY: 240 });
+    fireEvent.mouseUp(window);
+    expect(suggestionPanel).toHaveStyle({ width: "700px", height: "240px" });
+
+    const leftResizeHandle = within(suggestionPanel).getByRole("separator", { name: "向左拉伸命令提示" });
+    fireEvent.mouseDown(leftResizeHandle, { clientX: 100, clientY: 240 });
+    fireEvent.mouseMove(window, { clientX: 60, clientY: 240 });
+    fireEvent.mouseUp(window);
+    expect(suggestionPanel).toHaveStyle({ left: "60px", width: "740px" });
+    expect(window.localStorage.getItem("ldyssh.terminal.commandSuggestions.panel")).toContain("\"width\":740");
     await waitFor(() => expect(sendInput).toHaveBeenCalledWith("local-1", bytesToBase64(new TextEncoder().encode("d"))));
     sendInput.mockClear();
 
