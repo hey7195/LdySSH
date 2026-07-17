@@ -2211,6 +2211,7 @@ function TerminalSurface({
   const activeMatch = searchMatches[visibleMatchIndex];
   const [commandSuggestions, setCommandSuggestions] = useState<CommandSuggestion[]>([]);
   const [activeCommandSuggestionIndex, setActiveCommandSuggestionIndexState] = useState(0);
+  const [terminalRenderEpoch, setTerminalRenderEpoch] = useState(0);
   const commandFoldersRef = useRef(commandFolders);
   const commandSuggestionsEnabledRef = useRef(commandSuggestionsEnabled);
   const commandSuggestionSourcesRef = useRef(commandSuggestionSources);
@@ -2253,6 +2254,12 @@ function TerminalSurface({
 
   function suppressFocusInputResidue() {
     focusInputSuppressUntilRef.current = Date.now() + 150;
+  }
+
+  function rebuildTerminalRenderer() {
+    if (!visibleRef.current) return;
+    suppressFocusInputResidue();
+    setTerminalRenderEpoch((epoch) => epoch + 1);
   }
 
   function setActiveCommandSuggestionIndex(index: number) {
@@ -2424,9 +2431,7 @@ function TerminalSurface({
     if (!activeSession) return;
 
     function restoreTerminalRender() {
-      suppressFocusInputResidue();
-      refitAndFocusTerminal();
-      window.requestAnimationFrame(refitAndFocusTerminal);
+      rebuildTerminalRenderer();
     }
 
     function handleVisibilityChange() {
@@ -2521,6 +2526,7 @@ function TerminalSurface({
 
     setSelectedText("");
     terminalRef.current?.dispose();
+    container.replaceChildren();
     const appearance = getTerminalAppearance(terminalAppearance);
     const terminalThemeOptions = getTerminalColors(terminalTheme, appearance, Boolean(terminalBackgroundImage));
     const terminal = new XTerm({
@@ -2640,7 +2646,7 @@ function TerminalSurface({
       }
       terminal.dispose();
     };
-  }, [activeSession?.id, highlightRules, terminalTheme, terminalAppearance, terminalBackgroundImage]);
+  }, [activeSession?.id, highlightRules, terminalTheme, terminalAppearance, terminalBackgroundImage, terminalRenderEpoch]);
 
   useEffect(() => {
     if (focusRequest > 0) focusTerminal();

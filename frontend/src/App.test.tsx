@@ -1010,14 +1010,11 @@ describe("command library", () => {
     fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
 
-    const fitCallsBeforeFocus = terminalMock.fitCalls;
-    const focusCallsBeforeFocus = terminalMock.focusCalls;
+    const instancesBeforeFocus = terminalMock.instances.length;
     window.dispatchEvent(new Event("focus"));
 
-    expect(terminalMock.instances).toHaveLength(1);
-    expect(terminalMock.fitCalls).toBeGreaterThan(fitCallsBeforeFocus);
-    expect(terminalMock.focusCalls).toBeGreaterThan(focusCallsBeforeFocus);
-    expect(terminalMock.refreshCalls).toBeGreaterThan(0);
+    await waitFor(() => expect(terminalMock.instances.length).toBeGreaterThan(instancesBeforeFocus));
+    expect(window.pywebview?.api?.create_local_session).toHaveBeenCalledTimes(1);
   });
 
   test("does not sync a collapsed terminal width to the remote pty", async () => {
