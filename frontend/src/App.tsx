@@ -2047,9 +2047,10 @@ function TerminalWorkspace({
             return (
               <div
                 key={session.id}
+                onClick={() => onActivate(session.id)}
                 onContextMenu={(event) => openTabMenu(event, session.id)}
                 className={cn(
-                  "relative -mb-px flex h-8 min-w-[68px] max-w-48 items-center gap-2 rounded-t-md border px-3 text-xs font-semibold transition-colors",
+                  "relative -mb-px flex h-8 min-w-[68px] max-w-48 cursor-pointer items-center gap-2 rounded-t-md border px-3 text-xs font-semibold transition-colors",
                   isActive
                     ? "z-10 border-blue-500 border-b-white bg-white text-slate-950 shadow-sm"
                     : "border-slate-200 bg-slate-100 text-slate-600 hover:border-slate-300 hover:bg-white hover:text-slate-900"
@@ -2063,12 +2064,24 @@ function TerminalWorkspace({
                   aria-current={isActive ? "page" : undefined}
                   className="min-w-0 flex-1 truncate text-left"
                   title={session.title}
-                  onClick={() => onActivate(session.id)}
-                  onContextMenu={(event) => openTabMenu(event, session.id)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onActivate(session.id);
+                  }}
+                  onContextMenu={(event) => {
+                    event.stopPropagation();
+                    openTabMenu(event, session.id);
+                  }}
                 >
                   {session.title}
                 </button>
-                <button className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700" onClick={() => onClose(session.id)}>
+                <button
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onClose(session.id);
+                  }}
+                >
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>

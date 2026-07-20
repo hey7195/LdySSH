@@ -1342,6 +1342,31 @@ describe("command library", () => {
     });
   });
 
+  test("activates terminal tabs from the status and index area", async () => {
+    (window.pywebview?.api?.create_local_session as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce("local-1")
+      .mockResolvedValueOnce("local-2");
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    fireEvent.click(await screen.findByTitle("新建本地终端"));
+
+    await waitFor(() => expect(window.pywebview?.api?.create_local_session).toHaveBeenCalledTimes(2));
+
+    const [firstTabButton, secondTabButton] = screen.getAllByRole("button", { name: "Local Shell" });
+    expect(secondTabButton).toHaveAttribute("aria-current", "page");
+
+    const firstTab = firstTabButton.closest("div") as HTMLElement;
+    fireEvent.click(within(firstTab).getByTitle("已连接"));
+    expect(firstTabButton).toHaveAttribute("aria-current", "page");
+
+    const secondTab = secondTabButton.closest("div") as HTMLElement;
+    fireEvent.click(within(secondTab).getByText("2"));
+    expect(secondTabButton).toHaveAttribute("aria-current", "page");
+  });
+
   test("edits an existing saved SSH connection without starting a session", async () => {
     (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       {
