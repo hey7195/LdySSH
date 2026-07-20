@@ -2009,7 +2009,7 @@ function TerminalWorkspace({
   return (
     <div className="grid h-full grid-rows-[34px_minmax(0,1fr)_34px] bg-white">
       <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 pl-3 pr-4">
-        <div className="flex h-full min-w-0 flex-1 items-center gap-1">
+        <div className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           <button
             className="flex h-7 w-8 items-center justify-center rounded-md bg-slate-900 text-white"
             onClick={onReturnHome}
@@ -2024,25 +2024,35 @@ function TerminalWorkspace({
           >
             <Plus className="h-4 w-4" />
           </button>
-          {sessions.map((session) => (
-            <div
-              key={session.id}
-              onContextMenu={(event) => openTabMenu(event, session.id)}
-              className={cn(
-                "flex h-7 max-w-48 items-center gap-2 rounded-md border px-3 text-xs font-medium",
-                session.id === activeSessionId
-                  ? "border-slate-300 bg-white text-slate-950"
-                  : "border-transparent text-slate-500 hover:bg-white"
-              )}
-            >
-              <button className="min-w-0 truncate" onClick={() => onActivate(session.id)} onContextMenu={(event) => openTabMenu(event, session.id)}>
-                {session.title}
-              </button>
-              <button className="text-slate-400 hover:text-slate-700" onClick={() => onClose(session.id)}>
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
+          {sessions.map((session) => {
+            const isActive = session.id === activeSessionId;
+
+            return (
+              <div
+                key={session.id}
+                onContextMenu={(event) => openTabMenu(event, session.id)}
+                className={cn(
+                  "relative -mb-px flex h-8 min-w-[68px] max-w-48 items-center gap-2 rounded-t-md border px-3 text-xs font-semibold transition-colors",
+                  isActive
+                    ? "z-10 border-blue-500 border-b-white bg-white text-slate-950 shadow-sm"
+                    : "border-slate-200 bg-slate-100 text-slate-600 hover:border-slate-300 hover:bg-white hover:text-slate-900"
+                )}
+              >
+                <button
+                  aria-current={isActive ? "page" : undefined}
+                  className="min-w-0 flex-1 truncate text-left"
+                  title={session.title}
+                  onClick={() => onActivate(session.id)}
+                  onContextMenu={(event) => openTabMenu(event, session.id)}
+                >
+                  {session.title}
+                </button>
+                <button className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700" onClick={() => onClose(session.id)}>
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
         <Button variant="ghost" className="h-7 px-2">
           <Menu className="h-4 w-4" />
