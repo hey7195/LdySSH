@@ -1319,6 +1319,29 @@ describe("command library", () => {
     expect(inactiveTab).toHaveClass("border-slate-200", "bg-slate-100", "text-slate-600");
   });
 
+  test("shows green connected indicators on terminal tabs without changing tab names", async () => {
+    (window.pywebview?.api?.create_local_session as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce("local-1")
+      .mockResolvedValueOnce("local-2");
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+    fireEvent.click(await screen.findByTitle("新建本地终端"));
+
+    await waitFor(() => expect(window.pywebview?.api?.create_local_session).toHaveBeenCalledTimes(2));
+
+    const tabButtons = screen.getAllByRole("button", { name: "Local Shell" });
+    const connectedDots = screen.getAllByTitle("已连接");
+
+    expect(tabButtons).toHaveLength(2);
+    expect(connectedDots).toHaveLength(2);
+    connectedDots.forEach((dot) => {
+      expect(dot).toHaveClass("bg-emerald-500");
+    });
+  });
+
   test("edits an existing saved SSH connection without starting a session", async () => {
     (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       {

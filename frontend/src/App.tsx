@@ -97,6 +97,22 @@ interface SessionTab {
   connectParams?: ConnectParams;
 }
 
+function getSessionTabStatus(session: SessionTab) {
+  const status = session.status ?? (session.connected ? "connected" : "disconnected");
+
+  switch (status) {
+    case "connected":
+      return { title: "已连接", dotClass: "bg-emerald-500" };
+    case "connecting":
+      return { title: "连接中", dotClass: "bg-amber-400 animate-pulse" };
+    case "failed":
+      return { title: "连接失败", dotClass: "bg-rose-500" };
+    case "disconnected":
+    default:
+      return { title: "已断开", dotClass: "bg-slate-400" };
+  }
+}
+
 interface TerminalCommandNotice {
   sessionId: string;
   command: string;
@@ -2024,8 +2040,9 @@ function TerminalWorkspace({
           >
             <Plus className="h-4 w-4" />
           </button>
-          {sessions.map((session) => {
+          {sessions.map((session, index) => {
             const isActive = session.id === activeSessionId;
+            const status = getSessionTabStatus(session);
 
             return (
               <div
@@ -2038,6 +2055,10 @@ function TerminalWorkspace({
                     : "border-slate-200 bg-slate-100 text-slate-600 hover:border-slate-300 hover:bg-white hover:text-slate-900"
                 )}
               >
+                <span className="flex shrink-0 items-center gap-1 text-[11px] leading-none" aria-hidden="true">
+                  <span title={status.title} className={cn("h-1.5 w-1.5 rounded-full", status.dotClass)} />
+                  <span className={cn("font-semibold", isActive ? "text-emerald-700" : "text-slate-500")}>{index + 1}</span>
+                </span>
                 <button
                   aria-current={isActive ? "page" : undefined}
                   className="min-w-0 flex-1 truncate text-left"
