@@ -3401,7 +3401,8 @@ function stripTerminalGeneratedReplies(data: string) {
     .replace(/\x1b\[[?>]?[0-9;:]*c/g, "")
     .replace(/\x1b\[\??[0-9;:]*n/g, "")
     .replace(/\x1b\[\??[0-9;:]*R/g, "")
-    .replace(/\x1b\[\??[0-9;:]*\$y/g, "");
+    .replace(/\x1b\[\??[0-9;:]*\$y/g, "")
+    .replace(/\x1b\[[IO]/g, "");
 
   return isVisibleTerminalReplyResidue(stripped) ? "" : stripped;
 }

@@ -1571,6 +1571,20 @@ describe("command library", () => {
     expect(sendInput).not.toHaveBeenCalled();
   });
 
+  test("does not forward xterm focus in or focus out reports as shell input", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
+    await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
+    const sendInput = window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>;
+    sendInput.mockClear();
+
+    terminalMock.dataHandler?.("\x1b[I\x1b[O\x1b[I");
+
+    expect(sendInput).not.toHaveBeenCalled();
+  });
+
   test("drops short focus residue after returning to the window without blocking later typing", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(1000);
     try {
