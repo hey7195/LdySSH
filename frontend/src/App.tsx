@@ -2440,6 +2440,7 @@ function TerminalSurface({
   const fitRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const decoderRef = useRef<TextDecoder | null>(null);
+  const pushDecodersRef = useRef<Record<string, TextDecoder>>({});
   const activeIdRef = useRef("");
   const visibleRef = useRef(visible);
   const lastValidTerminalSizeRef = useRef({ cols: 80, rows: 24 });
@@ -2770,6 +2771,16 @@ function TerminalSurface({
     }
   }
 
+  function decodePushedTerminalOutput(sessionId: string, data: string) {
+    const bytes = base64ToBytes(data);
+    let decoder = pushDecodersRef.current[sessionId];
+    if (!decoder) {
+      decoder = new TextDecoder("utf-8");
+      pushDecodersRef.current[sessionId] = decoder;
+    }
+    return decoder.decode(bytes, { stream: true });
+  }
+
   function openTerminalMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
     const selection = terminalRef.current?.getSelection() || selectedText;
@@ -2925,11 +2936,13 @@ function TerminalSurface({
 
   useEffect(() => {
     window.handlePushOutput = (sessionId, data) => {
+      const output = decodePushedTerminalOutput(sessionId, data);
+      if (!output) return;
+
+      onOutputRef.current(sessionId, output);
       if (sessionId === activeIdRef.current) {
-        const output = decodeTerminalOutput(data, decoderRef);
         maybeLeaveRawCommandMode(output);
         terminalRef.current?.write(applyHighlightRules(output, highlightRules));
-        onOutputRef.current(sessionId, output);
       }
     };
     return () => {

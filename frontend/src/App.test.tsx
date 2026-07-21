@@ -1367,6 +1367,31 @@ describe("command library", () => {
     expect(secondTabButton).toHaveAttribute("aria-current", "page");
   });
 
+  test("keeps inactive session push output when switching terminal tabs", async () => {
+    (window.pywebview?.api?.create_local_session as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce("local-1")
+      .mockResolvedValueOnce("local-2");
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
+    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
+    fireEvent.click(await screen.findByTitle("\u65b0\u5efa\u672c\u5730\u7ec8\u7aef"));
+    await waitFor(() => expect(window.pywebview?.api?.create_local_session).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(window.handlePushOutput).toBeTypeOf("function"));
+
+    act(() => {
+      window.handlePushOutput?.("local-1", bytesToBase64(new TextEncoder().encode("old session tail\n")));
+    });
+
+    const [firstTabButton] = screen.getAllByRole("button", { name: "Local Shell" });
+    fireEvent.click(firstTabButton);
+
+    await waitFor(() => {
+      expect(terminalMock.instances.at(-1)?.writes.join("")).toContain("old session tail");
+    });
+  });
+
   test("edits an existing saved SSH connection without starting a session", async () => {
     (window.pywebview?.api?.get_saved_connections as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       {
