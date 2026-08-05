@@ -1,28 +1,129 @@
 @import "tailwindcss";
 
+/* ============================================================
+   LdySSH Design System
+   基于 Kimi Design Tokens（principles + tokens.json）
+   语义令牌 → 全应用 Tailwind 类重映射，深浅双主题
+   ============================================================ */
+
 :root {
   color-scheme: light;
-  --app-bg: #f6f8fb;
-  --app-text: #0f172a;
-  --app-muted: #64748b;
-  --app-line: #d9e2ef;
-  --panel-bg: #ffffff;
-  --subtle-bg: #f8fafc;
-  --terminal-bg: #020617;
+
+  /* 表面层级 color.background.* (light) */
+  --app-bg: #f5f5f5;            /* groupedBackground.primary */
+  --panel-bg: #ffffff;          /* background.primary */
+  --sidebar-bg: #f5f5f5;        /* background.secondary */
+  --subtle-bg: #f5f5f5;         /* background.secondary */
+  --raised-bg: #ffffff;         /* 浮层表面 */
+  --ground-bg: #f9fbfc;         /* background.groundPc */
+
+  /* 文本 color.labels.* (light) */
+  --app-text: rgba(0, 0, 0, 0.9);
+  --text-secondary: rgba(0, 0, 0, 0.6);
+  --app-muted: rgba(0, 0, 0, 0.45);
+  --text-quaternary: rgba(0, 0, 0, 0.3);
+
+  /* 分隔 color.separator.s1 / fills (light) */
+  --app-line: rgba(0, 0, 0, 0.13);
+  --fill-1: rgba(0, 0, 0, 0.03);
+  --fill-2: rgba(0, 0, 0, 0.05);
+  --fill-3: rgba(0, 0, 0, 0.15);
+
+  /* 品牌与状态 color.status.* (light) */
+  --accent: #1783ff;                       /* kimiBlue */
+  --accent-hover: rgba(22, 127, 247, 1);
+  --accent-active: rgba(22, 124, 242, 1);
+  --accent-soft: rgba(23, 131, 255, 0.1);  /* kimiBlue10 */
+  --accent-soft-strong: rgba(23, 131, 255, 0.16);
+  --accent-text: #0f6ee0;                  /* 浅底上的强调文本，保证对比度 */
+  --on-accent: #ffffff;
+  --text-selected: rgba(23, 131, 255, 0.2);
+  --accent-grad: linear-gradient(135deg, #4096ff 0%, #1f6feb 100%);
+  --accent-glow: 0 4px 14px rgba(31, 111, 235, 0.28);
+  --accent-grad-soft: linear-gradient(135deg, rgba(64, 150, 255, 0.14) 0%, rgba(31, 111, 235, 0.14) 100%);
+
+  --success: #16c456;
+  --success-soft: rgba(22, 196, 86, 0.1);
+  --success-text: #0e9c42;
+  --danger: #ff3849;
+  --danger-hover: rgba(247, 54, 71, 1);
+  --danger-soft: rgba(255, 77, 77, 0.1);
+  --danger-text: #e02b3c;
+  --warning: #ff9500;
+  --warning-soft: rgba(255, 149, 0, 0.1);
+  --warning-text: #c27400;
+
+  /* 终端 */
+  --terminal-bg: #0b0e14;
   --terminal-text: #e5e7eb;
+
+  /* 遮罩 */
+  --mask-base: rgba(0, 0, 0, 0.4);
+
+  /* 阴影：仅表达层级，不做装饰 */
+  --shadow-raised: 0 8px 28px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+  --shadow-input: 0 1px 2px rgba(15, 23, 42, 0.05);
+
+  /* 动效：purposeful motion */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 150ms;
+  --dur-med: 200ms;
 }
 
 .app-root[data-theme="dark"] {
   color-scheme: dark;
-  --app-bg: #0f172a;
-  --app-text: #e5e7eb;
-  --app-muted: #94a3b8;
-  --app-line: #334155;
-  --panel-bg: #111827;
-  --subtle-bg: #1e293b;
-  --terminal-bg: #020617;
+
+  /* 蓝调深色表面：比纯灰更有质感（Linear/Warp 风格） */
+  --app-bg: #0e1013;
+  --panel-bg: #161a21;
+  --sidebar-bg: #11141a;
+  --subtle-bg: #161a21;
+  --raised-bg: #1d232e;
+  --ground-bg: #0e1013;
+
+  --app-text: rgba(255, 255, 255, 0.92);
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --app-muted: rgba(255, 255, 255, 0.44);
+  --text-quaternary: rgba(255, 255, 255, 0.28);
+
+  --app-line: rgba(255, 255, 255, 0.08);
+  --fill-1: rgba(255, 255, 255, 0.04);
+  --fill-2: rgba(255, 255, 255, 0.07);
+  --fill-3: rgba(255, 255, 255, 0.14);
+
+  --accent: #2f8bff;
+  --accent-hover: rgba(68, 152, 255, 1);
+  --accent-active: rgba(91, 165, 255, 1);
+  --accent-soft: rgba(47, 139, 255, 0.15);
+  --accent-soft-strong: rgba(47, 139, 255, 0.24);
+  --accent-text: #6fb1ff;
+  --on-accent: #ffffff;
+  --text-selected: rgba(47, 139, 255, 0.3);
+  --accent-grad: linear-gradient(135deg, #4da3ff 0%, #2472e8 100%);
+  --accent-glow: 0 4px 18px rgba(36, 114, 232, 0.4);
+  --accent-grad-soft: linear-gradient(135deg, rgba(77, 163, 255, 0.16) 0%, rgba(36, 114, 232, 0.16) 100%);
+
+  --success: #16c456;
+  --success-soft: rgba(22, 196, 86, 0.14);
+  --success-text: #3ddc78;
+  --danger: #ff4756;
+  --danger-hover: rgba(255, 80, 94, 1);
+  --danger-soft: rgba(255, 82, 82, 0.12);
+  --danger-text: #ff6b78;
+  --warning: #ff9f0a;
+  --warning-soft: rgba(255, 159, 10, 0.12);
+  --warning-text: #ffb340;
+
+  --terminal-bg: #0b0e14;
   --terminal-text: #e5e7eb;
+
+  --mask-base: rgba(0, 0, 0, 0.6);
+  --shadow-raised: 0 12px 36px rgba(0, 0, 0, 0.45), 0 2px 10px rgba(0, 0, 0, 0.3);
+  --shadow-input: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
+
+/* ---------------- 基础 ---------------- */
 
 * {
   box-sizing: border-box;
@@ -41,20 +142,98 @@ body {
   background: var(--app-bg);
   color: var(--app-text);
   font-family:
-    Inter,
-    "Segoe UI",
     "PingFang SC",
     "Microsoft YaHei",
+    Inter,
+    "Segoe UI",
+    "Helvetica Neue",
     Arial,
     sans-serif;
-  text-rendering: geometricPrecision;
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
+
+::selection {
+  background: var(--text-selected);
+}
+
+/* 交互元素颜色过渡；位置/形变不全局加 transition，避免布局抖动 */
+button,
+a,
+input,
+textarea,
+select,
+[role="button"] {
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    opacity var(--dur-fast) ease;
+}
+
+/* 按压反馈：scale 0.97，100–160ms */
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled):active,
+  [role="button"]:not(:disabled):active {
+    transform: scale(0.97);
+    transition-duration: 100ms;
+  }
+}
+
+/* focus-visible：kimiBlue 焦点环 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible),
+select:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 滚动条：细、低存在感的填充色 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-3) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--fill-3);
+  border-radius: 8px;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-quaternary);
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------- 终端 ---------------- */
 
 .xterm {
   height: 100%;
@@ -80,34 +259,7 @@ textarea {
   background: transparent;
 }
 
-.app-root[data-theme="dark"] .bg-white,
-.app-root[data-theme="dark"] .bg-slate-50,
-.app-root[data-theme="dark"] .bg-\[\#eef2f7\],
-.app-root[data-theme="dark"] .bg-\[\#f6f8fb\] {
-  background-color: var(--panel-bg) !important;
-}
-
-.app-root[data-theme="dark"] .bg-slate-100 {
-  background-color: var(--subtle-bg) !important;
-}
-
-.app-root[data-theme="dark"] .text-slate-950,
-.app-root[data-theme="dark"] .text-slate-900,
-.app-root[data-theme="dark"] .text-slate-800,
-.app-root[data-theme="dark"] .text-slate-700 {
-  color: var(--app-text) !important;
-}
-
-.app-root[data-theme="dark"] .text-slate-600,
-.app-root[data-theme="dark"] .text-slate-500,
-.app-root[data-theme="dark"] .text-slate-400 {
-  color: var(--app-muted) !important;
-}
-
-.app-root[data-theme="dark"] .border-slate-200,
-.app-root[data-theme="dark"] .border-slate-300 {
-  border-color: var(--app-line) !important;
-}
+/* ---------------- 窗口拖拽区 ---------------- */
 
 .pywebview-drag-region {
   -webkit-app-region: drag;
@@ -116,6 +268,282 @@ textarea {
 .no-drag,
 button,
 input,
-textarea {
+textarea,
+select {
   -webkit-app-region: no-drag;
+}
+
+/* ============================================================
+   Tailwind 类 → 语义令牌重映射
+   覆盖原 slate/blue/emerald/rose/amber 直写色值，
+   深浅主题各自映射到对应令牌，逻辑层零改动
+   ============================================================ */
+
+/* ---------- 中性表面（bg-white / bg-slate-*） ---------- */
+
+.app-root .bg-white,
+.app-root .bg-slate-50 {
+  background-color: var(--panel-bg) !important;
+}
+.app-root .bg-\[\#eef2f7\],
+.app-root .bg-\[\#f6f8fb\] {
+  background-color: var(--app-bg) !important;
+}
+.app-root .bg-slate-100 {
+  background-color: var(--fill-2) !important;
+}
+.app-root .bg-slate-200 {
+  background-color: var(--fill-2) !important;
+}
+.app-root .bg-slate-300 {
+  background-color: var(--fill-3) !important;
+}
+
+/* 深色下卡片阴影调暗 */
+.app-root[data-theme="dark"] .shadow-sm,
+.app-root[data-theme="dark"] .shadow,
+.app-root[data-theme="dark"] .shadow-md {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35) !important;
+}
+
+/* ---------- 中性文本 ---------- */
+
+.app-root .text-slate-950,
+.app-root .text-slate-900,
+.app-root .text-slate-800 {
+  color: var(--app-text) !important;
+}
+.app-root .text-slate-700,
+.app-root .text-slate-600 {
+  color: var(--text-secondary) !important;
+}
+.app-root .text-slate-500,
+.app-root .text-slate-400 {
+  color: var(--app-muted) !important;
+}
+.app-root .text-slate-300 {
+  color: var(--text-quaternary) !important;
+}
+
+/* ---------- 中性边框 ---------- */
+
+.app-root .border-slate-100,
+.app-root .border-slate-200,
+.app-root .border-slate-300 {
+  border-color: var(--app-line) !important;
+}
+.app-root .ring-slate-200,
+.app-root .ring-slate-300 {
+  --tw-ring-color: var(--app-line) !important;
+}
+
+/* ---------- 主强调 blue → kimiBlue ---------- */
+
+.app-root .bg-blue-500,
+.app-root .bg-blue-600 {
+  background-color: var(--accent) !important;
+}
+.app-root .hover\:bg-blue-700:hover {
+  background-color: var(--accent-hover) !important;
+}
+.app-root .bg-blue-50,
+.app-root .bg-blue-100 {
+  background-color: var(--accent-soft) !important;
+}
+.app-root .bg-blue-100\/60 {
+  background-color: var(--accent-soft) !important;
+}
+.app-root .hover\:bg-blue-50:hover,
+.app-root .hover\:bg-blue-100\/60:hover {
+  background-color: var(--accent-soft-strong) !important;
+}
+.app-root .text-blue-600,
+.app-root .text-blue-700 {
+  color: var(--accent-text) !important;
+}
+.app-root .border-blue-100,
+.app-root .border-blue-200,
+.app-root .border-blue-300 {
+  border-color: var(--accent-soft-strong) !important;
+}
+.app-root .border-blue-500 {
+  border-color: var(--accent) !important;
+}
+.app-root .ring-blue-100 {
+  --tw-ring-color: var(--accent-soft-strong) !important;
+}
+
+/* ---------- 成功 emerald → positiveGreen ---------- */
+
+.app-root .bg-emerald-500 {
+  background-color: var(--success) !important;
+}
+.app-root .bg-emerald-50 {
+  background-color: var(--success-soft) !important;
+}
+.app-root .text-emerald-700 {
+  color: var(--success-text) !important;
+}
+.app-root .border-emerald-200 {
+  border-color: var(--success-soft) !important;
+}
+
+/* ---------- 危险 rose → danger ---------- */
+
+.app-root .bg-rose-500 {
+  background-color: var(--danger) !important;
+}
+.app-root .bg-rose-50 {
+  background-color: var(--danger-soft) !important;
+}
+.app-root .hover\:bg-rose-50:hover {
+  background-color: var(--danger-soft) !important;
+}
+.app-root .text-rose-500,
+.app-root .text-rose-600 {
+  color: var(--danger-text) !important;
+}
+.app-root .text-rose-700 {
+  color: var(--danger-text) !important;
+}
+.app-root .hover\:text-rose-600:hover,
+.app-root .hover\:text-rose-700:hover {
+  color: var(--danger) !important;
+}
+.app-root .border-rose-100,
+.app-root .border-rose-200 {
+  border-color: var(--danger-soft) !important;
+}
+
+/* ---------- 警告 amber/yellow → orange ---------- */
+
+.app-root .bg-amber-400,
+.app-root .bg-amber-500 {
+  background-color: var(--warning) !important;
+}
+.app-root .bg-amber-50 {
+  background-color: var(--warning-soft) !important;
+}
+.app-root .text-amber-500,
+.app-root .text-amber-600 {
+  color: var(--warning) !important;
+}
+.app-root .text-amber-800 {
+  color: var(--warning-text) !important;
+}
+.app-root .border-amber-200,
+.app-root .border-amber-300 {
+  border-color: var(--warning-soft) !important;
+}
+
+/* ---------- 品牌渐变主按钮 ---------- */
+
+.btn-primary-grad {
+  background: var(--accent-grad);
+  color: #ffffff;
+  box-shadow: var(--accent-glow);
+}
+.btn-primary-grad:hover:not(:disabled) {
+  filter: brightness(1.1);
+  box-shadow: var(--accent-glow);
+}
+.btn-primary-grad:active:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+/* 卡片悬浮提升 */
+.card-lift {
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) ease,
+    background-color var(--dur-fast) ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .card-lift:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  }
+}
+.app-root[data-theme="dark"] .card-lift:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* ---------- hover 中性填充统一 ---------- */
+
+.app-root .hover\:bg-slate-50:hover,
+.app-root .hover\:bg-slate-100:hover {
+  background-color: var(--fill-1) !important;
+}
+.app-root .hover\:bg-slate-200:hover {
+  background-color: var(--fill-2) !important;
+}
+.app-root .hover\:text-slate-800:hover,
+.app-root .hover\:text-slate-700:hover {
+  color: var(--app-text) !important;
+}
+
+/* ---------- 浮层（下拉/菜单/弹窗）边缘与阴影 ---------- */
+
+.app-root .fixed .bg-white.rounded-lg,
+.app-root .fixed .bg-white.rounded-xl,
+.app-root .fixed .bg-white.rounded-md {
+  background-color: var(--raised-bg) !important;
+  box-shadow: var(--shadow-raised);
+}
+
+/* 深色下浮层需要可见边缘：0.5px 级分隔线 */
+.app-root[data-theme="dark"] .fixed .rounded-lg,
+.app-root[data-theme="dark"] .fixed .rounded-xl,
+.app-root[data-theme="dark"] .fixed .rounded-md {
+  border-color: var(--app-line) !important;
+}
+
+/* ---------- 遮罩层 ---------- */
+
+.app-root .bg-black\/40,
+.app-root .bg-black\/50,
+.app-root .bg-black\/60,
+.app-root .bg-slate-900\/40,
+.app-root .bg-slate-900\/50,
+.app-root .bg-slate-900\/60 {
+  background-color: var(--mask-base) !important;
+}
+
+/* ---------- 弹窗进入动效：scale(0.96) + 淡入，150–200ms ---------- */
+
+@keyframes ldy-modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ldy-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.app-root .fixed.inset-0 > .rounded-lg,
+.app-root .fixed.inset-0 > .rounded-xl,
+.app-root .fixed.inset-0 .bg-white.rounded-lg {
+  animation: ldy-modal-in var(--dur-med) var(--ease-out);
+}
+
+.app-root .fixed.inset-0 {
+  animation: ldy-fade-in var(--dur-fast) ease;
+}
+
+/* ---------- 标签页激活态（border-b-white 抵消边框 hack） ---------- */
+
+.app-root[data-theme="dark"] .border-b-white {
+  border-bottom-color: var(--panel-bg) !important;
+}
+.app-root[data-theme="light"] .border-b-white,
+.app-root:not([data-theme]) .border-b-white {
+  border-bottom-color: #ffffff !important;
 }

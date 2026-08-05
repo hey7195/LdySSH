@@ -18,3 +18,6 @@ prismssh-cpp/prismssh-cpp/x64/
 *.tlog
 *.ipdb
 *.iobj
+.tools/
+prismssh-cpp/WebView2Loader.dll
+prismssh-cpp/x64/Release/tools/

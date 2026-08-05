@@ -1394,7 +1394,7 @@ export function App() {
       className="app-root h-screen w-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]"
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div className="grid h-full grid-cols-[54px_244px_minmax(0,1fr)] grid-rows-[36px_minmax(0,1fr)] border border-[var(--app-line)] bg-[var(--app-bg)]">
+      <div className="grid h-full grid-cols-[64px_240px_minmax(0,1fr)] grid-rows-[36px_minmax(0,1fr)] bg-[var(--app-bg)]">
         <TitleBar />
         <ActivityRail activeTool={activeTool} onChange={setActiveTool} />
         <HostSidebar
@@ -1549,26 +1549,29 @@ export function App() {
 
 function TitleBar() {
   return (
-    <header className="pywebview-drag-region col-span-3 grid grid-cols-[298px_minmax(0,1fr)_120px] border-b border-slate-200 bg-white">
-      <div className="flex items-center px-5 text-sm font-semibold text-slate-950">LdySSH</div>
-      <div className="flex items-center justify-center text-xs font-medium text-slate-400">SSH Workbench</div>
+    <header className="pywebview-drag-region col-span-3 grid grid-cols-[304px_minmax(0,1fr)_120px] border-b border-[var(--app-line)] bg-[var(--panel-bg)]">
+      <div className="flex items-center gap-2 px-4">
+        <span className="btn-primary-grad flex h-4 w-4 items-center justify-center rounded-[5px] text-[10px] font-bold leading-none">L</span>
+        <span className="text-sm font-semibold text-[var(--app-text)]">LdySSH</span>
+      </div>
+      <div className="flex items-center justify-center text-xs text-[var(--app-muted)]">SSH Workbench</div>
       <div className="no-drag flex items-center justify-end">
         <button
-          className="flex h-9 w-10 items-center justify-center text-slate-500 hover:bg-slate-100"
+          className="flex h-9 w-10 items-center justify-center text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
           title="最小化"
           onClick={nativeBridge.minimize}
         >
           <Minimize2 className="h-4 w-4" />
         </button>
         <button
-          className="flex h-9 w-10 items-center justify-center text-slate-500 hover:bg-slate-100"
+          className="flex h-9 w-10 items-center justify-center text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
           title="最大化"
           onClick={nativeBridge.maximize}
         >
           <Grid2X2 className="h-4 w-4" />
         </button>
         <button
-          className="flex h-9 w-10 items-center justify-center text-slate-500 hover:bg-rose-50 hover:text-rose-600"
+          className="flex h-9 w-10 items-center justify-center text-[var(--app-muted)] hover:bg-[var(--danger)] hover:text-white"
           title="关闭"
           onClick={nativeBridge.close}
         >
@@ -1581,11 +1584,11 @@ function TitleBar() {
 
 function ActivityRail({ activeTool, onChange }: { activeTool: Tool; onChange: (tool: Tool) => void }) {
   return (
-    <aside className="flex min-h-0 flex-col items-center border-r border-slate-200 bg-white py-3">
-      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-slate-950 text-sm font-semibold text-white">
+    <aside className="flex min-h-0 flex-col items-center border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] py-3">
+      <div className="btn-primary-grad mb-4 flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold">
         L
       </div>
-      <nav className="flex flex-1 flex-col gap-1">
+      <nav className="flex flex-1 flex-col gap-1.5">
         {tools.map((tool) => {
           const Icon = tool.icon;
           const active = activeTool === tool.id;
@@ -1593,19 +1596,26 @@ function ActivityRail({ activeTool, onChange }: { activeTool: Tool; onChange: (t
             <button
               key={tool.id}
               className={cn(
-                "flex h-12 w-12 flex-col items-center justify-center gap-1 rounded-md text-[10px] font-semibold transition-colors",
-                active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                "relative flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-medium",
+                active
+                  ? "text-[var(--accent-text)]"
+                  : "text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
               )}
               title={tool.title}
               onClick={() => onChange(tool.id)}
             >
-              <Icon className="h-4 w-4" />
-              <span>{tool.label}</span>
+              {active && (
+                <>
+                  <span className="absolute inset-0 rounded-xl" style={{ background: "var(--accent-grad-soft)" }} />
+                  <span className="absolute -left-1 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-full" style={{ background: "var(--accent-grad)" }} />
+                </>
+              )}
+              <Icon className="relative h-[18px] w-[18px]" />
+              <span className="relative">{tool.label}</span>
             </button>
           );
         })}
       </nav>
-      <div className="text-[10px] font-semibold text-slate-400">HL</div>
     </aside>
   );
 }
@@ -1640,26 +1650,26 @@ function HostSidebar({
   onActivateSession: (sessionId: string) => void;
 }) {
   return (
-    <aside className="min-h-0 border-r border-slate-200 bg-[#eef2f7]">
+    <aside className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)]">
       <div className="flex h-full flex-col">
-        <div className="px-4 pb-4 pt-5">
-          <div className="mb-5 flex items-center justify-between">
+        <div className="px-4 pb-3 pt-4">
+          <div className="mb-4 flex items-center justify-between">
             <div>
-              <div className="text-lg font-semibold text-slate-950">LdySSH</div>
-              <div className="mt-1 text-xs text-slate-500">轻量 SSH 桌面工作台</div>
+              <div className="text-sm font-semibold text-[var(--app-text)]">LdySSH</div>
+              <div className="mt-0.5 text-xs text-[var(--app-muted)]">轻量 SSH 桌面工作台</div>
             </div>
-            <Button variant="outline" className="h-8 w-8 px-0" onClick={onRefresh} title="刷新">
-              <RefreshCw className="h-4 w-4" />
+            <Button variant="outline" size={26} className="w-[26px] px-0" onClick={onRefresh} title="刷新">
+              <RefreshCw className="h-3.5 w-3.5" />
             </Button>
           </div>
           <Button className="w-full justify-start" onClick={onOpenDialog}>
             <Plus className="h-4 w-4" />
             新建连接
           </Button>
-          <div className="relative mt-3">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <div className="relative mt-2.5">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
             <Input
-              className="pl-9"
+              className="pl-8"
               value={query}
               placeholder="搜索主机"
               onChange={(event) => onQueryChange(event.target.value)}
@@ -1669,7 +1679,7 @@ function HostSidebar({
 
         <SidebarSection title="最近主机" count={savedConnections.length} open>
           {savedConnections.length === 0 ? (
-            <div className="rounded-md border border-dashed border-slate-300 bg-white/60 px-3 py-5 text-center text-xs text-slate-500">
+            <div className="rounded-lg border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-4 text-center text-xs text-[var(--app-muted)]">
               暂无最近主机
             </div>
           ) : (
@@ -1761,20 +1771,20 @@ function SidebarSection({
   const [isOpen, setIsOpen] = useState(open ?? true);
 
   return (
-    <section className="border-t border-slate-200 px-4 py-4">
+    <section className="border-t border-[var(--app-line)] px-4 py-3">
       <button
         type="button"
         aria-label={`${isOpen ? "折叠" : "展开"}${title}`}
         aria-expanded={isOpen}
-        className="mb-3 flex w-full items-center justify-between rounded-md text-left hover:bg-white/60"
+        className="mb-2 flex w-full items-center justify-between rounded-md py-1 text-left"
         onClick={() => setIsOpen((current) => !current)}
       >
-        <div className="text-sm font-semibold text-slate-950">{title}</div>
+        <div className="text-xs font-medium uppercase tracking-wider text-[var(--app-muted)]">{title}</div>
         <div className="flex items-center gap-2">
           {typeof count === "number" && (
-            <span className="rounded bg-white px-1.5 py-0.5 text-xs font-medium text-slate-500">{count}</span>
+            <span className="rounded-md bg-[var(--fill-2)] px-1.5 py-0.5 text-xs tabular-nums text-[var(--app-muted)]">{count}</span>
           )}
-          <ChevronDown className={cn("h-4 w-4 text-slate-400", !isOpen && "-rotate-90")} />
+          <ChevronDown className={cn("h-3.5 w-3.5 text-[var(--app-muted)]", !isOpen && "-rotate-90")} />
         </div>
       </button>
       {isOpen && children}
@@ -1802,19 +1812,16 @@ function Workbench({
   onDeleteConnection: (connection: SavedConnection) => void;
 }) {
   return (
-    <div className="h-full overflow-auto px-8 py-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="flex items-start justify-between gap-5">
+    <div className="h-full overflow-auto px-8 py-6">
+      <div className="mx-auto max-w-5xl">
+        <div className="flex items-center justify-between gap-5">
           <div>
-            <div className="inline-flex h-7 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              SSH Workbench
-            </div>
-            <h1 className="mt-5 text-4xl font-semibold tracking-normal text-slate-950">主机工作台</h1>
-            <p className="mt-2 text-sm text-slate-600">管理 SSH 主机、快速连接并进入终端会话。</p>
+            <h1 className="text-xl font-semibold leading-[30px] text-[var(--app-text)]">主机工作台</h1>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">管理 SSH 主机、快速连接并进入终端会话。</p>
           </div>
           <div className="flex items-center gap-2">
             <div className="relative w-64">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
               <Input
                 className="pl-9"
                 value={query}
@@ -1833,44 +1840,65 @@ function Workbench({
           </div>
         </div>
 
-        <div className="mt-7 grid grid-cols-3 gap-4">
-          <Metric label="全部主机" value={savedConnections.length} icon={Server} />
-          <Metric label="密钥连接" value={savedConnections.filter((item) => item.keyPath).length} icon={KeyRound} />
-          <Metric label="分组数" value={new Set(savedConnections.map((item) => item.group).filter(Boolean)).size} icon={HardDrive} />
-        </div>
-
-        <Panel
-          className="mt-6"
-          title="主机列表"
-          action={<Button variant="outline" onClick={onOpenDialog}>添加主机</Button>}
-        >
-          {savedConnections.length === 0 ? (
-            <EmptyState
-              title="暂无已保存主机"
-              description="从左侧新建连接，或直接添加第一台 SSH 主机。"
-              action={<Button onClick={onOpenDialog}>新建连接</Button>}
+        {savedConnections.length === 0 ? (
+          <div className="relative flex min-h-[calc(100vh-220px)] flex-col items-center justify-center text-center">
+            <span
+              className="pointer-events-none absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{ background: "radial-gradient(circle, var(--accent-soft) 0%, transparent 65%)" }}
             />
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <span className="btn-primary-grad relative flex h-16 w-16 items-center justify-center rounded-2xl">
+              <Server className="h-8 w-8 text-white" />
+            </span>
+            <div className="relative mt-5 text-base font-medium text-[var(--app-text)]">还没有保存的主机</div>
+            <p className="relative mt-2 max-w-sm text-sm leading-6 text-[var(--text-secondary)]">
+              添加第一台 SSH 主机，连接后即可使用终端、SFTP 文件管理、命令库和系统监控。
+            </p>
+            <div className="relative mt-6">
+              <Button size={44} onClick={onOpenDialog}>
+                <Plus className="h-5 w-5" />
+                新建连接
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="mt-6 grid grid-cols-3 gap-4">
+              <Metric label="全部主机" value={savedConnections.length} icon={Server} />
+              <Metric label="密钥连接" value={savedConnections.filter((item) => item.keyPath).length} icon={KeyRound} />
+              <Metric label="分组数" value={new Set(savedConnections.map((item) => item.group).filter(Boolean)).size} icon={HardDrive} />
+            </div>
+
+            <Panel
+              className="mt-5"
+              title="主机列表"
+              action={<Button variant="outline" onClick={onOpenDialog}>添加主机</Button>}
+            >
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
               {savedConnections.map((connection, index) => (
                 <div
                   key={`${connection.hostname}-${connection.username}-${index}`}
-                  className="rounded-lg border border-slate-200 bg-white p-4 text-left transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  className="card-lift rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-4 text-left hover:border-[var(--accent-soft-strong)]"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-950">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-[var(--accent-text)]"
+                      style={{ background: "var(--accent-grad-soft)" }}
+                    >
+                      {(connection.name || connection.hostname || "S").slice(0, 1).toUpperCase()}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-[var(--app-text)]">
                         {connection.name || connection.hostname}
                       </div>
-                      <div className="mt-1 truncate text-xs text-slate-500">
+                      <div className="mt-0.5 truncate text-xs text-[var(--app-muted)]">
                         {connection.username || "user"}@{connection.hostname}:{connection.port || 22}
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <button
                         aria-label={`编辑 ${connection.name || connection.hostname}`}
                         title={`编辑 ${connection.name || connection.hostname}`}
-                        className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
                         onClick={() => onEditConnection(connection)}
                       >
                         <Pencil className="h-3.5 w-3.5" />
@@ -1878,25 +1906,22 @@ function Workbench({
                       <button
                         aria-label={`删除 ${connection.name || connection.hostname}`}
                         title={`删除 ${connection.name || connection.hostname}`}
-                        className="flex h-8 w-8 items-center justify-center rounded-md border border-rose-100 bg-white text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
                         onClick={() => onDeleteConnection(connection)}
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
-                      <button
-                        aria-label={`连接 ${connection.name || connection.hostname}`}
-                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-                        onClick={() => onConnect(connection)}
-                      >
+                      <Button size={26} onClick={() => onConnect(connection)} aria-label={`连接 ${connection.name || connection.hostname}`}>
                         连接
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 </div>
               ))}
-            </div>
-          )}
-        </Panel>
+              </div>
+            </Panel>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1912,12 +1937,14 @@ function Metric({
   icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-slate-500">{label}</span>
-        <Icon className="h-4 w-4 text-slate-400" />
+    <div className="flex items-center justify-between rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3">
+      <div>
+        <div className="text-xs text-[var(--app-muted)]">{label}</div>
+        <div className="mt-1 text-xl font-semibold tabular-nums leading-7 text-[var(--app-text)]">{value}</div>
       </div>
-      <div className="mt-3 text-2xl font-semibold text-slate-950">{value}</div>
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "var(--accent-grad-soft)" }}>
+        <Icon className="h-4 w-4 text-[var(--accent-text)]" />
+      </span>
     </div>
   );
 }
@@ -2027,7 +2054,7 @@ function TerminalWorkspace({
       <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 pl-3 pr-4">
         <div className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           <button
-            className="flex h-7 w-8 items-center justify-center rounded-md bg-slate-900 text-white"
+            className="flex h-7 w-8 items-center justify-center rounded-lg bg-[var(--app-text)] text-[var(--panel-bg)]"
             onClick={onReturnHome}
             title="回到桌面"
           >
@@ -3281,7 +3308,7 @@ function TerminalCommandSidebar({
                 className={cn(
                   "flex h-[48px] basis-[calc((100%_-_1rem)/3)] min-w-0 shrink-0 flex-col items-start justify-between overflow-hidden rounded-md border px-2 py-1.5 text-left text-[12px] font-medium leading-[14px] [overflow-wrap:anywhere]",
                   folder.id === activeFolder?.id
-                    ? "border-slate-900 bg-slate-900 text-white"
+                    ? "border-transparent bg-[var(--app-text)] text-[var(--panel-bg)]"
                     : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
                 )}
                 onClick={() => onActiveFolderChange(folder.id)}
@@ -3596,8 +3623,8 @@ function TerminalRightSidebar({
               role="tab"
               aria-selected={active}
               className={cn(
-                "inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-semibold transition-colors",
-                active ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                "inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[10px] text-xs font-medium",
+                active ? "bg-[var(--app-text)] text-[var(--panel-bg)]" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
               )}
               onClick={() => onPanelChange(panel.id)}
             >
@@ -4417,7 +4444,7 @@ function CommandPanel({
               key={folder.id}
               className={cn(
                 "grid grid-cols-[minmax(0,1fr)_32px] overflow-hidden rounded-md text-sm font-medium",
-                folder.id === activeFolder?.id ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-white"
+                folder.id === activeFolder?.id ? "bg-[var(--app-text)] text-[var(--panel-bg)]" : "text-slate-700 hover:bg-white"
               )}
             >
               <button
@@ -4435,7 +4462,7 @@ function CommandPanel({
                 className={cn(
                   "flex h-full min-h-9 items-center justify-center border-l",
                   folder.id === activeFolder?.id
-                    ? "border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white"
+                    ? "border-[var(--app-line)] text-[var(--panel-bg)] opacity-70 hover:bg-[var(--danger)] hover:opacity-100"
                     : "border-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-600",
                   folders.length <= 1 && "cursor-not-allowed opacity-40"
                 )}
@@ -4496,8 +4523,8 @@ function CommandPanel({
 
         <Dialog.Root open={Boolean(editingCommand)} onOpenChange={(open) => !open && setEditingCommand(null)}>
           <Dialog.Portal>
-            <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
-            <Dialog.Content className="fixed left-1/2 top-1/2 w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+            <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)]" />
+            <Dialog.Content className="fixed left-1/2 top-1/2 w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)]">
               <div className="mb-5 flex items-start justify-between">
                 <div>
                   <Dialog.Title className="text-lg font-semibold text-slate-950">编辑命令</Dialog.Title>
@@ -4872,7 +4899,7 @@ function SettingsPanel({
                   />
                 </label>
                 <div
-                  className="rounded-md bg-[#d8cfbd] px-3 py-2 text-center text-slate-800"
+                  className="rounded-[10px] border border-[var(--app-line)] bg-[var(--terminal-bg)] px-3 py-2 text-center text-[var(--terminal-text)]"
                   style={{
                     fontFamily: resolvedTerminalAppearance.fontFamily,
                     fontSize: `${resolvedTerminalAppearance.fontSize}px`
@@ -6287,7 +6314,7 @@ const aiMarkdownComponents: Components = {
     );
   },
   pre: ({ children }) => (
-    <pre className="my-2 max-h-72 overflow-auto rounded-md bg-slate-950 p-3 text-left">
+    <pre className="my-2 max-h-72 overflow-auto rounded-[10px] bg-[var(--terminal-bg)] p-3 text-left">
       {children}
     </pre>
   ),
@@ -6477,8 +6504,8 @@ function DeleteConfirmationDialog({
   return (
     <Dialog.Root open={Boolean(confirmation)} onOpenChange={(open) => !open && onCancel()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 w-[360px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+        <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)]" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 w-[360px] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)]">
           <Dialog.Title className="text-lg font-semibold text-slate-950">确认删除</Dialog.Title>
           <Dialog.Description className="mt-2 text-sm leading-6 text-slate-600">
             {confirmation?.description}
@@ -6523,8 +6550,8 @@ function ConnectDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+        <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)]" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)]">
           <div className="mb-5 flex items-start justify-between">
             <div>
               <Dialog.Title className="text-lg font-semibold text-slate-950">
@@ -6610,10 +6637,10 @@ function RetryPasswordDialog({
   return (
     <Dialog.Root open={Boolean(prompt)} onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
+        <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)]" />
         <Dialog.Content
           data-testid="retry-password-dialog"
-          className="fixed left-1/2 top-1/2 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+          className="fixed left-1/2 top-1/2 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)]"
         >
           <div className="mb-4 flex items-start justify-between">
             <div>
