@@ -11,19 +11,19 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
-    "@radix-ui/react-dialog": "latest",
-    "@tailwindcss/vite": "latest",
+    "@radix-ui/react-dialog": "^1.1.19",
+    "@tailwindcss/vite": "^4.3.2",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/xterm": "5.5.0",
-    "clsx": "latest",
-    "lucide-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.23.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "latest",
-    "tailwindcss": "latest"
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.3.2"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
@@ -32,7 +32,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
     "jsdom": "^26.1.0",
-    "typescript": "latest",
+    "typescript": "^6.0.3",
     "vite": "^5.4.21",
     "vitest": "^3.2.4"
   }
