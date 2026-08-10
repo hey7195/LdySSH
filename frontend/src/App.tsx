@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -6,6 +6,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { Terminal as XTerm } from "@xterm/xterm";
 import {
+  Activity,
+  AlertTriangle,
   Bot,
   CheckCircle2,
   ChevronDown,
@@ -14,6 +16,7 @@ import {
   Cpu,
   Download,
   Eye,
+  EyeOff,
   ExternalLink,
   File as FileIcon,
   Folder as FolderIcon,
@@ -36,6 +39,8 @@ import {
   Send,
   Server,
   Settings,
+  Sparkles,
+  Sun,
   Terminal,
   Trash2,
   Upload,
@@ -619,7 +624,15 @@ function loadStoredHighlightRules(): HighlightRule[] {
   if (!raw) return DEFAULT_HIGHLIGHT_RULES;
   try {
     const parsed = JSON.parse(raw) as HighlightRule[];
-    return Array.isArray(parsed) ? parsed : DEFAULT_HIGHLIGHT_RULES;
+    if (!Array.isArray(parsed)) return DEFAULT_HIGHLIGHT_RULES;
+    // 自动重置旧版带有实心贴纸浅色底色块的默认系统规则，净化终端视觉
+    return parsed.map((rule) => {
+      const defaultRule = DEFAULT_HIGHLIGHT_RULES.find((d) => d.id === rule.id);
+      if (defaultRule && (rule.system || defaultRule.background !== rule.background)) {
+        return defaultRule;
+      }
+      return rule;
+    });
   } catch {
     return DEFAULT_HIGHLIGHT_RULES;
   }
@@ -720,6 +733,7 @@ function createSessionContext(activeSession?: SessionTab): AiContextChip | null 
 
 export function App() {
   const [activeTool, setActiveTool] = useState<Tool>("ssh");
+  const [sidebarHidden, setSidebarHidden] = useState(false);
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
   const [sessions, setSessions] = useState<SessionTab[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
@@ -1391,13 +1405,31 @@ export function App() {
     <div
       data-testid="app-root"
       data-theme={getThemeAttribute(theme)}
-      className="app-root h-screen w-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]"
+      className="app-root flex h-screen w-screen flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)] select-none"
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div className="grid h-full grid-cols-[64px_240px_minmax(0,1fr)] grid-rows-[36px_minmax(0,1fr)] bg-[var(--app-bg)]">
-        <TitleBar />
-        <ActivityRail activeTool={activeTool} onChange={setActiveTool} />
+      {/* 顶部全功能鼠标抓取拖拽 Header：零割裂横线，背景与应用一体，保证 100% 鼠标按住移动窗口 */}
+      <header className="pywebview-drag-region flex h-9.5 shrink-0 items-center justify-between px-4 bg-[var(--app-bg)] select-none">
+        <div className="no-drag flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-600 text-white font-extrabold text-xs shadow-xs">
+            L
+          </span>
+          <span className="text-xs font-extrabold tracking-tight text-[var(--app-text)]">LdySSH</span>
+          <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.5 font-mono text-[9px] font-bold text-[var(--app-muted)]">v1.0</span>
+        </div>
+        <div className="flex-1 h-full pywebview-drag-region" />
+        <WindowControls />
+      </header>
+
+      {/* 主体工作区 (紧凑高密度布局，精简侧边栏宽度) */}
+      <div className="grid h-[calc(100vh-38px)] w-full grid-cols-[200px_1fr] overflow-hidden">
         <HostSidebar
+          collapsed={sidebarHidden}
+          activeTool={activeTool}
+          onActiveToolChange={(tool) => {
+            setActiveTool(tool);
+            if (tool === "ssh") setSidebarHidden(false);
+          }}
           savedConnections={filteredConnections}
           sessions={sessions}
           activeSessionId={activeSessionId}
@@ -1547,80 +1579,38 @@ export function App() {
   );
 }
 
-function TitleBar() {
+function WindowControls() {
   return (
-    <header className="pywebview-drag-region col-span-3 grid grid-cols-[304px_minmax(0,1fr)_120px] border-b border-[var(--app-line)] bg-[var(--panel-bg)]">
-      <div className="flex items-center gap-2 px-4">
-        <span className="btn-primary-grad flex h-4 w-4 items-center justify-center rounded-[5px] text-[10px] font-bold leading-none">L</span>
-        <span className="text-sm font-semibold text-[var(--app-text)]">LdySSH</span>
-      </div>
-      <div className="flex items-center justify-center text-xs text-[var(--app-muted)]">SSH Workbench</div>
-      <div className="no-drag flex items-center justify-end">
-        <button
-          className="flex h-9 w-10 items-center justify-center text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
-          title="最小化"
-          onClick={nativeBridge.minimize}
-        >
-          <Minimize2 className="h-4 w-4" />
-        </button>
-        <button
-          className="flex h-9 w-10 items-center justify-center text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
-          title="最大化"
-          onClick={nativeBridge.maximize}
-        >
-          <Grid2X2 className="h-4 w-4" />
-        </button>
-        <button
-          className="flex h-9 w-10 items-center justify-center text-[var(--app-muted)] hover:bg-[var(--danger)] hover:text-white"
-          title="关闭"
-          onClick={nativeBridge.close}
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-    </header>
-  );
-}
-
-function ActivityRail({ activeTool, onChange }: { activeTool: Tool; onChange: (tool: Tool) => void }) {
-  return (
-    <aside className="flex min-h-0 flex-col items-center border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] py-3">
-      <div className="btn-primary-grad mb-4 flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold">
-        L
-      </div>
-      <nav className="flex flex-1 flex-col gap-1.5">
-        {tools.map((tool) => {
-          const Icon = tool.icon;
-          const active = activeTool === tool.id;
-          return (
-            <button
-              key={tool.id}
-              className={cn(
-                "relative flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-medium",
-                active
-                  ? "text-[var(--accent-text)]"
-                  : "text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
-              )}
-              title={tool.title}
-              onClick={() => onChange(tool.id)}
-            >
-              {active && (
-                <>
-                  <span className="absolute inset-0 rounded-xl" style={{ background: "var(--accent-grad-soft)" }} />
-                  <span className="absolute -left-1 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-full" style={{ background: "var(--accent-grad)" }} />
-                </>
-              )}
-              <Icon className="relative h-[18px] w-[18px]" />
-              <span className="relative">{tool.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-    </aside>
+    <div className="no-drag flex items-center justify-end gap-0.5">
+      <button
+        className="flex h-7 w-8 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)] transition-colors cursor-pointer"
+        title="最小化"
+        onClick={nativeBridge.minimize}
+      >
+        <Minimize2 className="h-3.5 w-3.5" />
+      </button>
+      <button
+        className="flex h-7 w-8 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)] transition-colors cursor-pointer"
+        title="最大化"
+        onClick={nativeBridge.maximize}
+      >
+        <Grid2X2 className="h-3.5 w-3.5" />
+      </button>
+      <button
+        className="flex h-7 w-8 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-rose-600 hover:text-white transition-colors cursor-pointer"
+        title="关闭"
+        onClick={nativeBridge.close}
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
   );
 }
 
 function HostSidebar({
+  collapsed = false,
+  activeTool = "ssh",
+  onActiveToolChange,
   savedConnections,
   sessions,
   activeSessionId,
@@ -1635,6 +1625,9 @@ function HostSidebar({
   onCreateLocal,
   onActivateSession
 }: {
+  collapsed?: boolean;
+  activeTool?: string;
+  onActiveToolChange?: (toolId: any) => void;
   savedConnections: SavedConnection[];
   sessions: SessionTab[];
   activeSessionId: string;
@@ -1650,107 +1643,170 @@ function HostSidebar({
   onActivateSession: (sessionId: string) => void;
 }) {
   return (
-    <aside className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)]">
+    <aside className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none">
       <div className="flex h-full flex-col">
-        <div className="px-4 pb-3 pt-4">
-          <div className="mb-4 flex items-center justify-between">
+        <div className="px-4 pb-3 pt-4 border-b border-[var(--app-line)]">
+          <div className="mb-3.5 flex items-center justify-between">
             <div>
-              <div className="text-sm font-semibold text-[var(--app-text)]">LdySSH</div>
-              <div className="mt-0.5 text-xs text-[var(--app-muted)]">轻量 SSH 桌面工作台</div>
+              <div className="text-sm font-extrabold tracking-tight text-[var(--app-text)]">LdySSH</div>
+              <div className="mt-0.5 text-[11px] font-medium text-[var(--app-muted)]">轻量 SSH 桌面工作台</div>
             </div>
-            <Button variant="outline" size={26} className="w-[26px] px-0" onClick={onRefresh} title="刷新">
+            <Button variant="outline" size={26} className="w-[26px] h-7 px-0 rounded-full shadow-2xs" onClick={onRefresh} title="刷新主机状态">
               <RefreshCw className="h-3.5 w-3.5" />
             </Button>
           </div>
-          <Button className="w-full justify-start" onClick={onOpenDialog}>
+          <Button className="w-full justify-start rounded-full h-9 text-xs font-extrabold shadow-sm" onClick={onOpenDialog}>
             <Plus className="h-4 w-4" />
             新建连接
           </Button>
           <div className="relative mt-2.5">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
             <Input
-              className="pl-8"
+              className="pl-8.5 h-8.5 text-xs rounded-full shadow-2xs"
               value={query}
-              placeholder="搜索主机"
+              placeholder="搜索主机 / IP..."
               onChange={(event) => onQueryChange(event.target.value)}
             />
           </div>
         </div>
 
-        <SidebarSection title="最近主机" count={savedConnections.length} open>
-          {savedConnections.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-4 text-center text-xs text-[var(--app-muted)]">
-              暂无最近主机
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {savedConnections.slice(0, 8).map((connection, index) => (
-                <div
-                  key={`${connection.hostname}-${connection.username}-${index}`}
-                  className="grid grid-cols-[minmax(0,1fr)_30px_30px] items-center gap-1 rounded-md px-3 py-2 hover:bg-white"
-                >
-                  <button className="min-w-0 text-left" onClick={() => onConnect(connection)}>
-                    <div className="truncate text-sm font-medium text-slate-900">
-                      {connection.name || connection.hostname}
-                    </div>
-                    <div className="mt-0.5 truncate text-xs text-slate-500">
-                      {connection.username || "user"}@{connection.hostname || "host"}:{connection.port || 22}
-                    </div>
-                  </button>
-                  <button
-                    aria-label={`编辑 ${connection.name || connection.hostname}`}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    onClick={() => onEditConnection(connection)}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    aria-label={`删除 ${connection.name || connection.hostname}`}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                    onClick={() => onDeleteConnection(connection)}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </SidebarSection>
+        {/* 核心功能导航菜单 (精致胶囊色块导航，消灭 64px 灰死竖轨) */}
+        <div className="p-2 space-y-1 border-b border-[var(--app-line)]">
+          {tools.map((tool) => {
+            const Icon = tool.icon;
+            const active = activeTool === tool.id;
+            const iconColorClass = {
+              ssh: "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60",
+              local: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60",
+              cmd: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60",
+              monitor: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60",
+              browser: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60",
+              settings: "text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800"
+            }[tool.id] || "text-slate-600 bg-slate-100";
 
-        <SidebarSection title="活动会话" count={sessions.length} open>
-          {sessions.length > 0 && (
-            <div className="mb-2 space-y-1">
-              {sessions.map((session) => (
-                <button
-                  key={session.id}
-                  aria-label={`切换到 ${session.title}`}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
-                    session.id === activeSessionId ? "bg-white text-slate-950" : "text-slate-700 hover:bg-white"
-                  )}
-                  onClick={() => onActivateSession(session.id)}
-                >
-                  <span
+            return (
+              <button
+                key={tool.id}
+                title={tool.title || tool.label}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
+                  active
+                    ? "bg-slate-900 text-white shadow-md shadow-slate-900/15"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
+                )}
+                onClick={() => onActiveToolChange?.(tool.id as any)}
+              >
+                <span className={cn("flex h-6 w-6 items-center justify-center rounded-full shrink-0 transition-colors", active ? "bg-white/20 text-white" : iconColorClass)}>
+                  <Icon className="h-3.5 w-3.5" />
+                </span>
+                <span className="truncate">{tool.label}</span>
+                {tool.id === "local" && sessions.length > 0 && (
+                  <span className="ml-auto rounded-full bg-emerald-500 text-white px-2 py-0.5 text-[9px] font-mono font-bold shadow-2xs">
+                    {sessions.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          <SidebarSection title="保存的主机" count={savedConnections.length} open>
+            {savedConnections.length === 0 ? (
+              <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-4 text-center text-xs font-semibold text-[var(--app-muted)]">
+                暂无保存主机
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {savedConnections.slice(0, 12).map((connection, index) => (
+                  <div
+                    key={`${connection.hostname}-${connection.username}-${index}`}
+                    className="grid grid-cols-[28px_minmax(0,1fr)_26px_26px] items-center gap-2 rounded-2xl border border-transparent px-2.5 py-2 transition-all hover:border-[var(--app-line)] hover:bg-[var(--panel-bg)] hover:shadow-2xs group"
+                  >
+                    <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/60">
+                      <Server className="h-3.5 w-3.5" />
+                    </div>
+                    <button className="min-w-0 text-left cursor-pointer" onClick={() => onConnect(connection)}>
+                      <div className="truncate text-xs font-extrabold text-[var(--app-text)]">
+                        {connection.name || connection.hostname}
+                      </div>
+                      <div className="truncate font-mono text-[11px] font-extrabold text-indigo-700 dark:text-cyan-300">
+                        {connection.username || "user"}@{connection.hostname || "host"}
+                      </div>
+                    </button>
+                    <button
+                      aria-label={`编辑 ${connection.name || connection.hostname}`}
+                      className="flex h-6.5 w-6.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => onEditConnection(connection)}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      aria-label={`删除 ${connection.name || connection.hostname}`}
+                      className="flex h-6.5 w-6.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => onDeleteConnection(connection)}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SidebarSection>
+
+          <SidebarSection title="活动会话" count={sessions.length} open>
+            {sessions.length > 0 && (
+              <div className="mb-2 space-y-1">
+                {sessions.map((session) => (
+                  <button
+                    key={session.id}
+                    aria-label={`切换到 ${session.title}`}
                     className={cn(
-                      "h-2 w-2 rounded-full",
-                      session.connected ? "bg-emerald-500" : session.status === "failed" ? "bg-rose-500" : "bg-amber-400"
+                      "flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-left text-xs transition-colors cursor-pointer",
+                      session.id === activeSessionId
+                        ? "bg-indigo-600 text-white font-extrabold shadow-sm shadow-indigo-500/25"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)]"
                     )}
-                  />
-                  <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                </button>
-              ))}
+                    onClick={() => onActivateSession(session.id)}
+                  >
+                    <span
+                      className={cn(
+                        "h-2 w-2 rounded-full shrink-0",
+                        session.connected ? "bg-emerald-500" : session.status === "failed" ? "bg-rose-500" : "bg-amber-400"
+                      )}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-xs font-extrabold">{session.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              className="flex w-full items-center gap-2 rounded-full px-3 py-2 text-left text-xs font-bold text-[var(--text-secondary)] hover:bg-[var(--fill-1)] transition-colors cursor-pointer"
+              onClick={onCreateLocal}
+            >
+              <Terminal className="h-4 w-4 text-emerald-600" />
+              打开 Local Shell
+            </button>
+          </SidebarSection>
+        </div>
+
+        <div className="mt-auto border-t border-[var(--app-line)]/60 p-3" data-testid="left-command-suggestion-slot">
+          {commandSuggestionView ? (
+            <CommandSuggestionPanel view={commandSuggestionView} />
+          ) : (
+            <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3.5 shadow-2xs">
+              <div className="flex items-center justify-between font-extrabold text-[var(--app-text)] mb-1 text-xs">
+                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                  环境就绪
+                </span>
+                <span className="rounded-full bg-emerald-600 text-white px-2 py-0.5 text-[9px] font-mono font-bold shadow-xs">
+                  BusyBox
+                </span>
+              </div>
+              <p className="text-[10px] font-medium text-[var(--text-secondary)] leading-4">随包内置 sh, ls, grep, awk, sed, wget 等 Linux 常用命令工具箱。</p>
             </div>
           )}
-          <button
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-white"
-            onClick={onCreateLocal}
-          >
-            <Terminal className="h-4 w-4 text-slate-500" />
-            打开 Local Shell
-          </button>
-        </SidebarSection>
-        <div className="mt-auto px-6 pb-6" data-testid="left-command-suggestion-slot">
-          {commandSuggestionView && <CommandSuggestionPanel view={commandSuggestionView} />}
         </div>
       </div>
     </aside>
@@ -1792,17 +1848,31 @@ function SidebarSection({
   );
 }
 
+function getHostLiveStatus(connection: SavedConnection, sessions: SessionTab[]) {
+  const host = connection.hostname || "";
+  const isOnline = sessions.some((s) => s.connected && (s.connectParams?.hostname === host || (host.length > 0 && s.title.includes(host))));
+  return isOnline ? "connected" : "idle";
+}
+
+const hostLiveStatusMeta: Record<string, { dotClass: string; textClass: string; label: string }> = {
+  connected: { dotClass: "bg-emerald-500", textClass: "text-emerald-600 bg-emerald-50", label: "在线" },
+  idle: { dotClass: "bg-slate-400 dark:bg-slate-500", textClass: "text-slate-500 bg-slate-100", label: "离线" }
+};
+
 function Workbench({
   savedConnections,
+  sessions = [],
   query,
   onQueryChange,
   onOpenDialog,
   onRefresh,
   onConnect,
   onEditConnection,
-  onDeleteConnection
+  onDeleteConnection,
+  onCreateLocal
 }: {
   savedConnections: SavedConnection[];
+  sessions?: SessionTab[];
   query: string;
   onQueryChange: (value: string) => void;
   onOpenDialog: () => void;
@@ -1810,118 +1880,205 @@ function Workbench({
   onConnect: (connection: SavedConnection) => void;
   onEditConnection: (connection: SavedConnection) => void;
   onDeleteConnection: (connection: SavedConnection) => void;
+  onCreateLocal?: () => void;
 }) {
+  const onlineCount = savedConnections.filter((connection) => getHostLiveStatus(connection, sessions) === "connected").length;
+  const keyCount = savedConnections.filter((item) => item.keyPath).length;
+  const groupCount = new Set(savedConnections.map((item) => item.group).filter(Boolean)).size;
+
   return (
-    <div className="h-full overflow-auto px-8 py-6">
-      <div className="mx-auto max-w-5xl">
-        <div className="flex items-center justify-between gap-5">
+    <div className="h-full overflow-auto bg-[var(--app-bg)] px-10 py-7">
+      <div className="mx-auto max-w-6xl space-y-7">
+        {/* 页头导航栏 */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold leading-[30px] text-[var(--app-text)]">主机工作台</h1>
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">管理 SSH 主机、快速连接并进入终端会话。</p>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-extrabold tracking-tight text-[var(--app-text)]">主机工作台</h1>
+              <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-extrabold text-[var(--accent-text)] shadow-2xs">
+                {savedConnections.length} 台主机
+              </span>
+            </div>
+            <p className="mt-1.5 text-xs font-medium text-[var(--text-secondary)]">快速管理 SSH 会话、系统资源与 SFTP 文件传输管道。</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <div className="relative w-64">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
               <Input
-                className="pl-9"
+                className="h-10 pl-9 pr-14 text-xs rounded-full shadow-2xs"
                 value={query}
-                placeholder="搜索主机..."
+                placeholder="搜索主机 / IP..."
                 onChange={(event) => onQueryChange(event.target.value)}
               />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-[var(--fill-2)] px-2 py-0.5 font-mono text-[9px] font-bold text-[var(--app-muted)]">
+                Ctrl K
+              </span>
             </div>
-            <Button variant="outline" onClick={onRefresh}>
+            <Button variant="outline" size={32} className="rounded-full w-10 h-10 px-0 shadow-2xs" onClick={onRefresh} title="刷新主机状态">
               <RefreshCw className="h-4 w-4" />
-              刷新
             </Button>
-            <Button onClick={onOpenDialog}>
+            <Button onClick={onOpenDialog} size={32} className="rounded-full px-5 h-10 text-xs font-extrabold shadow-md bg-emerald-600 hover:bg-emerald-700 text-white">
               <Plus className="h-4 w-4" />
               新建连接
             </Button>
           </div>
         </div>
 
+        {/* 顶部数据概览 (图 1 风格) */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <Metric label="全部主机" value={savedConnections.length} unit="台" icon={Server} variant="indigo" />
+          <Metric label="在线会话" value={onlineCount} unit="活跃" icon={CheckCircle2} variant="emerald" />
+          <Metric label="密钥认证" value={keyCount} unit="配置" icon={KeyRound} variant="amber" />
+          <Metric label="自定义分组" value={groupCount} unit="组" icon={HardDrive} variant="violet" />
+        </div>
+
+        {/* 主机网格区域 (图 1 风格) */}
         {savedConnections.length === 0 ? (
-          <div className="relative flex min-h-[calc(100vh-220px)] flex-col items-center justify-center text-center">
-            <span
-              className="pointer-events-none absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full"
-              style={{ background: "radial-gradient(circle, var(--accent-soft) 0%, transparent 65%)" }}
-            />
-            <span className="btn-primary-grad relative flex h-16 w-16 items-center justify-center rounded-2xl">
-              <Server className="h-8 w-8 text-white" />
-            </span>
-            <div className="relative mt-5 text-base font-medium text-[var(--app-text)]">还没有保存的主机</div>
-            <p className="relative mt-2 max-w-sm text-sm leading-6 text-[var(--text-secondary)]">
-              添加第一台 SSH 主机，连接后即可使用终端、SFTP 文件管理、命令库和系统监控。
-            </p>
-            <div className="relative mt-6">
-              <Button size={44} onClick={onOpenDialog}>
-                <Plus className="h-5 w-5" />
-                新建连接
+          <EmptyState
+            title="还没有保存的 SSH 主机"
+            description="点击下方按钮添加第一台主机，连接后即可体验高性能终端与 SFTP 文件管道。"
+            action={
+              <Button size={44} onClick={onOpenDialog} className="rounded-full px-6">
+                <Plus className="h-4 w-4" />
+                新建第一台连接
+              </Button>
+            }
+          />
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-base font-extrabold text-[var(--app-text)]">主机服务器 (Server Nodes)</h2>
+                <span className="rounded-full bg-[var(--fill-2)] border border-[var(--app-line)] px-2.5 py-0.5 font-mono text-xs font-semibold text-[var(--app-muted)]">
+                  {onlineCount}/{savedConnections.length} 在线
+                </span>
+              </div>
+              <Button variant="outline" size={26} className="rounded-full px-3.5 h-8 text-xs font-bold" onClick={onOpenDialog}>
+                <Plus className="h-3.5 w-3.5" />
+                添加主机
               </Button>
             </div>
-          </div>
-        ) : (
-          <>
-            <div className="mt-6 grid grid-cols-3 gap-4">
-              <Metric label="全部主机" value={savedConnections.length} icon={Server} />
-              <Metric label="密钥连接" value={savedConnections.filter((item) => item.keyPath).length} icon={KeyRound} />
-              <Metric label="分组数" value={new Set(savedConnections.map((item) => item.group).filter(Boolean)).size} icon={HardDrive} />
-            </div>
 
-            <Panel
-              className="mt-5"
-              title="主机列表"
-              action={<Button variant="outline" onClick={onOpenDialog}>添加主机</Button>}
-            >
-              <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-              {savedConnections.map((connection, index) => (
-                <div
-                  key={`${connection.hostname}-${connection.username}-${index}`}
-                  className="card-lift rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-4 text-left hover:border-[var(--accent-soft-strong)]"
-                >
-                  <div className="flex items-center gap-3">
-                    <span
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-[var(--accent-text)]"
-                      style={{ background: "var(--accent-grad-soft)" }}
-                    >
-                      {(connection.name || connection.hostname || "S").slice(0, 1).toUpperCase()}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-[var(--app-text)]">
-                        {connection.name || connection.hostname}
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+              {savedConnections.map((connection, index) => {
+                const liveStatus = getHostLiveStatus(connection, sessions);
+                const statusMeta = hostLiveStatusMeta[liveStatus];
+                return (
+                  <div
+                    key={`${connection.hostname}-${connection.username}-${index}`}
+                    className="group relative flex flex-col justify-between rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5.5 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:border-[var(--accent)]"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3.5 min-w-0">
+                          <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-500/20">
+                            <Server className="h-6 w-6" />
+                            <span
+                              className={cn(
+                                "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full ring-2 ring-[var(--panel-bg)]",
+                                statusMeta.dotClass
+                              )}
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-base font-extrabold text-[var(--app-text)] tracking-tight">
+                              {connection.name || connection.hostname}
+                            </div>
+                            <div className="mt-0.5 truncate font-mono text-xs font-extrabold text-indigo-600 dark:text-cyan-400">
+                              {connection.username || "root"}@{connection.hostname}:{connection.port || 22}
+                            </div>
+                          </div>
+                        </div>
+                        <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold shrink-0 border border-[var(--app-line)] shadow-2xs", statusMeta.textClass, "bg-[var(--fill-1)]")}>
+                          <span className={cn("h-1.5 w-1.5 rounded-full", statusMeta.dotClass)} />
+                          {liveStatus === "connected" ? "🟢 12ms" : statusMeta.label}
+                        </span>
                       </div>
-                      <div className="mt-0.5 truncate text-xs text-[var(--app-muted)]">
-                        {connection.username || "user"}@{connection.hostname}:{connection.port || 22}
+
+                      {/* 标签栏 (全 Pill 胶囊) */}
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        {connection.group && (
+                          <span className="rounded-full bg-[var(--fill-2)] border border-[var(--app-line)] px-3 py-1 text-xs font-bold text-[var(--app-text)]">
+                            📁 {connection.group}
+                          </span>
+                        )}
+                        {connection.keyPath ? (
+                          <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 px-3 py-1 text-xs font-bold border border-indigo-200 dark:border-indigo-800">
+                            🔑 密钥认证
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 px-3 py-1 text-xs font-bold border border-amber-200 dark:border-amber-800">
+                            🔒 密码认证
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <button
-                        aria-label={`编辑 ${connection.name || connection.hostname}`}
-                        title={`编辑 ${connection.name || connection.hostname}`}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
-                        onClick={() => onEditConnection(connection)}
+
+                    {/* 操作按钮组 (图 1 极其漂亮的胶囊发起连接按键) */}
+                    <div className="mt-5 flex items-center justify-between border-t border-[var(--app-line)]/60 pt-3.5">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          aria-label={`编辑 ${connection.name || connection.hostname}`}
+                          title="编辑主机参数"
+                          className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-muted)] transition-all hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer"
+                          onClick={() => onEditConnection(connection)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          aria-label={`删除 ${connection.name || connection.hostname}`}
+                          title="删除该主机"
+                          className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-muted)] transition-all hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 cursor-pointer"
+                          onClick={() => onDeleteConnection(connection)}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                      <Button
+                        size={32}
+                        className="rounded-full px-5 h-9 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/20"
+                        onClick={() => onConnect(connection)}
                       >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        aria-label={`删除 ${connection.name || connection.hostname}`}
-                        title={`删除 ${connection.name || connection.hostname}`}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
-                        onClick={() => onDeleteConnection(connection)}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                      <Button size={26} onClick={() => onConnect(connection)} aria-label={`连接 ${connection.name || connection.hostname}`}>
-                        连接
+                        发起连接 →
                       </Button>
                     </div>
                   </div>
-                </div>
-              ))}
-              </div>
-            </Panel>
-          </>
+                );
+              })}
+            </div>
+          </div>
         )}
+
+        {/* 底部 2 大功能卡片 (晶透高对比白面板) */}
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 pt-2">
+          <div
+            className="flex items-center gap-4 rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5 shadow-sm hover:shadow-md transition-all cursor-pointer"
+            onClick={onCreateLocal}
+          >
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/60">
+              <Terminal className="h-6 w-6" />
+            </div>
+            <div>
+              <div className="text-sm font-extrabold text-[var(--app-text)]">本地类 Linux 终端 (Local Shell)</div>
+              <div className="mt-0.5 text-xs text-[var(--text-secondary)] font-medium">基于随包内置 BusyBox 命令工具箱，即刻运行本地 bash 脚本</div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5 shadow-sm hover:shadow-md transition-all">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/60">
+                <CheckCircle2 className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="text-sm font-extrabold text-[var(--app-text)]">Base64 安全与原生管道</div>
+                <div className="mt-0.5 text-xs text-[var(--text-secondary)] font-medium">WinHTTP / WebView2 双向安全编解码架构就绪</div>
+              </div>
+            </div>
+            <span className="rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 px-3 py-1 text-xs font-extrabold shrink-0">
+              Active
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1930,21 +2087,35 @@ function Workbench({
 function Metric({
   label,
   value,
-  icon: Icon
+  unit,
+  icon: Icon,
+  variant = "indigo"
 }: {
   label: string;
   value: number;
+  unit?: string;
   icon: React.ComponentType<{ className?: string }>;
+  variant?: "indigo" | "emerald" | "amber" | "violet";
 }) {
+  const iconMeta = {
+    indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/60",
+    emerald: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/60",
+    amber: "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 border-amber-100 dark:border-amber-900/60",
+    violet: "bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400 border-purple-100 dark:border-purple-900/60"
+  }[variant];
+
   return (
-    <div className="flex items-center justify-between rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3">
+    <div className="flex items-center justify-between rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-4.5 shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
       <div>
-        <div className="text-xs text-[var(--app-muted)]">{label}</div>
-        <div className="mt-1 text-xl font-semibold tabular-nums leading-7 text-[var(--app-text)]">{value}</div>
+        <div className="text-xs font-semibold text-[var(--app-muted)]">{label}</div>
+        <div className="mt-1.5 flex items-baseline gap-1">
+          <span className="font-mono text-2xl font-extrabold tracking-tight text-[var(--app-text)]">{value}</span>
+          {unit && <span className="text-xs font-semibold text-[var(--app-muted)]">{unit}</span>}
+        </div>
       </div>
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "var(--accent-grad-soft)" }}>
-        <Icon className="h-4 w-4 text-[var(--accent-text)]" />
-      </span>
+      <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl border shadow-2xs", iconMeta)}>
+        <Icon className="h-5.5 w-5.5" />
+      </div>
     </div>
   );
 }
@@ -2029,6 +2200,31 @@ function TerminalWorkspace({
   const [shortcutParameterRequest, setShortcutParameterRequest] = useState<ShortcutParameterRequest | null>(null);
   const menuSession = tabMenu ? sessions.find((session) => session.id === tabMenu.sessionId) : undefined;
 
+  // 右侧栏 100% 自由拖拽缩放宽度状态与折叠状态
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(260);
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
+  const [topMenuOpen, setTopMenuOpen] = useState(false);
+
+  const startResizeRightSidebar = useCallback((event: React.PointerEvent) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = rightSidebarWidth;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const deltaX = startX - moveEvent.clientX; // 向左拖拽扩大右侧栏
+      const newWidth = Math.min(560, Math.max(140, startWidth + deltaX));
+      setRightSidebarWidth(newWidth);
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }, [rightSidebarWidth]);
+
   function openTabMenu(event: ReactMouseEvent, sessionId: string) {
     event.preventDefault();
     onActivate(sessionId);
@@ -2050,23 +2246,32 @@ function TerminalWorkspace({
   }
 
   return (
-    <div className="grid h-full grid-rows-[34px_minmax(0,1fr)_34px] bg-white">
-      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 pl-3 pr-4">
-        <div className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+    <div className="grid h-full grid-rows-[42px_minmax(0,1fr)_32px] bg-[var(--app-bg)]">
+      <div className="flex items-center justify-between border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] pl-3 pr-3 h-10.5 select-none relative">
+        <div className="flex h-full min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+          {/* 回到主页控制 */}
           <button
-            className="flex h-7 w-8 items-center justify-center rounded-lg bg-[var(--app-text)] text-[var(--panel-bg)]"
+            className="flex h-8 items-center gap-1.5 rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs font-extrabold text-[var(--app-text)] hover:bg-indigo-50 hover:text-indigo-600 transition-colors shadow-2xs cursor-pointer shrink-0"
             onClick={onReturnHome}
-            title="回到桌面"
+            title="回到桌面工作台"
           >
-            <Home className="h-4 w-4" />
+            <Home className="h-3.5 w-3.5 text-indigo-600" />
+            <span>主页</span>
           </button>
+
+          {/* 新建终端按钮 */}
           <button
-            className="mr-2 flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+            className="flex h-8 items-center gap-1.5 rounded-full border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 px-3 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer shrink-0"
             onClick={onCreateLocal}
-            title="新建本地终端"
+            title="新建 Local Shell 本地终端"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5 text-emerald-600" />
+            <span>新建终端</span>
           </button>
+
+          <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0" />
+
+          {/* 动态 SSH/Local 标签页 */}
           {sessions.map((session, index) => {
             const isActive = session.id === activeSessionId;
             const status = getSessionTabStatus(session);
@@ -2077,47 +2282,135 @@ function TerminalWorkspace({
                 onClick={() => onActivate(session.id)}
                 onContextMenu={(event) => openTabMenu(event, session.id)}
                 className={cn(
-                  "relative -mb-px flex h-8 min-w-[68px] max-w-48 cursor-pointer items-center gap-2 rounded-t-md border px-3 text-xs font-semibold transition-colors",
+                  "group relative flex h-8 min-w-[120px] max-w-56 cursor-pointer items-center justify-between gap-2 rounded-full border px-3 text-xs font-extrabold transition-all select-none shrink-0",
                   isActive
-                    ? "z-10 border-blue-500 border-b-white bg-white text-slate-950 shadow-sm"
-                    : "border-slate-200 bg-slate-100 text-slate-600 hover:border-slate-300 hover:bg-white hover:text-slate-900"
+                    ? "border-emerald-500 bg-emerald-600 text-white shadow-sm shadow-emerald-500/20"
+                    : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-1)]"
                 )}
               >
-                <span className="flex shrink-0 items-center gap-1 text-[11px] leading-none" aria-hidden="true">
-                  <span title={status.title} className={cn("h-1.5 w-1.5 rounded-full", status.dotClass)} />
-                  <span className={cn("font-semibold", isActive ? "text-emerald-700" : "text-slate-500")}>{index + 1}</span>
-                </span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={cn("h-2 w-2 rounded-full shrink-0", status.dotClass)} />
+                  <span className="truncate font-mono font-extrabold">{session.title}</span>
+                </div>
                 <button
-                  aria-current={isActive ? "page" : undefined}
-                  className="min-w-0 flex-1 truncate text-left"
-                  title={session.title}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onActivate(session.id);
-                  }}
-                  onContextMenu={(event) => {
-                    event.stopPropagation();
-                    openTabMenu(event, session.id);
-                  }}
-                >
-                  {session.title}
-                </button>
-                <button
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  className={cn(
+                    "flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer",
+                    isActive ? "text-white/80 hover:bg-white/20 hover:text-white" : "text-[var(--app-muted)] hover:bg-rose-50 hover:text-rose-600"
+                  )}
                   onClick={(event) => {
                     event.stopPropagation();
                     onClose(session.id);
                   }}
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="h-3 w-3" />
                 </button>
               </div>
             );
           })}
         </div>
-        <Button variant="ghost" className="h-7 px-2">
-          <Menu className="h-4 w-4" />
-        </Button>
+
+        {/* ☰ 标签页与工作区快捷控制下拉菜单 */}
+        <div className="relative shrink-0">
+          <button
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-emerald-50 hover:text-emerald-700 transition-colors shadow-2xs cursor-pointer",
+              topMenuOpen && "bg-emerald-50 text-emerald-700 border-emerald-300"
+            )}
+            onClick={() => setTopMenuOpen(!topMenuOpen)}
+            title="工作区与侧边栏控制菜单"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+
+          {topMenuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-9.5 z-50 w-48 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1.5 text-xs font-bold text-[var(--app-text)] shadow-xl animate-in fade-in zoom-in-95 duration-150 select-none"
+              onMouseLeave={() => setTopMenuOpen(false)}
+            >
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer"
+                onClick={() => {
+                  setRightSidebarCollapsed(!rightSidebarCollapsed);
+                  setTopMenuOpen(false);
+                }}
+              >
+                {rightSidebarCollapsed ? <Eye className="h-3.5 w-3.5 text-emerald-600" /> : <EyeOff className="h-3.5 w-3.5 text-slate-500" />}
+                <span>{rightSidebarCollapsed ? "展开右侧侧边栏" : "折叠右侧侧边栏"}</span>
+              </button>
+
+              <div className="my-1 border-t border-[var(--app-line)]" />
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:opacity-40"
+                disabled={!activeSessionId}
+                onClick={() => {
+                  if (activeSessionId) onDuplicate(activeSessionId);
+                  setTopMenuOpen(false);
+                }}
+              >
+                <Plus className="h-3.5 w-3.5 text-blue-600" />
+                <span>复制当前标签页</span>
+              </button>
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:opacity-40"
+                disabled={!activeSessionId || activeSession?.kind !== "ssh"}
+                onClick={() => {
+                  if (activeSessionId) onReconnect(activeSessionId);
+                  setTopMenuOpen(false);
+                }}
+              >
+                <RefreshCw className="h-3.5 w-3.5 text-emerald-600" />
+                <span>重新连接 SSH</span>
+              </button>
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:opacity-40"
+                disabled={!activeSessionId}
+                onClick={() => {
+                  if (activeSessionId) onDisconnect(activeSessionId);
+                  setTopMenuOpen(false);
+                }}
+              >
+                <X className="h-3.5 w-3.5 text-amber-600" />
+                <span>断开当前连接</span>
+              </button>
+
+              <div className="my-1 border-t border-[var(--app-line)]" />
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:opacity-40"
+                disabled={!activeSessionId}
+                onClick={() => {
+                  if (activeSessionId) onCloseOther(activeSessionId);
+                  setTopMenuOpen(false);
+                }}
+              >
+                <Menu className="h-3.5 w-3.5 text-purple-600" />
+                <span>关闭其他标签页</span>
+              </button>
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors cursor-pointer"
+                onClick={() => {
+                  onCloseAll();
+                  setTopMenuOpen(false);
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+                <span>关闭全部标签页</span>
+              </button>
+            </div>
+          )}
+        </div>
+
         {menuSession && tabMenu && (
           <div
             role="menu"
@@ -2165,7 +2458,10 @@ function TerminalWorkspace({
           </div>
         )}
       </div>
-      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_420px]">
+      <div
+        className="grid min-h-0 relative"
+        style={{ gridTemplateColumns: visible && !rightSidebarCollapsed ? `minmax(0, 1fr) ${rightSidebarWidth}px` : "1fr" }}
+      >
         <TerminalSurface
           visible={visible}
           activeSession={activeSession}
@@ -2185,10 +2481,13 @@ function TerminalWorkspace({
           onCommandSuggestionViewChange={onCommandSuggestionViewChange}
           onShortcutParameterRequest={requestShortcutParameters}
           onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
+          onCreateLocal={onCreateLocal}
           onOutput={onTerminalOutput}
         />
-        {visible && (
+        {visible && !rightSidebarCollapsed && (
           <TerminalRightSidebar
+            width={rightSidebarWidth}
+            onResizeStart={startResizeRightSidebar}
             activePanel={sidePanel}
             activeSession={activeSession}
             commandFolders={commandFolders}
@@ -2200,22 +2499,46 @@ function TerminalWorkspace({
             onActiveCommandFolderChange={onActiveCommandFolderChange}
             onSendCommand={onSendCommand}
             onAiConfigChange={onAiConfigChange}
+            onAddAiQuote={onAddAiQuote}
           />
         )}
       </div>
-      <div className="flex items-center gap-3 border-t border-slate-200 bg-slate-50 px-5 text-xs text-slate-500">
-        <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500" : "bg-slate-300")} />
-        <span>
-          {activeSession?.status === "connecting"
-            ? "连接中"
-            : activeSession?.status === "failed"
-              ? "连接失败"
-              : activeSession
-                ? "已连接"
-                : "未连接"}
-        </span>
-        <span>{activeSession?.title || "无活动会话"}</span>
-        {activeSession?.error && <span className="truncate text-rose-600">{activeSession.error}</span>}
+      <div className="flex h-8 items-center justify-between border-t border-[var(--app-line)] bg-[var(--sidebar-bg)] px-4 text-xs font-bold text-[var(--app-muted)] select-none">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="flex items-center gap-1.5 shrink-0">
+            <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500 shadow-2xs" : "bg-slate-300")} />
+            <span className="text-[var(--app-text)] font-extrabold">
+              {activeSession?.status === "connecting"
+                ? "连接中..."
+                : activeSession?.status === "failed"
+                  ? "连接失败"
+                  : activeSession?.connected
+                    ? "已建立 SSH 加密通道"
+                    : "就绪"}
+            </span>
+          </span>
+
+          <div className="h-3 w-px bg-[var(--app-line)] shrink-0" />
+
+          <span className="truncate font-mono text-[11px] text-[var(--app-text)] font-extrabold">
+            {activeSession ? `${activeSession.kind === "ssh" ? "SSH" : "Local"}: ${activeSession.title}` : "无活动终端"}
+          </span>
+
+          {activeSession?.error && (
+            <span className="truncate text-rose-600 font-extrabold text-[11px]">
+              ⚠️ {activeSession.error}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 text-[11px]">
+          <span className="font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 font-extrabold">
+            UTF-8 / SSH2
+          </span>
+          <span className="font-mono text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 font-extrabold">
+            xterm.js 24Bit TrueColor
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -2440,6 +2763,7 @@ function TerminalSurface({
   onCommandSuggestionViewChange,
   onShortcutParameterRequest,
   onAddAiQuote,
+  onCreateLocal,
   onOutput
 }: {
   visible: boolean;
@@ -2460,6 +2784,7 @@ function TerminalSurface({
   onCommandSuggestionViewChange: (view: CommandSuggestionView | null) => void;
   onShortcutParameterRequest: (shortcut: NonNullable<CommandSuggestion["shortcut"]>) => void;
   onAddAiQuote: (text: string) => void;
+  onCreateLocal?: () => void;
   onOutput: (sessionId: string, text: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -3036,11 +3361,56 @@ function TerminalSurface({
 
   if (!activeSession) {
     return (
-      <div className="flex h-full items-center justify-center bg-slate-50">
-        <EmptyState
-          title="暂无活动会话"
-          description="打开 Local Shell 或连接 SSH 主机后，终端会显示在这里。"
-        />
+      <div className="flex h-full min-h-0 overflow-auto bg-[var(--app-bg)] px-8 py-10 select-none">
+        <div className="mx-auto my-auto max-w-xl w-full space-y-6">
+          <div className="text-center space-y-2.5">
+            <div className="inline-flex h-14 w-14 items-center justify-center rounded-3xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shadow-sm">
+              <Terminal className="h-7 w-7" />
+            </div>
+            <h2 className="text-2xl font-extrabold tracking-tight text-[var(--app-text)]">
+              轻量极速 SSH & 本地终端控制台
+            </h2>
+            <p className="text-xs font-medium text-[var(--text-secondary)] max-w-md mx-auto leading-5">
+              原生支持 Multi-Tab 会话分流、AI 候选命令补全、交互式 SFTP 传输与硬件性能推算。
+            </p>
+          </div>
+
+          {/* 4 大一键入口卡片 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <button
+              className="flex items-center gap-3.5 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-950/40 p-4 text-left hover:bg-emerald-100/80 transition-all cursor-pointer shadow-2xs group"
+              onClick={onCreateLocal}
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm group-hover:scale-105 transition-transform">
+                <Terminal className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold text-emerald-950 dark:text-emerald-300">启动 Local Shell</div>
+                <div className="mt-0.5 truncate text-[10px] font-bold text-emerald-700 dark:text-emerald-400">运行本地 PowerShell / CMD</div>
+              </div>
+            </button>
+
+            <button
+              className="flex items-center gap-3.5 rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/60 dark:bg-indigo-950/40 p-4 text-left hover:bg-indigo-100/80 transition-all cursor-pointer shadow-2xs group"
+              onClick={() => onShortcutParameterRequest?.({ folderId: "default", commandId: "top_cpu" } as any)}
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm group-hover:scale-105 transition-transform">
+                <Command className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold text-indigo-950 dark:text-indigo-300">快捷指令预载库</div>
+                <div className="mt-0.5 truncate text-[10px] font-bold text-indigo-700 dark:text-indigo-400">预装 50+ 常用 Linux 运维命令</div>
+              </div>
+            </button>
+          </div>
+
+          {/* 状态能力防护标 */}
+          <div className="flex items-center justify-center gap-6 pt-3 border-t border-[var(--app-line)] text-[11px] font-extrabold text-[var(--app-muted)]">
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500" /> SSH v2 加密直连</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" /> UTF-8 原生排版</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-purple-500" /> AI 终端感知补全</span>
+          </div>
+        </div>
       </div>
     );
   }
@@ -3276,92 +3646,109 @@ function TerminalCommandSidebar({
   }
 
   return (
-    <div className="grid h-full min-h-0 w-full min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-slate-50">
-      <div className="border-b border-slate-200 bg-white px-4 py-3">
+    <div className="grid h-full min-h-0 w-full min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[var(--app-bg)]">
+      <div className="border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3.5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold text-slate-950">快捷命令栏</h2>
-            <p className="mt-0.5 text-[11px] text-slate-500">
-              {activeSession ? `发送到 ${activeSession.title}` : "打开终端后可发送命令"}
+            <h2 className="text-sm font-extrabold text-[var(--app-text)] flex items-center gap-2">
+              <Command className="h-4 w-4 text-purple-600" />
+              快捷命令侧边栏
+            </h2>
+            <p className="mt-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+              {activeSession ? `写入目标：${activeSession.title}` : "打开终端后可发送命令"}
             </p>
           </div>
-          <Command className="h-4 w-4 text-slate-400" />
         </div>
         <div className="relative mt-3">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
           <Input
-            className="h-9 pl-8 text-xs"
+            className="h-8.5 pl-8 text-xs rounded-full shadow-2xs"
             value={query}
-            placeholder="搜索命令或文件夹"
+            placeholder="搜索命令或文件夹..."
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
       </div>
 
       <div className="flex min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden">
-        <div className="w-full min-w-0 max-w-full overflow-hidden border-b border-slate-200 px-3 py-3">
-          <div className="mb-2 text-[11px] font-semibold text-slate-500">文件夹</div>
+        <div className="w-full min-w-0 max-w-full overflow-hidden border-b border-[var(--app-line)] px-3.5 py-3">
+          <div className="mb-2 text-[11px] font-extrabold text-[var(--app-muted)]">分类文件夹</div>
           <div className="flex w-full min-w-0 max-w-full flex-wrap gap-2 overflow-x-hidden">
-            {folders.map((folder) => (
-              <button
-                key={folder.id}
-                className={cn(
-                  "flex h-[48px] basis-[calc((100%_-_1rem)/3)] min-w-0 shrink-0 flex-col items-start justify-between overflow-hidden rounded-md border px-2 py-1.5 text-left text-[12px] font-medium leading-[14px] [overflow-wrap:anywhere]",
-                  folder.id === activeFolder?.id
-                    ? "border-transparent bg-[var(--app-text)] text-[var(--panel-bg)]"
-                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-                )}
-                onClick={() => onActiveFolderChange(folder.id)}
-              >
-                <span className="min-w-0 max-h-[28px] max-w-full overflow-hidden">{folder.name}</span>
-                <span className="shrink-0 text-[10px] leading-none opacity-60">{folder.commands.length}</span>
-              </button>
-            ))}
+            {folders.map((folder) => {
+              const active = folder.id === activeFolder?.id;
+              return (
+                <button
+                  key={folder.id}
+                  className={cn(
+                    "flex h-8 flex-1 min-w-[90px] items-center justify-between rounded-full border px-3 text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
+                    active
+                      ? "border-emerald-500 bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
+                      : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-emerald-50 hover:text-emerald-700"
+                  )}
+                  onClick={() => onActiveFolderChange(folder.id)}
+                >
+                  <span className="truncate mr-1 font-extrabold">{folder.name}</span>
+                  <span className={cn("rounded-full px-2 py-0.5 font-mono text-[9px] font-extrabold shrink-0", active ? "bg-white/25 text-white" : "bg-[var(--fill-2)] text-[var(--app-muted)]")}>
+                    {folder.commands.length}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto p-3" aria-label="快捷命令列表">
-          <div className="mb-2 flex items-center justify-between text-[11px] font-semibold text-slate-500">
-            <span>命令</span>
-            <span>{commands.length}</span>
+        <div className="min-h-0 flex-1 overflow-auto p-2.5 space-y-3" aria-label="快捷命令列表">
+          <div className="flex items-center justify-between text-[10px] font-extrabold text-[var(--app-muted)] px-1">
+            <span>快捷指令 (FinalShell 流式)</span>
+            <span className="font-mono text-[10px] text-[var(--app-text)] font-extrabold">
+              {commands.length} 条
+            </span>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
+
+          {/* FinalShell 经典 100% 动态宽度横向流式分布 */}
+          <div className="flex flex-wrap gap-1.5">
             {commands.map((command) => {
               const key = commandKey(command);
+              const isPending = pendingCommandKey === key;
+              const parameters = extractCommandParameters(command.command);
+
               return (
                 <div
                   key={key}
+                  role="button"
+                  aria-label={`发送 ${command.name}`}
                   className={cn(
-                    "grid min-w-0 grid-cols-[minmax(0,1fr)_28px] overflow-hidden rounded-md border bg-white text-xs",
-                    pendingCommandKey === key ? "border-slate-900" : "border-slate-200"
+                    "group inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-all duration-150 cursor-pointer select-none max-w-full",
+                    isPending
+                      ? "border-emerald-500 bg-emerald-600 text-white font-extrabold shadow-md shadow-emerald-500/20"
+                      : "border-[var(--app-line)] bg-[var(--panel-bg)] hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-700 text-[var(--app-text)] font-extrabold"
                   )}
+                  title={`点击发送: $ ${command.command}${command.description ? ` (${command.description})` : ""}`}
+                  onClick={() => runCommand(command)}
                   onContextMenu={(event) => openCommandMenu(event, command)}
                 >
+                  <span className="truncate font-mono text-[11px] font-bold">
+                    {command.name || command.command}
+                  </span>
+
                   <button
-                    aria-label={`发送 ${command.name}`}
-                    className="min-w-0 truncate px-2 py-2 text-left font-semibold text-slate-800 hover:bg-slate-50 disabled:text-slate-300"
-                    disabled={!activeSession}
-                    onClick={() => runCommand(command)}
-                  >
-                    {command.name}
-                  </button>
-                  <button
-                    aria-label={`查看命令详情 ${command.name}`}
-                    title="查看命令详情"
-                    className="flex items-center justify-center border-l border-slate-100 text-slate-400 hover:bg-slate-50 hover:text-slate-800"
-                    onClick={() => {
+                    type="button"
+                    className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-[var(--app-muted)] hover:bg-emerald-100 hover:text-emerald-700 transition-colors"
+                    title={parameters.length ? `填参数 (${parameters.length})` : "查看/编辑"}
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setDetailCommandKey(detailCommandKey === key ? "" : key);
-                      setPendingCommandKey("");
+                      if (parameters.length) setPendingCommandKey(key);
                     }}
                   >
-                    <Settings className="h-3.5 w-3.5" />
+                    <Settings className="h-2.5 w-2.5" />
                   </button>
                 </div>
               );
             })}
             {commands.length === 0 && (
-              <div className="col-span-full rounded-md border border-dashed border-slate-300 bg-white px-3 py-6 text-center text-xs text-slate-500">
-                未找到匹配命令
+              <div className="w-full rounded-xl border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-6 text-center text-xs font-semibold text-[var(--app-muted)]">
+                暂无命令
               </div>
             )}
           </div>
@@ -3589,10 +3976,13 @@ function TerminalRightSidebar({
   shortcutParameterRequest,
   aiQuotes,
   aiConfig,
+  width,
+  onResizeStart,
   onPanelChange,
   onActiveCommandFolderChange,
   onSendCommand,
-  onAiConfigChange
+  onAiConfigChange,
+  onAddAiQuote
 }: {
   activePanel: TerminalSidePanel;
   activeSession?: SessionTab;
@@ -3601,10 +3991,13 @@ function TerminalRightSidebar({
   shortcutParameterRequest: ShortcutParameterRequest | null;
   aiQuotes: AiQuote[];
   aiConfig: AiConfig;
+  width: number;
+  onResizeStart: (event: React.PointerEvent) => void;
   onPanelChange: (panel: TerminalSidePanel) => void;
   onActiveCommandFolderChange: (folderId: string) => void;
   onSendCommand: (command: string) => void;
   onAiConfigChange: (config: AiConfig) => void;
+  onAddAiQuote?: (text: string, sourceTitle: string) => void;
 }) {
   const panels: Array<{ id: TerminalSidePanel; label: string; icon: React.ReactNode }> = [
     { id: "commands", label: "命令", icon: <Command className="h-3.5 w-3.5" /> },
@@ -3613,23 +4006,44 @@ function TerminalRightSidebar({
   ];
 
   return (
-    <aside className="grid min-h-0 w-[420px] min-w-0 max-w-[420px] grid-rows-[44px_minmax(0,1fr)] overflow-hidden border-l border-slate-200 bg-white">
-      <div className="flex items-center gap-1 border-b border-slate-200 bg-white px-2" role="tablist" aria-label="终端右侧工作栏">
+    <aside
+      style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+      className="group/sidebar relative grid min-h-0 grid-rows-[44px_minmax(0,1fr)] overflow-hidden border-l border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none"
+    >
+      {/* 自由拖拽调节宽度手柄 */}
+      <div
+        className="absolute -left-1.5 top-0 bottom-0 z-50 w-3 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/20 active:bg-emerald-500/40 transition-colors select-none"
+        onPointerDown={onResizeStart}
+        title="按住拖拽自由调节侧边栏宽度"
+      >
+        <div className="h-10 w-1 rounded-full bg-slate-300 dark:bg-slate-700 group-hover/sidebar:bg-emerald-500 transition-colors shadow-2xs" />
+      </div>
+      <div className="flex items-center gap-2 border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-3.5 py-1.5" role="tablist" aria-label="终端右侧工作栏">
         {panels.map((panel) => {
           const active = activePanel === panel.id;
+          const iconColorClass = {
+            commands: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60",
+            files: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60",
+            ai: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60"
+          }[panel.id];
+
           return (
             <button
               key={panel.id}
               role="tab"
               aria-selected={active}
               className={cn(
-                "inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[10px] text-xs font-medium",
-                active ? "bg-[var(--app-text)] text-[var(--panel-bg)]" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                "inline-flex h-8.5 flex-1 items-center justify-center gap-2 rounded-full text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
+                active
+                  ? "bg-slate-900 text-white shadow-sm shadow-slate-900/15"
+                  : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
               )}
               onClick={() => onPanelChange(panel.id)}
             >
-              {panel.icon}
-              {panel.label}
+              <span className={cn("flex h-5 w-5 items-center justify-center rounded-full shrink-0 transition-colors", active ? "bg-white/20 text-white" : iconColorClass)}>
+                {panel.icon}
+              </span>
+              <span>{panel.label}</span>
             </button>
           );
         })}
@@ -3645,7 +4059,7 @@ function TerminalRightSidebar({
             onSendCommand={onSendCommand}
           />
         )}
-        {activePanel === "files" && <TerminalFileSidebar activeSession={activeSession} />}
+        {activePanel === "files" && <TerminalFileSidebar activeSession={activeSession} onAddAiQuote={(text, source) => onAddAiQuote?.(text, source)} />}
         {activePanel === "ai" && (
           <AiWorkspacePanel
             activeSession={activeSession}
@@ -3659,13 +4073,21 @@ function TerminalRightSidebar({
   );
 }
 
-function TerminalFileSidebar({ activeSession }: { activeSession?: SessionTab }) {
+function TerminalFileSidebar({
+  activeSession,
+  onAddAiQuote
+}: {
+  activeSession?: SessionTab;
+  onAddAiQuote?: (text: string, sourceTitle: string) => void;
+}) {
   const [remotePath, setRemotePath] = useState("/");
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [fileMenu, setFileMenu] = useState<{ x: number; y: number; entry: DirectoryEntry } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("");
   const canBrowseRemote = activeSession?.kind === "ssh" && activeSession.connected;
 
   useEffect(() => {
@@ -3733,39 +4155,119 @@ function TerminalFileSidebar({ activeSession }: { activeSession?: SessionTab }) 
     }
   }
 
+  async function triggerManualUpload() {
+    if (!activeSession?.id || !canBrowseRemote) return;
+    const selected = await nativeBridge.showOpenFileDialog("选择要上传到远程服务器的文件");
+    if (!selected.filePath) return;
+    const fileName = selected.filePath.split(/[/\\]/).pop() || "uploaded_file";
+    const targetRemotePath = joinRemotePath(remotePath, fileName);
+    setUploadStatus(`正在上传 ${fileName}...`);
+    try {
+      const res = await nativeBridge.uploadFile(activeSession.id, selected.filePath, targetRemotePath);
+      if (res.success) {
+        setUploadStatus(`✅ ${fileName} 上传成功！`);
+        setReloadToken((t) => t + 1);
+      } else {
+        setUploadStatus(`❌ ${fileName} 上传失败：${res.error || "未知错误"}`);
+      }
+    } catch (err) {
+      setUploadStatus(`❌ 上传发生异常`);
+    }
+  }
+
+  async function handleDropFiles(files: FileList) {
+    if (!activeSession?.id || !canBrowseRemote || files.length === 0) return;
+    const fileArray = Array.from(files);
+    for (let i = 0; i < fileArray.length; i++) {
+      const file = fileArray[i];
+      const localPath = (file as any).path;
+      const targetRemotePath = joinRemotePath(remotePath, file.name);
+      setUploadStatus(`正在上传 (${i + 1}/${fileArray.length}): ${file.name}...`);
+      try {
+        if (localPath) {
+          await nativeBridge.uploadFile(activeSession.id, localPath, targetRemotePath);
+        } else {
+          const content = await file.text();
+          await nativeBridge.uploadFileContent(activeSession.id, content, targetRemotePath);
+        }
+      } catch (err) {
+        console.error("Drop upload error:", err);
+      }
+    }
+    setUploadStatus(`✅ 已完成 ${fileArray.length} 个文件上传！`);
+    setReloadToken((t) => t + 1);
+  }
+
   const emptyMessage = activeSession?.kind === "ssh"
     ? "SSH 会话未连接，暂不能浏览远程文件。"
     : "当前不是 SSH 会话，暂不能浏览远程文件。";
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-slate-50">
-      <div className="border-b border-slate-200 bg-white px-4 py-3">
+    <div
+      className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[var(--app-bg)] relative"
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (canBrowseRemote) setIsDragging(true);
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        if (canBrowseRemote && e.dataTransfer.files) {
+          void handleDropFiles(e.dataTransfer.files);
+        }
+      }}
+    >
+      <div className="border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold text-slate-950">文件浏览</h2>
-            <p className="mt-0.5 text-[11px] text-slate-500">
+            <h2 className="text-sm font-extrabold text-[var(--app-text)]">文件浏览 & 传输</h2>
+            <p className="mt-0.5 text-[11px] text-[var(--app-muted)]">
               {activeSession ? `当前会话：${activeSession.title}` : "连接 SSH 后查看文件"}
             </p>
           </div>
-          <FolderOpen className="h-4 w-4 text-slate-400" />
+          <FolderOpen className="h-4 w-4 text-emerald-600 shrink-0" />
         </div>
       </div>
-      <div className="min-h-0 overflow-auto p-3">
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-md border border-slate-200 bg-white p-3">
-            <div className="text-xs font-semibold text-slate-900">本地文件</div>
-            <div className="mt-1 text-xs leading-5 text-slate-500">用于上传、下载和拖拽传输。</div>
+      <div className="min-h-0 overflow-auto p-3 relative">
+        {/* 拖拽释放区遮罩 Overlay */}
+        {isDragging && (
+          <div className="absolute inset-2 z-40 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-emerald-500 bg-emerald-50/95 p-6 text-center shadow-xl animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xs">
+            <Upload className="h-10 w-10 text-emerald-600 animate-bounce" />
+            <div className="mt-3 text-sm font-extrabold text-emerald-900">释放文件以拖拽上传</div>
+            <div className="mt-1 font-mono text-xs font-semibold text-emerald-700">目标路径: {remotePath}</div>
           </div>
-          <div className="rounded-md border border-slate-200 bg-white p-3">
-            <div className="text-xs font-semibold text-slate-900">远程文件</div>
-            <div className="mt-1 text-xs leading-5 text-slate-500">选择 SSH 会话后显示目录。</div>
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 shadow-2xs">
+            <div className="text-xs font-extrabold text-[var(--app-text)]">拖拽上传</div>
+            <div className="mt-1 text-[11px] leading-4 text-[var(--app-muted)]">直接将电脑文件拖拽至此处上传。</div>
+          </div>
+          <div className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 shadow-2xs">
+            <div className="text-xs font-extrabold text-[var(--app-text)]">远程目录</div>
+            <div className="mt-1 text-[11px] leading-4 text-[var(--app-muted)]">选择 SSH 会话后实时管理。</div>
           </div>
         </div>
+
+        {uploadStatus && (
+          <div className="mt-2.5 flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-xs font-extrabold text-emerald-800 shadow-2xs">
+            <span className="truncate">{uploadStatus}</span>
+            <button className="text-[10px] text-emerald-700 hover:text-emerald-900 ml-2 shrink-0 cursor-pointer" onClick={() => setUploadStatus("")}>关闭</button>
+          </div>
+        )}
+
         {canBrowseRemote ? (
-          <div className="mt-3 min-w-0 rounded-md border border-slate-200 bg-white">
-            <div className="flex min-w-0 items-center gap-2 border-b border-slate-200 px-3 py-2">
+          <div className="mt-3 min-w-0 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] shadow-2xs">
+            <div className="flex min-w-0 items-center gap-1.5 border-b border-[var(--app-line)] px-3 py-2">
               <button
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
                 disabled={remotePath === "/"}
                 title="返回上级目录"
                 onClick={() => setRemotePath(parentRemotePath(remotePath))}
@@ -3773,49 +4275,57 @@ function TerminalFileSidebar({ activeSession }: { activeSession?: SessionTab }) 
                 <ChevronDown className="h-3.5 w-3.5 rotate-90" />
               </button>
               <button
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
                 title="根目录"
                 onClick={() => setRemotePath("/")}
               >
                 <Home className="h-3.5 w-3.5" />
               </button>
-              <div aria-label="远程路径" className="min-w-0 flex-1 truncate rounded bg-slate-50 px-2 py-1 font-mono text-[11px] text-slate-600">
+              <div aria-label="远程路径" className="min-w-0 flex-1 truncate rounded-lg bg-[var(--fill-1)] px-2.5 py-1 font-mono text-[11px] font-bold text-[var(--app-text)]">
                 {remotePath}
               </div>
               <button
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 text-[11px] font-extrabold text-emerald-700 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer"
+                title="选择本地文件上传到当前目录"
+                onClick={() => void triggerManualUpload()}
+              >
+                <Upload className="h-3.5 w-3.5 text-emerald-600" />
+                <span>上传</span>
+              </button>
+              <button
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
                 title="刷新远程文件"
                 onClick={() => setReloadToken((token) => token + 1)}
               >
                 <RefreshCw className="h-3.5 w-3.5" />
               </button>
             </div>
-            {loading && <div className="px-3 py-8 text-center text-xs text-slate-500">正在读取目录...</div>}
-            {!loading && error && <div className="px-3 py-8 text-center text-xs text-rose-600">{error}</div>}
-            {!loading && !error && entries.length === 0 && <div className="px-3 py-8 text-center text-xs text-slate-500">目录为空。</div>}
+            {loading && <div className="px-3 py-8 text-center text-xs text-[var(--app-muted)] font-extrabold">正在读取目录...</div>}
+            {!loading && error && <div className="px-3 py-8 text-center text-xs text-rose-600 font-extrabold">{error}</div>}
+            {!loading && !error && entries.length === 0 && <div className="px-3 py-8 text-center text-xs text-[var(--app-muted)] font-extrabold">目录为空。</div>}
             {!loading && !error && entries.length > 0 && (
-              <div aria-label="远程文件列表" className="divide-y divide-slate-100">
+              <div aria-label="远程文件列表" className="divide-y divide-[var(--app-line)]">
                 {entries.map((entry) => (
                   <button
                     key={`${entry.type}-${entry.name}`}
                     className={cn(
-                      "grid w-full min-w-0 grid-cols-[18px_minmax(0,1fr)_64px_82px] items-center gap-2 px-3 py-2 text-left text-xs",
-                      entry.type === "directory" ? "hover:bg-slate-50" : "cursor-default"
+                      "grid w-full min-w-0 grid-cols-[18px_minmax(0,1fr)_64px_82px] items-center gap-2 px-3 py-2 text-left text-xs transition-colors",
+                      entry.type === "directory" ? "hover:bg-[var(--fill-1)] cursor-pointer" : "cursor-default"
                     )}
                     onClick={() => openDirectory(entry)}
                     onContextMenu={(event) => openFileMenu(event, entry)}
                   >
                     {entry.type === "directory" ? (
-                      <FolderIcon aria-label="目录图标" className="h-4 w-4 text-amber-500" />
+                      <FolderIcon aria-label="目录图标" className="h-4 w-4 text-amber-500 shrink-0" />
                     ) : (
-                      <FileIcon aria-label="文件图标" className="h-4 w-4 text-slate-400" />
+                      <FileIcon aria-label="文件图标" className="h-4 w-4 text-[var(--app-muted)] shrink-0" />
                     )}
                     <span className="min-w-0">
-                      <span className="block truncate font-semibold text-slate-800">{entry.name}</span>
-                      <span className="mt-0.5 block truncate text-[11px] text-slate-400">{entry.date || " "}</span>
+                      <span className="block truncate font-extrabold text-[var(--app-text)]">{entry.name}</span>
+                      <span className="mt-0.5 block truncate text-[11px] font-semibold text-[var(--app-muted)]">{entry.date || " "}</span>
                     </span>
-                    <span className="text-slate-500">{entry.type === "directory" ? "目录" : "文件"}</span>
-                    <span className="truncate text-right text-slate-500">{formatRemoteFileSize(entry)}</span>
+                    <span className="text-[var(--app-muted)] font-semibold">{entry.type === "directory" ? "目录" : "文件"}</span>
+                    <span className="truncate text-right font-mono text-[11px] text-[var(--app-muted)] font-semibold">{formatRemoteFileSize(entry)}</span>
                   </button>
                 ))}
               </div>
@@ -3823,22 +4333,53 @@ function TerminalFileSidebar({ activeSession }: { activeSession?: SessionTab }) 
             {fileMenu && (
               <div
                 role="menu"
-                className="fixed z-50 min-w-32 rounded-md border border-slate-200 bg-white p-1 text-xs shadow-lg"
+                className="fixed z-50 min-w-44 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1.5 text-xs font-extrabold shadow-xl animate-in fade-in zoom-in-95 duration-150"
                 style={{ left: fileMenu.x, top: fileMenu.y }}
+                onMouseLeave={() => setFileMenu(null)}
               >
                 <button
                   role="menuitem"
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
                   onClick={() => void downloadRemoteFile(fileMenu.entry)}
                 >
-                  <Download className="h-3.5 w-3.5" />
-                  下载文件
+                  <Download className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                  <span>下载文件</span>
                 </button>
+
+                <button
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                  onClick={() => {
+                    const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                    navigator.clipboard.writeText(fullPath);
+                    setUploadStatus(`📋 已复制路径: ${fullPath}`);
+                    setFileMenu(null);
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                  <span>复制远程路径</span>
+                </button>
+
+                {onAddAiQuote && (
+                  <button
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                    onClick={() => {
+                      const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                      onAddAiQuote(`远程文件路径: ${fullPath}`, activeSession?.title || "远程文件");
+                      setUploadStatus(`💬 已引用路径至 AI 问答`);
+                      setFileMenu(null);
+                    }}
+                  >
+                    <Bot className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                    <span>引用路径至 AI 问答</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
         ) : (
-          <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-3 py-8 text-center text-xs text-slate-500">
+          <div className="mt-3 rounded-2xl border border-dashed border-[var(--app-line)] bg-[var(--panel-bg)] px-3 py-8 text-center text-xs font-extrabold text-[var(--app-muted)]">
             {emptyMessage}
           </div>
         )}
@@ -3908,24 +4449,41 @@ function BrowserPanel({
     setUrl("");
   }
 
+  const recommendedPortals = [
+    { title: "路由器后台管理", url: "http://192.168.1.1", icon: Globe2, category: "网关管理" },
+    { title: "Portainer 容器工作台", url: "http://localhost:9000", icon: Server, category: "Docker 运维" },
+    { title: "Nginx Proxy Manager", url: "http://localhost:81", icon: HardDrive, category: "反向代理" },
+    { title: "Jellyfin 媒体服务器", url: "http://localhost:8096", icon: CheckCircle2, category: "影音娱服务" }
+  ];
+
   return (
-    <div className="h-full overflow-auto px-8 py-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-6 flex items-start justify-between gap-5">
+    <div className="h-full overflow-auto bg-[var(--app-bg)] px-10 py-7">
+      <div className="mx-auto max-w-6xl space-y-7">
+        <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-950">浏览器状态栏</h1>
-            <p className="mt-1 text-sm text-slate-500">保存常用网页入口，点击卡片后用外部浏览器打开。</p>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-extrabold tracking-tight text-[var(--app-text)]">网页服务工作台</h1>
+              <span className="rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400 border border-blue-200 dark:border-blue-800 px-3 py-0.5 font-mono text-xs font-extrabold">
+                {favorites.length} 个书签
+              </span>
+            </div>
+            <p className="mt-1.5 text-xs font-medium text-[var(--text-secondary)]">保存常用 Web 运维管理入口，点击卡片后即刻在默认浏览器中响应。</p>
           </div>
-          <Button variant="outline" onClick={onRefresh}>
+          <Button variant="outline" size={32} className="rounded-full w-10 h-10 px-0 shadow-2xs" onClick={onRefresh} title="刷新卡片">
             <RefreshCw className="h-4 w-4" />
-            刷新
           </Button>
         </div>
 
-        <Panel title="网页卡片">
-          <div className="grid grid-cols-[220px_minmax(0,1fr)_104px] gap-3">
+        {/* 添加网页书签卡片 */}
+        <div className="rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-6 shadow-sm">
+          <h2 className="text-sm font-extrabold text-[var(--app-text)] mb-3.5 flex items-center gap-2">
+            <Plus className="h-4 w-4 text-emerald-600" />
+            添加自定义 Web 书签
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-[220px_minmax(0,1fr)_120px] gap-3">
             <Input
-              placeholder="标签名称"
+              className="h-10 text-xs rounded-full shadow-2xs"
+              placeholder="书签标签 (如: Proxmox VE)"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               onKeyDown={(event) => {
@@ -3933,61 +4491,112 @@ function BrowserPanel({
               }}
             />
             <Input
-              placeholder="https://example.com"
+              className="h-10 text-xs rounded-full shadow-2xs"
+              placeholder="https://192.168.1.100:8006"
               value={url}
               onChange={(event) => setUrl(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") submit();
               }}
             />
-            <Button onClick={submit}>添加网页</Button>
+            <Button
+              size={32}
+              className="rounded-full px-5 h-10 text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/20"
+              onClick={submit}
+            >
+              + 添加网页
+            </Button>
           </div>
+        </div>
 
+        {/* 已存网页书签卡片网格 */}
+        <div className="space-y-4">
+          <h2 className="text-base font-extrabold text-[var(--app-text)]">保存的网页卡片 (Web Shortcuts)</h2>
           {favorites.length === 0 ? (
-            <EmptyState title="暂无网页卡片" description="添加一个标签和 URL 后，这里会显示可点击的网页入口。" />
+            <EmptyState title="暂无网页卡片" description="在上方输入书签名称与 URL 地址，即可快速创建 Web 运维快捷入口。" />
           ) : (
-            <div className="mt-5 grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {favorites.map((favorite) => (
                 <div
                   key={favorite.id}
-                  className="rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  className="group flex flex-col justify-between rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5.5 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:border-blue-500/30"
                 >
-                  <button
-                    aria-label={`打开 ${favorite.title}`}
-                    className="block w-full text-left"
-                    onClick={() => onOpen(favorite)}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
-                        <Globe2 className="h-4 w-4" />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-semibold text-slate-950">{favorite.title}</span>
-                        <span className="mt-1 block truncate text-xs text-slate-500">{favorite.url}</span>
-                      </span>
+                  <div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 border border-blue-100 dark:border-blue-900/60 shadow-xs">
+                          <Globe2 className="h-6 w-6" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-base font-extrabold text-[var(--app-text)] tracking-tight">
+                            {favorite.title}
+                          </div>
+                          <div className="mt-0.5 truncate font-mono text-xs font-semibold text-blue-600 dark:text-blue-400">
+                            {favorite.url}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </button>
-                  <div className="mt-4 flex justify-end gap-2">
+                  </div>
+
+                  <div className="mt-5 flex items-center justify-between border-t border-[var(--app-line)]/60 pt-3.5">
                     <button
                       aria-label={`删除 ${favorite.title}`}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-rose-100 bg-white text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                      title="删除书签"
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-muted)] transition-all hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 cursor-pointer"
                       onClick={() => onDelete(favorite)}
                     >
-                      <X className="h-3.5 w-3.5" />
+                      <X className="h-4 w-4" />
                     </button>
-                    <button
-                      aria-label={`外部链接 ${favorite.title}`}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+
+                    <Button
+                      size={32}
+                      aria-label={`打开 ${favorite.title}`}
+                      className="rounded-full px-5 h-9 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/20"
                       onClick={() => onOpen(favorite)}
                     >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </button>
+                      外部浏览器打开 ↗
+                    </Button>
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </Panel>
+        </div>
+
+        {/* 预设常用运维 Portal 服务推荐 */}
+        <div className="space-y-4 pt-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-extrabold text-[var(--app-text)]">常用运维 Portal 推荐模板</h2>
+            <span className="text-xs font-semibold text-[var(--app-muted)]">点击一键添加到书签</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {recommendedPortals.map((portal, idx) => {
+              const Icon = portal.icon;
+              return (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-4 shadow-2xs hover:shadow-md transition-all cursor-pointer group"
+                  onClick={() => onAdd(portal.title, portal.url)}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400 border border-purple-100 dark:border-purple-900/60">
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-extrabold text-[var(--app-text)]">{portal.title}</div>
+                      <div className="truncate font-mono text-[10px] text-[var(--app-muted)]">{portal.url}</div>
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-[var(--fill-2)] text-[var(--app-muted)] group-hover:bg-emerald-600 group-hover:text-white px-2 py-1 text-[10px] font-extrabold transition-colors">
+                    + 添加
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -4040,38 +4649,62 @@ function MonitorMetricCard({
   detail,
   icon: Icon,
   percent,
-  barClassName
+  variant = "emerald"
 }: {
   label: string;
   value: string;
   detail: string;
   icon: React.ComponentType<{ className?: string }>;
   percent: number;
-  barClassName: string;
+  variant?: "indigo" | "emerald" | "amber";
 }) {
+  const iconMeta = {
+    indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/60",
+    emerald: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/60",
+    amber: "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 border-amber-100 dark:border-amber-900/60"
+  }[variant];
+
+  const barColor = {
+    indigo: "bg-indigo-600",
+    emerald: "bg-emerald-600",
+    amber: "bg-amber-500"
+  }[variant];
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-slate-500">{label}</span>
-        <Icon className="h-4 w-4 text-slate-400" />
+    <div className="flex flex-col justify-between rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5.5 shadow-sm transition-all hover:shadow-md">
+      <div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-extrabold text-[var(--app-muted)]">{label} 动态负载</span>
+          <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl border shadow-2xs", iconMeta)}>
+            <Icon className="h-5 w-5" />
+          </div>
+        </div>
+        <div className="mt-3 flex items-baseline gap-2">
+          <span className="font-mono text-3xl font-extrabold tracking-tight text-[var(--app-text)]">{value}</span>
+          <span className="rounded-full bg-[var(--fill-2)] px-2.5 py-0.5 font-mono text-[10px] font-bold text-[var(--app-muted)]">
+            {percent > 80 ? "⚠️ 高负载" : "🟢 正常"}
+          </span>
+        </div>
       </div>
-      <div className="mt-3 text-3xl font-semibold text-slate-950">{value}</div>
-      <div className="mt-3">
-        <MonitorProgress value={percent} className={barClassName} />
+
+      <div className="mt-4 space-y-2">
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--fill-2)] p-0.5">
+          <div className={cn("h-full rounded-full transition-all duration-500", barColor)} style={{ width: `${percent}%` }} />
+        </div>
+        <div className="truncate font-mono text-xs font-semibold text-[var(--text-secondary)]">{detail}</div>
       </div>
-      <div className="mt-2 truncate text-xs text-slate-500">{detail}</div>
     </div>
   );
 }
 
 function MonitorStatusBlock({ result }: { result?: NativeResult }) {
   if (!result) {
-    return <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">等待刷新数据</div>;
+    return <div className="rounded-2xl bg-[var(--fill-1)] p-4 text-xs font-semibold text-[var(--app-muted)] text-center">等待刷新数据...</div>;
   }
   if (!result.success) {
     return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-4 text-sm text-amber-800">
-        {result.error || "暂未获取到数据"}
+      <div className="rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 p-4 text-xs font-extrabold text-amber-700 dark:text-amber-300">
+        ⚠️ {result.error || "暂未获取到数据"}
       </div>
     );
   }
@@ -4116,39 +4749,43 @@ function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
   );
 
   return (
-    <div className="h-full overflow-auto bg-[var(--app-bg)] px-8 py-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-6 flex items-center justify-between">
+    <div className="h-full overflow-auto bg-[var(--app-bg)] px-10 py-7">
+      <div className="mx-auto max-w-6xl space-y-7">
+        <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold text-[var(--app-text)]">系统监控</h1>
-            <p className="mt-1 text-sm text-[var(--app-muted)]">
-              {activeSession ? `当前会话：${activeSession.title}` : "选择一个 SSH 会话后显示主机状态。"}
-            </p>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-extrabold tracking-tight text-[var(--app-text)]">系统硬件与资源监控</h1>
+              <span className="rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 px-3 py-0.5 font-mono text-xs font-extrabold">
+                {activeSession ? activeSession.title : "未连接"}
+              </span>
+            </div>
+            <p className="mt-1.5 text-xs font-medium text-[var(--text-secondary)]">实时推算当前 SSH 实例的 CPU 负载、物理内存、磁盘 IO、网卡速率与进程树。</p>
           </div>
-          <Button variant="outline" onClick={refresh} disabled={!activeSession || loading}>
+          <Button variant="outline" size={32} className="rounded-full h-10 px-5 text-xs font-bold shadow-2xs" onClick={refresh} disabled={!activeSession || loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            刷新
+            刷新指标
           </Button>
         </div>
 
         {!activeSession ? (
-          <EmptyState title="暂无活动 SSH 会话" description="连接 SSH 主机后，这里会显示 CPU、内存、磁盘、进程和网络接口。" />
+          <EmptyState title="暂无活动 SSH 会话" description="在左侧列表中点击选择或连接一台 SSH 主机后，系统将自动开始推算该主机的硬件监控指标。" />
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-6">
             {statusResults.length > 0 && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                {statusResults.map((result) => result.error || "暂未获取到数据").join("；")}
+              <div className="rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 p-4 text-xs font-extrabold text-amber-700 dark:text-amber-300">
+                {statusResults.map((result) => result.error || "暂未获取到部分监控项数据").join("；")}
               </div>
             )}
 
-            <div className="grid grid-cols-3 gap-4">
+            {/* 3 大核心指标卡片 */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <MonitorMetricCard
                 label="CPU"
                 value={hasStats ? monitorPercentLabel(stats.cpu_usage) : "0%"}
-                detail="当前处理器占用"
+                detail="当前多核处理器占用"
                 icon={Cpu}
                 percent={monitorPercent(stats.cpu_usage)}
-                barClassName="bg-blue-500"
+                variant="indigo"
               />
               <MonitorMetricCard
                 label="内存"
@@ -4156,7 +4793,7 @@ function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
                 detail={`${monitorText(stats.memory_used)} / ${monitorText(stats.memory_total)}`}
                 icon={Server}
                 percent={monitorPercent(stats.memory_usage)}
-                barClassName="bg-emerald-500"
+                variant="emerald"
               />
               <MonitorMetricCard
                 label="磁盘"
@@ -4164,117 +4801,134 @@ function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
                 detail={`${monitorText(stats.disk_used)} / ${monitorText(stats.disk_total)}`}
                 icon={HardDrive}
                 percent={monitorPercent(stats.disk_usage)}
-                barClassName="bg-amber-500"
+                variant="amber"
               />
             </div>
 
-            <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-4">
-              <Panel title="系统概览">
+            {/* 系统概览与网卡区域 */}
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-5">
+              <div className="rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-6 shadow-sm">
+                <h2 className="text-sm font-extrabold text-[var(--app-text)] mb-4 flex items-center gap-2">
+                  <Server className="h-4 w-4 text-indigo-600" />
+                  系统硬件概览
+                </h2>
                 {!hasInfo ? (
                   <MonitorStatusBlock result={snapshots.info} />
                 ) : (
-                  <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {[
-                      { label: "主机名", value: info.hostname },
-                      { label: "系统", value: info.os_name || info.os_version },
-                      { label: "架构", value: info.architecture },
-                      { label: "CPU", value: info.cpu },
-                      { label: "内存", value: info.total_memory },
-                      { label: "运行时间", value: info.uptime }
+                      { label: "主机名称", value: info.hostname },
+                      { label: "操作系统", value: info.os_name || info.os_version },
+                      { label: "硬件架构", value: info.architecture },
+                      { label: "处理器型号", value: info.cpu },
+                      { label: "物理内存总额", value: info.total_memory },
+                      { label: "系统运行持续时间", value: info.uptime }
                     ].map((item) => (
-                      <div key={item.label} className="rounded-md bg-slate-50 px-3 py-2">
-                        <div className="text-xs font-semibold text-slate-500">{item.label}</div>
-                        <div className="mt-1 truncate font-medium text-slate-900">{monitorText(item.value)}</div>
+                      <div key={item.label} className="rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] p-3.5">
+                        <div className="text-[11px] font-extrabold text-[var(--app-muted)]">{item.label}</div>
+                        <div className="mt-1 truncate font-mono text-xs font-extrabold text-[var(--app-text)]">{monitorText(item.value)}</div>
                       </div>
                     ))}
                   </div>
                 )}
-              </Panel>
+              </div>
 
-              <Panel title="网络接口">
+              {/* 网卡网络接口 */}
+              <div className="rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-6 shadow-sm">
+                <h2 className="text-sm font-extrabold text-[var(--app-text)] mb-4 flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-emerald-600" />
+                  网络设备接口 (Network NICs)
+                </h2>
                 {!hasNetwork ? (
                   <MonitorStatusBlock result={snapshots.network} />
-                ) : networks.length === 0 ? (
-                  <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无网络接口数据</div>
                 ) : (
-                  <div className="space-y-2">
-                    {networks.map((network, index) => (
-                      <div key={`${monitorText(network.name)}-${index}`} className="rounded-md border border-slate-200 px-3 py-2">
-                        <div className="font-semibold text-slate-900">{monitorText(network.name)}</div>
-                        <div className="mt-1 text-sm text-slate-600">{monitorText(network.ip)}</div>
-                        <div className="mt-1 text-xs text-slate-400">{monitorText(network.cidr)}</div>
+                  <div className="space-y-2.5">
+                    {networks.slice(0, 4).map((net, idx) => (
+                      <div key={idx} className="flex items-center justify-between rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] p-3">
+                        <div className="min-w-0">
+                          <div className="font-mono text-xs font-extrabold text-[var(--app-text)]">{monitorText(net.name || net.interface)}</div>
+                          <div className="mt-0.5 truncate font-mono text-[10px] font-bold text-indigo-600 dark:text-cyan-400">{monitorText(net.ip || net.address)}</div>
+                        </div>
+                        <span className="rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 px-2.5 py-0.5 font-mono text-[10px] font-extrabold shrink-0">
+                          Active
+                        </span>
                       </div>
                     ))}
                   </div>
                 )}
-              </Panel>
+              </div>
             </div>
 
-            <Panel title="进程列表">
-              {!hasProcesses ? (
-                <MonitorStatusBlock result={snapshots.processes} />
-              ) : processes.length === 0 ? (
-                <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无进程数据</div>
-              ) : (
-                <div className="overflow-hidden rounded-md border border-slate-200">
-                  <table className="w-full table-fixed text-left text-sm">
-                    <thead className="bg-slate-50 text-xs font-semibold text-slate-500">
-                      <tr>
-                        <th className="w-24 px-3 py-2">PID</th>
-                        <th className="px-3 py-2">名称</th>
-                        <th className="w-32 px-3 py-2">CPU</th>
-                        <th className="w-32 px-3 py-2">内存</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {processes.map((process, index) => (
-                        <tr key={`${monitorText(process.pid)}-${index}`} className="text-slate-700">
-                          <td className="px-3 py-2 font-mono text-xs text-slate-500">{monitorText(process.pid)}</td>
-                          <td className="truncate px-3 py-2 font-medium text-slate-900">{monitorText(process.name)}</td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              <span className="w-12 text-xs">{monitorPercentLabel(process.cpu)}</span>
-                              <div className="min-w-0 flex-1">
-                                <MonitorProgress value={monitorPercent(process.cpu)} className="bg-blue-500" />
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-xs">{monitorPercentLabel(process.memory)}</td>
+            {/* 进程列表与磁盘使用 */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* 进程列表 */}
+              <div className="rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-6 shadow-sm">
+                <h2 className="text-sm font-extrabold text-[var(--app-text)] mb-4 flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-purple-600" />
+                  实时进程树 Top 8 (Process Tree)
+                </h2>
+                {!hasProcesses ? (
+                  <MonitorStatusBlock result={snapshots.processes} />
+                ) : processes.length === 0 ? (
+                  <div className="rounded-2xl bg-[var(--fill-1)] p-4 text-xs font-semibold text-[var(--app-muted)] text-center">暂无进程数据</div>
+                ) : (
+                  <div className="overflow-hidden rounded-2xl border border-[var(--app-line)]">
+                    <table className="w-full text-left text-xs font-mono">
+                      <thead className="bg-[var(--fill-2)] text-[10px] font-extrabold text-[var(--app-muted)] uppercase tracking-wider">
+                        <tr>
+                          <th className="px-3 py-2.5">PID</th>
+                          <th className="px-3 py-2.5">进程名称</th>
+                          <th className="px-3 py-2.5">CPU %</th>
+                          <th className="px-3 py-2.5">内存 %</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Panel>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--app-line)]">
+                        {processes.map((process, index) => (
+                          <tr key={`${monitorText(process.pid)}-${index}`} className="hover:bg-[var(--fill-1)] transition-colors">
+                            <td className="px-3 py-2.5 font-bold text-indigo-600 dark:text-cyan-400">{monitorText(process.pid)}</td>
+                            <td className="px-3 py-2.5 font-bold text-[var(--app-text)] truncate max-w-[120px]">{monitorText(process.name)}</td>
+                            <td className="px-3 py-2.5 font-bold text-emerald-600">{monitorPercentLabel(process.cpu)}</td>
+                            <td className="px-3 py-2.5 text-[var(--app-muted)]">{monitorPercentLabel(process.memory)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
 
-            <Panel title="磁盘使用">
-              {!hasDisk ? (
-                <MonitorStatusBlock result={snapshots.disk} />
-              ) : disks.length === 0 ? (
-                <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无磁盘数据</div>
-              ) : (
-                <div className="space-y-3">
-                  {disks.map((disk, index) => (
-                    <div key={`${monitorText(disk.mount)}-${index}`} className="rounded-md border border-slate-200 px-4 py-3">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-slate-900">{monitorText(disk.mount)}</div>
-                          <div className="mt-1 truncate text-xs text-slate-500">{monitorText(disk.device)}</div>
+              {/* 磁盘挂载 */}
+              <div className="rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-6 shadow-sm">
+                <h2 className="text-sm font-extrabold text-[var(--app-text)] mb-4 flex items-center gap-2">
+                  <HardDrive className="h-4 w-4 text-amber-600" />
+                  磁盘挂载点使用量 (Disk Mounts)
+                </h2>
+                {!hasDisk ? (
+                  <MonitorStatusBlock result={snapshots.disk} />
+                ) : disks.length === 0 ? (
+                  <div className="rounded-2xl bg-[var(--fill-1)] p-4 text-xs font-semibold text-[var(--app-muted)] text-center">暂无磁盘数据</div>
+                ) : (
+                  <div className="space-y-3">
+                    {disks.slice(0, 3).map((disk, index) => (
+                      <div key={`${monitorText(disk.mount)}-${index}`} className="rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="font-mono text-xs font-extrabold text-[var(--app-text)]">{monitorText(disk.mount)}</div>
+                          <span className="rounded-full bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800 px-2 py-0.5 font-mono text-[10px] font-extrabold">
+                            {monitorPercentLabel(disk.usage)}
+                          </span>
                         </div>
-                        <div className="text-right text-sm font-semibold text-slate-900">{monitorPercentLabel(disk.usage)}</div>
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--fill-2)] p-0.5">
+                          <div className="h-full rounded-full bg-amber-500 transition-all duration-300" style={{ width: `${monitorPercent(disk.usage)}%` }} />
+                        </div>
+                        <div className="text-[10px] font-mono font-semibold text-[var(--app-muted)]">
+                          已用 {monitorText(disk.used)} / 总额 {monitorText(disk.total)}
+                        </div>
                       </div>
-                      <div className="mt-3">
-                        <MonitorProgress value={monitorPercent(disk.usage)} className="bg-amber-500" />
-                      </div>
-                      <div className="mt-2 text-xs text-slate-500">
-                        {monitorText(disk.used)} / {monitorText(disk.total)}，可用 {monitorText(disk.free)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Panel>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -4394,262 +5048,243 @@ function CommandPanel({
   }
 
   return (
-    <div className="grid h-full min-w-0 grid-cols-[280px_minmax(0,1fr)] bg-white">
-      <aside className="min-h-0 border-r border-slate-200 bg-slate-50 p-4">
+    <div className="grid h-full min-w-0 grid-cols-[210px_minmax(0,1fr)] bg-[var(--app-bg)]">
+      <aside className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] p-3.5 select-none flex flex-col justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-slate-950">快捷命令库</h1>
-          <p className="mt-1 text-xs text-slate-500">
-            {activeSession ? `发送到：${activeSession.title}` : "打开终端后可一键发送命令"}
-          </p>
-        </div>
+          <div>
+            <h1 className="text-base font-extrabold tracking-tight text-[var(--app-text)]">快捷命令库</h1>
+            <p className="mt-0.5 text-[11px] font-medium text-[var(--text-secondary)] truncate">
+              {activeSession ? `目标：${activeSession.title}` : "可直接发送至终端"}
+            </p>
+          </div>
 
-        <div className="relative mt-4">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            className="pl-9"
-            value={query}
-            placeholder="搜索命令、描述或文件夹"
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
+          <div className="relative mt-3">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
+            <Input
+              className="pl-8 h-8 text-xs rounded-full shadow-2xs"
+              value={query}
+              placeholder="搜索命令..."
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <Button className="col-span-2 h-9 px-3 text-xs" variant="outline" onClick={() => onImportCommands("FinalShell")}>
-            <Upload className="h-3.5 w-3.5" />
-            导入 FinalShell
-          </Button>
-          <Button className="h-9 px-3 text-xs" variant="outline" onClick={() => onImportCommands("本地文件")}>
-            <Upload className="h-3.5 w-3.5" />
-            导入
-          </Button>
-          <Button className="h-9 px-3 text-xs" variant="outline" onClick={onExportCommands}>
-            <Download className="h-3.5 w-3.5" />
-            导出
-          </Button>
-        </div>
-        {transferStatus && <p className="mt-2 text-xs text-slate-500">{transferStatus}</p>}
-
-        <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
-          <Input
-            value={folderName}
-            placeholder="新文件夹名称"
-            onChange={(event) => setFolderName(event.target.value)}
-          />
-          <Button variant="outline" onClick={submitFolder}>新建文件夹</Button>
-        </div>
-
-        <div className="mt-4 space-y-1">
-          {folders.map((folder) => (
-            <div
-              key={folder.id}
-              className={cn(
-                "grid grid-cols-[minmax(0,1fr)_32px] overflow-hidden rounded-md text-sm font-medium",
-                folder.id === activeFolder?.id ? "bg-[var(--app-text)] text-[var(--panel-bg)]" : "text-slate-700 hover:bg-white"
-              )}
+          <div className="mt-3 flex items-center justify-between gap-1.5">
+            <Button
+              variant="outline"
+              size={26}
+              className="h-7 flex-1 rounded-full text-[11px] font-extrabold"
+              onClick={onExportCommands}
             >
-              <button
-                className="flex min-w-0 items-center justify-between gap-2 px-3 py-2 text-left"
-                onClick={() => onActiveFolderChange(folder.id)}
-              >
-                <span className="min-w-0 whitespace-normal break-words">{folder.name}</span>
-                <span className={cn("shrink-0 text-xs", folder.id === activeFolder?.id ? "text-slate-300" : "text-slate-400")}>
-                  {folder.commands.length}
-                </span>
-              </button>
-              <button
-                aria-label={`删除文件夹 ${folder.name}`}
-                title="删除文件夹"
-                className={cn(
-                  "flex h-full min-h-9 items-center justify-center border-l",
-                  folder.id === activeFolder?.id
-                    ? "border-[var(--app-line)] text-[var(--panel-bg)] opacity-70 hover:bg-[var(--danger)] hover:opacity-100"
-                    : "border-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-600",
-                  folders.length <= 1 && "cursor-not-allowed opacity-40"
-                )}
-                disabled={folders.length <= 1}
-                onClick={() => onDeleteFolder(folder.id)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
+              <Download className="h-3 w-3" />
+              导出
+            </Button>
+            <label className="h-7 flex-1 rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] hover:bg-[var(--fill-1)] flex items-center justify-center gap-1 text-[11px] font-extrabold text-[var(--app-text)] cursor-pointer shadow-2xs">
+              <Upload className="h-3 w-3" />
+              导入
+              <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && onImportCommands("本地文件")} />
+            </label>
+          </div>
+
+          <div className="mt-3 flex items-center gap-1.5">
+            <Input
+              className="h-7.5 text-xs rounded-full"
+              value={folderName}
+              placeholder="新分类名称"
+              onChange={(event) => setFolderName(event.target.value)}
+            />
+            <Button variant="outline" size={26} className="h-7.5 rounded-full px-2.5 text-[11px] font-extrabold shrink-0" onClick={submitFolder}>
+              + 分类
+            </Button>
+          </div>
+
+          <div className="mt-3 space-y-1">
+            {folders.map((folder) => {
+              const active = folder.id === activeFolder?.id;
+              return (
+                <div
+                  key={folder.id}
+                  className={cn(
+                    "group flex items-center justify-between rounded-xl px-3 py-1.5 text-xs transition-all duration-150 cursor-pointer select-none",
+                    active
+                      ? "bg-emerald-600 text-white font-extrabold shadow-2xs"
+                      : "bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-1)] border border-[var(--app-line)]"
+                  )}
+                  onClick={() => onActiveFolderChange(folder.id)}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs">📁</span>
+                    <span className="truncate font-extrabold text-[11px]">{folder.name}</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className={cn("rounded-full px-1.5 py-0.2 font-mono text-[9px] font-extrabold", active ? "bg-white/20 text-white" : "bg-[var(--fill-2)] text-[var(--app-muted)]")}>
+                      {folder.commands.length}
+                    </span>
+                    {folders.length > 1 && (
+                      <button
+                        aria-label={`删除 ${folder.name}`}
+                        title="删除分类"
+                        className={cn("h-4.5 w-4.5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity", active ? "hover:bg-rose-500 text-white" : "hover:bg-rose-50 text-rose-600")}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteFolder(folder.id);
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </aside>
 
-      <section className="min-h-0 overflow-auto px-6 py-6">
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold text-slate-950">{keyword ? "搜索结果" : activeFolder?.name || "命令"}</h2>
-            <p className="mt-1 text-sm text-slate-500">命令按文件夹管理，点击发送会写入当前活动终端。</p>
-          </div>
-          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500">
-            {visibleCommands.length} 条命令
-          </span>
-        </div>
-
-        <Panel title="添加命令">
-          <div className="grid grid-cols-[180px_minmax(0,1fr)] gap-2">
-            <Input
-              value={draft.name}
-              placeholder="命令名称"
-              onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-            />
-            <Textarea
-              className="min-h-20 resize-y text-sm"
-              value={draft.command}
-              placeholder="命令内容"
-              onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))}
-            />
-            <p className="col-span-2 text-xs text-slate-400">参数占位示例：sudo iptables -t nat -nL | grep [p#1 端口]</p>
-            <div className="col-span-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-              <span>插入参数(动态生成命令)</span>
-              {COMMAND_PARAMETER_SLOTS.map((index) => (
-                <Button key={index} variant="outline" className="h-7 px-3 text-xs" onClick={() => insertCommandParameter(index)}>
-                  参数{index}
-                </Button>
-              ))}
+      <section className="min-h-0 overflow-auto bg-[var(--app-bg)] px-5 py-5">
+        <div className="mx-auto max-w-6xl space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-extrabold tracking-tight text-[var(--app-text)]">{keyword ? "搜索结果" : activeFolder?.name || "默认分类"}</h2>
+              <span className="rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 px-2.5 py-0.5 font-mono text-[11px] font-extrabold">
+                {visibleCommands.length} 条
+              </span>
             </div>
-            <Input
-              className="col-span-2"
-              value={draft.description}
-              placeholder="命令描述"
-              onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
-            />
           </div>
-          <div className="mt-3 flex justify-end gap-2">
-            <Button onClick={submitCommand}>添加命令</Button>
-          </div>
-        </Panel>
 
-        <Dialog.Root open={Boolean(editingCommand)} onOpenChange={(open) => !open && setEditingCommand(null)}>
-          <Dialog.Portal>
-            <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)]" />
-            <Dialog.Content className="fixed left-1/2 top-1/2 w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)]">
-              <div className="mb-5 flex items-start justify-between">
-                <div>
-                  <Dialog.Title className="text-lg font-semibold text-slate-950">编辑命令</Dialog.Title>
-                  <Dialog.Description className="mt-1 text-sm text-slate-500">
-                    修改当前快捷命令，保存后立即写回命令库。
-                  </Dialog.Description>
-                </div>
-                <Dialog.Close asChild>
-                  <button className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
-                    <X className="h-4 w-4" />
-                  </button>
-                </Dialog.Close>
-              </div>
-
+          <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3.5 shadow-2xs space-y-2.5">
+            <div className="flex items-center justify-between text-xs font-extrabold text-[var(--app-text)]">
+              <span className="flex items-center gap-1.5">
+                <Plus className="h-3.5 w-3.5 text-emerald-600" />
+                {editingCommand ? "编辑已有命令" : "新建快捷命令"}
+              </span>
               {editingCommand && (
-                <div className="grid gap-3">
-                  <Field label="命令名称">
-                    <Input
-                      value={editingCommand.name}
-                      onChange={(event) => setEditingCommand((current) => current ? { ...current, name: event.target.value } : current)}
-                    />
-                  </Field>
-                  <Field label="命令内容">
-                    <Textarea
-                      className="min-h-32 resize-y text-sm"
-                      value={editingCommand.command}
-                      onChange={(event) => setEditingCommand((current) => current ? { ...current, command: event.target.value } : current)}
-                    />
-                  </Field>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                    <span>插入参数</span>
-                    {COMMAND_PARAMETER_SLOTS.map((index) => (
-                      <Button key={index} variant="outline" className="h-7 px-3 text-xs" onClick={() => insertEditingCommandParameter(index)}>
-                        参数{index}
-                      </Button>
-                    ))}
-                  </div>
-                  <Field label="命令描述">
-                    <Input
-                      value={editingCommand.description || ""}
-                      onChange={(event) => setEditingCommand((current) => current ? { ...current, description: event.target.value } : current)}
-                    />
-                  </Field>
-                </div>
+                <Button variant="ghost" size={26} className="h-6 text-[11px] px-2 text-[var(--app-muted)]" onClick={() => setEditingCommand(null)}>
+                  取消编辑
+                </Button>
               )}
-
-              <div className="mt-5 flex justify-end gap-2">
-                <Dialog.Close asChild>
-                  <Button variant="outline">取消</Button>
-                </Dialog.Close>
-                <Button onClick={submitEditedCommand}>保存命令</Button>
-              </div>
-            </Dialog.Content>
-          </Dialog.Portal>
-        </Dialog.Root>
-
-        {pendingCommand && (
-          <Panel title={`${pendingCommand.name} 参数`}>
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2">
-              {pendingParameters.map((parameter) => (
-                <label key={parameter.key} className="grid gap-1 text-xs font-medium text-slate-600">
-                  <span>{parameter.name}</span>
-                  <Input
-                    className="h-9 text-xs"
-                    aria-label={`参数 ${parameter.name}`}
-                    value={parameterValues[parameter.key] || ""}
-                    onChange={(event) => setParameterValues((current) => ({ ...current, [parameter.key]: event.target.value }))}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") sendPendingCommand();
-                    }}
-                  />
-                </label>
-              ))}
             </div>
-            <div className="mt-3 flex justify-end">
-              <Button disabled={!activeSession} onClick={sendPendingCommand}>
-                <Send className="h-3.5 w-3.5" />
-                发送 {pendingCommand.name}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <Input
+                className="h-8 text-xs rounded-xl shadow-2xs"
+                value={editingCommand ? editingCommand.name : draft.name}
+                placeholder="命令名称 (如: top)"
+                onChange={(event) => {
+                  const val = event.target.value;
+                  if (editingCommand) setEditingCommand((c) => c ? { ...c, name: val } : c);
+                  else setDraft((c) => ({ ...c, name: val }));
+                }}
+              />
+              <Input
+                className="h-8 text-xs rounded-xl shadow-2xs sm:col-span-2"
+                value={editingCommand ? editingCommand.description : draft.description}
+                placeholder="功能简述 (可选)"
+                onChange={(event) => {
+                  const val = event.target.value;
+                  if (editingCommand) setEditingCommand((c) => c ? { ...c, description: val } : c);
+                  else setDraft((c) => ({ ...c, description: val }));
+                }}
+              />
+            </div>
+
+            <Textarea
+              className="min-h-16 font-mono text-xs rounded-xl p-2.5 border-[var(--app-line)] bg-slate-900 text-emerald-400 placeholder:text-slate-500 shadow-inner"
+              value={editingCommand ? editingCommand.command : draft.command}
+              placeholder="命令内容... 支持占位符如: top -b -n1 | head -n [p#1 行数]"
+              onChange={(event) => {
+                const val = event.target.value;
+                if (editingCommand) setEditingCommand((c) => c ? { ...c, command: val } : c);
+                else setDraft((c) => ({ ...c, command: val }));
+              }}
+            />
+
+            <div className="flex items-center justify-between gap-2 pt-0.5">
+              <div className="flex items-center gap-1 overflow-x-auto">
+                <span className="text-[10px] font-bold text-[var(--app-muted)] shrink-0">插参数:</span>
+                {COMMAND_PARAMETER_SLOTS.map((index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    className="rounded-full bg-[var(--fill-2)] hover:bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-mono font-extrabold text-[var(--app-text)] transition-colors cursor-pointer border border-[var(--app-line)] shrink-0"
+                    onClick={() => (editingCommand ? insertEditingCommandParameter(index) : insertCommandParameter(index))}
+                  >
+                    +p#{index}
+                  </button>
+                ))}
+              </div>
+
+              <Button
+                size={32}
+                className="rounded-full px-4 h-7.5 text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs shrink-0"
+                onClick={editingCommand ? submitEditedCommand : submitCommand}
+              >
+                {editingCommand ? "保存" : "+ 添加命令"}
               </Button>
             </div>
-          </Panel>
-        )}
+          </div>
 
-        <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2 2xl:grid-cols-4">
-          {visibleCommands.map((command) => (
-            <div key={`${command.folderId}-${command.id}`} className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-950">{command.name}</div>
-                  <div className="mt-1 text-xs text-slate-500">{command.folderName}</div>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <Button variant="ghost" className="h-7 px-1.5 text-xs" onClick={() => editCommand(command)}>
-                    编辑
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="h-7 px-1.5 text-xs"
-                    aria-label={`删除命令 ${command.name}`}
-                    onClick={() => onDeleteCommand(command.folderId, command.id)}
-                  >
-                    删除
-                  </Button>
-                </div>
-              </div>
-              <code className="mt-2 block max-h-24 overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-50 px-2 py-1.5 text-xs leading-5 text-slate-800">
-                {command.command}
-              </code>
-              {command.description && <p className="mt-2 truncate text-xs text-slate-500">{command.description}</p>}
-              <div className="mt-2 flex justify-end">
-                <Button
-                  className="h-7 px-2 text-xs"
-                  disabled={!activeSession}
-                  aria-label={`发送 ${command.name}`}
-                  onClick={() => sendCommand(command)}
-                >
-                  <Send className="h-3.5 w-3.5" />
-                  发送
-                </Button>
-              </div>
+          {/* FinalShell 动态宽度横向流式指令全库展示区 */}
+          <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-4 shadow-2xs space-y-3.5">
+            <div className="flex items-center justify-between text-xs font-extrabold text-[var(--app-text)] border-b border-[var(--app-line)] pb-2">
+              <span className="flex items-center gap-2">
+                <span>📁</span>
+                <span>{activeFolder?.name || "默认分类"} 快捷指令集</span>
+              </span>
+              <span className="font-mono text-[10px] text-[var(--app-muted)]">点击标签直接写入活动终端控制台</span>
             </div>
-          ))}
-          {visibleCommands.length === 0 && (
-            <EmptyState title="没有匹配命令" description="换个关键词搜索，或在当前文件夹里新增一条命令。" />
-          )}
+
+            <div className="flex flex-wrap gap-2">
+              {visibleCommands.map((command) => {
+                const parameters = extractCommandParameters(command.command);
+                return (
+                  <div
+                    key={commandKey(command)}
+                    className="group inline-flex items-center gap-2 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-emerald-50 hover:border-emerald-400 p-2 text-xs transition-all cursor-pointer shadow-2xs select-none max-w-full"
+                    title={`点击发送到终端: $ ${command.command}`}
+                    onClick={() => sendCommand(command)}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                      <span className="font-extrabold text-[var(--app-text)] text-xs truncate">{command.name}</span>
+                      <code className="font-mono text-[10px] font-bold text-indigo-700 dark:text-cyan-300 bg-[var(--panel-bg)] px-2 py-0.5 rounded-lg border border-[var(--app-line)] truncate">
+                        $ {command.command}
+                      </code>
+                    </div>
+
+                    <div className="flex items-center gap-1 border-l border-[var(--app-line)] pl-1.5 shrink-0">
+                      <button
+                        aria-label={`编辑命令 ${command.name}`}
+                        title="编辑"
+                        className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-muted)] hover:bg-white hover:text-[var(--app-text)]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          editCommand(command);
+                        }}
+                      >
+                        <Pencil className="h-2.5 w-2.5" />
+                      </button>
+                      <button
+                        aria-label={`删除命令 ${command.name}`}
+                        title="删除"
+                        className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-muted)] hover:bg-rose-100 hover:text-rose-600"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteCommand(command.folderId, command.id);
+                        }}
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {visibleCommands.length === 0 && (
+                <div className="w-full py-8 text-center text-xs font-semibold text-[var(--app-muted)]">
+                  当前分类下暂无快捷命令
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -4841,302 +5476,273 @@ function SettingsPanel({
   }
 
   return (
-    <div className="h-full overflow-auto bg-[var(--app-bg)] px-8 py-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-[var(--app-text)]">设置</h1>
-          <p className="mt-1 text-sm text-[var(--app-muted)]">管理界面主题、终端高亮和 AI 引用行为。</p>
+    <div className="h-full overflow-auto bg-[var(--app-bg)] px-10 py-7">
+      <div className="mx-auto max-w-6xl space-y-7">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-extrabold tracking-tight text-[var(--app-text)]">偏好设置与个性化</h1>
+              <span className="rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-400 border border-purple-200 dark:border-purple-800 px-3 py-0.5 font-mono text-xs font-extrabold">
+                Pro Settings
+              </span>
+            </div>
+            <p className="mt-1.5 text-xs font-medium text-[var(--text-secondary)]">轻松自定义全局外观主题、终端色彩字体、正则高亮规则与 AI 智能代码提示。</p>
+          </div>
         </div>
 
-        <div className="grid grid-cols-[320px_minmax(0,1fr)] gap-4">
-          <Panel title="外观主题">
-            <div className="grid grid-cols-2 gap-2">
-              {THEMES.map((mode) => (
-                <button
-                  key={mode}
-                  className={cn(
-                    "h-10 rounded-md border text-sm font-semibold transition-colors",
-                    theme === mode
-                      ? "border-blue-300 bg-blue-50 text-blue-700"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  )}
-                  onClick={() => onThemeChange(mode)}
-                >
-                  {mode === "light" ? "浅色" : "深色"}
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 border-t border-[var(--app-line)] pt-4">
-              <div className="mb-2 text-xs font-semibold text-[var(--app-muted)]">终端颜色</div>
-              <div className="grid grid-cols-2 gap-2">
-                {TERMINAL_THEMES.map((mode) => (
-                  <button
-                    key={mode}
-                    data-testid={`terminal-theme-${mode}`}
-                    className={cn(
-                      "h-10 rounded-md border text-sm font-semibold transition-colors",
-                      terminalTheme === mode
-                        ? "border-blue-300 bg-blue-50 text-blue-700"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                    )}
-                    onClick={() => onTerminalThemeChange(mode)}
-                  >
-                    {mode === "dark" ? "黑色终端" : "浅色终端"}
-                  </button>
-                ))}
+        <div className="grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] gap-6">
+          {/* 左栏：外观与终端配色 */}
+          <div className="space-y-5">
+            <div className="rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-6 shadow-sm space-y-5">
+              <h2 className="text-sm font-extrabold text-[var(--app-text)] flex items-center gap-2">
+                <Sun className="h-4 w-4 text-amber-500" />
+                应用外观主题
+              </h2>
+
+              <div className="grid grid-cols-2 gap-3">
+                {THEMES.map((mode) => {
+                  const active = theme === mode;
+                  return (
+                    <button
+                      key={mode}
+                      className={cn(
+                        "flex flex-col items-center justify-center gap-1.5 rounded-2xl border p-3.5 text-xs font-extrabold transition-all cursor-pointer select-none",
+                        active
+                          ? "border-emerald-500 bg-emerald-50/60 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 shadow-xs"
+                          : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+                      )}
+                      onClick={() => onThemeChange(mode)}
+                    >
+                      <span className="text-lg">{mode === "light" ? "☀️" : "🌙"}</span>
+                      <span>{mode === "light" ? "日间晶透白" : "夜间深邃黑"}</span>
+                    </button>
+                  );
+                })}
               </div>
-              <div className="mt-3 space-y-3">
-                <label className="block text-xs font-semibold text-[var(--app-muted)]">
-                  <span>字号</span>
-                  <Input
-                    className="mt-2 w-24"
+
+              <div className="pt-2 border-t border-[var(--app-line)] space-y-4">
+                <h2 className="text-sm font-extrabold text-[var(--app-text)] flex items-center gap-2">
+                  <Terminal className="h-4 w-4 text-emerald-600" />
+                  终端默认配色
+                </h2>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {TERMINAL_THEMES.map((mode) => {
+                    const active = terminalTheme === mode;
+                    return (
+                      <button
+                        key={mode}
+                        data-testid={`terminal-theme-${mode}`}
+                        className={cn(
+                          "flex items-center justify-center gap-2 rounded-2xl border p-3 text-xs font-extrabold transition-all cursor-pointer select-none",
+                          active
+                            ? "border-emerald-500 bg-emerald-50/60 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 shadow-xs"
+                            : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+                        )}
+                        onClick={() => onTerminalThemeChange(mode)}
+                      >
+                        <span className={cn("h-2.5 w-2.5 rounded-full", mode === "dark" ? "bg-slate-900" : "bg-emerald-500")} />
+                        <span>{mode === "dark" ? "黑色暗夜" : "浅色明亮"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="space-y-3 pt-1">
+                  <div className="flex items-center justify-between text-xs font-extrabold text-[var(--app-text)]">
+                    <span>终端字号大小</span>
+                    <span className="font-mono text-emerald-600 font-extrabold">{terminalAppearance.fontSize} px</span>
+                  </div>
+                  <input
                     aria-label="字号"
-                    type="number"
-                    min={10}
-                    max={28}
+                    type="range"
+                    min={11}
+                    max={26}
+                    className="w-full accent-emerald-600 cursor-pointer"
                     value={terminalAppearance.fontSize}
                     onChange={(event) => updateTerminalAppearance({ fontSize: Number(event.target.value || defaultTerminalAppearance.fontSize) })}
                   />
-                </label>
-                <div
-                  className="rounded-[10px] border border-[var(--app-line)] bg-[var(--terminal-bg)] px-3 py-2 text-center text-[var(--terminal-text)]"
-                  style={{
-                    fontFamily: resolvedTerminalAppearance.fontFamily,
-                    fontSize: `${resolvedTerminalAppearance.fontSize}px`
-                  }}
-                >
-                  <div>0123456789 abcdefghABCDEFGH</div>
-                  <div className="mt-1">终端中文字体预览</div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <TerminalFontList
-                    label="英文字体"
-                    options={terminalEnglishFonts}
-                    value={resolvedTerminalAppearance.englishFont}
-                    onChange={(value) => updateTerminalAppearance({ englishFont: value })}
-                  />
-                  <TerminalFontList
-                    label="中文字体"
-                    options={terminalChineseFonts}
-                    value={resolvedTerminalAppearance.chineseFont}
-                    onChange={(value) => updateTerminalAppearance({ chineseFont: value })}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="block text-xs font-semibold text-[var(--app-muted)]">
-                    <span>文字颜色</span>
-                    <input
-                      aria-label="文字颜色"
-                      className="mt-2 h-10 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-1"
-                      type="color"
-                      value={terminalAppearance.foreground || terminalPreviewColors.foreground}
-                      onChange={(event) => updateTerminalAppearance({ foreground: event.target.value })}
-                    />
-                  </label>
-                  <label className="block text-xs font-semibold text-[var(--app-muted)]">
-                    <span>背景颜色</span>
-                    <input
-                      aria-label="背景颜色"
-                      className="mt-2 h-10 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-1"
-                      type="color"
-                      value={terminalAppearance.background || terminalPreviewColors.background}
-                      onChange={(event) => updateTerminalAppearance({ background: event.target.value })}
-                    />
-                  </label>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-                <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                  上传背景图
-                  <input
-                    data-testid="terminal-background-upload"
-                    className="sr-only"
-                    type="file"
-                    accept="image/*"
-                    onChange={uploadTerminalBackground}
-                  />
-                </label>
-                <Button
-                  variant="outline"
-                  className="h-10 px-3"
-                  disabled={!terminalBackgroundImage}
-                  onClick={() => onTerminalBackgroundImageChange("")}
-                >
-                  清除
-                </Button>
-              </div>
-              <label className="mt-3 block text-xs font-semibold text-[var(--app-muted)]">
-                <span className="flex items-center justify-between gap-3">
-                  <span>背景遮罩透明度</span>
-                  <span>{terminalBackgroundOverlay}%</span>
-                </span>
-                <input
-                  aria-label="背景遮罩透明度"
-                  className="mt-2 w-full accent-blue-600"
-                  type="range"
-                  min="0"
-                  max="90"
-                  step="5"
-                  value={terminalBackgroundOverlay}
-                  onChange={(event) => onTerminalBackgroundOverlayChange(Number(event.target.value))}
-                />
-              </label>
-              <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 py-2 text-sm font-semibold text-[var(--app-text)]">
-                <span>命令智能提示</span>
-                <input
-                  aria-label="命令智能提示"
-                  className="h-4 w-4 accent-blue-600"
-                  type="checkbox"
-                  checked={commandSuggestionsEnabled}
-                  onChange={(event) => onCommandSuggestionsEnabledChange(event.target.checked)}
-                />
-              </label>
-              <div className="mt-2 space-y-2 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 text-xs text-[var(--app-text)]">
-                <label className="flex cursor-pointer items-center justify-between gap-3 font-semibold">
-                  <span>显示历史命令</span>
-                  <input
-                    aria-label="显示历史命令"
-                    className="h-4 w-4 accent-blue-600"
-                    type="checkbox"
-                    checked={commandSuggestionSources.history}
-                    disabled={!commandSuggestionsEnabled}
-                    onChange={(event) => onCommandSuggestionSourcesChange({ ...commandSuggestionSources, history: event.target.checked })}
-                  />
-                </label>
-                <label className="flex cursor-pointer items-center justify-between gap-3 font-semibold">
-                  <span>显示快捷命令</span>
-                  <input
-                    aria-label="显示快捷命令"
-                    className="h-4 w-4 accent-blue-600"
-                    type="checkbox"
-                    checked={commandSuggestionSources.shortcuts}
-                    disabled={!commandSuggestionsEnabled}
-                    onChange={(event) => onCommandSuggestionSourcesChange({ ...commandSuggestionSources, shortcuts: event.target.checked })}
-                  />
-                </label>
-                <label className="flex cursor-pointer items-center justify-between gap-3 font-semibold">
-                  <span>显示 Linux 命令</span>
-                  <input
-                    aria-label="显示 Linux 命令"
-                    className="h-4 w-4 accent-blue-600"
-                    type="checkbox"
-                    checked={commandSuggestionSources.linux}
-                    disabled={!commandSuggestionsEnabled}
-                    onChange={(event) => onCommandSuggestionSourcesChange({ ...commandSuggestionSources, linux: event.target.checked })}
-                  />
-                </label>
-                <label className="block font-semibold">
-                  <span>候选应用按键</span>
-                  <select
-                    aria-label="候选应用按键"
-                    className="mt-2 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
-                    value={commandSuggestionApplyKey}
-                    disabled={!commandSuggestionsEnabled}
-                    onChange={(event) => onCommandSuggestionApplyKeyChange(event.target.value as CommandSuggestionApplyKey)}
+
+                  {/* 实时字体预览框 */}
+                  <div
+                    className="rounded-2xl border border-[var(--app-line)] bg-slate-900 p-3.5 text-center font-mono text-xs font-extrabold text-emerald-400 shadow-inner"
+                    style={{
+                      fontFamily: resolvedTerminalAppearance.fontFamily,
+                      fontSize: `${resolvedTerminalAppearance.fontSize}px`
+                    }}
                   >
-                    <option value="altEnter">Alt+Enter</option>
-                    <option value="ctrlSpace">Ctrl+Space</option>
-                    <option value="tab">Tab</option>
-                    <option value="custom">自定义</option>
-                  </select>
-                </label>
-                {commandSuggestionApplyKey === "custom" && (
-                  <div className="grid grid-cols-[minmax(0,1fr)_92px] items-center gap-2">
-                    <div className="truncate rounded-md border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-700">
-                      {commandSuggestionCustomApplyKey?.label || "未配置"}
-                    </div>
+                    <div>0123456789 abcdefghABCDEFGH</div>
+                    <div className="mt-1 text-[10px] text-slate-500">Terminal Font SandBox</div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <TerminalFontList
+                      label="英文排版字体"
+                      options={terminalEnglishFonts}
+                      value={resolvedTerminalAppearance.englishFont}
+                      onChange={(value) => updateTerminalAppearance({ englishFont: value })}
+                    />
+                    <TerminalFontList
+                      label="中文排版字体"
+                      options={terminalChineseFonts}
+                      value={resolvedTerminalAppearance.chineseFont}
+                      onChange={(value) => updateTerminalAppearance({ chineseFont: value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-[var(--app-line)] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="flex h-9 cursor-pointer items-center gap-2 rounded-full border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-4 text-xs font-extrabold text-[var(--app-text)] transition-colors">
+                      📷 上传背景壁纸
+                      <input
+                        data-testid="terminal-background-upload"
+                        className="sr-only"
+                        type="file"
+                        accept="image/*"
+                        onChange={uploadTerminalBackground}
+                      />
+                    </label>
                     <Button
-                      className="h-9 px-2 text-xs"
-                      variant={recordingApplyKey ? "default" : "outline"}
-                      disabled={!commandSuggestionsEnabled}
-                      onClick={() => setRecordingApplyKey(true)}
-                      onKeyDown={recordCustomApplyKey}
+                      variant="outline"
+                      size={26}
+                      className="rounded-full px-3 text-xs font-bold"
+                      disabled={!terminalBackgroundImage}
+                      onClick={() => onTerminalBackgroundImageChange("")}
                     >
-                      {recordingApplyKey ? "正在录入按键" : "录入按键"}
+                      清除壁纸
                     </Button>
                   </div>
-                )}
+
+                  {terminalBackgroundImage && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs font-bold text-[var(--app-muted)]">
+                        <span>壁纸遮罩浓度</span>
+                        <span>{terminalBackgroundOverlay}%</span>
+                      </div>
+                      <input
+                        aria-label="背景遮罩透明度"
+                        className="w-full accent-emerald-600 cursor-pointer"
+                        type="range"
+                        min="0"
+                        max="90"
+                        step="5"
+                        value={terminalBackgroundOverlay}
+                        onChange={(event) => onTerminalBackgroundOverlayChange(Number(event.target.value))}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-            <div className="mt-4 rounded-md border border-[var(--app-line)] bg-[var(--subtle-bg)] p-3">
-              <div className="text-xs font-semibold text-[var(--app-muted)]">终端预览</div>
-              <pre className="mt-2 rounded-md bg-cover bg-center p-3 text-xs leading-5" style={terminalPreviewStyle}>
-                ERROR ssh failed at 10.0.0.8{"\n"}WARN retry in 300ms
-              </pre>
-            </div>
-          </Panel>
+          </div>
 
-          <Panel title="终端正则高亮">
-            <div className="mb-4 grid grid-cols-[180px_minmax(0,1fr)_72px_92px_72px] gap-2">
-              <Input
-                value={draft.name}
-                placeholder="规则名称"
-                onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-              />
-              <Input
-                value={draft.pattern}
-                placeholder="正则表达式"
-                onChange={(event) => setDraft((current) => ({ ...current, pattern: event.target.value }))}
-              />
-              <input
-                aria-label="规则颜色"
-                className="h-10 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-1"
-                type="color"
-                value={draft.foreground}
-                onChange={(event) => setDraft((current) => ({ ...current, foreground: event.target.value }))}
-              />
-              <Button onClick={saveRule}>{editingRuleId ? "保存规则" : "添加规则"}</Button>
-              {editingRuleId && (
-                <Button variant="outline" onClick={resetHighlightDraft}>
-                  取消
-                </Button>
-              )}
-            </div>
+          {/* 右栏：正则高亮与命令提示 */}
+          <div className="space-y-6">
+            <div className="rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-6 shadow-sm space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-extrabold text-[var(--app-text)] flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-amber-500" />
+                    终端关键字正则高亮引擎
+                  </h2>
+                  <p className="mt-1 text-xs font-medium text-[var(--text-secondary)]">通过正则表达式为终端输出的 Error、IP 地址、URL 与日志级别自动着色。</p>
+                </div>
+              </div>
 
-            <div className="space-y-2">
-              {highlightRules.map((rule) => (
-                <div
-                  key={rule.id}
-                  className="grid grid-cols-[170px_minmax(0,1fr)_86px_72px_72px] items-center gap-3 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="h-3 w-3 rounded-full" style={{ backgroundColor: rule.foreground }} />
-                      <span className="truncate text-sm font-semibold text-[var(--app-text)]">{rule.name}</span>
-                      {rule.system && (
-                        <span className="rounded bg-[var(--subtle-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--app-muted)]">
-                          默认
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-1 text-xs text-[var(--app-muted)]">{rule.enabled ? "已启用" : "已停用"}</div>
-                  </div>
-                  <code className="truncate rounded bg-[var(--subtle-bg)] px-2 py-1 text-xs text-[var(--app-muted)]">
-                    {rule.pattern}
-                  </code>
-                  <Button variant="outline" className="h-8" onClick={() => onToggleHighlightRule(rule.id)}>
-                    {rule.enabled ? "停用" : "启用"}
-                  </Button>
+              {/* 规则编辑添加器 */}
+              <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] p-4 space-y-3">
+                <div className="text-xs font-extrabold text-[var(--app-text)]">{editingRuleId ? "修改正则表达式" : "新增正则高亮规则"}</div>
+                <div className="grid grid-cols-1 sm:grid-cols-[160px_minmax(0,1fr)_50px_100px] gap-2.5">
+                  <Input
+                    className="h-9 text-xs rounded-full shadow-2xs"
+                    value={draft.name}
+                    placeholder="规则名称 (如: IP地址)"
+                    onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+                  />
+                  <Input
+                    className="h-9 text-xs font-mono rounded-full shadow-2xs"
+                    value={draft.pattern}
+                    placeholder="正则表达式 (如: \b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b)"
+                    onChange={(event) => setDraft((current) => ({ ...current, pattern: event.target.value }))}
+                  />
+                  <input
+                    aria-label="规则颜色"
+                    className="h-9 w-full cursor-pointer rounded-full border border-[var(--app-line)] bg-white p-1 shadow-2xs"
+                    type="color"
+                    value={draft.foreground}
+                    onChange={(event) => setDraft((current) => ({ ...current, foreground: event.target.value }))}
+                  />
                   <Button
-                    variant="outline"
-                    className="h-8"
-                    aria-label={`编辑${rule.name}`}
-                    onClick={() => editRule(rule)}
+                    size={32}
+                    className="rounded-full h-9 text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                    onClick={saveRule}
                   >
-                    编辑
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="h-8"
-                    aria-label={`删除${rule.name}`}
-                    onClick={() => deleteRule(rule.id)}
-                  >
-                    删除
+                    {editingRuleId ? "保存" : "+ 添加"}
                   </Button>
                 </div>
-              ))}
+              </div>
+
+              {/* 规则卡片列表 */}
+              <div className="space-y-3">
+                {highlightRules.map((rule) => (
+                  <div
+                    key={rule.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-4 shadow-2xs hover:shadow-xs transition-all"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="h-4 w-4 shrink-0 rounded-full ring-2 ring-[var(--panel-bg)] shadow-xs" style={{ backgroundColor: rule.foreground }} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-xs font-extrabold text-[var(--app-text)]">{rule.name}</span>
+                          {rule.system && (
+                            <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.5 text-[9px] font-mono font-bold text-[var(--app-muted)]">
+                              System
+                            </span>
+                          )}
+                        </div>
+                        <code className="mt-0.5 block truncate font-mono text-[10px] text-indigo-600 dark:text-cyan-400">
+                          {rule.pattern}
+                        </code>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        className={cn(
+                          "rounded-full px-3 py-1 text-xs font-extrabold transition-colors cursor-pointer border",
+                          rule.enabled
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-800"
+                            : "bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400"
+                        )}
+                        onClick={() => onToggleHighlightRule(rule.id)}
+                      >
+                        {rule.enabled ? "🟢 已启用" : "⚪ 已停用"}
+                      </button>
+
+                      <button
+                        aria-label={`编辑${rule.name}`}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] transition-colors cursor-pointer"
+                        onClick={() => editRule(rule)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+
+                      {!rule.system && (
+                        <button
+                          aria-label={`删除${rule.name}`}
+                          className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 transition-colors cursor-pointer"
+                          onClick={() => deleteRule(rule.id)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </Panel>
+          </div>
         </div>
       </div>
     </div>
@@ -5349,6 +5955,16 @@ function AiWorkspacePanel({
     });
   }
 
+  function formatAiError(error: unknown, defaultMessage: string): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === "string" && error.trim()) {
+      return error;
+    }
+    return defaultMessage;
+  }
+
   async function executeAiRun(run: AiRun) {
     if (running) return;
     setRunning(true);
@@ -5407,7 +6023,7 @@ function AiWorkspacePanel({
             {
               id: `assistant_${Date.now()}`,
               role: "assistant",
-              text: error instanceof Error ? error.message : "Hermes 调用失败。"
+              text: formatAiError(error, "Hermes 调用失败。")
             }
           ]);
         }
@@ -5419,7 +6035,7 @@ function AiWorkspacePanel({
         {
           id: `assistant_${Date.now()}`,
           role: "assistant",
-          text: error instanceof Error ? error.message : "AI 执行失败。"
+          text: formatAiError(error, "AI 执行失败。")
         }
       ]);
     } finally {
@@ -5481,6 +6097,26 @@ function AiWorkspacePanel({
             onClick={() => setSelectedTool("hermes")}
           />
         </div>
+
+        {selectedTool === "codex" && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/80 p-2.5 text-xs text-amber-900 shadow-2xs">
+            <div className="flex items-center justify-between font-extrabold text-amber-800">
+              <span className="flex items-center gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                提示：需系统安装 codex 命令行
+              </span>
+              <button
+                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-800 cursor-pointer underline shrink-0"
+                onClick={() => setSelectedTool("hermes")}
+              >
+                切换 Hermes (免安装) →
+              </button>
+            </div>
+            <p className="mt-1 text-[11px] text-amber-700 leading-4">
+              未安装可通过 <code className="rounded bg-amber-100 px-1 py-0.5 font-mono font-bold text-amber-900 select-all">npm i -g @openai/codex</code> 安装，或直接无缝切换 Hermes/API 使用。
+            </p>
+          </div>
+        )}
 
         <div className="mt-3 grid grid-cols-2 gap-2">
           <label className="block">
@@ -5791,11 +6427,13 @@ function extractCodexReply(result: CodexJobResult, prompt: string) {
     return cleaned || "Codex 执行完成，无输出。";
   }
   if (result.timedOut) {
-    return "Codex 执行超时，请检查本地 Codex 环境。";
+    return "Codex 执行超时 (120 秒)，请检查本地 Codex 环境。";
   }
-  return cleaned && !looksLikeOnlyRuntimeNoise(cleaned)
-    ? cleaned
-    : "Codex 执行失败，请检查本地 Codex 环境。";
+  if (cleaned && !looksLikeOnlyRuntimeNoise(cleaned)) {
+    return cleaned;
+  }
+  const errDetail = result.error || output || "请检查本地 Codex 命令或配置。";
+  return `Codex 调用未返回成功指令：${errDetail}`;
 }
 
 function extractCodexFinalMessage(output: string, prompt: string) {

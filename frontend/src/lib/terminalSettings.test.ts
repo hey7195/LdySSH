@@ -25,20 +25,26 @@ const errorRule: HighlightRule = {
 describe("terminal highlight settings", () => {
   test("ships with practical default highlight rules", () => {
     expect(DEFAULT_HIGHLIGHT_RULES.map((rule) => rule.name)).toEqual([
-      "错误",
+      "错误与崩溃",
       "警告",
+      "Logcat E 错误",
+      "Logcat W 警告",
+      "Logcat I 信息",
+      "Logcat D 调试",
       "权限拒绝",
       "Linux 服务状态",
-      "ADB 设备",
-      "IP 地址",
-      "URL",
-      "HTTP 5xx",
-      "路径",
-      "耗时",
-      "包管理命令",
-      "端口",
       "Android 包名",
-      "进程 ID"
+      "源码文件与行号",
+      "IP 地址",
+      "JSON 属性键",
+      "URL 链接",
+      "HTTP 5xx 响应",
+      "文件路径",
+      "日志时间戳",
+      "耗时与超时",
+      "包管理命令",
+      "网络端口",
+      "进程与线程 ID"
     ]);
   });
 
@@ -48,7 +54,6 @@ describe("terminal highlight settings", () => {
         "apt-get install nginx",
         "systemctl status nginx active (running)",
         "cat /data/local/tmp/a.txt: Permission denied",
-        "127.0.0.1:5555 device",
         "package:com.android.settings pid=1234 uid=1000",
         "listen on port 10302"
       ].join("\n"),
@@ -58,7 +63,6 @@ describe("terminal highlight settings", () => {
     expect(highlighted).toMatch(/\x1b\[[\d;]+mapt-get\x1b\[0m/);
     expect(highlighted).toMatch(/\x1b\[[\d;]+mactive \(running\)\x1b\[0m/);
     expect(highlighted).toMatch(/\x1b\[[\d;]+mPermission denied\x1b\[0m/);
-    expect(highlighted).toMatch(/\x1b\[[\d;]+m127\.0\.0\.1:5555 device\x1b\[0m/);
     expect(highlighted).toMatch(/\x1b\[[\d;]+mcom\.android\.settings\x1b\[0m/);
     expect(highlighted).toMatch(/\x1b\[[\d;]+mpid=1234\x1b\[0m/);
     expect(highlighted).toMatch(/\x1b\[[\d;]+mport 10302\x1b\[0m/);
@@ -80,7 +84,7 @@ describe("terminal highlight settings", () => {
   test("does not inject highlight escapes into terminal control sequences", () => {
     const pathRule: HighlightRule = {
       id: "path",
-      name: "璺緞",
+      name: "路径",
       pattern: "(/[^\\s]+)",
       flags: "g",
       enabled: true,
@@ -101,8 +105,8 @@ describe("terminal theme settings", () => {
   test("defaults to a dark terminal inside the light application shell", () => {
     expect(DEFAULT_TERMINAL_THEME).toBe("dark");
     expect(getTerminalTheme(DEFAULT_TERMINAL_THEME)).toMatchObject({
-      background: "#020617",
-      foreground: "#e5e7eb"
+      background: "#090a0f",
+      foreground: "#f0f4ff"
     });
   });
 
@@ -112,13 +116,13 @@ describe("terminal theme settings", () => {
       foreground: "#1f2937"
     });
     expect(getTerminalTheme("dark")).toMatchObject({
-      background: "#020617",
-      foreground: "#e5e7eb"
+      background: "#090a0f",
+      foreground: "#f0f4ff"
     });
   });
 
   test("normalizes theme mode to a root data attribute", () => {
-    expect(THEMES).toEqual(["light", "dark"]);
+    expect(THEMES).toEqual(["dark", "nordic", "light"]);
     expect(getThemeAttribute("light")).toBe("light");
     expect(getThemeAttribute("dark")).toBe("dark");
   });

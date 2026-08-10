@@ -21,3 +21,5 @@ prismssh-cpp/prismssh-cpp/x64/
 .tools/
 prismssh-cpp/WebView2Loader.dll
 prismssh-cpp/x64/Release/tools/
+*.png
+design-preview.html

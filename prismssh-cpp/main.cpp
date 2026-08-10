@@ -108,6 +108,46 @@ static void ClearPendingTerminalSize(const std::string& sessionId) {
     pendingTerminalSizes.erase(sessionId);
 }
 
+// 自动转换 Windows 本地 ANSI/GBK 编码为标准 UTF-8，防止 nlohmann::json 抛出 json.exception.type_error.316
+inline std::string EnsureValidUtf8(const std::string& str) {
+    if (str.empty()) return "";
+
+    // 1. 先校验是否已经是标准 UTF-8
+    int wlen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, str.c_str(), (int)str.size(), NULL, 0);
+    if (wlen > 0) return str;
+
+    // 2. 若不是标准 UTF-8，则按 Windows 本地 ANSI/GBK (CP_ACP) 转为 UTF-8
+    wlen = MultiByteToWideChar(CP_ACP, 0, str.c_str(), (int)str.size(), NULL, 0);
+    if (wlen > 0) {
+        std::wstring wstr(wlen, L'\0');
+        MultiByteToWideChar(CP_ACP, 0, str.c_str(), (int)str.size(), &wstr[0], wlen);
+        int ulen = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), wlen, NULL, 0, NULL, NULL);
+        if (ulen > 0) {
+            std::string utf8(ulen, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), wlen, &utf8[0], ulen, NULL, NULL);
+            return utf8;
+        }
+    }
+
+    // 3. 安全兜底过滤
+    std::string safeStr;
+    safeStr.reserve(str.size());
+    for (unsigned char c : str) {
+        if (c < 128 || (c >= 0xC0 && c <= 0xF4)) safeStr.push_back(c);
+        else safeStr.push_back('?');
+    }
+    return safeStr;
+}
+
+// 替换掉 dump() 中可能的非 UTF-8 异常
+inline std::string SafeDumpJson(const nlohmann::json& j) {
+    try {
+        return j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    } catch (...) {
+        return "{}";
+    }
+}
+
 static void ProcessSessionInputQueue(std::string sessionId) {
     for (;;) {
         std::string data;
@@ -872,7 +912,12 @@ ProcessRunResult RunHiddenProcessCapture(
     if (inputRead) CloseHandle(inputRead);
 
     if (!created) {
-        result.error = "CreateProcessW failed: " + std::to_string(GetLastError());
+        DWORD errCode = GetLastError();
+        if (errCode == ERROR_FILE_NOT_FOUND || errCode == 2) {
+            result.error = "未找到 codex 命令行可执行文件。请先在系统中安装 Codex (npm install -g @openai/codex) 或在配置中设置可执行文件绝对路径。";
+        } else {
+            result.error = "CreateProcessW failed: " + std::to_string(errCode);
+        }
         if (inputWrite) CloseHandle(inputWrite);
         CloseHandle(readPipe);
         return result;
@@ -924,10 +969,8 @@ ProcessRunResult RunHiddenProcessCapture(
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     CloseHandle(readPipe);
-    if (stdinThread.joinable()) {
-        stdinThread.join();
-    }
-
+    result.output = EnsureValidUtf8(result.output);
+    result.error = EnsureValidUtf8(result.error);
     return result;
 }
 
@@ -1489,14 +1532,14 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 retObj["running"] = job.running;
                 retObj["completed"] = job.completed;
                 retObj["commandPreview"] = job.commandPreview;
-                retObj["output"] = job.result.output;
-                retObj["error"] = job.result.error;
+                retObj["output"] = EnsureValidUtf8(job.result.output);
+                retObj["error"] = EnsureValidUtf8(job.result.error);
                 retObj["exitCode"] = job.result.exitCode;
                 retObj["timedOut"] = job.result.timedOut;
             }
 
             response["status"] = "success";
-            response["result"] = retObj.dump();
+            response["result"] = SafeDumpJson(retObj);
         }
         else if (action == "run_codex") {
             std::string paramsStr = args[0].get<std::string>();
@@ -1525,14 +1568,14 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             } else {
                 ProcessRunResult run = RunHiddenProcessCapture(invocation.commandLine, invocation.workingDirectory, prompt, 120000);
                 retObj["success"] = run.success;
-                retObj["output"] = run.output;
-                retObj["error"] = run.error;
+                retObj["output"] = EnsureValidUtf8(run.output);
+                retObj["error"] = EnsureValidUtf8(run.error);
                 retObj["exitCode"] = run.exitCode;
                 retObj["timedOut"] = run.timedOut;
             }
 
             response["status"] = "success";
-            response["result"] = retObj.dump();
+            response["result"] = SafeDumpJson(retObj);
         }
         else if (action == "create_local_session") {
             std::string sessionId = globalSessionManager.CreateLocalSession();

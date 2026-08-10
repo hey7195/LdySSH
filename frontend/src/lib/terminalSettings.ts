@@ -1,5 +1,5 @@
-export type ThemeMode = "light" | "dark";
-export type TerminalThemeMode = "light" | "dark";
+export type ThemeMode = "light" | "dark" | "nordic";
+export type TerminalThemeMode = "light" | "dark" | "nordic";
 
 export interface HighlightRule {
   id: string;
@@ -15,20 +15,19 @@ export interface HighlightRule {
   system?: boolean;
 }
 
-export const THEMES: ThemeMode[] = ["light", "dark"];
-export const TERMINAL_THEMES: TerminalThemeMode[] = ["dark", "light"];
+export const THEMES: ThemeMode[] = ["dark", "nordic", "light"];
+export const TERMINAL_THEMES: TerminalThemeMode[] = ["dark", "nordic", "light"];
 export const DEFAULT_TERMINAL_THEME: TerminalThemeMode = "dark";
 
 export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
   {
     id: "error",
-    name: "错误",
+    name: "错误与崩溃",
     pattern: "\\b(ERROR|ERR|FATAL|Exception|Traceback|failed|failure|panic|crash|ANR|Segmentation fault|No such file or directory|not found|失败)\\b",
     flags: "gi",
     enabled: true,
     scope: "terminal",
-    foreground: "#dc2626",
-    background: "#fee2e2",
+    foreground: "#ef4444",
     fontWeight: "bold",
     priority: 10,
     system: true
@@ -40,10 +39,57 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
     flags: "gi",
     enabled: true,
     scope: "terminal",
-    foreground: "#d97706",
-    background: "#fef3c7",
+    foreground: "#f59e0b",
     fontWeight: "bold",
     priority: 20,
+    system: true
+  },
+  {
+    id: "logcat-error",
+    name: "Logcat E 错误",
+    pattern: "\\s+E\\s+|\\bE/[A-Za-z0-9_.-]+",
+    flags: "g",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#ef4444",
+    fontWeight: "bold",
+    priority: 22,
+    system: true
+  },
+  {
+    id: "logcat-warn",
+    name: "Logcat W 警告",
+    pattern: "\\s+W\\s+|\\bW/[A-Za-z0-9_.-]+",
+    flags: "g",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#fb923c",
+    fontWeight: "bold",
+    priority: 23,
+    system: true
+  },
+  {
+    id: "logcat-info",
+    name: "Logcat I 信息",
+    pattern: "\\s+I\\s+|\\bI/[A-Za-z0-9_.-]+",
+    flags: "g",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#10b981",
+    fontWeight: "bold",
+    priority: 24,
+    system: true
+  },
+  {
+    id: "logcat-debug",
+    name: "Logcat D 调试",
+    pattern: "\\s+D\\s+|\\bD/[A-Za-z0-9_.-]+",
+    flags: "g",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#38bdf8",
+    fontWeight: "bold",
+    priority: 25,
     system: true
   },
   {
@@ -53,10 +99,9 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
     flags: "gi",
     enabled: true,
     scope: "terminal",
-    foreground: "#b91c1c",
-    background: "#fee2e2",
+    foreground: "#f87171",
     fontWeight: "bold",
-    priority: 25,
+    priority: 26,
     system: true
   },
   {
@@ -66,23 +111,31 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
     flags: "gi",
     enabled: true,
     scope: "terminal",
-    foreground: "#16a34a",
-    background: "#dcfce7",
+    foreground: "#10b981",
     fontWeight: "bold",
     priority: 30,
     system: true
   },
   {
-    id: "adb-device",
-    name: "ADB 设备",
-    pattern: "\\b(?:[A-Za-z0-9._-]+|(?:\\d{1,3}\\.){3}\\d{1,3}:\\d{2,5})\\s+(?:device|offline|unauthorized|no permissions)\\b",
-    flags: "gi",
+    id: "android-package",
+    name: "Android 包名",
+    pattern: "\\b(?:com|org|net|io|android|cn|de|uk|gov)\\.[a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+\\b",
+    flags: "g",
     enabled: true,
     scope: "terminal",
-    foreground: "#0891b2",
-    background: "#cffafe",
-    fontWeight: "bold",
+    foreground: "#38bdf8",
     priority: 35,
+    system: true
+  },
+  {
+    id: "cpp-source",
+    name: "源码文件与行号",
+    pattern: "\\b[a-zA-Z0-9_.-]+\\.(?:cpp|cc|c|h|hpp|py|js|ts|go|rs):?\\(?\\d*\\)?\\b",
+    flags: "g",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#2dd4bf",
+    priority: 38,
     system: true
   },
   {
@@ -92,53 +145,74 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
     flags: "g",
     enabled: true,
     scope: "terminal",
-    foreground: "#2563eb",
+    foreground: "#60a5fa",
     priority: 40,
     system: true
   },
   {
+    id: "json-key",
+    name: "JSON 属性键",
+    pattern: "\"[a-zA-Z0-9_]+\"\\s*:",
+    flags: "g",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#c084fc",
+    priority: 45,
+    system: true
+  },
+  {
     id: "url",
-    name: "URL",
+    name: "URL 链接",
     pattern: "https?://[^\\s]+",
     flags: "gi",
     enabled: true,
     scope: "terminal",
-    foreground: "#7c3aed",
+    foreground: "#c084fc",
     priority: 50,
     system: true
   },
   {
     id: "http-5xx",
-    name: "HTTP 5xx",
+    name: "HTTP 5xx 响应",
     pattern: "\\bHTTP/[0-9.]+\\s+5\\d{2}\\b|\\b5\\d{2}\\b",
     flags: "gi",
     enabled: true,
     scope: "terminal",
-    foreground: "#be123c",
-    background: "#ffe4e6",
+    foreground: "#f43f5e",
     fontWeight: "bold",
     priority: 60,
     system: true
   },
   {
     id: "path",
-    name: "路径",
+    name: "文件路径",
     pattern: "([A-Za-z]:\\\\[^\\s]+|/(?:[^\\s:]+/?)+)",
     flags: "g",
     enabled: true,
     scope: "terminal",
-    foreground: "#0f766e",
+    foreground: "#2dd4bf",
     priority: 70,
     system: true
   },
   {
+    id: "log-timestamp",
+    name: "日志时间戳",
+    pattern: "\\b\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\b",
+    flags: "g",
+    enabled: true,
+    scope: "terminal",
+    foreground: "#94a3b8",
+    priority: 75,
+    system: true
+  },
+  {
     id: "duration",
-    name: "耗时",
+    name: "耗时与超时",
     pattern: "\\b\\d+(?:\\.\\d+)?\\s*(?:ms|s|timeout)\\b",
     flags: "gi",
     enabled: true,
     scope: "terminal",
-    foreground: "#ea580c",
+    foreground: "#fb923c",
     priority: 80,
     system: true
   },
@@ -149,43 +223,30 @@ export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [
     flags: "gi",
     enabled: true,
     scope: "terminal",
-    foreground: "#0d9488",
-    background: "#ccfbf1",
+    foreground: "#38bdf8",
     fontWeight: "bold",
     priority: 90,
     system: true
   },
   {
     id: "port",
-    name: "端口",
+    name: "网络端口",
     pattern: "\\b(?:port\\s+|listen\\s+|listening\\s+on\\s+)\\d{2,5}\\b|:\\d{2,5}\\b",
     flags: "gi",
     enabled: true,
     scope: "terminal",
-    foreground: "#9333ea",
+    foreground: "#a855f7",
     priority: 100,
     system: true
   },
   {
-    id: "android-package",
-    name: "Android 包名",
-    pattern: "\\b(?:[A-Za-z_][\\w]*\\.){2,}[A-Za-z_][\\w]*\\b",
-    flags: "g",
-    enabled: true,
-    scope: "terminal",
-    foreground: "#2563eb",
-    background: "#dbeafe",
-    priority: 110,
-    system: true
-  },
-  {
     id: "process-id",
-    name: "进程 ID",
+    name: "进程与线程 ID",
     pattern: "\\b(?:pid|ppid|tid|uid|gid)[:= ]+\\d+\\b",
     flags: "gi",
     enabled: true,
     scope: "terminal",
-    foreground: "#ca8a04",
+    foreground: "#eab308",
     priority: 120,
     system: true
   }
@@ -276,12 +337,20 @@ export function getThemeAttribute(theme: ThemeMode) {
 }
 
 export function getTerminalTheme(theme: TerminalThemeMode, translucent = false) {
+  if (theme === "nordic") {
+    return {
+      background: translucent ? "rgba(11, 19, 41, 0.88)" : "#0b1329",
+      foreground: "#e0f2fe",
+      cursor: "#38bdf8",
+      selectionBackground: "#1e3a8a"
+    };
+  }
   if (theme === "dark") {
     return {
-      background: translucent ? "rgba(2, 6, 23, 0.82)" : "#020617",
-      foreground: "#e5e7eb",
-      cursor: "#93c5fd",
-      selectionBackground: "#334155"
+      background: translucent ? "rgba(9, 10, 15, 0.88)" : "#090a0f",
+      foreground: "#f0f4ff",
+      cursor: "#818cf8",
+      selectionBackground: "#312e81"
     };
   }
 

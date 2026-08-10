@@ -84,6 +84,24 @@ export const nativeBridge = {
       localPath
     );
   },
+  uploadFile(sessionId: string, localPath: string, remotePath: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "upload_file",
+      { success: false, error: "Upload bridge unavailable" },
+      sessionId,
+      localPath,
+      remotePath
+    );
+  },
+  uploadFileContent(sessionId: string, content: string, remotePath: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "upload_file_content",
+      { success: false, error: "Upload content bridge unavailable" },
+      sessionId,
+      content,
+      remotePath
+    );
+  },
   connect(sessionId: string, params: ConnectParams) {
     return callNative<{ success: boolean; error?: string }>("connect", { success: false }, sessionId, JSON.stringify(params));
   },
