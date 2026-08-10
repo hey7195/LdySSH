@@ -102,6 +102,14 @@ export const nativeBridge = {
       remotePath
     );
   },
+  readFileContent(sessionId: string, remotePath: string) {
+    return callNative<{ success: boolean; content?: string; error?: string }>(
+      "read_file_content",
+      { success: false, error: "Read file content bridge unavailable" },
+      sessionId,
+      remotePath
+    );
+  },
   connect(sessionId: string, params: ConnectParams) {
     return callNative<{ success: boolean; error?: string }>("connect", { success: false }, sessionId, JSON.stringify(params));
   },
@@ -214,6 +222,7 @@ export interface SavedConnection {
   password_unavailable?: boolean;
   group?: string;
   keyPath?: string;
+  environment?: "prod" | "staging" | "local";
 }
 
 export interface CommandItem {
@@ -315,6 +324,7 @@ export interface ConnectParams {
   save?: boolean;
   group?: string;
   preservePassword?: boolean;
+  environment?: "prod" | "staging" | "local";
 }
 
 export interface NativeResult {

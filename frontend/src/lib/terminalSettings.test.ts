@@ -105,7 +105,7 @@ describe("terminal theme settings", () => {
   test("defaults to a dark terminal inside the light application shell", () => {
     expect(DEFAULT_TERMINAL_THEME).toBe("dark");
     expect(getTerminalTheme(DEFAULT_TERMINAL_THEME)).toMatchObject({
-      background: "#090a0f",
+      background: "#0a0a0c",
       foreground: "#f0f4ff"
     });
   });
@@ -116,7 +116,7 @@ describe("terminal theme settings", () => {
       foreground: "#1f2937"
     });
     expect(getTerminalTheme("dark")).toMatchObject({
-      background: "#090a0f",
+      background: "#0a0a0c",
       foreground: "#f0f4ff"
     });
   });

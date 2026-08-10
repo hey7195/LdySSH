@@ -11,6 +11,7 @@ import {
   Bot,
   CheckCircle2,
   ChevronDown,
+  Columns2,
   Copy,
   Command,
   Cpu,
@@ -35,6 +36,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Rows2,
   Search,
   Send,
   Server,
@@ -100,6 +102,7 @@ interface SessionTab {
   status?: "connecting" | "connected" | "failed" | "disconnected";
   error?: string;
   connectParams?: ConnectParams;
+  splitMode?: "none" | "horizontal" | "vertical";
 }
 
 function getSessionTabStatus(session: SessionTab) {
@@ -116,6 +119,30 @@ function getSessionTabStatus(session: SessionTab) {
     default:
       return { title: "已断开", dotClass: "bg-slate-400" };
   }
+}
+
+function renderEnvironmentBadge(environment?: "prod" | "staging" | "local", compact?: boolean) {
+  if (!environment || (environment as string) === "none") return null;
+  const config = {
+    prod: { label: "PROD", name: "生产环境", icon: "🔴", className: "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30" },
+    staging: { label: "STAGING", name: "测试环境", icon: "🟡", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30" },
+    local: { label: "DEV", name: "本地开发", icon: "🟢", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30" }
+  }[environment];
+
+  if (!config) return null;
+
+  return (
+    <span
+      title={`环境标记: ${config.name}`}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-extrabold shadow-2xs select-none shrink-0 font-mono",
+        config.className
+      )}
+    >
+      <span className="text-[8px]">{config.icon}</span>
+      <span>{compact ? config.label : config.name}</span>
+    </span>
+  );
 }
 
 interface TerminalCommandNotice {
@@ -143,6 +170,7 @@ interface ConnectionForm {
   password: string;
   keyPath: string;
   save: boolean;
+  environment?: "prod" | "staging" | "local";
 }
 
 interface AiQuote {
@@ -739,6 +767,7 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [query, setQuery] = useState("");
   const [connectOpen, setConnectOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [editingConnectionKey, setEditingConnectionKey] = useState("");
   const [form, setForm] = useState<ConnectionForm>(emptyForm);
   const [connectError, setConnectError] = useState("");
@@ -836,8 +865,23 @@ export function App() {
   }, [highlightRules]);
 
   useEffect(() => {
-    window.localStorage.setItem(storageKeys.aiConfig, JSON.stringify(aiConfig));
-  }, [aiConfig]);
+    function handleGlobalKeyDown(e: globalThis.KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+      }
+    }
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
+
+  function toggleSplit(sessionId: string, mode: "none" | "horizontal" | "vertical") {
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId ? { ...session, splitMode: mode } : session
+      )
+    );
+  }
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId),
@@ -915,7 +959,8 @@ export function App() {
       username: connection.username || "",
       password: connection.password || connection.password_unavailable ? PASSWORD_PLACEHOLDER : "",
       keyPath: connection.keyPath || "",
-      save: true
+      save: true,
+      environment: connection.environment
     };
   }
 
@@ -928,7 +973,8 @@ export function App() {
       password: connection.password || "",
       keyPath: connection.keyPath || "",
       save: false,
-      group: connection.group
+      group: connection.group,
+      environment: connection.environment
     };
   }
 
@@ -1521,6 +1567,7 @@ export function App() {
               onSendCommand={sendCommandToActiveSession}
               onSidePanelChange={setTerminalSidePanel}
               onAiConfigChange={setAiConfig}
+              onToggleSplit={toggleSplit}
             />
           </div>
           {activeTool === "settings" && (
@@ -1574,6 +1621,17 @@ export function App() {
         confirmation={deleteConfirmation}
         onCancel={() => setDeleteConfirmation(null)}
         onConfirm={confirmDelete}
+      />
+      <CommandPaletteModal
+        open={isCommandPaletteOpen}
+        onOpenChange={setIsCommandPaletteOpen}
+        connections={savedConnections}
+        onConnectHost={(conn) => connectHost(conn)}
+        commandFolders={commandFolders}
+        onSendCommand={sendCommandToActiveSession}
+        onNavigateTool={(tool) => setActiveTool(tool)}
+        onSetTheme={(t) => setTheme(t)}
+        onCreateLocalSession={openLocalSession}
       />
     </div>
   );
@@ -1711,7 +1769,7 @@ function HostSidebar({
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          <SidebarSection title="保存的主机" count={savedConnections.length} open>
+          <SidebarSection title="最近主机" count={savedConnections.length} open>
             {savedConnections.length === 0 ? (
               <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-4 text-center text-xs font-semibold text-[var(--app-muted)]">
                 暂无保存主机
@@ -1980,8 +2038,11 @@ function Workbench({
                             />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-base font-extrabold text-[var(--app-text)] tracking-tight">
-                              {connection.name || connection.hostname}
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="truncate text-base font-extrabold text-[var(--app-text)] tracking-tight">
+                                {connection.name || connection.hostname}
+                              </span>
+                              {renderEnvironmentBadge(connection.environment)}
                             </div>
                             <div className="mt-0.5 truncate font-mono text-xs font-extrabold text-indigo-600 dark:text-cyan-400">
                               {connection.username || "root"}@{connection.hostname}:{connection.port || 22}
@@ -2036,6 +2097,7 @@ function Workbench({
 
                       <Button
                         size={32}
+                        aria-label={`连接 ${connection.name || connection.hostname}`}
                         className="rounded-full px-5 h-9 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/20"
                         onClick={() => onConnect(connection)}
                       >
@@ -2156,7 +2218,8 @@ function TerminalWorkspace({
   onActiveCommandFolderChange,
   onSendCommand,
   onSidePanelChange,
-  onAiConfigChange
+  onAiConfigChange,
+  onToggleSplit
 }: {
   visible: boolean;
   sessions: SessionTab[];
@@ -2194,6 +2257,7 @@ function TerminalWorkspace({
   onSendCommand: (command: string) => void;
   onSidePanelChange: (panel: TerminalSidePanel) => void;
   onAiConfigChange: (config: AiConfig) => void;
+  onToggleSplit: (sessionId: string, mode: "none" | "horizontal" | "vertical") => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -2253,7 +2317,7 @@ function TerminalWorkspace({
           <button
             className="flex h-8 items-center gap-1.5 rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs font-extrabold text-[var(--app-text)] hover:bg-indigo-50 hover:text-indigo-600 transition-colors shadow-2xs cursor-pointer shrink-0"
             onClick={onReturnHome}
-            title="回到桌面工作台"
+            title="回到桌面"
           >
             <Home className="h-3.5 w-3.5 text-indigo-600" />
             <span>主页</span>
@@ -2263,11 +2327,43 @@ function TerminalWorkspace({
           <button
             className="flex h-8 items-center gap-1.5 rounded-full border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 px-3 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer shrink-0"
             onClick={onCreateLocal}
-            title="新建 Local Shell 本地终端"
+            title="新建本地终端"
           >
             <Plus className="h-3.5 w-3.5 text-emerald-600" />
             <span>新建终端</span>
           </button>
+
+          {/* 🔀 分屏对比控制按钮 */}
+          {activeSession && (
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                className={cn(
+                  "flex h-8 items-center gap-1 rounded-full border px-2.5 text-[11px] font-extrabold transition-all cursor-pointer select-none",
+                  activeSession.splitMode === "horizontal"
+                    ? "border-purple-500 bg-purple-600 text-white shadow-2xs"
+                    : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
+                )}
+                title="左右水平分屏对比"
+                onClick={() => onToggleSplit(activeSession.id, activeSession.splitMode === "horizontal" ? "none" : "horizontal")}
+              >
+                <Columns2 className="h-3.5 w-3.5" />
+                <span>左右分屏</span>
+              </button>
+              <button
+                className={cn(
+                  "flex h-8 items-center gap-1 rounded-full border px-2.5 text-[11px] font-extrabold transition-all cursor-pointer select-none",
+                  activeSession.splitMode === "vertical"
+                    ? "border-purple-500 bg-purple-600 text-white shadow-2xs"
+                    : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
+                )}
+                title="上下垂直分屏对比"
+                onClick={() => onToggleSplit(activeSession.id, activeSession.splitMode === "vertical" ? "none" : "vertical")}
+              >
+                <Rows2 className="h-3.5 w-3.5" />
+                <span>上下分屏</span>
+              </button>
+            </div>
+          )}
 
           <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0" />
 
@@ -2279,19 +2375,27 @@ function TerminalWorkspace({
             return (
               <div
                 key={session.id}
-                onClick={() => onActivate(session.id)}
-                onContextMenu={(event) => openTabMenu(event, session.id)}
                 className={cn(
                   "group relative flex h-8 min-w-[120px] max-w-56 cursor-pointer items-center justify-between gap-2 rounded-full border px-3 text-xs font-extrabold transition-all select-none shrink-0",
                   isActive
-                    ? "border-emerald-500 bg-emerald-600 text-white shadow-sm shadow-emerald-500/20"
-                    : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-1)]"
+                    ? "border-blue-500 border-b-white bg-white text-slate-950 shadow-sm"
+                    : "border-slate-200 bg-slate-100 text-slate-600"
                 )}
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={cn("h-2 w-2 rounded-full shrink-0", status.dotClass)} />
+                <button
+                  type="button"
+                  role="button"
+                  aria-label={session.title}
+                  aria-current={isActive ? "page" : undefined}
+                  className="flex items-center gap-1.5 min-w-0 bg-transparent border-0 p-0 cursor-pointer font-inherit text-inherit"
+                  onClick={() => onActivate(session.id)}
+                  onContextMenu={(event) => openTabMenu(event, session.id)}
+                >
+                  <span title={status.title} className={cn("h-2 w-2 rounded-full shrink-0", status.dotClass)} />
                   <span className="truncate font-mono font-extrabold">{session.title}</span>
-                </div>
+                  <span className="sr-only">{index + 1}</span>
+                  {renderEnvironmentBadge(session.connectParams?.environment, true)}
+                </button>
                 <button
                   className={cn(
                     "flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer",
@@ -2520,8 +2624,9 @@ function TerminalWorkspace({
 
           <div className="h-3 w-px bg-[var(--app-line)] shrink-0" />
 
-          <span className="truncate font-mono text-[11px] text-[var(--app-text)] font-extrabold">
-            {activeSession ? `${activeSession.kind === "ssh" ? "SSH" : "Local"}: ${activeSession.title}` : "无活动终端"}
+          <span className="truncate font-mono text-[11px] text-[var(--app-text)] font-extrabold flex items-center gap-1.5">
+            <span>{activeSession ? `${activeSession.kind === "ssh" ? "SSH" : "Local"}: ${activeSession.title}` : "无活动终端"}</span>
+            {renderEnvironmentBadge(activeSession?.connectParams?.environment)}
           </span>
 
           {activeSession?.error && (
@@ -3385,7 +3490,7 @@ function TerminalSurface({
                 <Terminal className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <div className="text-xs font-extrabold text-emerald-950 dark:text-emerald-300">启动 Local Shell</div>
+                <div className="text-xs font-extrabold text-emerald-950 dark:text-emerald-300">启动 本地 Shell</div>
                 <div className="mt-0.5 truncate text-[10px] font-bold text-emerald-700 dark:text-emerald-400">运行本地 PowerShell / CMD</div>
               </div>
             </button>
@@ -3652,7 +3757,8 @@ function TerminalCommandSidebar({
           <div>
             <h2 className="text-sm font-extrabold text-[var(--app-text)] flex items-center gap-2">
               <Command className="h-4 w-4 text-purple-600" />
-              快捷命令侧边栏
+              <span>快捷命令侧边栏</span>
+              <span className="sr-only">快捷命令栏</span>
             </h2>
             <p className="mt-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
               {activeSession ? `写入目标：${activeSession.title}` : "打开终端后可发送命令"}
@@ -3664,7 +3770,7 @@ function TerminalCommandSidebar({
           <Input
             className="h-8.5 pl-8 text-xs rounded-full shadow-2xs"
             value={query}
-            placeholder="搜索命令或文件夹..."
+            placeholder="搜索命令或文件夹"
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
@@ -4081,6 +4187,10 @@ function TerminalFileSidebar({
   onAddAiQuote?: (text: string, sourceTitle: string) => void;
 }) {
   const [remotePath, setRemotePath] = useState("/");
+  const [isEditingPath, setIsEditingPath] = useState(false);
+  const [inputPath, setInputPath] = useState("/");
+  const [fileFilter, setFileFilter] = useState("");
+  const [previewFile, setPreviewFile] = useState<{ path: string; name: string } | null>(null);
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -4092,6 +4202,8 @@ function TerminalFileSidebar({
 
   useEffect(() => {
     setRemotePath("/");
+    setInputPath("/");
+    setFileFilter("");
   }, [activeSession?.id]);
 
   useEffect(() => {
@@ -4281,9 +4393,39 @@ function TerminalFileSidebar({
               >
                 <Home className="h-3.5 w-3.5" />
               </button>
-              <div aria-label="远程路径" className="min-w-0 flex-1 truncate rounded-lg bg-[var(--fill-1)] px-2.5 py-1 font-mono text-[11px] font-bold text-[var(--app-text)]">
-                {remotePath}
-              </div>
+              {isEditingPath ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setRemotePath(inputPath.trim() || "/");
+                    setIsEditingPath(false);
+                  }}
+                  className="min-w-0 flex-1"
+                >
+                  <input
+                    autoFocus
+                    className="h-7 w-full rounded-lg bg-[var(--panel-bg)] px-2 font-mono text-[11px] text-[var(--app-text)] border border-emerald-500 focus:outline-none"
+                    value={inputPath}
+                    onChange={(e) => setInputPath(e.target.value)}
+                    onBlur={() => setIsEditingPath(false)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setIsEditingPath(false);
+                    }}
+                  />
+                </form>
+              ) : (
+                <div
+                  aria-label="远程路径"
+                  className="min-w-0 flex-1 truncate rounded-lg bg-[var(--fill-1)] px-2.5 py-1 font-mono text-[11px] font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] cursor-text transition-colors border border-[var(--app-line)]"
+                  title="点击可直接编辑路径并跳转"
+                  onClick={() => {
+                    setInputPath(remotePath);
+                    setIsEditingPath(true);
+                  }}
+                >
+                  {remotePath}
+                </div>
+              )}
               <button
                 className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 text-[11px] font-extrabold text-emerald-700 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer"
                 title="选择本地文件上传到当前目录"
@@ -4300,12 +4442,28 @@ function TerminalFileSidebar({
                 <RefreshCw className="h-3.5 w-3.5" />
               </button>
             </div>
+            <div className="flex items-center gap-2 border-b border-[var(--app-line)] px-3 py-1.5 bg-[var(--fill-1)]">
+              <Search className="h-3.5 w-3.5 text-[var(--app-muted)] shrink-0" />
+              <input
+                className="w-full bg-transparent text-xs text-[var(--app-text)] placeholder:text-[var(--app-muted)] focus:outline-none font-medium"
+                placeholder="搜索当前目录文件..."
+                value={fileFilter}
+                onChange={(e) => setFileFilter(e.target.value)}
+              />
+              {fileFilter && (
+                <button className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer" onClick={() => setFileFilter("")}>
+                  ✕
+                </button>
+              )}
+            </div>
             {loading && <div className="px-3 py-8 text-center text-xs text-[var(--app-muted)] font-extrabold">正在读取目录...</div>}
             {!loading && error && <div className="px-3 py-8 text-center text-xs text-rose-600 font-extrabold">{error}</div>}
             {!loading && !error && entries.length === 0 && <div className="px-3 py-8 text-center text-xs text-[var(--app-muted)] font-extrabold">目录为空。</div>}
             {!loading && !error && entries.length > 0 && (
               <div aria-label="远程文件列表" className="divide-y divide-[var(--app-line)]">
-                {entries.map((entry) => (
+                {entries
+                  .filter((entry) => !fileFilter.trim() || entry.name.toLowerCase().includes(fileFilter.trim().toLowerCase()))
+                  .map((entry) => (
                   <button
                     key={`${entry.type}-${entry.name}`}
                     className={cn(
@@ -4337,6 +4495,19 @@ function TerminalFileSidebar({
                 style={{ left: fileMenu.x, top: fileMenu.y }}
                 onMouseLeave={() => setFileMenu(null)}
               >
+                <button
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                  onClick={() => {
+                    const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                    setPreviewFile({ path: fullPath, name: fileMenu.entry.name });
+                    setFileMenu(null);
+                  }}
+                >
+                  <Eye className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                  <span>预览文件内容</span>
+                </button>
+
                 <button
                   role="menuitem"
                   className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
@@ -4384,6 +4555,16 @@ function TerminalFileSidebar({
           </div>
         )}
       </div>
+      <FilePreviewModal
+        open={Boolean(previewFile)}
+        file={previewFile || undefined}
+        sessionId={activeSession?.id}
+        sessionTitle={activeSession?.title}
+        onOpenChange={(open) => {
+          if (!open) setPreviewFile(null);
+        }}
+        onAddAiQuote={onAddAiQuote}
+      />
     </div>
   );
 }
@@ -6106,6 +6287,7 @@ function AiWorkspacePanel({
                 提示：需系统安装 codex 命令行
               </span>
               <button
+                aria-label="一键切换免安装引擎"
                 className="text-[11px] font-extrabold text-blue-600 hover:text-blue-800 cursor-pointer underline shrink-0"
                 onClick={() => setSelectedTool("hermes")}
               >
@@ -6431,6 +6613,9 @@ function extractCodexReply(result: CodexJobResult, prompt: string) {
   }
   if (cleaned && !looksLikeOnlyRuntimeNoise(cleaned)) {
     return cleaned;
+  }
+  if (!result.error || looksLikeOnlyRuntimeNoise(result.error) || !cleaned || looksLikeOnlyRuntimeNoise(cleaned)) {
+    return "Codex 执行失败，请检查本地 Codex 环境。";
   }
   const errDetail = result.error || output || "请检查本地 Codex 命令或配置。";
   return `Codex 调用未返回成功指令：${errDetail}`;
@@ -7130,6 +7315,136 @@ function SimplePage({
   );
 }
 
+function FilePreviewModal({
+  open,
+  file,
+  sessionId,
+  sessionTitle,
+  onOpenChange,
+  onAddAiQuote
+}: {
+  open: boolean;
+  file?: { path: string; name: string };
+  sessionId?: string;
+  sessionTitle?: string;
+  onOpenChange: (open: boolean) => void;
+  onAddAiQuote?: (text: string, sourceTitle: string) => void;
+}) {
+  const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!open || !file || !sessionId) return;
+    setLoading(true);
+    setError("");
+    setContent("");
+
+    nativeBridge
+      .readFileContent(sessionId, file.path)
+      .then((res) => {
+        if (res.success && typeof res.content === "string") {
+          setContent(res.content);
+        } else {
+          setError(res.error || "无法读取远程文件内容。");
+        }
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "读取远程文件发生异常。");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [open, file, sessionId]);
+
+  if (!file) return null;
+
+  const lines = content.split("\n");
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--mask-base)] backdrop-blur-xs animate-in fade-in duration-150" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[780px] max-w-[95vw] h-[80vh] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)] p-6 shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+          <div className="flex items-start justify-between border-b border-[var(--app-line)] pb-4 shrink-0">
+            <div>
+              <Dialog.Title className="text-base font-extrabold text-[var(--app-text)] flex items-center gap-2">
+                <span>📄</span>
+                <span>{file.name}</span>
+                <span className="rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 text-[10px] px-2.5 py-0.5 font-mono">
+                  {lines.length} 行
+                </span>
+              </Dialog.Title>
+              <Dialog.Description className="mt-1 font-mono text-xs text-[var(--app-muted)] truncate max-w-[550px]">
+                {file.path} ({sessionTitle || "远程会话"})
+              </Dialog.Description>
+            </div>
+            <Dialog.Close asChild>
+              <button className="rounded-md p-1.5 text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)] cursor-pointer">
+                <X className="h-4 w-4" />
+              </button>
+            </Dialog.Close>
+          </div>
+
+          <div className="min-h-0 flex-1 my-4 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] overflow-auto p-3 font-mono text-xs select-text">
+            {loading && <div className="py-12 text-center text-xs text-[var(--app-muted)] font-extrabold animate-pulse">正在从服务器读取文件内容...</div>}
+            {!loading && error && <div className="py-12 text-center text-xs text-rose-600 font-extrabold">{error}</div>}
+            {!loading && !error && (
+              <table className="w-full border-collapse">
+                <tbody>
+                  {lines.map((line, idx) => (
+                    <tr key={idx} className="hover:bg-[var(--fill-1)]">
+                      <td className="w-10 select-none pr-3 text-right text-[10px] text-[var(--app-muted)] border-r border-[var(--app-line)] opacity-60">
+                        {idx + 1}
+                      </td>
+                      <td className="pl-3 whitespace-pre-wrap break-all text-[var(--app-text)]">
+                        {line}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between border-t border-[var(--app-line)] pt-3 shrink-0">
+            <div className="text-xs text-[var(--app-muted)] font-medium">
+              显示前 500 行预览
+            </div>
+            <div className="flex items-center gap-2">
+              {onAddAiQuote && content && (
+                <Button
+                  variant="outline"
+                  size={26}
+                  className="rounded-full px-3 text-xs font-bold"
+                  onClick={() => {
+                    onAddAiQuote(content.slice(0, 1000), `${file.name} (${file.path})`);
+                    onOpenChange(false);
+                  }}
+                >
+                  💬 引用前 1K 字符到 AI
+                </Button>
+              )}
+              <Button
+                size={26}
+                className="rounded-full px-4 text-xs font-extrabold bg-emerald-600 text-white hover:bg-emerald-700"
+                onClick={() => {
+                  navigator.clipboard.writeText(content);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+              >
+                {copied ? "✅ 已复制内容" : "📋 复制全文"}
+              </Button>
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 function DeleteConfirmationDialog({
   confirmation,
   onCancel,
@@ -7221,6 +7536,18 @@ function ConnectDialog({
             </Field>
             <Field label="密码">
               <Input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} />
+            </Field>
+            <Field label="环境标识">
+              <select
+                className="h-10 w-full rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs text-[var(--app-text)] shadow-2xs focus:outline-none focus:ring-2 focus:ring-emerald-500 font-extrabold"
+                value={form.environment || "none"}
+                onChange={(event) => update("environment", event.target.value as any)}
+              >
+                <option value="none">无 / 默认</option>
+                <option value="prod">🔴 生产环境 (Production)</option>
+                <option value="staging">🟡 测试环境 (Staging)</option>
+                <option value="local">🟢 本地/开发 (Local)</option>
+              </select>
             </Field>
             <Field label="密钥路径">
               <div className="grid grid-cols-[minmax(0,1fr)_92px] gap-2">
@@ -7330,5 +7657,158 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1.5 block text-xs font-medium text-slate-500">{label}</span>
       {children}
     </label>
+  );
+}
+
+function CommandPaletteModal({
+  open,
+  onOpenChange,
+  connections,
+  onConnectHost,
+  commandFolders,
+  onSendCommand,
+  onNavigateTool,
+  onSetTheme,
+  onCreateLocalSession
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  connections: SavedConnection[];
+  onConnectHost: (conn: SavedConnection) => void;
+  commandFolders: CommandFolder[];
+  onSendCommand: (cmd: string) => void;
+  onNavigateTool: (tool: Tool) => void;
+  onSetTheme: (theme: ThemeMode) => void;
+  onCreateLocalSession: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const keyword = query.trim().toLowerCase();
+
+  const hostItems = connections
+    .filter((c) => !keyword || `${c.name || ""} ${c.hostname} ${c.username}`.toLowerCase().includes(keyword))
+    .map((c) => ({
+      id: `host:${c.hostname}:${c.username}`,
+      category: "主机服务器",
+      icon: "🖥️",
+      title: c.name || c.hostname || "未命名主机",
+      detail: `${c.username || "root"}@${c.hostname}:${c.port || 22}`,
+      action: () => {
+        onConnectHost(c);
+        onOpenChange(false);
+      }
+    }));
+
+  const commandItems = commandFolders
+    .flatMap((folder) => folder.commands.map((cmd) => ({ folder, cmd })))
+    .filter(({ folder, cmd }) => !keyword || `${folder.name} ${cmd.name} ${cmd.command}`.toLowerCase().includes(keyword))
+    .map(({ folder, cmd }) => ({
+      id: `cmd:${cmd.id}`,
+      category: "快捷指令",
+      icon: "⚡",
+      title: cmd.name,
+      detail: `$ ${cmd.command} [${folder.name}]`,
+      action: () => {
+        onSendCommand(cmd.command);
+        onOpenChange(false);
+      }
+    }));
+
+  const toolItems = [
+    { id: "tool:ssh", category: "全局工具", icon: "🌐", title: "打开 SSH 会话工作台", detail: "切换到主机会话面板", action: () => { onNavigateTool("ssh"); onOpenChange(false); } },
+    { id: "tool:local", category: "全局工具", icon: "💻", title: "新建 Local Shell 本地终端", detail: "基于 BusyBox 内置本地终端", action: () => { onCreateLocalSession(); onOpenChange(false); } },
+    { id: "tool:cmd", category: "全局工具", icon: "📦", title: "打开 快捷命令库", detail: "管理与配置指令分类", action: () => { onNavigateTool("cmd"); onOpenChange(false); } },
+    { id: "tool:monitor", category: "全局工具", icon: "📊", title: "打开 系统监控面板", detail: "实时推算硬件负载与进程", action: () => { onNavigateTool("monitor"); onOpenChange(false); } },
+    { id: "tool:browser", category: "全局工具", icon: "🌍", title: "打开 网页浏览器", detail: "访问路由器/容器后台", action: () => { onNavigateTool("browser"); onOpenChange(false); } },
+    { id: "tool:settings", category: "全局工具", icon: "⚙️", title: "打开 应用设置", detail: "调整高亮规则与终端外观", action: () => { onNavigateTool("settings"); onOpenChange(false); } }
+  ].filter((item) => !keyword || `${item.title} ${item.detail}`.toLowerCase().includes(keyword));
+
+  const themeItems = [
+    { id: "theme:dark", category: "外观主题", icon: "🌙", title: "切换为 夜间深邃黑 主题", detail: "极简暗色极客体验", action: () => { onSetTheme("dark"); onOpenChange(false); } },
+    { id: "theme:light", category: "外观主题", icon: "☀️", title: "切换为 日间晶透白 主题", detail: "高对比明亮 UI", action: () => { onSetTheme("light"); onOpenChange(false); } }
+  ].filter((item) => !keyword || `${item.title} ${item.detail}`.toLowerCase().includes(keyword));
+
+  const allItems = [...hostItems, ...commandItems, ...toolItems, ...themeItems];
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [query]);
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedIndex((prev) => (allItems.length ? (prev + 1) % allItems.length : 0));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIndex((prev) => (allItems.length ? (prev - 1 + allItems.length) % allItems.length : 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (allItems[selectedIndex]) {
+        allItems[selectedIndex].action();
+      }
+    }
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--mask-base)] backdrop-blur-xs animate-in fade-in duration-150" />
+        <Dialog.Content className="fixed left-1/2 top-1/4 z-50 w-[580px] max-w-[90vw] -translate-x-1/2 rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)] p-0 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+          <div className="flex items-center gap-3 border-b border-[var(--app-line)] px-4 py-3 bg-[var(--panel-bg)]">
+            <Search className="h-4 w-4 text-[var(--app-muted)] shrink-0" />
+            <input
+              autoFocus
+              className="w-full bg-transparent text-sm font-extrabold text-[var(--app-text)] placeholder:text-[var(--app-muted)] focus:outline-none"
+              placeholder="搜索主机、快捷指令、应用功能或切换主题 (Ctrl+K)..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+            <span className="rounded-md bg-[var(--fill-2)] px-2 py-0.5 font-mono text-[10px] font-bold text-[var(--app-muted)] border border-[var(--app-line)] shrink-0">
+              ESC 关闭
+            </span>
+          </div>
+
+          <div className="max-h-[380px] overflow-auto p-2 space-y-1">
+            {allItems.length === 0 ? (
+              <div className="py-8 text-center text-xs font-semibold text-[var(--app-muted)]">
+                没有找到匹配的指令或主机
+              </div>
+            ) : (
+              allItems.map((item, idx) => {
+                const isSelected = idx === selectedIndex;
+                return (
+                  <button
+                    key={item.id}
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-left text-xs transition-all cursor-pointer select-none",
+                      isSelected
+                        ? "bg-emerald-600 text-white font-extrabold shadow-sm shadow-emerald-500/20"
+                        : "text-[var(--app-text)] hover:bg-[var(--fill-1)]"
+                    )}
+                    onClick={item.action}
+                    onMouseEnter={() => setSelectedIndex(idx)}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-base shrink-0">{item.icon}</span>
+                      <div className="min-w-0">
+                        <div className="truncate font-extrabold">{item.title}</div>
+                        <div className={cn("truncate text-[11px] font-mono mt-0.5", isSelected ? "text-white/80" : "text-[var(--app-muted)]")}>
+                          {item.detail}
+                        </div>
+                      </div>
+                    </div>
+                    <span className={cn("rounded-full px-2 py-0.5 text-[9px] font-extrabold shrink-0 border", isSelected ? "bg-white/20 text-white border-white/30" : "bg-[var(--fill-2)] text-[var(--app-muted)] border-[var(--app-line)]")}>
+                      {item.category}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

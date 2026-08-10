@@ -347,7 +347,7 @@ export function getTerminalTheme(theme: TerminalThemeMode, translucent = false) 
   }
   if (theme === "dark") {
     return {
-      background: translucent ? "rgba(9, 10, 15, 0.88)" : "#090a0f",
+      background: translucent ? "rgba(10, 10, 12, 0.88)" : "#0a0a0c",
       foreground: "#f0f4ff",
       cursor: "#818cf8",
       selectionBackground: "#312e81"
