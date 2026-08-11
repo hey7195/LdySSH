@@ -85,6 +85,7 @@ import {
   applyHighlightRules,
   getTerminalTheme,
   getThemeAttribute,
+  getThemeInfo,
   type HighlightRule,
   type TerminalThemeMode,
   type ThemeMode
@@ -5934,22 +5935,24 @@ function SettingsPanel({
                 应用外观主题
               </h2>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-2">
                 {THEMES.map((mode) => {
                   const active = theme === mode;
+                  const info = getThemeInfo(mode);
                   return (
                     <button
                       key={mode}
                       className={cn(
-                        "flex flex-col items-center justify-center gap-1.5 rounded-2xl border p-3.5 text-xs font-extrabold transition-all cursor-pointer select-none",
+                        "flex flex-col items-center justify-center gap-1.5 rounded-2xl border p-3 text-xs font-extrabold transition-all cursor-pointer select-none",
                         active
                           ? "border-emerald-600 bg-emerald-600 text-white font-extrabold shadow-sm shadow-emerald-500/20"
                           : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"
                       )}
                       onClick={() => onThemeChange(mode)}
                     >
-                      <span className="text-lg">{mode === "light" ? "☀️" : "🌙"}</span>
-                      <span>{mode === "light" ? "日间晶透白" : "夜间深邃黑"}</span>
+                      <span className="text-base">{info.icon}</span>
+                      <span className="truncate text-xs font-extrabold">{info.name}</span>
+                      <span className={cn("text-[9px] font-mono", active ? "text-white/80" : "text-[var(--app-muted)]")}>{info.tag}</span>
                     </button>
                   );
                 })}
@@ -5961,23 +5964,28 @@ function SettingsPanel({
                   终端默认配色
                 </h2>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-2">
                   {TERMINAL_THEMES.map((mode) => {
                     const active = terminalTheme === mode;
+                    const labels = {
+                      dark: { name: "曜石纯黑", icon: "🌙" },
+                      nordic: { name: "极光冷灰", icon: "❄️" },
+                      light: { name: "浅色明亮", icon: "☀️" }
+                    }[mode];
                     return (
                       <button
                         key={mode}
                         data-testid={`terminal-theme-${mode}`}
                         className={cn(
-                          "flex items-center justify-center gap-2 rounded-2xl border p-3 text-xs font-extrabold transition-all cursor-pointer select-none",
+                          "flex flex-col items-center justify-center gap-1 rounded-2xl border p-2.5 text-xs font-extrabold transition-all cursor-pointer select-none",
                           active
                             ? "border-emerald-600 bg-emerald-600 text-white font-extrabold shadow-sm shadow-emerald-500/20"
                             : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"
                         )}
                         onClick={() => onTerminalThemeChange(mode)}
                       >
-                        <span className={cn("h-2.5 w-2.5 rounded-full", mode === "dark" ? "bg-slate-900" : "bg-emerald-500")} />
-                        <span>{mode === "dark" ? "黑色暗夜" : "浅色明亮"}</span>
+                        <span className="text-sm">{labels.icon}</span>
+                        <span className="text-[11px] truncate">{labels.name}</span>
                       </button>
                     );
                   })}

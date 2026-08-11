@@ -336,6 +336,17 @@ export function getThemeAttribute(theme: ThemeMode) {
   return theme;
 }
 
+export function getThemeInfo(mode: ThemeMode) {
+  switch (mode) {
+    case "dark":
+      return { name: "夜间深邃黑", icon: "🌙", tag: "曜石纯黑" };
+    case "nordic":
+      return { name: "极光石墨灰", icon: "❄️", tag: "冷调深灰" };
+    case "light":
+      return { name: "日间晶透白", icon: "☀️", tag: "晶透纯白" };
+  }
+}
+
 export function getTerminalTheme(theme: TerminalThemeMode, translucent = false) {
   if (theme === "nordic") {
     return {
