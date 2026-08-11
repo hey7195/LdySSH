@@ -221,8 +221,42 @@ export interface SavedConnection {
   password?: string;
   password_unavailable?: boolean;
   group?: string;
+  folder?: string;
+  tags?: string[];
   keyPath?: string;
   environment?: "prod" | "staging" | "local";
+}
+
+export interface SshKeyPair {
+  id: string;
+  name: string;
+  type: "ed25519" | "rsa";
+  publicKey: string;
+  privateKey: string;
+  fingerprint: string;
+  createdAt: string;
+}
+
+export interface TransferTask {
+  id: string;
+  name: string;
+  type: "upload" | "download";
+  localPath: string;
+  remotePath: string;
+  size: number;
+  progress: number;
+  status: "queued" | "transferring" | "completed" | "error";
+  speed?: string;
+  error?: string;
+}
+
+export interface FilePermissions {
+  owner: { read: boolean; write: boolean; execute: boolean };
+  group: { read: boolean; write: boolean; execute: boolean };
+  others: { read: boolean; write: boolean; execute: boolean };
+  octal: string;
+  ownerName?: string;
+  groupName?: string;
 }
 
 export interface CommandItem {
@@ -323,6 +357,8 @@ export interface ConnectParams {
   keyPath?: string;
   save?: boolean;
   group?: string;
+  folder?: string;
+  tags?: string[];
   preservePassword?: boolean;
   environment?: "prod" | "staging" | "local";
 }

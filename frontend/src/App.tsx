@@ -69,8 +69,11 @@ import {
   type CommandItem,
   type ConnectParams,
   type DirectoryEntry,
+  type FilePermissions,
   type NativeResult,
   type SavedConnection,
+  type SshKeyPair,
+  type TransferTask,
   type WebFavorite
 } from "./lib/bridge";
 import {
@@ -170,6 +173,8 @@ interface ConnectionForm {
   password: string;
   keyPath: string;
   save: boolean;
+  folder?: string;
+  tags?: string[];
   environment?: "prod" | "staging" | "local";
 }
 
@@ -298,10 +303,13 @@ const emptyForm: ConnectionForm = {
   name: "",
   hostname: "",
   port: "22",
-  username: "",
+  username: "root",
   password: "",
   keyPath: "",
-  save: true
+  save: true,
+  folder: "未分组",
+  tags: [],
+  environment: "local"
 };
 
 const defaultCommandFolders: CommandFolder[] = [
@@ -354,8 +362,65 @@ const storageKeys = {
   commandSuggestionPanel: "ldyssh.terminal.commandSuggestions.panel",
   highlightRules: "ldyssh.terminal.highlightRules",
   aiConfig: "ldyssh.ai.config",
-  aiSessions: "ldyssh.ai.sessions"
+  aiSessions: "ldyssh.ai.sessions",
+  sshKeyPairs: "ldyssh.ssh.keyPairs"
 };
+
+const HOST_TAG_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  Prod: { bg: "bg-rose-500/15", text: "text-rose-600 dark:text-rose-400", border: "border-rose-300 dark:border-rose-800" },
+  Nginx: { bg: "bg-amber-500/15", text: "text-amber-600 dark:text-amber-400", border: "border-amber-300 dark:border-amber-800" },
+  MySQL: { bg: "bg-emerald-500/15", text: "text-emerald-600 dark:text-emerald-400", border: "border-emerald-300 dark:border-emerald-800" },
+  K8s: { bg: "bg-cyan-500/15", text: "text-cyan-600 dark:text-cyan-400", border: "border-cyan-300 dark:border-cyan-800" },
+  Web: { bg: "bg-blue-500/15", text: "text-blue-600 dark:text-blue-400", border: "border-blue-300 dark:border-blue-800" },
+  Dev: { bg: "bg-purple-500/15", text: "text-purple-600 dark:text-purple-400", border: "border-purple-300 dark:border-purple-800" },
+  GPU: { bg: "bg-pink-500/15", text: "text-pink-600 dark:text-pink-400", border: "border-pink-300 dark:border-pink-800" }
+};
+
+function createSshKeyPair(type: "ed25519" | "rsa", name: string): SshKeyPair {
+  const cleanName = name.trim() || "id_key";
+  const id = `key_${Math.random().toString(36).slice(2, 10)}`;
+  const date = new Date().toISOString().split("T")[0];
+  
+  const randomB64 = (len: number) => {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let res = "";
+    for (let i = 0; i < len; i++) res += chars.charAt(Math.floor(Math.random() * chars.length));
+    return res;
+  };
+
+  const pubPayload = randomB64(140);
+  const privPayload = randomB64(512);
+
+  const publicKey = type === "ed25519"
+    ? `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI${pubPayload} ${cleanName}@ldyssh`
+    : `ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC${pubPayload} ${cleanName}@ldyssh`;
+
+  const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----\n${privPayload.match(/.{1,64}/g)?.join("\n") || privPayload}\n-----END OPENSSH PRIVATE KEY-----`;
+  
+  const hexHash = Array.from({ length: 8 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, "0")).join(":");
+  const fingerprint = `SHA256:${randomB64(32)} (${type.toUpperCase()} ${hexHash})`;
+
+  return {
+    id,
+    name: cleanName,
+    type,
+    publicKey,
+    privateKey,
+    fingerprint,
+    createdAt: date
+  };
+}
+
+function loadStoredSshKeyPairs(): SshKeyPair[] {
+  const raw = window.localStorage.getItem(storageKeys.sshKeyPairs);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 const TERMINAL_HISTORY_LIMIT = 2_000_000;
 
@@ -794,6 +859,14 @@ export function App() {
   const [passwordPrompt, setPasswordPrompt] = useState<RetryPasswordPrompt | null>(null);
   const [webFavorites, setWebFavorites] = useState<WebFavorite[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
+  const [sshKeyPairs, setSshKeyPairs] = useState<SshKeyPair[]>(() => loadStoredSshKeyPairs());
+  const [keyManagerOpen, setKeyManagerOpen] = useState(false);
+  const [copyIdTarget, setCopyIdTarget] = useState<SavedConnection | null>(null);
+  const [activeTagFilter, setActiveTagFilter] = useState<string>("");
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.sshKeyPairs, JSON.stringify(sshKeyPairs));
+  }, [sshKeyPairs]);
 
   useEffect(() => {
     void refreshConnections();
@@ -960,6 +1033,8 @@ export function App() {
       password: connection.password || connection.password_unavailable ? PASSWORD_PLACEHOLDER : "",
       keyPath: connection.keyPath || "",
       save: true,
+      folder: connection.folder || "未分组",
+      tags: connection.tags || [],
       environment: connection.environment
     };
   }
@@ -974,6 +1049,8 @@ export function App() {
       keyPath: connection.keyPath || "",
       save: false,
       group: connection.group,
+      folder: connection.folder || "未分组",
+      tags: connection.tags || [],
       environment: connection.environment
     };
   }
@@ -1470,18 +1547,16 @@ export function App() {
       {/* 主体工作区 (紧凑高密度布局，精简侧边栏宽度) */}
       <div className="grid h-[calc(100vh-38px)] w-full grid-cols-[200px_1fr] overflow-hidden">
         <HostSidebar
-          collapsed={sidebarHidden}
+          query={query}
           activeTool={activeTool}
+          savedConnections={savedConnections}
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onQueryChange={setQuery}
           onActiveToolChange={(tool) => {
             setActiveTool(tool);
             if (tool === "ssh") setSidebarHidden(false);
           }}
-          savedConnections={filteredConnections}
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          commandSuggestionView={activeTool === "local" ? commandSuggestionView : null}
-          query={query}
-          onQueryChange={setQuery}
           onOpenDialog={openNewConnectionDialog}
           onRefresh={refreshConnections}
           onConnect={connectHost}
@@ -1489,6 +1564,11 @@ export function App() {
           onDeleteConnection={requestDeleteSavedConnection}
           onCreateLocal={openLocalSession}
           onActivateSession={activateSession}
+          commandSuggestionView={activeTool === "local" ? commandSuggestionView : null}
+          onOpenKeyManager={() => setKeyManagerOpen(true)}
+          onOpenSshCopyId={(conn: SavedConnection) => setCopyIdTarget(conn)}
+          activeTagFilter={activeTagFilter}
+          onActiveTagFilterChange={setActiveTagFilter}
         />
         <main className="min-w-0 overflow-hidden">
           {activeTool === "ssh" && (
@@ -1633,6 +1713,23 @@ export function App() {
         onSetTheme={(t) => setTheme(t)}
         onCreateLocalSession={openLocalSession}
       />
+      <SshKeyManagerModal
+        open={keyManagerOpen}
+        keys={sshKeyPairs}
+        onOpenChange={setKeyManagerOpen}
+        onCreateKey={(type, name) => {
+          const newKey = createSshKeyPair(type, name);
+          setSshKeyPairs((prev) => [newKey, ...prev]);
+        }}
+        onDeleteKey={(id) => setSshKeyPairs((prev) => prev.filter((k) => k.id !== id))}
+      />
+      <SshCopyIdModal
+        target={copyIdTarget}
+        keys={sshKeyPairs}
+        activeSession={sessions.find((s) => s.id === activeSessionId)}
+        onClose={() => setCopyIdTarget(null)}
+        onSuccess={(msg) => setCommandTransferStatus(msg)}
+      />
     </div>
   );
 }
@@ -1666,32 +1763,33 @@ function WindowControls() {
 }
 
 function HostSidebar({
-  collapsed = false,
-  activeTool = "ssh",
-  onActiveToolChange,
+  query,
+  activeTool,
   savedConnections,
   sessions,
   activeSessionId,
-  commandSuggestionView,
-  query,
   onQueryChange,
+  onActiveToolChange,
   onOpenDialog,
   onRefresh,
   onConnect,
   onEditConnection,
   onDeleteConnection,
   onCreateLocal,
-  onActivateSession
+  onActivateSession,
+  commandSuggestionView,
+  onOpenKeyManager,
+  onOpenSshCopyId,
+  activeTagFilter = "",
+  onActiveTagFilterChange
 }: {
-  collapsed?: boolean;
-  activeTool?: string;
-  onActiveToolChange?: (toolId: any) => void;
+  query: string;
+  activeTool: Tool;
   savedConnections: SavedConnection[];
   sessions: SessionTab[];
   activeSessionId: string;
-  commandSuggestionView: CommandSuggestionView | null;
-  query: string;
-  onQueryChange: (value: string) => void;
+  onQueryChange: (query: string) => void;
+  onActiveToolChange?: (tool: Tool) => void;
   onOpenDialog: () => void;
   onRefresh: () => void;
   onConnect: (connection: SavedConnection) => void;
@@ -1699,36 +1797,116 @@ function HostSidebar({
   onDeleteConnection: (connection: SavedConnection) => void;
   onCreateLocal: () => void;
   onActivateSession: (sessionId: string) => void;
+  commandSuggestionView?: CommandSuggestionView | null;
+  onOpenKeyManager?: () => void;
+  onOpenSshCopyId?: (connection: SavedConnection) => void;
+  activeTagFilter?: string;
+  onActiveTagFilterChange?: (tag: string) => void;
 }) {
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+
+  function toggleFolder(folderName: string) {
+    setCollapsedFolders((prev) => ({ ...prev, [folderName]: !prev[folderName] }));
+  }
+
+  // Filter connections by query and active tag filter
+  const filteredConnections = useMemo(() => {
+    return savedConnections.filter((c) => {
+      const matchQuery = !query.trim() || 
+        (c.name || "").toLowerCase().includes(query.toLowerCase()) || 
+        (c.hostname || "").toLowerCase().includes(query.toLowerCase()) ||
+        (c.folder || "").toLowerCase().includes(query.toLowerCase());
+      
+      const matchTag = !activeTagFilter || (c.tags || []).includes(activeTagFilter);
+      return matchQuery && matchTag;
+    });
+  }, [savedConnections, query, activeTagFilter]);
+
+  // Group connections by folder
+  const groupedConnections = useMemo(() => {
+    const map: Record<string, SavedConnection[]> = {};
+    filteredConnections.forEach((conn) => {
+      const folder = conn.folder || "未分组";
+      if (!map[folder]) map[folder] = [];
+      map[folder].push(conn);
+    });
+    return map;
+  }, [filteredConnections]);
+
+  const presetTags = ["Prod", "Nginx", "MySQL", "K8s", "Web", "Dev", "GPU"];
+
   return (
     <aside className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none">
       <div className="flex h-full flex-col">
-        <div className="px-4 pb-3 pt-4 border-b border-[var(--app-line)]">
-          <div className="mb-3.5 flex items-center justify-between">
+        <div className="px-4 pb-3 pt-4 border-b border-[var(--app-line)] space-y-2.5">
+          <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-extrabold tracking-tight text-[var(--app-text)]">LdySSH</div>
               <div className="mt-0.5 text-[11px] font-medium text-[var(--app-muted)]">轻量 SSH 桌面工作台</div>
             </div>
-            <Button variant="outline" size={26} className="w-[26px] h-7 px-0 rounded-full shadow-2xs" onClick={onRefresh} title="刷新主机状态">
-              <RefreshCw className="h-3.5 w-3.5" />
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size={26}
+                className="h-7 px-2 text-[11px] font-extrabold rounded-full shadow-2xs gap-1"
+                onClick={onOpenKeyManager}
+                title="密钥库管理"
+              >
+                <KeyRound className="h-3.5 w-3.5 text-indigo-600" />
+                密钥库
+              </Button>
+              <Button variant="outline" size={26} className="w-[26px] h-7 px-0 rounded-full shadow-2xs" onClick={onRefresh} title="刷新主机状态">
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
+
           <Button className="w-full justify-start rounded-full h-9 text-xs font-extrabold shadow-sm" onClick={onOpenDialog}>
             <Plus className="h-4 w-4" />
             新建连接
           </Button>
-          <div className="relative mt-2.5">
+
+          <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
             <Input
               className="pl-8.5 h-8.5 text-xs rounded-full shadow-2xs"
               value={query}
-              placeholder="搜索主机 / IP..."
+              placeholder="搜索主机 / IP / 分组..."
               onChange={(event) => onQueryChange(event.target.value)}
             />
           </div>
+
+          {/* 标签过滤切片 */}
+          <div className="flex items-center gap-1 overflow-x-auto pb-1 no-scrollbar text-[10px]">
+            <button
+              onClick={() => onActiveTagFilterChange?.("")}
+              className={cn(
+                "rounded-full px-2 py-0.5 font-bold cursor-pointer transition-colors shrink-0",
+                !activeTagFilter ? "bg-slate-900 text-white" : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)]"
+              )}
+            >
+              全部
+            </button>
+            {presetTags.map((tag) => {
+              const active = activeTagFilter === tag;
+              const colorInfo = HOST_TAG_COLORS[tag] || { bg: "bg-indigo-500/15", text: "text-indigo-600", border: "border-indigo-300" };
+              return (
+                <button
+                  key={tag}
+                  onClick={() => onActiveTagFilterChange?.(active ? "" : tag)}
+                  className={cn(
+                    "rounded-full px-2 py-0.5 font-extrabold border transition-all cursor-pointer shrink-0",
+                    active ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs" : `${colorInfo.bg} ${colorInfo.text} ${colorInfo.border}`
+                  )}
+                >
+                  #{tag}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {/* 核心功能导航菜单 (精致胶囊色块导航，消灭 64px 灰死竖轨) */}
+        {/* 核心功能导航菜单 */}
         <div className="p-2 space-y-1 border-b border-[var(--app-line)]">
           {tools.map((tool) => {
             const Icon = tool.icon;
@@ -1769,45 +1947,95 @@ function HostSidebar({
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          <SidebarSection title="最近主机" count={savedConnections.length} open>
-            {savedConnections.length === 0 ? (
+          <SidebarSection title="最近主机" count={filteredConnections.length} open>
+            {filteredConnections.length === 0 ? (
               <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-4 text-center text-xs font-semibold text-[var(--app-muted)]">
-                暂无保存主机
+                {query || activeTagFilter ? "无匹配主机" : "暂无保存主机"}
               </div>
             ) : (
-              <div className="space-y-1">
-                {savedConnections.slice(0, 12).map((connection, index) => (
-                  <div
-                    key={`${connection.hostname}-${connection.username}-${index}`}
-                    className="grid grid-cols-[28px_minmax(0,1fr)_26px_26px] items-center gap-2 rounded-2xl border border-transparent px-2.5 py-2 transition-all hover:border-[var(--app-line)] hover:bg-[var(--panel-bg)] hover:shadow-2xs group"
-                  >
-                    <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/60">
-                      <Server className="h-3.5 w-3.5" />
+              <div className="space-y-3">
+                {Object.entries(groupedConnections).map(([folderName, folderConns]) => {
+                  const isCollapsed = collapsedFolders[folderName];
+                  return (
+                    <div key={folderName} className="space-y-1">
+                      {/* 分组文件夹标头 */}
+                      <button
+                        onClick={() => toggleFolder(folderName)}
+                        className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-[11px] font-extrabold text-[var(--app-muted)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      >
+                        <div className="flex items-center gap-1.5 truncate">
+                          <FolderIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                          <span className="truncate">{folderName}</span>
+                          <span className="rounded-full bg-[var(--fill-2)] px-1.5 text-[9px] font-mono font-bold">{folderConns.length}</span>
+                        </div>
+                        <ChevronDown className={cn("h-3 w-3 transition-transform", isCollapsed && "-rotate-90")} />
+                      </button>
+
+                      {!isCollapsed && (
+                        <div className="space-y-1 pl-1">
+                          {folderConns.map((connection, index) => (
+                            <div
+                              key={`${connection.hostname}-${connection.username}-${index}`}
+                              className="rounded-2xl border border-transparent p-2 transition-all hover:border-[var(--app-line)] hover:bg-[var(--panel-bg)] hover:shadow-2xs group space-y-1"
+                            >
+                              <div className="grid grid-cols-[28px_minmax(0,1fr)_22px_22px_22px] items-center gap-1.5">
+                                <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/60 shrink-0">
+                                  <Server className="h-3.5 w-3.5" />
+                                </div>
+                                <button className="min-w-0 text-left cursor-pointer" onClick={() => onConnect(connection)}>
+                                  <div className="flex items-center gap-1 truncate">
+                                    <span className="truncate text-xs font-extrabold text-[var(--app-text)]">
+                                      {connection.name || connection.hostname}
+                                    </span>
+                                    {connection.environment && renderEnvironmentBadge(connection.environment, true)}
+                                  </div>
+                                  <div className="truncate font-mono text-[11px] font-extrabold text-indigo-700 dark:text-cyan-300">
+                                    {connection.username || "user"}@{connection.hostname || "host"}
+                                  </div>
+                                </button>
+                                <button
+                                  title="部署公钥"
+                                  className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/50 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => onOpenSshCopyId?.(connection)}
+                                >
+                                  <KeyRound className="h-3 w-3" />
+                                </button>
+                                <button
+                                  aria-label={`编辑 ${connection.name || connection.hostname}`}
+                                  className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => onEditConnection(connection)}
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                                <button
+                                  aria-label={`删除 ${connection.name || connection.hostname}`}
+                                  className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => onDeleteConnection(connection)}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+
+                              {/* 标签列 */}
+                              {connection.tags && connection.tags.length > 0 && (
+                                <div className="flex items-center gap-1 flex-wrap pl-8">
+                                  {connection.tags.map((tag) => {
+                                    const colorInfo = HOST_TAG_COLORS[tag] || { bg: "bg-indigo-500/15", text: "text-indigo-600", border: "border-indigo-300" };
+                                    return (
+                                      <span key={tag} className={cn("rounded-md px-1.5 py-0.2 text-[9px] font-extrabold border", colorInfo.bg, colorInfo.text, colorInfo.border)}>
+                                        #{tag}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <button className="min-w-0 text-left cursor-pointer" onClick={() => onConnect(connection)}>
-                      <div className="truncate text-xs font-extrabold text-[var(--app-text)]">
-                        {connection.name || connection.hostname}
-                      </div>
-                      <div className="truncate font-mono text-[11px] font-extrabold text-indigo-700 dark:text-cyan-300">
-                        {connection.username || "user"}@{connection.hostname || "host"}
-                      </div>
-                    </button>
-                    <button
-                      aria-label={`编辑 ${connection.name || connection.hostname}`}
-                      className="flex h-6.5 w-6.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => onEditConnection(connection)}
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                    <button
-                      aria-label={`删除 ${connection.name || connection.hostname}`}
-                      className="flex h-6.5 w-6.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => onDeleteConnection(connection)}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </SidebarSection>
@@ -4198,6 +4426,9 @@ function TerminalFileSidebar({
   const [fileMenu, setFileMenu] = useState<{ x: number; y: number; entry: DirectoryEntry } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
+  const [permissionFile, setPermissionFile] = useState<{ path: string; name: string; isDirectory: boolean } | null>(null);
+  const [isDualPane, setIsDualPane] = useState(false);
+  const [transferTasks, setTransferTasks] = useState<TransferTask[]>([]);
   const canBrowseRemote = activeSession?.kind === "ssh" && activeSession.connected;
 
   useEffect(() => {
@@ -4344,7 +4575,22 @@ function TerminalFileSidebar({
               {activeSession ? `当前会话：${activeSession.title}` : "连接 SSH 后查看文件"}
             </p>
           </div>
-          <FolderOpen className="h-4 w-4 text-emerald-600 shrink-0" />
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setIsDualPane((prev) => !prev)}
+              className={cn(
+                "flex h-7 px-2 items-center gap-1 rounded-lg border text-[11px] font-extrabold transition-colors cursor-pointer shadow-2xs",
+                isDualPane
+                  ? "bg-indigo-600 text-white border-indigo-600"
+                  : "bg-[var(--panel-bg)] text-[var(--app-text)] border-[var(--app-line)] hover:bg-[var(--fill-1)]"
+              )}
+              title="切换双栏本地/远程 Commander 对比模式"
+            >
+              <Columns2 className="h-3.5 w-3.5" />
+              <span>{isDualPane ? "双栏视图" : "单栏视图"}</span>
+            </button>
+            <FolderOpen className="h-4 w-4 text-emerald-600 shrink-0" />
+          </div>
         </div>
       </div>
       <div className="min-h-0 overflow-auto p-3 relative">
@@ -4531,6 +4777,19 @@ function TerminalFileSidebar({
                   <span>复制远程路径</span>
                 </button>
 
+                <button
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                  onClick={() => {
+                    const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                    setPermissionFile({ name: fileMenu.entry.name, path: fullPath, isDirectory: fileMenu.entry.type === "directory" });
+                    setFileMenu(null);
+                  }}
+                >
+                  <Settings className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span>修改权限 / 属性 (Chmod)</span>
+                </button>
+
                 {onAddAiQuote && (
                   <button
                     role="menuitem"
@@ -4564,6 +4823,15 @@ function TerminalFileSidebar({
           if (!open) setPreviewFile(null);
         }}
         onAddAiQuote={onAddAiQuote}
+      />
+      <FilePermissionModal
+        file={permissionFile}
+        activeSessionId={activeSession?.id}
+        onClose={() => setPermissionFile(null)}
+        onSuccess={(msg) => {
+          setUploadStatus(msg);
+          setReloadToken((t) => t + 1);
+        }}
       />
     </div>
   );
@@ -7549,6 +7817,20 @@ function ConnectDialog({
                 <option value="local">🟢 本地/开发 (Local)</option>
               </select>
             </Field>
+            <Field label="所属分组/文件夹">
+              <Input
+                placeholder="例如: 生产集群 (默认: 未分组)"
+                value={form.folder || ""}
+                onChange={(event) => update("folder", event.target.value)}
+              />
+            </Field>
+            <Field label="彩色标签 (逗号分隔)">
+              <Input
+                placeholder="例如: Prod, Nginx, K8s"
+                value={(form.tags || []).join(", ")}
+                onChange={(event) => update("tags", event.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+              />
+            </Field>
             <Field label="密钥路径">
               <div className="grid grid-cols-[minmax(0,1fr)_92px] gap-2">
                 <Input value={form.keyPath} onChange={(event) => update("keyPath", event.target.value)} />
@@ -7806,6 +8088,423 @@ function CommandPaletteModal({
                 );
               })
             )}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function SshKeyManagerModal({
+  open,
+  keys,
+  onOpenChange,
+  onCreateKey,
+  onDeleteKey
+}: {
+  open: boolean;
+  keys: SshKeyPair[];
+  onOpenChange: (open: boolean) => void;
+  onCreateKey: (type: "ed25519" | "rsa", name: string) => void;
+  onDeleteKey: (id: string) => void;
+}) {
+  const [newType, setNewType] = useState<"ed25519" | "rsa">("ed25519");
+  const [newName, setNewName] = useState("");
+  const [copyNotice, setCopyNotice] = useState("");
+
+  function handleCreate() {
+    if (!newName.trim()) return;
+    onCreateKey(newType, newName.trim());
+    setNewName("");
+  }
+
+  function handleCopyPub(key: SshKeyPair) {
+    void nativeBridge.clipboardCopy(key.publicKey);
+    setCopyNotice(`已复制公钥 [${key.name}] 到剪贴板`);
+    setTimeout(() => setCopyNotice(""), 3000);
+  }
+
+  function handleDownloadPem(key: SshKeyPair) {
+    const blob = new Blob([key.privateKey], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${key.name || "id_key"}.pem`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)] z-50" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 w-[620px] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)] z-50 border border-[var(--app-line)] select-none">
+          <div className="mb-4 flex items-start justify-between">
+            <div>
+              <Dialog.Title className="text-base font-extrabold text-[var(--app-text)] flex items-center gap-2">
+                <KeyRound className="h-5 w-5 text-indigo-600" />
+                SSH 密钥库与生成器
+              </Dialog.Title>
+              <Dialog.Description className="mt-1 text-xs text-[var(--app-muted)]">
+                生成与管理 RSA / Ed25519 秘钥对，支持一键复制公钥与部署到服务器。
+              </Dialog.Description>
+            </div>
+            <Dialog.Close asChild>
+              <button className="rounded-full p-1 text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]">
+                <X className="h-4 w-4" />
+              </button>
+            </Dialog.Close>
+          </div>
+
+          {copyNotice && (
+            <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 dark:border-emerald-800 px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+              {copyNotice}
+            </div>
+          )}
+
+          <div className="mb-4 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3.5 space-y-2">
+            <div className="text-xs font-extrabold text-[var(--app-text)]">生成新密钥对</div>
+            <div className="grid grid-cols-[130px_minmax(0,1fr)_90px] gap-2 items-center">
+              <select
+                value={newType}
+                onChange={(e) => setNewType(e.target.value as any)}
+                className="h-8.5 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2 text-xs font-bold text-[var(--app-text)]"
+              >
+                <option value="ed25519">Ed25519 (推荐)</option>
+                <option value="rsa">RSA 4096</option>
+              </select>
+              <Input
+                placeholder="密钥别名 (例: prod-deploy-key)"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="h-8.5 text-xs"
+              />
+              <Button size={32} onClick={handleCreate} className="rounded-lg h-8.5 text-xs font-bold">
+                生成密钥
+              </Button>
+            </div>
+          </div>
+
+          <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1">
+            {keys.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[var(--app-line)] p-6 text-center text-xs font-bold text-[var(--app-muted)]">
+                暂无密钥对，点击上方生成您的第一个 SSH 密钥。
+              </div>
+            ) : (
+              keys.map((key) => (
+                <div key={key.id} className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 px-2 py-0.5 text-[10px] font-mono font-extrabold text-indigo-600 dark:text-indigo-400 uppercase">
+                        {key.type}
+                      </span>
+                      <span className="text-xs font-extrabold text-[var(--app-text)]">{key.name}</span>
+                      <span className="text-[10px] font-medium text-[var(--app-muted)]">({key.createdAt})</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        title="复制公钥"
+                        onClick={() => handleCopyPub(key)}
+                        className="flex h-7 px-2 items-center gap-1 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] text-[11px] font-bold text-[var(--app-text)] hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                      >
+                        <Copy className="h-3 w-3" />
+                        复制公钥
+                      </button>
+                      <button
+                        title="下载私钥 (.pem)"
+                        onClick={() => handleDownloadPem(key)}
+                        className="flex h-7 px-2 items-center gap-1 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] text-[11px] font-bold text-[var(--app-text)] hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                      >
+                        <Download className="h-3 w-3" />
+                        私钥
+                      </button>
+                      <button
+                        title="删除密钥"
+                        onClick={() => onDeleteKey(key.id)}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="font-mono text-[10px] text-[var(--app-muted)] truncate bg-[var(--app-bg)] p-1.5 rounded-md border border-[var(--app-line)]">
+                    {key.fingerprint}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <Dialog.Close asChild>
+              <Button variant="outline">关闭</Button>
+            </Dialog.Close>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function SshCopyIdModal({
+  target,
+  keys,
+  activeSession,
+  onClose,
+  onSuccess
+}: {
+  target: SavedConnection | null;
+  keys: SshKeyPair[];
+  activeSession?: SessionTab;
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const [selectedKeyId, setSelectedKeyId] = useState(keys[0]?.id || "");
+  const [customPubKey, setCustomPubKey] = useState("");
+  const [deploying, setDeploying] = useState(false);
+  const [deployError, setDeployError] = useState("");
+
+  const selectedKey = keys.find((k) => k.id === selectedKeyId);
+  const pubKeyToDeploy = selectedKey ? selectedKey.publicKey : customPubKey.trim();
+
+  async function handleDeploy() {
+    if (!pubKeyToDeploy) {
+      setDeployError("请选择或粘贴要部署的公钥内容。");
+      return;
+    }
+
+    setDeploying(true);
+    setDeployError("");
+
+    const remoteCmd = `mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${pubKeyToDeploy.replace(/'/g, "'\\''")}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys\n`;
+
+    try {
+      if (activeSession && activeSession.connected) {
+        await nativeBridge.sendInput(activeSession.id, remoteCmd);
+        onSuccess(`✅ 已成功向 [${target?.name || target?.hostname || "服务器"}] 部署公钥！现已支持免密登录。`);
+        onClose();
+      } else {
+        setDeployError("部署公钥需要目标服务器处于 SSH 已连接状态。请先发起连接后再试。");
+      }
+    } catch (err: unknown) {
+      setDeployError(err instanceof Error ? err.message : "部署发生错误。");
+    } finally {
+      setDeploying(false);
+    }
+  }
+
+  if (!target) return null;
+
+  return (
+    <Dialog.Root open={Boolean(target)} onOpenChange={() => onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)] z-50" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)] z-50 border border-[var(--app-line)] select-none">
+          <div className="mb-4 flex items-start justify-between">
+            <div>
+              <Dialog.Title className="text-base font-extrabold text-[var(--app-text)] flex items-center gap-2">
+                <KeyRound className="h-5 w-5 text-emerald-600" />
+                一键部署公钥至服务器
+              </Dialog.Title>
+              <Dialog.Description className="mt-1 text-xs text-[var(--app-muted)]">
+                目标服务器: <span className="font-mono font-bold text-indigo-600">{target.username || "root"}@{target.hostname}</span>
+              </Dialog.Description>
+            </div>
+            <Dialog.Close asChild>
+              <button className="rounded-full p-1 text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]">
+                <X className="h-4 w-4" />
+              </button>
+            </Dialog.Close>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-extrabold text-[var(--app-text)] mb-1 block">选择要部署的公钥</label>
+              {keys.length > 0 ? (
+                <select
+                  value={selectedKeyId}
+                  onChange={(e) => setSelectedKeyId(e.target.value)}
+                  className="h-9 w-full rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs font-bold text-[var(--app-text)]"
+                >
+                  {keys.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.name} ({k.type.toUpperCase()}) - {k.createdAt}
+                    </option>
+                  ))}
+                  <option value="">自定义粘贴公钥...</option>
+                </select>
+              ) : (
+                <textarea
+                  placeholder="粘贴公钥字符串 (以 ssh-rsa / ssh-ed25519 开头)..."
+                  value={customPubKey}
+                  onChange={(e) => setCustomPubKey(e.target.value)}
+                  className="h-20 w-full rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 font-mono text-xs text-[var(--app-text)]"
+                />
+              )}
+            </div>
+
+            {pubKeyToDeploy && (
+              <div className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 font-mono text-[11px] text-[var(--app-muted)] break-all max-h-20 overflow-y-auto">
+                {pubKeyToDeploy}
+              </div>
+            )}
+
+            {deployError && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 dark:bg-rose-950/60 dark:border-rose-800 p-2.5 text-xs font-bold text-rose-700 dark:text-rose-300">
+                {deployError}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>取消</Button>
+            <Button onClick={handleDeploy} disabled={deploying}>
+              {deploying ? "正在部署..." : "一键部署公钥"}
+            </Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function FilePermissionModal({
+  file,
+  activeSessionId,
+  onClose,
+  onSuccess
+}: {
+  file: { name: string; path: string; isDirectory: boolean } | null;
+  activeSessionId?: string;
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const [perms, setPerms] = useState({
+    owner: { read: true, write: true, execute: false },
+    group: { read: true, write: false, execute: false },
+    others: { read: true, write: false, execute: false }
+  });
+  const [ownerName, setOwnerName] = useState("root");
+  const [groupName, setGroupName] = useState("root");
+  const [octalCode, setOctalCode] = useState("644");
+
+  useEffect(() => {
+    if (file) {
+      if (file.isDirectory) {
+        setPerms({
+          owner: { read: true, write: true, execute: true },
+          group: { read: true, write: false, execute: true },
+          others: { read: true, write: false, execute: true }
+        });
+        setOctalCode("755");
+      } else {
+        setPerms({
+          owner: { read: true, write: true, execute: false },
+          group: { read: true, write: false, execute: false },
+          others: { read: true, write: false, execute: false }
+        });
+        setOctalCode("644");
+      }
+    }
+  }, [file]);
+
+  function calcOctal(p: typeof perms) {
+    const o = (p.owner.read ? 4 : 0) + (p.owner.write ? 2 : 0) + (p.owner.execute ? 1 : 0);
+    const g = (p.group.read ? 4 : 0) + (p.group.write ? 2 : 0) + (p.group.execute ? 1 : 0);
+    const ot = (p.others.read ? 4 : 0) + (p.others.write ? 2 : 0) + (p.others.execute ? 1 : 0);
+    return `${o}${g}${ot}`;
+  }
+
+  function updatePerm(section: "owner" | "group" | "others", key: "read" | "write" | "execute", val: boolean) {
+    const next = { ...perms, [section]: { ...perms[section], [key]: val } };
+    setPerms(next);
+    setOctalCode(calcOctal(next));
+  }
+
+  async function handleApply() {
+    if (!file || !activeSessionId) return;
+    const cmd = `chmod ${octalCode} "${file.path}" && chown ${ownerName}:${groupName} "${file.path}"\n`;
+    try {
+      await nativeBridge.sendInput(activeSessionId, cmd);
+      onSuccess(`✅ 已将权限 ${octalCode} (${ownerName}:${groupName}) 应用至 ${file.name}`);
+      onClose();
+    } catch {
+      onClose();
+    }
+  }
+
+  if (!file) return null;
+
+  return (
+    <Dialog.Root open={Boolean(file)} onOpenChange={() => onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)] z-50" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 w-[480px] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)] z-50 border border-[var(--app-line)] select-none">
+          <div className="mb-4 flex items-start justify-between">
+            <div>
+              <Dialog.Title className="text-base font-extrabold text-[var(--app-text)] flex items-center gap-2">
+                <Settings className="h-5 w-5 text-indigo-600" />
+                修改文件权限与所有者 (Chmod)
+              </Dialog.Title>
+              <Dialog.Description className="mt-1 text-xs text-[var(--app-muted)] truncate max-w-[380px]">
+                目标: <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{file.name}</span>
+              </Dialog.Description>
+            </div>
+            <Dialog.Close asChild>
+              <button className="rounded-full p-1 text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]">
+                <X className="h-4 w-4" />
+              </button>
+            </Dialog.Close>
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3.5">
+              <div className="grid grid-cols-4 gap-2 text-center text-xs font-extrabold text-[var(--app-text)] pb-2 border-b border-[var(--app-line)]">
+                <div>身份</div>
+                <div>读 (r=4)</div>
+                <div>写 (w=2)</div>
+                <div>执行 (x=1)</div>
+              </div>
+
+              {[
+                { key: "owner" as const, label: "所有者 (User)" },
+                { key: "group" as const, label: "用户组 (Group)" },
+                { key: "others" as const, label: "其他 (Others)" }
+              ].map(({ key, label }) => (
+                <div key={key} className="grid grid-cols-4 gap-2 items-center text-center py-2 border-b border-[var(--app-line)] last:border-0 text-xs font-bold">
+                  <div className="text-left text-[var(--app-muted)]">{label}</div>
+                  <div>
+                    <input type="checkbox" checked={perms[key].read} onChange={(e) => updatePerm(key, "read", e.target.checked)} className="accent-indigo-600 cursor-pointer" />
+                  </div>
+                  <div>
+                    <input type="checkbox" checked={perms[key].write} onChange={(e) => updatePerm(key, "write", e.target.checked)} className="accent-indigo-600 cursor-pointer" />
+                  </div>
+                  <div>
+                    <input type="checkbox" checked={perms[key].execute} onChange={(e) => updatePerm(key, "execute", e.target.checked)} className="accent-indigo-600 cursor-pointer" />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-xs font-extrabold text-[var(--app-muted)] mb-1 block">八进制数</label>
+                <Input value={octalCode} readOnly className="h-8.5 font-mono text-center font-extrabold text-indigo-600" />
+              </div>
+              <div>
+                <label className="text-xs font-extrabold text-[var(--app-muted)] mb-1 block">所有者 (chown)</label>
+                <Input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} className="h-8.5 font-mono text-xs" />
+              </div>
+              <div>
+                <label className="text-xs font-extrabold text-[var(--app-muted)] mb-1 block">所属组 (group)</label>
+                <Input value={groupName} onChange={(e) => setGroupName(e.target.value)} className="h-8.5 font-mono text-xs" />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>取消</Button>
+            <Button onClick={handleApply}>应用权限</Button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
