@@ -1941,7 +1941,7 @@ function HostSidebar({
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
                   active
-                    ? "bg-slate-900 text-white shadow-md shadow-slate-900/15"
+                    ? "bg-emerald-600 text-white shadow-sm shadow-emerald-500/20 font-extrabold"
                     : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
                 )}
                 onClick={() => onActiveToolChange?.(tool.id as any)}
@@ -1990,44 +1990,48 @@ function HostSidebar({
                           {folderConns.map((connection, index) => (
                             <div
                               key={`${connection.hostname}-${connection.username}-${index}`}
-                              className="rounded-2xl border border-transparent p-2 transition-all hover:border-[var(--app-line)] hover:bg-[var(--panel-bg)] hover:shadow-2xs group space-y-1"
+                              className="relative flex flex-col gap-1 rounded-xl border border-transparent p-2 transition-all hover:border-[var(--app-line)] hover:bg-[var(--panel-bg)] hover:shadow-2xs group"
                             >
-                              <div className="grid grid-cols-[28px_minmax(0,1fr)_22px_22px_22px] items-center gap-1.5">
-                                <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/60 shrink-0">
+                              <div className="flex items-center gap-2 min-w-0 w-full">
+                                <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/60 shrink-0">
                                   <Server className="h-3.5 w-3.5" />
                                 </div>
-                                <button className="min-w-0 text-left cursor-pointer" onClick={() => onConnect(connection)}>
-                                  <div className="flex items-center gap-1 truncate">
-                                    <span className="truncate text-xs font-extrabold text-[var(--app-text)]">
+                                
+                                <button className="min-w-0 flex-1 text-left cursor-pointer" onClick={() => onConnect(connection)}>
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="truncate text-xs font-extrabold text-[var(--app-text)] max-w-[110px]" title={connection.name || connection.hostname}>
                                       {connection.name || connection.hostname}
                                     </span>
                                     {connection.environment && renderEnvironmentBadge(connection.environment, true)}
                                   </div>
-                                  <div className="truncate font-mono text-[11px] font-extrabold text-indigo-700 dark:text-cyan-300">
+                                  <div className="truncate font-mono text-[10px] font-semibold text-[var(--app-muted)] max-w-[125px]" title={`${connection.username || "user"}@${connection.hostname || "host"}`}>
                                     {connection.username || "user"}@{connection.hostname || "host"}
                                   </div>
                                 </button>
-                                <button
-                                  title="部署公钥"
-                                  className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/50 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
-                                  onClick={() => onOpenSshCopyId?.(connection)}
-                                >
-                                  <KeyRound className="h-3 w-3" />
-                                </button>
-                                <button
-                                  aria-label={`编辑 ${connection.name || connection.hostname}`}
-                                  className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
-                                  onClick={() => onEditConnection(connection)}
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </button>
-                                <button
-                                  aria-label={`删除 ${connection.name || connection.hostname}`}
-                                  className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
-                                  onClick={() => onDeleteConnection(connection)}
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
+
+                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                  <button
+                                    title="部署公钥"
+                                    className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/50 cursor-pointer"
+                                    onClick={(e) => { e.stopPropagation(); onOpenSshCopyId?.(connection); }}
+                                  >
+                                    <KeyRound className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    aria-label={`编辑 ${connection.name || connection.hostname}`}
+                                    className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer"
+                                    onClick={(e) => { e.stopPropagation(); onEditConnection(connection); }}
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    aria-label={`删除 ${connection.name || connection.hostname}`}
+                                    className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 cursor-pointer"
+                                    onClick={(e) => { e.stopPropagation(); onDeleteConnection(connection); }}
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </div>
                               </div>
 
                               {/* 标签列 */}
@@ -3693,28 +3697,28 @@ function TerminalSurface({
           {/* 4 大一键入口卡片 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <button
-              className="flex items-center gap-3.5 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-950/40 p-4 text-left hover:bg-emerald-100/80 transition-all cursor-pointer shadow-2xs group"
+              className="flex items-center gap-3.5 rounded-2xl border border-emerald-300 dark:border-emerald-800 bg-[var(--panel-bg)] p-4 text-left hover:border-emerald-500 hover:shadow-md transition-all cursor-pointer shadow-2xs group"
               onClick={onCreateLocal}
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm group-hover:scale-105 transition-transform">
                 <Terminal className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <div className="text-xs font-extrabold text-emerald-950 dark:text-emerald-300">启动 本地 Shell</div>
-                <div className="mt-0.5 truncate text-[10px] font-bold text-emerald-700 dark:text-emerald-400">运行本地 PowerShell / CMD</div>
+                <div className="text-xs font-extrabold text-[var(--app-text)]">启动 本地 Shell</div>
+                <div className="mt-0.5 truncate text-[10px] font-bold text-emerald-600 dark:text-emerald-400">运行本地 PowerShell / CMD</div>
               </div>
             </button>
 
             <button
-              className="flex items-center gap-3.5 rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/60 dark:bg-indigo-950/40 p-4 text-left hover:bg-indigo-100/80 transition-all cursor-pointer shadow-2xs group"
+              className="flex items-center gap-3.5 rounded-2xl border border-indigo-300 dark:border-indigo-800 bg-[var(--panel-bg)] p-4 text-left hover:border-indigo-500 hover:shadow-md transition-all cursor-pointer shadow-2xs group"
               onClick={() => onShortcutParameterRequest?.({ folderId: "default", commandId: "top_cpu" } as any)}
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm group-hover:scale-105 transition-transform">
                 <Command className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <div className="text-xs font-extrabold text-indigo-950 dark:text-indigo-300">快捷指令预载库</div>
-                <div className="mt-0.5 truncate text-[10px] font-bold text-indigo-700 dark:text-indigo-400">预装 50+ 常用 Linux 运维命令</div>
+                <div className="text-xs font-extrabold text-[var(--app-text)]">快捷指令预载库</div>
+                <div className="mt-0.5 truncate text-[10px] font-bold text-indigo-600 dark:text-indigo-400">预装 50+ 常用 Linux 运维命令</div>
               </div>
             </button>
           </div>
@@ -5939,7 +5943,7 @@ function SettingsPanel({
                       className={cn(
                         "flex flex-col items-center justify-center gap-1.5 rounded-2xl border p-3.5 text-xs font-extrabold transition-all cursor-pointer select-none",
                         active
-                          ? "border-emerald-500 bg-emerald-50/60 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 shadow-xs"
+                          ? "border-emerald-600 bg-emerald-600 text-white font-extrabold shadow-sm shadow-emerald-500/20"
                           : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"
                       )}
                       onClick={() => onThemeChange(mode)}
@@ -5967,7 +5971,7 @@ function SettingsPanel({
                         className={cn(
                           "flex items-center justify-center gap-2 rounded-2xl border p-3 text-xs font-extrabold transition-all cursor-pointer select-none",
                           active
-                            ? "border-emerald-500 bg-emerald-50/60 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 shadow-xs"
+                            ? "border-emerald-600 bg-emerald-600 text-white font-extrabold shadow-sm shadow-emerald-500/20"
                             : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"
                         )}
                         onClick={() => onTerminalThemeChange(mode)}
