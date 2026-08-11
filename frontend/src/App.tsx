@@ -1841,57 +1841,51 @@ function HostSidebar({
     <aside className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none">
       <div className="flex h-full flex-col">
         <div className="px-3 pb-2.5 pt-3 border-b border-[var(--app-line)] space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <div className="text-sm font-extrabold tracking-tight text-[var(--app-text)]">LdySSH</div>
-              <span className="rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.2 text-[9px] font-mono font-bold">
-                v1.0
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={onOpenKeyManager}
-                title="密钥库管理"
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-indigo-50 hover:text-indigo-600 transition-colors shadow-2xs cursor-pointer"
-              >
-                <KeyRound className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={onRefresh}
-                title="刷新主机状态"
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-1)] transition-colors shadow-2xs cursor-pointer"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={onOpenDialog}
-                title="新建连接"
-                className="flex h-7 px-2.5 items-center gap-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm transition-colors cursor-pointer"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>新建</span>
-              </button>
-            </div>
-          </div>
+          {/* Row 1: 全宽新建连接按钮 */}
+          <button
+            onClick={onOpenDialog}
+            title="新建主机连接"
+            className="flex w-full h-8.5 items-center justify-center gap-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <Plus className="h-4 w-4" />
+            <span>新建 SSH 连接</span>
+          </button>
 
+          {/* Row 2: 搜索框与内嵌动作组 */}
           <div className="relative flex items-center">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
             <Input
-              className="pl-8.5 pr-8 h-8 text-xs rounded-full shadow-2xs"
+              className="pl-8.5 pr-16 h-8 text-xs rounded-full shadow-2xs"
               value={query}
-              placeholder="搜索主机 / IP / 分组..."
+              placeholder="搜索主机 / IP..."
               onChange={(event) => onQueryChange(event.target.value)}
             />
-            <button
-              onClick={() => setShowTagMenu((prev) => !prev)}
-              title="按标签筛选主机"
-              className={cn(
-                "absolute right-2 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full text-xs transition-colors cursor-pointer",
-                activeTagFilter ? "bg-indigo-600 text-white shadow-2xs" : "text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
-              )}
-            >
-              <Filter className="h-3 w-3" />
-            </button>
+            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+              <button
+                onClick={() => setShowTagMenu((prev) => !prev)}
+                title="按标签筛选主机"
+                className={cn(
+                  "flex h-5.5 w-5.5 items-center justify-center rounded-full text-xs transition-colors cursor-pointer",
+                  activeTagFilter ? "bg-indigo-600 text-white shadow-2xs" : "text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
+                )}
+              >
+                <Filter className="h-3 w-3" />
+              </button>
+              <button
+                onClick={onOpenKeyManager}
+                title="密钥库管理"
+                className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
+              >
+                <KeyRound className="h-3 w-3" />
+              </button>
+              <button
+                onClick={onRefresh}
+                title="刷新主机"
+                className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-1)] transition-colors cursor-pointer"
+              >
+                <RefreshCw className="h-3 w-3" />
+              </button>
+            </div>
           </div>
 
           {/* 默认折叠，仅在点击筛选按钮或存在激活标签时展开 */}
