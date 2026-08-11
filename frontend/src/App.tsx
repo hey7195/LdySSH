@@ -20,6 +20,7 @@ import {
   EyeOff,
   ExternalLink,
   File as FileIcon,
+  Filter,
   Folder as FolderIcon,
   FolderOpen,
   Grid2X2,
@@ -1804,6 +1805,7 @@ function HostSidebar({
   onActiveTagFilterChange?: (tag: string) => void;
 }) {
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [showTagMenu, setShowTagMenu] = useState(false);
 
   function toggleFolder(folderName: string) {
     setCollapsedFolders((prev) => ({ ...prev, [folderName]: !prev[folderName] }));
@@ -1838,72 +1840,90 @@ function HostSidebar({
   return (
     <aside className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none">
       <div className="flex h-full flex-col">
-        <div className="px-4 pb-3 pt-4 border-b border-[var(--app-line)] space-y-2.5">
+        <div className="px-3 pb-2.5 pt-3 border-b border-[var(--app-line)] space-y-2">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="flex items-center gap-1.5">
               <div className="text-sm font-extrabold tracking-tight text-[var(--app-text)]">LdySSH</div>
-              <div className="mt-0.5 text-[11px] font-medium text-[var(--app-muted)]">轻量 SSH 桌面工作台</div>
+              <span className="rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.2 text-[9px] font-mono font-bold">
+                v1.0
+              </span>
             </div>
             <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size={26}
-                className="h-7 px-2 text-[11px] font-extrabold rounded-full shadow-2xs gap-1"
+              <button
                 onClick={onOpenKeyManager}
                 title="密钥库管理"
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-indigo-50 hover:text-indigo-600 transition-colors shadow-2xs cursor-pointer"
               >
-                <KeyRound className="h-3.5 w-3.5 text-indigo-600" />
-                密钥库
-              </Button>
-              <Button variant="outline" size={26} className="w-[26px] h-7 px-0 rounded-full shadow-2xs" onClick={onRefresh} title="刷新主机状态">
+                <KeyRound className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={onRefresh}
+                title="刷新主机状态"
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-1)] transition-colors shadow-2xs cursor-pointer"
+              >
                 <RefreshCw className="h-3.5 w-3.5" />
-              </Button>
+              </button>
+              <button
+                onClick={onOpenDialog}
+                title="新建连接"
+                className="flex h-7 px-2.5 items-center gap-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm transition-colors cursor-pointer"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>新建</span>
+              </button>
             </div>
           </div>
 
-          <Button className="w-full justify-start rounded-full h-9 text-xs font-extrabold shadow-sm" onClick={onOpenDialog}>
-            <Plus className="h-4 w-4" />
-            新建连接
-          </Button>
-
-          <div className="relative">
+          <div className="relative flex items-center">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
             <Input
-              className="pl-8.5 h-8.5 text-xs rounded-full shadow-2xs"
+              className="pl-8.5 pr-8 h-8 text-xs rounded-full shadow-2xs"
               value={query}
               placeholder="搜索主机 / IP / 分组..."
               onChange={(event) => onQueryChange(event.target.value)}
             />
-          </div>
-
-          {/* 标签过滤切片 */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-1 no-scrollbar text-[10px]">
             <button
-              onClick={() => onActiveTagFilterChange?.("")}
+              onClick={() => setShowTagMenu((prev) => !prev)}
+              title="按标签筛选主机"
               className={cn(
-                "rounded-full px-2 py-0.5 font-bold cursor-pointer transition-colors shrink-0",
-                !activeTagFilter ? "bg-slate-900 text-white" : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)]"
+                "absolute right-2 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full text-xs transition-colors cursor-pointer",
+                activeTagFilter ? "bg-indigo-600 text-white shadow-2xs" : "text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
               )}
             >
-              全部
+              <Filter className="h-3 w-3" />
             </button>
-            {presetTags.map((tag) => {
-              const active = activeTagFilter === tag;
-              const colorInfo = HOST_TAG_COLORS[tag] || { bg: "bg-indigo-500/15", text: "text-indigo-600", border: "border-indigo-300" };
-              return (
-                <button
-                  key={tag}
-                  onClick={() => onActiveTagFilterChange?.(active ? "" : tag)}
-                  className={cn(
-                    "rounded-full px-2 py-0.5 font-extrabold border transition-all cursor-pointer shrink-0",
-                    active ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs" : `${colorInfo.bg} ${colorInfo.text} ${colorInfo.border}`
-                  )}
-                >
-                  #{tag}
-                </button>
-              );
-            })}
           </div>
+
+          {/* 默认折叠，仅在点击筛选按钮或存在激活标签时展开 */}
+          {(showTagMenu || activeTagFilter) && (
+            <div className="flex items-center gap-1 overflow-x-auto pt-1 pb-0.5 no-scrollbar text-[10px] animate-in fade-in duration-150">
+              <button
+                onClick={() => { onActiveTagFilterChange?.(""); setShowTagMenu(false); }}
+                className={cn(
+                  "rounded-full px-2 py-0.5 font-bold cursor-pointer transition-colors shrink-0",
+                  !activeTagFilter ? "bg-slate-900 text-white" : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)]"
+                )}
+              >
+                全部
+              </button>
+              {presetTags.map((tag) => {
+                const active = activeTagFilter === tag;
+                const colorInfo = HOST_TAG_COLORS[tag] || { bg: "bg-indigo-500/15", text: "text-indigo-600", border: "border-indigo-300" };
+                return (
+                  <button
+                    key={tag}
+                    onClick={() => { onActiveTagFilterChange?.(active ? "" : tag); }}
+                    className={cn(
+                      "rounded-full px-2 py-0.5 font-extrabold border transition-all cursor-pointer shrink-0",
+                      active ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs" : `${colorInfo.bg} ${colorInfo.text} ${colorInfo.border}`
+                    )}
+                  >
+                    #{tag}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* 核心功能导航菜单 */}
@@ -2560,38 +2580,6 @@ function TerminalWorkspace({
             <Plus className="h-3.5 w-3.5 text-emerald-600" />
             <span>新建终端</span>
           </button>
-
-          {/* 🔀 分屏对比控制按钮 */}
-          {activeSession && (
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                className={cn(
-                  "flex h-8 items-center gap-1 rounded-full border px-2.5 text-[11px] font-extrabold transition-all cursor-pointer select-none",
-                  activeSession.splitMode === "horizontal"
-                    ? "border-purple-500 bg-purple-600 text-white shadow-2xs"
-                    : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
-                )}
-                title="左右水平分屏对比"
-                onClick={() => onToggleSplit(activeSession.id, activeSession.splitMode === "horizontal" ? "none" : "horizontal")}
-              >
-                <Columns2 className="h-3.5 w-3.5" />
-                <span>左右分屏</span>
-              </button>
-              <button
-                className={cn(
-                  "flex h-8 items-center gap-1 rounded-full border px-2.5 text-[11px] font-extrabold transition-all cursor-pointer select-none",
-                  activeSession.splitMode === "vertical"
-                    ? "border-purple-500 bg-purple-600 text-white shadow-2xs"
-                    : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
-                )}
-                title="上下垂直分屏对比"
-                onClick={() => onToggleSplit(activeSession.id, activeSession.splitMode === "vertical" ? "none" : "vertical")}
-              >
-                <Rows2 className="h-3.5 w-3.5" />
-                <span>上下分屏</span>
-              </button>
-            </div>
-          )}
 
           <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0" />
 
