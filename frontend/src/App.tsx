@@ -3634,6 +3634,13 @@ interface CommandSuggestionResizeEdges {
 
 function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
   const [layout, setLayout] = useState<CommandSuggestionPanelLayout>(() => loadStoredCommandSuggestionPanelLayout());
+  const activeItemRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (activeItemRef.current && typeof activeItemRef.current.scrollIntoView === "function") {
+      activeItemRef.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [view.activeIndex]);
 
   function updateLayout(next: CommandSuggestionPanelLayout) {
     const normalized = normalizeCommandSuggestionPanelLayout(next);
@@ -3755,24 +3762,25 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-1 pr-3">
-        {view.suggestions.slice(0, 6).map((suggestion, index) => (
+        {view.suggestions.map((suggestion, index) => (
           <button
             key={suggestion.id}
+            ref={index === view.activeIndex ? activeItemRef : undefined}
             type="button"
             role="option"
             aria-selected={index === view.activeIndex}
             title={suggestion.command}
             className={cn(
-              "min-h-10 w-full min-w-0 shrink-0 rounded px-2 py-1 text-left",
-              index === view.activeIndex ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100"
+              "min-h-10 w-full min-w-0 shrink-0 rounded px-2 py-1 text-left transition-colors",
+              index === view.activeIndex ? "bg-emerald-600 text-white font-extrabold shadow-2xs" : "text-slate-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
             )}
             onMouseDown={(event) => {
               event.preventDefault();
               view.onApply(suggestion);
             }}
           >
-            <span className="block truncate text-[11px] font-semibold">{suggestion.command}</span>
-            <span className="mt-0.5 block truncate text-[10px] font-normal text-slate-400">
+            <span className="block truncate text-[11px] font-bold font-mono">{suggestion.command}</span>
+            <span className={cn("mt-0.5 block truncate text-[10px]", index === view.activeIndex ? "text-white/80" : "text-slate-400 dark:text-zinc-400")}>
               {suggestion.description || suggestion.label || suggestion.source}
             </span>
           </button>
