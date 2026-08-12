@@ -61,6 +61,9 @@ import {
   Stethoscope,
   Disc,
   Wrench,
+  Zap,
+  GitBranch,
+  Network,
   X
 } from "lucide-react";
 import { RemoteFileEditorModal } from "./components/modals/RemoteFileEditorModal";
@@ -78,6 +81,10 @@ import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
 import { ParameterFillModal } from "./components/modals/ParameterFillModal";
 import { KernelDevOpsToolboxModal } from "./components/modals/KernelDevOpsToolboxModal";
 import { IntegratedCodeDiffEditorModal } from "./components/modals/IntegratedCodeDiffEditorModal";
+import { SerialDevPanel } from "./components/sidebar/SerialDevPanel";
+import { EbpfObserverPanel } from "./components/sidebar/EbpfObserverPanel";
+import { ClusterRunnerPanel } from "./components/sidebar/ClusterRunnerPanel";
+import { GitVisualizerPanel } from "./components/sidebar/GitVisualizerPanel";
 import { getShellSuggestion } from "./lib/terminalIntelliSense";
 import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
 import { useAppStore } from "./store/useAppStore";
@@ -127,7 +134,7 @@ import {
   type ThemeMode
 } from "./lib/terminalSettings";
 
-type Tool = "ssh" | "cmd" | "monitor" | "local" | "browser" | "settings";
+type Tool = "ssh" | "cmd" | "monitor" | "serial" | "ebpf" | "cluster" | "git" | "local" | "browser" | "settings";
 type TerminalSidePanel = "commands" | "files" | "ai";
 type AiTool = "codex" | "hermes";
 type AiNoiseMode = "minimal" | "standard" | "debug";
@@ -333,6 +340,10 @@ const tools: Array<{ id: Tool; label: string; title: string; icon: React.Compone
   { id: "local", label: "本地", title: "本地终端", icon: Terminal },
   { id: "cmd", label: "命令", title: "命令库", icon: Command },
   { id: "monitor", label: "监控", title: "系统监控", icon: Monitor },
+  { id: "serial", label: "串口", title: "串口调试与 /dev 设备树", icon: Zap },
+  { id: "ebpf", label: "eBPF", title: "eBPF 性能天眼与进程剖析", icon: Activity },
+  { id: "cluster", label: "集群", title: "集群多节点并发巡检引擎", icon: Network },
+  { id: "git", label: "Git", title: "远程 Git 代码仓库与 Commit 树", icon: GitBranch },
   { id: "browser", label: "网页", title: "浏览器", icon: Globe2 },
   { id: "settings", label: "设置", title: "设置", icon: Settings }
 ];
@@ -2091,6 +2102,21 @@ export function App() {
             />
           )}
           {activeTool === "monitor" && <MonitorPanel activeSession={activeSession} />}
+          {activeTool === "serial" && (
+            <SerialDevPanel onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)} />
+          )}
+          {activeTool === "ebpf" && (
+            <EbpfObserverPanel onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)} />
+          )}
+          {activeTool === "cluster" && (
+            <ClusterRunnerPanel
+              savedConnections={savedConnections}
+              onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)}
+            />
+          )}
+          {activeTool === "git" && (
+            <GitVisualizerPanel onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)} />
+          )}
           {activeTool === "browser" && (
             <BrowserPanel
               favorites={webFavorites}
@@ -2620,6 +2646,10 @@ function HostSidebar({
               local: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60",
               cmd: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60",
               monitor: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60",
+              serial: "text-amber-500 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60",
+              ebpf: "text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-950/60",
+              cluster: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60",
+              git: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60",
               browser: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60",
               settings: "text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800"
             }[tool.id] || "text-slate-600 bg-slate-100";
