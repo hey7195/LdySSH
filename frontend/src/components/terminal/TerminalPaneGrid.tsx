@@ -68,13 +68,13 @@ export const TerminalPaneGrid: React.FC<TerminalPaneGridProps> = ({
             onClick={() => onSelectPane(pane.id)}
             className={`relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-xl border transition-all ${
               isActive
-                ? "border-blue-500/80 shadow-lg shadow-blue-500/10 ring-1 ring-blue-500/30"
-                : "border-zinc-800/80 hover:border-zinc-700 opacity-90"
+                ? "border-emerald-500/80 shadow-[0_0_20px_rgba(16,185,129,0.25)] ring-1 ring-emerald-500/50 z-10"
+                : "border-zinc-800/80 hover:border-zinc-700 opacity-85 hover:opacity-100"
             }`}
           >
             {/* Header Mini Status Bar */}
             <div className={`flex items-center justify-between border-b px-3 py-1 text-[11px] font-mono select-none ${
-              isActive ? "border-blue-500/30 bg-blue-950/40 text-blue-300" : "border-zinc-800/60 bg-zinc-900/60 text-zinc-400"
+              isActive ? "border-emerald-500/30 bg-emerald-950/40 text-emerald-300 font-extrabold" : "border-zinc-800/60 bg-zinc-900/60 text-zinc-400"
             }`}>
               <div className="flex items-center gap-1.5 min-w-0">
                 <TerminalIcon className="h-3 w-3 shrink-0 text-blue-400" />

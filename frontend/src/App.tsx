@@ -72,6 +72,7 @@ import { CloudSyncModal, type CloudSyncConfig } from "./components/modals/CloudS
 import { PortForwardingModal, type TunnelRule } from "./components/modals/PortForwardingModal";
 import { ServerDiagnosticsModal, type DiagnosticCheckItem } from "./components/modals/ServerDiagnosticsModal";
 import { SessionLoggerModal } from "./components/modals/SessionLoggerModal";
+import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
 import { getShellSuggestion } from "./lib/terminalIntelliSense";
 import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
 import { useAppStore } from "./store/useAppStore";
@@ -1169,6 +1170,9 @@ export function App() {
   const [sessionLoggerOpen, setSessionLoggerOpen] = useState(false);
   const [isRecordingSession, setIsRecordingSession] = useState(false);
 
+  // Key Generator State
+  const [keyGenOpen, setKeyGenOpen] = useState(false);
+
   const runServerDiagnostics = async (): Promise<{ score: number; checks: DiagnosticCheckItem[] }> => {
     let score = 95;
     const checks: DiagnosticCheckItem[] = [
@@ -2220,6 +2224,7 @@ export function App() {
           setSshKeyPairs((prev) => [newKey, ...prev]);
         }}
         onDeleteKey={(id) => setSshKeyPairs((prev) => prev.filter((k) => k.id !== id))}
+        onOpenGenerator={() => setKeyGenOpen(true)}
       />
       <SshCopyIdModal
         target={copyIdTarget}
@@ -2324,6 +2329,13 @@ export function App() {
         isRecording={isRecordingSession}
         onToggleRecording={() => setIsRecordingSession(!isRecordingSession)}
         onExportLog={handleExportSessionLog}
+      />
+      <SshKeyGeneratorModal
+        isOpen={keyGenOpen}
+        onClose={() => setKeyGenOpen(false)}
+        onSaveKeyPair={(kp) => {
+          setSshKeyPairs((prev) => [kp, ...prev]);
+        }}
       />
     </div>
   );
@@ -8495,13 +8507,15 @@ function SshKeyManagerModal({
   keys,
   onOpenChange,
   onCreateKey,
-  onDeleteKey
+  onDeleteKey,
+  onOpenGenerator
 }: {
   open: boolean;
   keys: SshKeyPair[];
   onOpenChange: (open: boolean) => void;
   onCreateKey: (type: "ed25519" | "rsa", name: string) => void;
   onDeleteKey: (id: string) => void;
+  onOpenGenerator?: () => void;
 }) {
   const [newType, setNewType] = useState<"ed25519" | "rsa">("ed25519");
   const [newName, setNewName] = useState("");
@@ -8544,11 +8558,25 @@ function SshKeyManagerModal({
                 生成与管理 RSA / Ed25519 秘钥对，支持一键复制公钥与部署到服务器。
               </Dialog.Description>
             </div>
-            <Dialog.Close asChild>
-              <button className="rounded-full p-1 text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]">
-                <X className="h-4 w-4" />
-              </button>
-            </Dialog.Close>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size={32}
+                onClick={() => {
+                  onOpenChange(false);
+                  onOpenGenerator?.();
+                }}
+                className="flex items-center gap-1 text-purple-600 border-purple-300 font-bold cursor-pointer"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                在线生成器
+              </Button>
+              <Dialog.Close asChild>
+                <button className="rounded-full p-1 text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]">
+                  <X className="h-4 w-4" />
+                </button>
+              </Dialog.Close>
+            </div>
           </div>
 
           {copyNotice && (
