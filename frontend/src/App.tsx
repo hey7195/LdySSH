@@ -20,6 +20,7 @@ import {
   EyeOff,
   ExternalLink,
   File as FileIcon,
+  FileCode,
   Filter,
   Folder as FolderIcon,
   FolderOpen,
@@ -76,6 +77,7 @@ import { SessionLoggerModal } from "./components/modals/SessionLoggerModal";
 import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
 import { ParameterFillModal } from "./components/modals/ParameterFillModal";
 import { KernelDevOpsToolboxModal } from "./components/modals/KernelDevOpsToolboxModal";
+import { IntegratedCodeDiffEditorModal } from "./components/modals/IntegratedCodeDiffEditorModal";
 import { getShellSuggestion } from "./lib/terminalIntelliSense";
 import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
 import { useAppStore } from "./store/useAppStore";
@@ -1183,6 +1185,9 @@ export function App() {
   // Kernel & DevOps ToolKit State
   const [kernelToolboxOpen, setKernelToolboxOpen] = useState(false);
 
+  // Integrated Code Diff Editor State
+  const [codeDiffEditorOpen, setCodeDiffEditorOpen] = useState(false);
+
 
 
   const runServerDiagnostics = async (): Promise<{ score: number; checks: DiagnosticCheckItem[] }> => {
@@ -1981,6 +1986,15 @@ export function App() {
               </button>
 
               <button
+                onClick={() => setCodeDiffEditorOpen(true)}
+                title="SFTP 深度远程代码编辑器 & File Diff 对比器"
+                className="flex items-center gap-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 px-2.5 py-1 text-xs font-bold text-indigo-400 hover:bg-indigo-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
+              >
+                <FileCode className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden xl:inline">代码编辑</span>
+              </button>
+
+              <button
                 onClick={() => setSessionLoggerOpen(true)}
                 title="终端会话 ANSI 日志录制与导出"
                 className="flex items-center gap-1 rounded-full bg-rose-500/10 border border-rose-500/30 px-2.5 py-1 text-xs font-bold text-rose-400 hover:bg-rose-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
@@ -2386,6 +2400,15 @@ export function App() {
         isOpen={kernelToolboxOpen}
         onClose={() => setKernelToolboxOpen(false)}
         onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)}
+      />
+      <IntegratedCodeDiffEditorModal
+        isOpen={codeDiffEditorOpen}
+        onClose={() => setCodeDiffEditorOpen(false)}
+        onSaveToRemote={(pathStr, contentStr) => {
+          // Send via active session
+          const escapedContent = contentStr.replace(/'/g, "'\\''");
+          sendCommandToActiveSession(`cat << 'EOF' > ${pathStr}\n${contentStr}\nEOF\n`);
+        }}
       />
     </div>
   );
