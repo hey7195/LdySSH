@@ -404,23 +404,29 @@ export const LINUX_SHELL_DICTIONARY: ShellDictionaryItem[] = [
   }
 ];
 
-// Extract ALL Linux command names from Runoob + dictionary
+// Extract ALL 350+ Linux command names from Runoob + dictionary + sysadmin tools
 const RAW_COMMAND_NAMES: string[] = Array.from(
   new Set([
     ...LINUX_SHELL_DICTIONARY.map((d) => d.prefix),
     ...FLAT_RUNOOB_COMMANDS.map((c) => c.name.split("/")[0].trim().toLowerCase()),
-    "ls", "cd", "pwd", "cp", "mv", "rm", "mkdir", "rmdir", "touch", "ln",
-    "cat", "more", "less", "head", "tail", "stat", "file", "find", "locate",
-    "grep", "sed", "awk", "cut", "sort", "uniq", "wc", "tr", "tee", "split",
-    "tar", "gzip", "gunzip", "zip", "unzip", "bzip2", "bunzip2", "xz",
-    "df", "du", "fdisk", "parted", "lsblk", "mkfs", "fsck", "mount", "umount",
-    "ps", "top", "htop", "btop", "kill", "pkill", "killall", "free", "uptime",
-    "uname", "hostname", "dmesg", "journalctl", "systemctl", "service", "crontab",
-    "ping", "ifconfig", "ip", "netstat", "ss", "route", "traceroute", "dig", "nslookup",
-    "tcpdump", "curl", "wget", "ssh", "scp", "rsync", "ufw", "iptables", "firewalld",
-    "docker", "podman", "kubectl", "helm", "git", "nginx", "apt", "yum", "dnf",
-    "python", "python3", "pip", "node", "npm", "yarn", "pnpm", "bun", "go", "make", "gcc",
-    "strace", "ltrace", "perf", "sysctl", "modprobe", "lsmod", "insmod", "rmmod", "lsof"
+    // File & Directory (50)
+    "ls", "cd", "pwd", "cp", "mv", "rm", "mkdir", "rmdir", "touch", "ln", "stat", "file", "find", "locate", "updatedb", "tree", "dir", "vdir", "install", "mkfifo", "mknod", "readlink", "realpath", "basename", "dirname", "pathchk", "shred", "truncate", "unlink", "sync", "dd", "df", "du", "lsblk", "fdisk", "parted", "sfdisk", "mkfs", "fsck", "mount", "umount", "blkid", "losetup", "e2fsck", "tune2fs", "resize2fs", "xfs_repair", "xfs_growfs", "badblocks", "chattr", "lsattr",
+    // Text Processing & Filtering & Search (45)
+    "cat", "tac", "more", "less", "head", "tail", "grep", "egrep", "fgrep", "rgrep", "sed", "awk", "gawk", "cut", "sort", "uniq", "wc", "tr", "tee", "split", "csplit", "join", "paste", "nl", "fold", "column", "col", "expand", "unexpand", "fmt", "pr", "diff", "diff3", "cmp", "comm", "patch", "jq", "yq", "iconv", "dos2unix", "unix2dos", "xxd", "hexdump", "od", "strings",
+    // Process & System & Resource Monitoring (40)
+    "ps", "pstree", "pgrep", "top", "htop", "btop", "atop", "glances", "nethogs", "iftop", "iotop", "vmstat", "iostat", "mpstat", "sar", "pidstat", "free", "uptime", "uname", "hostname", "hostnamectl", "timedatectl", "localectl", "loginctl", "dmesg", "journalctl", "systemctl", "service", "init", "telinit", "crontab", "at", "batch", "nohup", "screen", "tmux", "time", "timeout", "nice", "renice", "taskset",
+    // Network & Connectivity & Security (55)
+    "ping", "ping6", "ifconfig", "ip", "route", "netstat", "ss", "traceroute", "tracepath", "mtr", "dig", "nslookup", "host", "whois", "tcpdump", "wireshark", "tshark", "nmap", "nc", "netcat", "socat", "curl", "wget", "aria2c", "ssh", "sshd", "scp", "sftp", "rsync", "ssh-keygen", "ssh-copy-id", "ssh-add", "ssh-agent", "ufw", "iptables", "ip6tables", "nftables", "firewalld", "firewall-cmd", "fail2ban-client", "openssl", "gpg", "envsubst", "ethtool", "iwconfig", "nmcli", "nmtui", "resolvectl", "arp", "rarp", "iptunnel", "tunctl", "tcpwrapper", "openvpn", "wireguard", "wg",
+    // User Management & Authentication & Security (35)
+    "useradd", "userdel", "usermod", "groupadd", "groupdel", "groupmod", "passwd", "chfn", "chsh", "gpasswd", "newgrp", "id", "whoami", "who", "w", "last", "lastb", "users", "su", "sudo", "sudoedit", "visudo", "chmod", "chown", "chgrp", "umask", "faillock", "pam_tally2", "chage", "logname", "finger", "write", "wall", "mesg", "talk",
+    // Archive & Compression & Backup (25)
+    "tar", "gzip", "gunzip", "zcat", "bzip2", "bunzip2", "bzcat", "xz", "unxz", "xzcat", "lzma", "unlzma", "zip", "unzip", "zipinfo", "7z", "rar", "unrar", "cpio", "pax", "ar", "zstd", "unzstd", "zstdcat", "dump", "restore",
+    // DevOps & Containers & Cloud & Orchestration (35)
+    "docker", "docker-compose", "podman", "buildah", "skopeo", "crictl", "ctr", "containerd", "kubectl", "kubectx", "kubens", "helm", "minikube", "kind", "k3s", "terraform", "ansible", "ansible-playbook", "vagrant", "packer", "git", "git-lfs", "gh", "glab", "nginx", "apache2", "httpd", "caddy", "haproxy", "envoy", "redis-cli", "mysql", "mysqldump", "psql", "pg_dump", "sqlite3",
+    // Package Management & System Installers (30)
+    "apt", "apt-get", "apt-cache", "dpkg", "dpkg-reconfigure", "snap", "flatpak", "yum", "dnf", "rpm", "repoquery", "zypper", "pacman", "makepkg", "apk", "emerge", "brew", "pip", "pip3", "npm", "npx", "pnpm", "yarn", "bun", "gem", "cargo", "go", "composer", "cpan", "luarocks",
+    // Kernel, Hardware & Low-Level Diagnostics (35)
+    "lspci", "lsusb", "lscpu", "lsscsi", "lsblk", "dmidecode", "inxi", "hwinfo", "arch", "lshw", "numactl", "turbostat", "sensors", "smartctl", "hdparm", "nvme", "strace", "ltrace", "perf", "sysctl", "modprobe", "lsmod", "insmod", "rmmod", "modinfo", "depmod", "bpftool", "ebpf", "slabtop", "page-types", "fuser", "lsof", "execsnoop", "biolatency"
   ])
 );
 
