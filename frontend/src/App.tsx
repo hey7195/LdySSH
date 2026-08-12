@@ -55,6 +55,7 @@ import { Button, EmptyState, Input, Panel, Textarea } from "./components/ui";
 import { extractCommandParameters, fillCommandParameters, mergeCommandFolders, parseCommandLibraryImport, serializeCommandLibraryExport } from "./lib/commandLibrary";
 import {
   buildCommandSuggestions,
+  checkDangerousCommand,
   defaultCommandSuggestionApplyKey,
   defaultCommandSuggestionSources,
   isFullScreenCommand,
@@ -62,7 +63,8 @@ import {
   type CommandSuggestion,
   type CommandSuggestionApplyKey,
   type CommandSuggestionCustomApplyKey,
-  type CommandSuggestionSources
+  type CommandSuggestionSources,
+  type DangerousCommandInfo
 } from "./lib/commandSuggestions";
 import { cn } from "./lib/utils";
 import {
@@ -359,6 +361,7 @@ const storageKeys = {
   terminalBackgroundImage: "ldyssh.terminal.backgroundImage",
   terminalBackgroundOverlay: "ldyssh.terminal.backgroundOverlay",
   commandSuggestionsEnabled: "ldyssh.terminal.commandSuggestionsEnabled",
+  dangerousCommandGuardEnabled: "ldyssh.terminal.dangerousCommandGuardEnabled",
   commandSuggestionHistory: "ldyssh.terminal.commandSuggestions.history",
   commandSuggestionShortcuts: "ldyssh.terminal.commandSuggestions.shortcuts",
   commandSuggestionLinux: "ldyssh.terminal.commandSuggestions.linux",
@@ -624,6 +627,10 @@ function loadStoredCommandSuggestionsEnabled() {
   return window.localStorage.getItem(storageKeys.commandSuggestionsEnabled) !== "false";
 }
 
+function loadStoredDangerousCommandGuardEnabled() {
+  return window.localStorage.getItem(storageKeys.dangerousCommandGuardEnabled) !== "false";
+}
+
 function loadStoredCommandSuggestionSources(): CommandSuggestionSources {
   const history = window.localStorage.getItem(storageKeys.commandSuggestionHistory);
   const shortcuts = window.localStorage.getItem(storageKeys.commandSuggestionShortcuts);
@@ -853,6 +860,8 @@ export function App() {
   const [terminalBackgroundImage, setTerminalBackgroundImage] = useState(() => loadStoredTerminalBackgroundImage());
   const [terminalBackgroundOverlay, setTerminalBackgroundOverlay] = useState(() => loadStoredTerminalBackgroundOverlay());
   const [commandSuggestionsEnabled, setCommandSuggestionsEnabled] = useState(() => loadStoredCommandSuggestionsEnabled());
+  const [dangerousCommandGuardEnabled, setDangerousCommandGuardEnabled] = useState(() => loadStoredDangerousCommandGuardEnabled());
+  const [dangerousCommandConfirmation, setDangerousCommandConfirmation] = useState<{ command: string; info: DangerousCommandInfo; onConfirm: () => void } | null>(null);
   const [commandSuggestionSources, setCommandSuggestionSources] = useState<CommandSuggestionSources>(() => loadStoredCommandSuggestionSources());
   const [commandSuggestionApplyKey, setCommandSuggestionApplyKey] = useState<CommandSuggestionApplyKey>(() => loadStoredCommandSuggestionApplyKey());
   const [commandSuggestionCustomApplyKey, setCommandSuggestionCustomApplyKey] = useState<CommandSuggestionCustomApplyKey | null>(() => loadStoredCommandSuggestionCustomApplyKey());
@@ -925,6 +934,10 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(storageKeys.commandSuggestionsEnabled, String(commandSuggestionsEnabled));
   }, [commandSuggestionsEnabled]);
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.dangerousCommandGuardEnabled, String(dangerousCommandGuardEnabled));
+  }, [dangerousCommandGuardEnabled]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKeys.commandSuggestionHistory, String(commandSuggestionSources.history));
@@ -1520,6 +1533,23 @@ export function App() {
 
   function sendCommandToActiveSession(command: string) {
     if (!activeSession) return;
+    const cleanCmd = command.trim();
+    if (dangerousCommandGuardEnabled) {
+      const info = checkDangerousCommand(cleanCmd);
+      if (info.isDangerous) {
+        setDangerousCommandConfirmation({
+          command: cleanCmd,
+          info,
+          onConfirm: () => executeSendCommand(cleanCmd)
+        });
+        return;
+      }
+    }
+    executeSendCommand(cleanCmd);
+  }
+
+  function executeSendCommand(command: string) {
+    if (!activeSession) return;
     const data = command.endsWith("\n") ? command : `${command}\n`;
     void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(data)));
     setTerminalCommandNotice({ sessionId: activeSession.id, command });
@@ -1630,6 +1660,7 @@ export function App() {
               terminalBackgroundImage={terminalBackgroundImage}
               terminalBackgroundOverlay={terminalBackgroundOverlay}
               commandSuggestionsEnabled={commandSuggestionsEnabled}
+              dangerousCommandGuardEnabled={dangerousCommandGuardEnabled}
               commandSuggestionSources={commandSuggestionSources}
               commandSuggestionApplyKey={commandSuggestionApplyKey}
               commandSuggestionCustomApplyKey={commandSuggestionCustomApplyKey}
@@ -1652,6 +1683,9 @@ export function App() {
               onReturnHome={() => setActiveTool("ssh")}
               onCreateLocal={openLocalSession}
               onAddAiQuote={addAiQuote}
+              onRequestDangerousCommandConfirmation={(cmd, info, confirm) => {
+                setDangerousCommandConfirmation({ command: cmd, info, onConfirm: confirm });
+              }}
               onTerminalOutput={appendTerminalHistory}
               onCommandSuggestionViewChange={setCommandSuggestionView}
               onActiveCommandFolderChange={setActiveCommandFolderId}
@@ -1669,6 +1703,7 @@ export function App() {
               terminalBackgroundImage={terminalBackgroundImage}
               terminalBackgroundOverlay={terminalBackgroundOverlay}
               commandSuggestionsEnabled={commandSuggestionsEnabled}
+              dangerousCommandGuardEnabled={dangerousCommandGuardEnabled}
               commandSuggestionSources={commandSuggestionSources}
               commandSuggestionApplyKey={commandSuggestionApplyKey}
               commandSuggestionCustomApplyKey={commandSuggestionCustomApplyKey}
@@ -1679,6 +1714,7 @@ export function App() {
               onTerminalBackgroundImageChange={setTerminalBackgroundImage}
               onTerminalBackgroundOverlayChange={setTerminalBackgroundOverlay}
               onCommandSuggestionsEnabledChange={setCommandSuggestionsEnabled}
+              onDangerousCommandGuardEnabledChange={setDangerousCommandGuardEnabled}
               onCommandSuggestionSourcesChange={setCommandSuggestionSources}
               onCommandSuggestionApplyKeyChange={setCommandSuggestionApplyKey}
               onCommandSuggestionCustomApplyKeyChange={setCommandSuggestionCustomApplyKey}
@@ -1713,6 +1749,62 @@ export function App() {
         onCancel={() => setDeleteConfirmation(null)}
         onConfirm={confirmDelete}
       />
+      {dangerousCommandConfirmation && (
+        <Dialog.Root open onOpenChange={() => setDangerousCommandConfirmation(null)}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--mask-base)] backdrop-blur-xs" />
+            <Dialog.Content
+              data-testid="dangerous-command-modal"
+              className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-3xl border-2 border-rose-500 bg-[var(--panel-bg)] p-6 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                  <AlertTriangle className="h-6 w-6" />
+                </div>
+                <div>
+                  <Dialog.Title className="text-base font-black text-rose-600 dark:text-rose-400">
+                    ⚠️ 高危破坏性命令警告
+                  </Dialog.Title>
+                  <div className="text-xs font-extrabold text-[var(--app-muted)]">
+                    类型: {dangerousCommandConfirmation.info.patternName || "高危删库/重启操作"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/40 p-3.5 space-y-2">
+                <div className="font-mono text-xs font-black text-rose-700 dark:text-rose-300 break-all bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-rose-200 dark:border-rose-900 shadow-inner">
+                  {dangerousCommandConfirmation.command}
+                </div>
+                <p className="text-xs font-semibold text-rose-800 dark:text-rose-200 leading-5">
+                  {dangerousCommandConfirmation.info.warningText}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <Button
+                  variant="outline"
+                  size={32}
+                  className="rounded-full px-5 text-xs font-extrabold"
+                  onClick={() => setDangerousCommandConfirmation(null)}
+                >
+                  取消发送
+                </Button>
+                <Button
+                  size={32}
+                  className="rounded-full px-5 text-xs font-black bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-500/20"
+                  onClick={() => {
+                    const pending = dangerousCommandConfirmation;
+                    setDangerousCommandConfirmation(null);
+                    pending.onConfirm();
+                  }}
+                >
+                  强行发送该命令 →
+                </Button>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
       <CommandPaletteModal
         open={isCommandPaletteOpen}
         onOpenChange={setIsCommandPaletteOpen}
@@ -2454,6 +2546,7 @@ function TerminalWorkspace({
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   commandSuggestionsEnabled,
+  dangerousCommandGuardEnabled,
   commandSuggestionSources,
   commandSuggestionApplyKey,
   commandSuggestionCustomApplyKey,
@@ -2476,6 +2569,7 @@ function TerminalWorkspace({
   onReturnHome,
   onCreateLocal,
   onAddAiQuote,
+  onRequestDangerousCommandConfirmation,
   onTerminalOutput,
   onCommandSuggestionViewChange,
   onActiveCommandFolderChange,
@@ -2492,6 +2586,7 @@ function TerminalWorkspace({
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   commandSuggestionsEnabled: boolean;
+  dangerousCommandGuardEnabled: boolean;
   commandSuggestionSources: CommandSuggestionSources;
   commandSuggestionApplyKey: CommandSuggestionApplyKey;
   commandSuggestionCustomApplyKey: CommandSuggestionCustomApplyKey | null;
@@ -2514,6 +2609,7 @@ function TerminalWorkspace({
   onReturnHome: () => void;
   onCreateLocal: () => void;
   onAddAiQuote: (text: string, sourceTitle: string) => void;
+  onRequestDangerousCommandConfirmation?: (command: string, info: DangerousCommandInfo, onConfirm: () => void) => void;
   onTerminalOutput: (sessionId: string, text: string) => void;
   onCommandSuggestionViewChange: (view: CommandSuggestionView | null) => void;
   onActiveCommandFolderChange: (folderId: string) => void;
@@ -2805,6 +2901,7 @@ function TerminalWorkspace({
           terminalBackgroundImage={terminalBackgroundImage}
           terminalBackgroundOverlay={terminalBackgroundOverlay}
           commandSuggestionsEnabled={commandSuggestionsEnabled}
+          dangerousCommandGuardEnabled={dangerousCommandGuardEnabled}
           commandSuggestionSources={commandSuggestionSources}
           commandSuggestionApplyKey={commandSuggestionApplyKey}
           commandSuggestionCustomApplyKey={commandSuggestionCustomApplyKey}
@@ -2817,6 +2914,7 @@ function TerminalWorkspace({
           onShortcutParameterRequest={requestShortcutParameters}
           onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
           onCreateLocal={onCreateLocal}
+          onRequestDangerousCommandConfirmation={onRequestDangerousCommandConfirmation}
           onOutput={onTerminalOutput}
         />
         {visible && !rightSidebarCollapsed && (
@@ -3105,6 +3203,7 @@ function TerminalSurface({
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   commandSuggestionsEnabled,
+  dangerousCommandGuardEnabled,
   commandSuggestionSources,
   commandSuggestionApplyKey,
   commandSuggestionCustomApplyKey,
@@ -3117,6 +3216,7 @@ function TerminalSurface({
   onShortcutParameterRequest,
   onAddAiQuote,
   onCreateLocal,
+  onRequestDangerousCommandConfirmation,
   onOutput
 }: {
   visible: boolean;
@@ -3126,6 +3226,7 @@ function TerminalSurface({
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   commandSuggestionsEnabled: boolean;
+  dangerousCommandGuardEnabled: boolean;
   commandSuggestionSources: CommandSuggestionSources;
   commandSuggestionApplyKey: CommandSuggestionApplyKey;
   commandSuggestionCustomApplyKey: CommandSuggestionCustomApplyKey | null;
@@ -3138,6 +3239,7 @@ function TerminalSurface({
   onShortcutParameterRequest: (shortcut: NonNullable<CommandSuggestion["shortcut"]>) => void;
   onAddAiQuote: (text: string) => void;
   onCreateLocal?: () => void;
+  onRequestDangerousCommandConfirmation?: (command: string, info: DangerousCommandInfo, onConfirm: () => void) => void;
   onOutput: (sessionId: string, text: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -3165,6 +3267,7 @@ function TerminalSurface({
   const [terminalRenderEpoch, setTerminalRenderEpoch] = useState(0);
   const commandFoldersRef = useRef(commandFolders);
   const commandSuggestionsEnabledRef = useRef(commandSuggestionsEnabled);
+  const dangerousCommandGuardEnabledRef = useRef(dangerousCommandGuardEnabled);
   const commandSuggestionSourcesRef = useRef(commandSuggestionSources);
   const commandSuggestionApplyKeyRef = useRef(commandSuggestionApplyKey);
   const commandSuggestionCustomApplyKeyRef = useRef(commandSuggestionCustomApplyKey);
@@ -3179,6 +3282,7 @@ function TerminalSurface({
 
   commandFoldersRef.current = commandFolders;
   commandSuggestionsEnabledRef.current = commandSuggestionsEnabled;
+  dangerousCommandGuardEnabledRef.current = dangerousCommandGuardEnabled;
   commandSuggestionSourcesRef.current = commandSuggestionSources;
   commandSuggestionApplyKeyRef.current = commandSuggestionApplyKey;
   commandSuggestionCustomApplyKeyRef.current = commandSuggestionCustomApplyKey;
@@ -3303,6 +3407,18 @@ function TerminalSurface({
     if (submittedCommand) {
       commandHistoryRef.current = recordCommandHistory(commandHistoryRef.current, submittedCommand);
       rawCommandModeRef.current = isFullScreenCommand(submittedCommand);
+
+      if (dangerousCommandGuardEnabledRef.current) {
+        const info = checkDangerousCommand(submittedCommand);
+        if (info.isDangerous) {
+          const sessionId = activeIdRef.current;
+          onRequestDangerousCommandConfirmation?.(submittedCommand, info, () => {
+            if (sessionId) {
+              void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(`${submittedCommand}\n`)));
+            }
+          });
+        }
+      }
     }
     refreshCommandSuggestionList(draft);
   }
@@ -5833,6 +5949,7 @@ function SettingsPanel({
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   commandSuggestionsEnabled,
+  dangerousCommandGuardEnabled,
   commandSuggestionSources,
   commandSuggestionApplyKey,
   commandSuggestionCustomApplyKey,
@@ -5843,6 +5960,7 @@ function SettingsPanel({
   onTerminalBackgroundImageChange,
   onTerminalBackgroundOverlayChange,
   onCommandSuggestionsEnabledChange,
+  onDangerousCommandGuardEnabledChange,
   onCommandSuggestionSourcesChange,
   onCommandSuggestionApplyKeyChange,
   onCommandSuggestionCustomApplyKeyChange,
@@ -5857,6 +5975,7 @@ function SettingsPanel({
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   commandSuggestionsEnabled: boolean;
+  dangerousCommandGuardEnabled: boolean;
   commandSuggestionSources: CommandSuggestionSources;
   commandSuggestionApplyKey: CommandSuggestionApplyKey;
   commandSuggestionCustomApplyKey: CommandSuggestionCustomApplyKey | null;
@@ -5867,6 +5986,7 @@ function SettingsPanel({
   onTerminalBackgroundImageChange: (value: string) => void;
   onTerminalBackgroundOverlayChange: (value: number) => void;
   onCommandSuggestionsEnabledChange: (value: boolean) => void;
+  onDangerousCommandGuardEnabledChange: (value: boolean) => void;
   onCommandSuggestionSourcesChange: (value: CommandSuggestionSources) => void;
   onCommandSuggestionApplyKeyChange: (value: CommandSuggestionApplyKey) => void;
   onCommandSuggestionCustomApplyKeyChange: (value: CommandSuggestionCustomApplyKey | null) => void;
@@ -6108,6 +6228,29 @@ function SettingsPanel({
                       />
                     </div>
                   )}
+
+                  {/* 高危命令防护开关 */}
+                  <div className="pt-3 border-t border-[var(--app-line)] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-extrabold text-[var(--app-text)] flex items-center gap-1.5">
+                          <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
+                          高危删库与破坏性命令拦截防护
+                        </div>
+                        <div className="mt-0.5 text-[10px] font-medium text-[var(--text-secondary)]">输入 rm -rf /、rm -rf *、mkfs、reboot 等危险命令时自动弹窗二次确认。</div>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-label="高危命令防护开关"
+                        aria-checked={dangerousCommandGuardEnabled}
+                        className={cn("relative h-6 w-11 rounded-full transition-colors cursor-pointer shrink-0", dangerousCommandGuardEnabled ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700")}
+                        onClick={() => onDangerousCommandGuardEnabledChange(!dangerousCommandGuardEnabled)}
+                      >
+                        <span className={cn("inline-block h-5 w-5 transform rounded-full bg-white transition-transform shadow-xs", dangerousCommandGuardEnabled ? "translate-x-5.5" : "translate-x-0.5")} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

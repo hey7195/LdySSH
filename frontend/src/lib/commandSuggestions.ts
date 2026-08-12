@@ -553,6 +553,77 @@ export function isFullScreenCommand(command: string) {
   return FULL_SCREEN_COMMANDS.has(executable);
 }
 
+export interface DangerousCommandInfo {
+  isDangerous: boolean;
+  patternName?: string;
+  warningText?: string;
+}
+
+export function checkDangerousCommand(command: string): DangerousCommandInfo {
+  const clean = command.trim();
+  if (!clean) return { isDangerous: false };
+
+  // 1. rm -rf 删库/级联删除 (rm -rf /, rm -rf *, rm -rf /*, rm -f -r / 等)
+  if (
+    /^rm\s+.*-[a-zA-Z]*[rRfF]+[a-zA-Z]*\s+.*(\/|\*|~\/|\.\/|\/\*)/.test(clean) ||
+    /^rm\s+.*-[a-zA-Z]*[rR][a-zA-Z]*\s+.*-[a-zA-Z]*[fF][a-zA-Z]*\s+.*(\/|\*|~\/|\.\/|\/\*)/.test(clean) ||
+    /^rm\s+.*-[a-zA-Z]*[rRfF]+\s+(\/|\*|~\/|\.\/|\/\*)/.test(clean)
+  ) {
+    return {
+      isDangerous: true,
+      patternName: "rm -rf 级联强制删除",
+      warningText: "该命令包含 rm -rf 强制删除根目录或通配符操作，将导致受影响目录或整台服务器数据永久不可逆清空！"
+    };
+  }
+
+  // 2. 格式化磁盘 mkfs
+  if (/\bmkfs(\.[a-zA-Z0-9]+)?\s+/.test(clean)) {
+    return {
+      isDangerous: true,
+      patternName: "mkfs 格式化文件系统",
+      warningText: "格式化文件系统将直接抹除指定磁盘分区的全部数据与文件系统表结构！"
+    };
+  }
+
+  // 3. 磁盘底层块写入 dd of=/dev/
+  if (/\bdd\s+.*of=\/dev\//.test(clean)) {
+    return {
+      isDangerous: true,
+      patternName: "dd 磁盘物理块改写",
+      warningText: "直接向 /dev/ 块设备写入原始字节将直接破坏系统 MBR/GPT 分区表或存储介质！"
+    };
+  }
+
+  // 4. 全局 chmod -R 777 /
+  if (/\bchmod\s+.*-[a-zA-Z]*R[a-zA-Z]*\s+777\s+(\/|\*)/.test(clean)) {
+    return {
+      isDangerous: true,
+      patternName: "chmod -R 777 全局权限修改",
+      warningText: "将根目录或全局文件赋予 777 权限会导致 Linux 安全验证失效并触发 SSH 拒绝连接！"
+    };
+  }
+
+  // 5. 服务器关机重启
+  if (/^(reboot|shutdown|poweroff|init\s+[06])\b/.test(clean)) {
+    return {
+      isDangerous: true,
+      patternName: "服务器关机与重启",
+      warningText: "该命令将导致服务器立即断开所有网络与 SSH 连接并重启/关机，可能造成线上进程异常中断！"
+    };
+  }
+
+  // 6. Fork 炸弹
+  if (/:{\s*:\|:&\s*};:/.test(clean.replace(/\s+/g, ""))) {
+    return {
+      isDangerous: true,
+      patternName: "Fork 炸弹无限进程剥离",
+      warningText: "Fork 炸弹会瞬间耗尽系统 CPU 与进程 PID 资源，导致服务器无法响应并死机！"
+    };
+  }
+
+  return { isDangerous: false };
+}
+
 function normalizeCommand(command: string) {
   return command.trimStart().replace(/\s+/g, " ").toLowerCase();
 }

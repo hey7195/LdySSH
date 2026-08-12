@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { CommandFolder } from "./bridge";
-import { buildCommandSuggestions, defaultCommandSuggestionApplyKey, isFullScreenCommand, recordCommandHistory } from "./commandSuggestions";
+import { buildCommandSuggestions, checkDangerousCommand, defaultCommandSuggestionApplyKey, isFullScreenCommand, recordCommandHistory } from "./commandSuggestions";
 
 describe("command suggestions", () => {
   const folders: CommandFolder[] = [
@@ -84,5 +84,20 @@ describe("command suggestions", () => {
     expect(isFullScreenCommand("vim /tmp/a.txt")).toBe(true);
     expect(isFullScreenCommand("sudo vi /etc/hosts")).toBe(true);
     expect(isFullScreenCommand("ls -la")).toBe(false);
+  });
+
+  test("identifies dangerous destruction commands correctly", () => {
+    expect(checkDangerousCommand("rm -rf /").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm -rf *").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm -rf /*").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm -f -r /var/log/*").isDangerous).toBe(true);
+    expect(checkDangerousCommand("mkfs.ext4 /dev/sda1").isDangerous).toBe(true);
+    expect(checkDangerousCommand("dd if=/dev/zero of=/dev/sdb").isDangerous).toBe(true);
+    expect(checkDangerousCommand("reboot").isDangerous).toBe(true);
+    expect(checkDangerousCommand("shutdown -h now").isDangerous).toBe(true);
+    expect(checkDangerousCommand("chmod -R 777 /").isDangerous).toBe(true);
+
+    expect(checkDangerousCommand("ls -la").isDangerous).toBe(false);
+    expect(checkDangerousCommand("cat /etc/passwd").isDangerous).toBe(false);
   });
 });
