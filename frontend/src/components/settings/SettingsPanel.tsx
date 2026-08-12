@@ -86,11 +86,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
   const [hlDraft, setHlDraft] = useState({ name: "", pattern: "", foreground: "#00aa88" });
   const [editingHlId, setEditingHlId] = useState("");
 
-  // 自定义高危规则草稿
-  const [ruleName, setRuleName] = useState("");
-  const [rulePattern, setRulePattern] = useState("");
-  const [ruleWarning, setRuleWarning] = useState("");
-
   if (!props.isOpen) return null;
 
   const resolvedAppearance = getTerminalAppearance(terminalAppearance);
@@ -120,20 +115,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
     setHlDraft({ name: rule.name, pattern: rule.pattern, foreground: rule.foreground });
   };
 
-  const handleAddCustomDangerous = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!ruleName.trim() || !rulePattern.trim()) return;
-    store.addCustomDangerousRule({
-      name: ruleName.trim(),
-      pattern: rulePattern.trim(),
-      warningText: ruleWarning.trim() || "匹配自定义高危安全防护规则",
-      enabled: true
-    });
-    setRuleName("");
-    setRulePattern("");
-    setRuleWarning("");
-  };
-
   const handleBackgroundUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -149,21 +130,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
   };
 
   return (
-    <div className="h-full overflow-auto bg-[var(--app-bg,#12131a)] px-8 py-6 select-none">
+    <div className="h-full overflow-auto bg-[var(--app-bg)] text-[var(--app-text)] px-8 py-6 select-none transition-colors duration-200">
       <div className="mx-auto max-w-6xl space-y-6">
         {/* Title bar */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between border-b border-[var(--app-line)] pb-4">
           <div>
-            <h1 className="text-xl font-extrabold text-zinc-100 flex items-center gap-2">
+            <h1 className="text-xl font-extrabold text-[var(--app-text)] flex items-center gap-2">
               偏好设置与个性化 (Settings)
             </h1>
-            <p className="mt-1 text-xs text-zinc-400">
+            <p className="mt-1 text-xs text-[var(--app-muted)]">
               自定义外观主题、终端色彩字体、壁纸背景、高危命令防护与正则高亮引擎。
             </p>
           </div>
           <button
             onClick={props.onClose}
-            className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
+            className="rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-4 py-2 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] transition-colors cursor-pointer"
           >
             返回主页
           </button>
@@ -174,9 +155,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
           {/* 左栏：外观与壁纸防护 */}
           <div className="space-y-6">
             {/* 主题选择 */}
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 space-y-4">
-              <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
-                <Sun className="h-4 w-4 text-amber-400" /> 应用外观主题
+            <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5 space-y-4 shadow-xs">
+              <h3 className="text-sm font-bold text-[var(--app-text)] flex items-center gap-2">
+                <Sun className="h-4 w-4 text-amber-500" /> 应用外观主题
               </h3>
               <div className="grid grid-cols-3 gap-2">
                 {THEMES.map((t) => (
@@ -185,8 +166,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                     onClick={() => setTheme(t)}
                     className={`rounded-xl border p-3 text-center text-xs transition-all cursor-pointer ${
                       theme === t
-                        ? "border-blue-500 bg-blue-500/10 font-bold text-blue-400"
-                        : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700"
+                        ? "border-emerald-500 bg-emerald-500/10 font-extrabold text-emerald-500 shadow-xs"
+                        : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:border-[var(--app-line)] hover:text-[var(--app-text)]"
                     }`}
                   >
                     {t === "dark" ? "夜间黑" : t === "nordic" ? "北欧灰" : "极简白"}
@@ -194,8 +175,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                 ))}
               </div>
 
-              <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2 pt-2 border-t border-zinc-800">
-                <Terminal className="h-4 w-4 text-emerald-400" /> 终端配色方案
+              <h3 className="text-sm font-bold text-[var(--app-text)] flex items-center gap-2 pt-2 border-t border-[var(--app-line)]">
+                <Terminal className="h-4 w-4 text-emerald-500" /> 终端配色方案
               </h3>
               <div className="grid grid-cols-3 gap-2">
                 {TERMINAL_THEMES.map((t) => (
@@ -205,8 +186,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                     onClick={() => setTerminalTheme(t)}
                     className={`rounded-xl border p-3 text-center text-xs transition-all cursor-pointer ${
                       terminalTheme === t
-                        ? "border-emerald-500 bg-emerald-500/10 font-bold text-emerald-400"
-                        : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700"
+                        ? "border-emerald-500 bg-emerald-500/10 font-extrabold text-emerald-500 shadow-xs"
+                        : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:border-[var(--app-line)] hover:text-[var(--app-text)]"
                     }`}
                   >
                     {t === "dark" ? "曜石黑" : t === "nordic" ? "深海灰" : "浅色白"}
@@ -215,10 +196,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
               </div>
 
               {/* 字体与字号 */}
-              <div className="pt-2 border-t border-zinc-800 space-y-3">
-                <div className="flex items-center justify-between text-xs text-zinc-300">
+              <div className="pt-2 border-t border-[var(--app-line)] space-y-3">
+                <div className="flex items-center justify-between text-xs text-[var(--app-text)]">
                   <span>字号大小</span>
-                  <span className="font-mono text-blue-400">{resolvedAppearance.fontSize} px</span>
+                  <span className="font-mono text-emerald-500 font-bold">{resolvedAppearance.fontSize} px</span>
                 </div>
                 <input
                   aria-label="字号"
@@ -227,18 +208,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                   max={26}
                   value={resolvedAppearance.fontSize}
                   onChange={(e) => setTerminalAppearance({ ...terminalAppearance, fontSize: Number(e.target.value) })}
-                  className="w-full h-2 rounded-lg bg-zinc-800 accent-blue-500 cursor-pointer"
+                  className="w-full h-2 rounded-lg bg-[var(--fill-2)] accent-emerald-500 cursor-pointer"
                 />
 
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div>
-                    <label className="text-[11px] text-zinc-400 mb-1 block">英文排版字体</label>
+                    <label className="text-[11px] text-[var(--app-muted)] mb-1 block">英文排版字体</label>
                     <select
                       aria-label="英文排版字体"
                       role="listbox"
                       value={resolvedAppearance.englishFont}
                       onChange={(e) => setTerminalAppearance({ ...terminalAppearance, englishFont: e.target.value })}
-                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200"
+                      className="w-full rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-2.5 py-1.5 text-xs text-[var(--app-text)] focus:outline-none focus:border-emerald-500"
                     >
                       {terminalEnglishFonts.map((f) => (
                         <option
@@ -255,13 +236,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                   </div>
 
                   <div>
-                    <label className="text-[11px] text-zinc-400 mb-1 block">中文排版字体</label>
+                    <label className="text-[11px] text-[var(--app-muted)] mb-1 block">中文排版字体</label>
                     <select
                       aria-label="中文排版字体"
                       role="listbox"
                       value={resolvedAppearance.chineseFont}
                       onChange={(e) => setTerminalAppearance({ ...terminalAppearance, chineseFont: e.target.value })}
-                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200"
+                      className="w-full rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-2.5 py-1.5 text-xs text-[var(--app-text)] focus:outline-none focus:border-emerald-500"
                     >
                       {terminalChineseFonts.map((f) => (
                         <option
@@ -280,12 +261,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
               </div>
 
               {/* 壁纸上传与实时预览卡片 */}
-              <div className="pt-2 border-t border-zinc-800 space-y-3">
+              <div className="pt-2 border-t border-[var(--app-line)] space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
-                    <ImageIcon className="h-4 w-4 text-purple-400" /> 终端个性化壁纸
+                  <h4 className="text-xs font-bold text-[var(--app-text)] flex items-center gap-1.5">
+                    <ImageIcon className="h-4 w-4 text-purple-500" /> 终端个性化壁纸
                   </h4>
-                  <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-1 text-xs font-bold text-purple-300 hover:bg-purple-500/20 transition-colors">
+                  <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-1 text-xs font-bold text-purple-500 hover:bg-purple-500/20 transition-colors">
                     <Upload className="h-3.5 w-3.5" /> 上传壁纸
                     <input
                       data-testid="terminal-background-upload"
@@ -298,9 +279,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                 </div>
 
                 {terminalBackgroundImage ? (
-                  <div className="space-y-3 rounded-xl border border-purple-500/30 bg-zinc-950 p-3">
+                  <div className="space-y-3 rounded-xl border border-purple-500/30 bg-[var(--fill-1)] p-3">
                     {/* Live Image Preview Thumbnail Card */}
-                    <div className="relative h-28 w-full overflow-hidden rounded-lg border border-zinc-800 shadow-inner group">
+                    <div className="relative h-28 w-full overflow-hidden rounded-lg border border-[var(--app-line)] shadow-inner group">
                       <img
                         src={terminalBackgroundImage}
                         alt="终端壁纸预览"
@@ -315,7 +296,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                         }}
                       />
                       <div className="absolute inset-0 flex flex-col justify-between p-2.5">
-                        <span className="self-start rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 backdrop-blur-md border border-emerald-500/30">
+                        <span className="self-start rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400 backdrop-blur-md border border-emerald-500/30">
                           ✓ 已成功生效终端壁纸
                         </span>
                         <button
@@ -329,9 +310,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
 
                     {/* Opacity Slider */}
                     <div className="space-y-1">
-                      <div className="flex items-center justify-between text-xs text-zinc-300">
+                      <div className="flex items-center justify-between text-xs text-[var(--app-text)]">
                         <span>遮罩纯色浓度 (调节壁纸显隐)</span>
-                        <span className="font-mono text-purple-400">{terminalBackgroundOverlay}%</span>
+                        <span className="font-mono text-purple-500 font-bold">{terminalBackgroundOverlay}%</span>
                       </div>
                       <input
                         aria-label="背景遮罩透明度"
@@ -340,24 +321,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                         max={90}
                         value={terminalBackgroundOverlay}
                         onChange={(e) => setTerminalBackgroundOverlay(Number(e.target.value))}
-                        className="w-full h-2 rounded-lg bg-zinc-800 accent-purple-500 cursor-pointer"
+                        className="w-full h-2 rounded-lg bg-[var(--fill-2)] accent-purple-500 cursor-pointer"
                       />
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4 text-center text-xs text-zinc-500">
+                  <div className="rounded-xl border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] p-4 text-center text-xs text-[var(--app-muted)]">
                     未上传壁纸（点击右上角“上传壁纸”设置终端背景）
                   </div>
                 )}
               </div>
 
               {/* 高危防护 */}
-              <div className="pt-3 border-t border-zinc-800 flex items-center justify-between">
+              <div className="pt-3 border-t border-[var(--app-line)] flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
-                    <ShieldAlert className="h-4 w-4 text-red-400" /> 高危命令防护
+                  <h4 className="text-xs font-bold text-[var(--app-text)] flex items-center gap-1.5">
+                    <ShieldAlert className="h-4 w-4 text-red-500" /> 高危命令防护
                   </h4>
-                  <p className="text-[10px] text-zinc-500 mt-0.5">拦截 rm -rf /、reboot 等二次确认</p>
+                  <p className="text-[10px] text-[var(--app-muted)] mt-0.5">拦截 rm -rf /、reboot 等二次确认</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -367,7 +348,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                     onChange={(e) => setDangerousCommandGuardEnabled(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <div className="w-9 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                  <div className="w-9 h-5 bg-[var(--fill-3)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[var(--app-line)] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
                 </label>
               </div>
             </div>
@@ -376,9 +357,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
           {/* 右栏：语法高亮与安全规则 */}
           <div className="space-y-6">
             {/* 语法高亮 */}
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 space-y-4">
-              <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-400" /> 终端关键字正则高亮引擎
+            <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5 space-y-4 shadow-xs">
+              <h3 className="text-sm font-bold text-[var(--app-text)] flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-amber-500" /> 终端关键字正则高亮引擎
               </h3>
 
               <form onSubmit={handleSaveHl} className="grid grid-cols-1 sm:grid-cols-[160px_minmax(0,1fr)_48px_80px] gap-2.5">
@@ -387,25 +368,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                   placeholder="规则名称"
                   value={hlDraft.name}
                   onChange={(e) => setHlDraft({ ...hlDraft, name: e.target.value })}
-                  className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
+                  className="rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-1.5 text-xs text-[var(--app-text)] placeholder-[var(--app-muted)] focus:border-emerald-500 focus:outline-none"
                 />
                 <input
                   type="text"
                   placeholder="正则表达式"
                   value={hlDraft.pattern}
                   onChange={(e) => setHlDraft({ ...hlDraft, pattern: e.target.value })}
-                  className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
+                  className="rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-1.5 text-xs text-[var(--app-text)] placeholder-[var(--app-muted)] focus:border-emerald-500 focus:outline-none"
                 />
                 <input
                   type="color"
                   aria-label="规则颜色"
                   value={hlDraft.foreground}
                   onChange={(e) => setHlDraft({ ...hlDraft, foreground: e.target.value })}
-                  className="h-8 w-full rounded-xl border border-zinc-800 bg-zinc-950 p-1 cursor-pointer"
+                  className="h-8 w-full rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-1 cursor-pointer"
                 />
                 <button
                   type="submit"
-                  className="flex items-center justify-center gap-1 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500 transition-colors cursor-pointer"
+                  className="flex items-center justify-center gap-1 rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-600 transition-colors cursor-pointer shadow-xs"
                 >
                   <Plus className="h-3.5 w-3.5" /> {editingHlId ? "保存" : "+ 添加"}
                 </button>
@@ -415,17 +396,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                 {highlightRules.map((rule) => (
                   <div
                     key={rule.id}
-                    className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs"
+                    className="flex items-center justify-between rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-2 text-xs"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <input
                         type="checkbox"
                         checked={rule.enabled}
                         onChange={() => toggleHighlightRule(rule.id)}
-                        className="rounded border-zinc-700 bg-zinc-800 text-blue-600 focus:ring-0 cursor-pointer"
+                        className="rounded border-[var(--app-line)] bg-[var(--fill-2)] text-emerald-500 focus:ring-0 cursor-pointer"
                       />
-                      <span className="font-semibold text-zinc-200 truncate">{rule.name}</span>
-                      <code className="rounded bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400 font-mono truncate max-w-[200px]">
+                      <span className="font-semibold text-[var(--app-text)] truncate">{rule.name}</span>
+                      <code className="rounded bg-[var(--fill-2)] px-1.5 py-0.5 text-[10px] text-[var(--app-muted)] font-mono truncate max-w-[200px]">
                         {rule.pattern}
                       </code>
                       <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: rule.foreground }} />
@@ -434,7 +415,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                       <button
                         onClick={() => handleEditHl(rule)}
                         aria-label={`编辑${rule.name}`}
-                        className="text-zinc-400 hover:text-blue-400 transition-colors p-1 cursor-pointer"
+                        className="text-[var(--app-muted)] hover:text-emerald-500 transition-colors p-1 cursor-pointer"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
@@ -442,7 +423,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                         <button
                           onClick={() => deleteHighlightRule(rule.id)}
                           aria-label={`删除${rule.name}`}
-                          className="text-zinc-500 hover:text-red-400 transition-colors p-1 cursor-pointer"
+                          className="text-[var(--app-muted)] hover:text-red-500 transition-colors p-1 cursor-pointer"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -454,15 +435,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
             </div>
 
             {/* 安全审计日志 */}
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 space-y-3">
+            <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5 space-y-3 shadow-xs">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
-                  <FileText className="h-4 w-4 text-blue-400" /> 安全审计日志 (Audit Log)
+                <h4 className="text-xs font-bold text-[var(--app-text)] flex items-center gap-1.5">
+                  <FileText className="h-4 w-4 text-emerald-500" /> 安全审计日志 (Audit Log)
                 </h4>
                 {store.auditLogs.length > 0 && (
                   <button
                     onClick={store.clearAuditLogs}
-                    className="text-[11px] text-zinc-400 hover:text-red-400 transition-colors cursor-pointer"
+                    className="text-[11px] text-[var(--app-muted)] hover:text-red-500 transition-colors cursor-pointer"
                   >
                     清空记录
                   </button>
@@ -470,29 +451,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
               </div>
 
               {store.auditLogs.length === 0 ? (
-                <div className="py-6 text-center text-xs text-zinc-500">暂无任何高危触发审计记录</div>
+                <div className="py-6 text-center text-xs text-[var(--app-muted)]">暂无任何高危触发审计记录</div>
               ) : (
                 <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
                   {store.auditLogs.map((log) => (
                     <div
                       key={log.id}
-                      className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950 p-2.5 text-xs"
+                      className="flex items-center justify-between rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] p-2.5 text-xs"
                     >
                       <div className="flex items-center gap-2">
-                        <Clock className="h-3.5 w-3.5 text-zinc-500" />
-                        <span className="text-zinc-400 text-[11px]">
+                        <Clock className="h-3.5 w-3.5 text-[var(--app-muted)]" />
+                        <span className="text-[var(--app-muted)] text-[11px]">
                           {new Date(log.timestamp).toLocaleTimeString()}
                         </span>
-                        <span className="font-semibold text-red-400">{log.patternName}</span>
-                        <code className="rounded bg-red-950/40 px-1.5 py-0.5 text-red-300 font-mono text-[11px]">
+                        <span className="font-semibold text-red-500">{log.patternName}</span>
+                        <code className="rounded bg-red-500/10 px-1.5 py-0.5 text-red-500 font-mono text-[11px]">
                           {log.command}
                         </code>
                       </div>
                       <span
                         className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                           log.action === "intercepted_cancelled"
-                            ? "bg-emerald-500/10 text-emerald-400"
-                            : "bg-red-500/10 text-red-400"
+                            ? "bg-emerald-500/10 text-emerald-500"
+                            : "bg-red-500/10 text-red-500"
                         }`}
                       >
                         {log.action === "intercepted_cancelled" ? "已拦截撤回" : "强行发送"}

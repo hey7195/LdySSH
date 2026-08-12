@@ -1846,7 +1846,7 @@ describe("command library", () => {
 
     fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
     fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
-    await screen.findByTestId("terminal-shell");
+    await waitFor(() => expect(terminalMock.options.length).toBeGreaterThan(0));
 
     expect(terminalMock.options.at(-1)).toMatchObject({
       allowProposedApi: true,
