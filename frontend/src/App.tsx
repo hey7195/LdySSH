@@ -4836,14 +4836,14 @@ function TerminalCommandSidebar({
                 <button
                   key={folder.id}
                   className={cn(
-                    "flex h-7 flex-1 min-w-[85px] items-center justify-between rounded-full border px-3 text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
+                    "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-extrabold transition-all duration-200 cursor-pointer select-none shadow-2xs",
                     active
                       ? "border-emerald-500 bg-emerald-600 text-white shadow-sm shadow-emerald-500/20"
                       : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:border-emerald-500/50 hover:text-emerald-500"
                   )}
                   onClick={() => onActiveFolderChange(folder.id)}
                 >
-                  <span className="truncate mr-1 font-extrabold">{folder.name}</span>
+                  <span className="truncate font-extrabold">{folder.name}</span>
                   <span className={cn("rounded-full px-1.5 py-0.2 font-mono text-[9px] font-extrabold shrink-0", active ? "bg-white/25 text-white" : "bg-[var(--fill-2)] text-[var(--app-muted)]")}>
                     {folder.commands.length}
                   </span>
