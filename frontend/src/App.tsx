@@ -913,14 +913,18 @@ export function App() {
     setRemoteEditorOpen(true);
     setRemoteEditorLoading(true);
     try {
-      if (window.pywebview?.api?.read_sftp_file && activeSession) {
-        const res = (await window.pywebview.api.read_sftp_file(activeSession.id, filePath)) as { content?: string };
-        setRemoteEditorContent(res?.content || `# ${fileName} (文件为空)\n`);
+      if (activeSession?.id) {
+        const res = await nativeBridge.readFileContent(activeSession.id, filePath);
+        if (res.success && typeof res.content === "string") {
+          setRemoteEditorContent(res.content);
+        } else {
+          setRemoteEditorContent(`# 无法读取文件 ${fileName}\n# 错误: ${res.error || "文件不存在或无读取权限"}\n`);
+        }
       } else {
         setRemoteEditorContent(`# 远程文件在线编辑器 (${fileName})\n# 路径: ${filePath}\n# 您可以在此修改配置，按 Ctrl+S 将自动保存写回远程服务器\n\nPORT=8080\nDEBUG=false\nENV=production\nLOG_LEVEL=info\n`);
       }
-    } catch {
-      setRemoteEditorContent("# 读取远程文件文本失败");
+    } catch (err: any) {
+      setRemoteEditorContent(`# 读取远程文件发生异常: ${err?.message || "网络断开"}`);
     } finally {
       setRemoteEditorLoading(false);
     }
@@ -928,9 +932,9 @@ export function App() {
 
   const handleSaveRemoteFile = async (filePath: string, content: string): Promise<boolean> => {
     try {
-      if (window.pywebview?.api?.write_sftp_file && activeSession) {
-        const res = (await window.pywebview.api.write_sftp_file(activeSession.id, filePath, content)) as { success?: boolean };
-        return res?.success !== false;
+      if (activeSession?.id) {
+        const res = await nativeBridge.uploadFileContent(activeSession.id, content, filePath);
+        return res.success;
       }
       return true;
     } catch {
