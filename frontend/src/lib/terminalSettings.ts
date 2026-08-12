@@ -1,6 +1,96 @@
 export type ThemeMode = "light" | "dark" | "nordic";
 export type TerminalThemeMode = "light" | "dark" | "nordic";
 
+export interface TerminalAppearance {
+  englishFont: string;
+  chineseFont: string;
+  fontSize: number;
+  foreground: string;
+  background: string;
+}
+
+export interface TerminalFontOption {
+  id: string;
+  name: string;
+  value: string;
+  family: string;
+}
+
+export const terminalEnglishFonts: TerminalFontOption[] = [
+  { id: "Consola.ttf", name: "Consola.ttf", value: "Consola.ttf", family: "Consolas" },
+  { id: "DejaVuSansMono-Bold.ttf", name: "DejaVuSansMono-Bold.ttf", value: "DejaVuSansMono-Bold.ttf", family: "DejaVu Sans Mono" },
+  { id: "DejaVuSansMono.ttf", name: "DejaVuSansMono.ttf", value: "DejaVuSansMono.ttf", family: "DejaVu Sans Mono" },
+  { id: "IBMPlexMono-Bold.ttf", name: "IBMPlexMono-Bold.ttf", value: "IBMPlexMono-Bold.ttf", family: "IBM Plex Mono" },
+  { id: "IBMPlexMono-Medium.ttf", name: "IBMPlexMono-Medium.ttf", value: "IBMPlexMono-Medium.ttf", family: "IBM Plex Mono" },
+  { id: "IBMPlexMono-Regular.ttf", name: "IBMPlexMono-Regular.ttf", value: "IBMPlexMono-Regular.ttf", family: "IBM Plex Mono" },
+  { id: "Inconsolata.ttf", name: "Inconsolata.ttf", value: "Inconsolata.ttf", family: "Inconsolata" },
+  { id: "JetBrainsMono.ttf", name: "JetBrainsMono.ttf", value: "JetBrainsMono.ttf", family: "JetBrains Mono" },
+  { id: "NanumGothicCoding-Bold.ttf", name: "NanumGothicCoding-Bold.ttf", value: "NanumGothicCoding-Bold.ttf", family: "NanumGothicCoding" },
+  { id: "NanumGothicCoding-Regular.ttf", name: "NanumGothicCoding-Regular.ttf", value: "NanumGothicCoding-Regular.ttf", family: "NanumGothicCoding" },
+  { id: "NotoSansMono.ttf", name: "NotoSansMono.ttf", value: "NotoSansMono.ttf", family: "Noto Sans Mono" },
+  { id: "NovaMono-Regular.ttf", name: "NovaMono-Regular.ttf", value: "NovaMono-Regular.ttf", family: "Nova Mono" },
+  { id: "PTMono-Regular.ttf", name: "PTMono-Regular.ttf", value: "PTMono-Regular.ttf", family: "PT Mono" },
+  { id: "RobotoMono.ttf", name: "RobotoMono.ttf", value: "RobotoMono.ttf", family: "Roboto Mono" },
+  { id: "ShareTechMono-Regular.ttf", name: "ShareTechMono-Regular.ttf", value: "ShareTechMono-Regular.ttf", family: "Share Tech Mono" }
+];
+
+export const terminalChineseFonts: TerminalFontOption[] = [
+  { id: "仿宋", name: "仿宋", value: "仿宋", family: "FangSong" },
+  { id: "华文中宋", name: "华文中宋", value: "华文中宋", family: "STZhongsong" },
+  { id: "华文仿宋", name: "华文仿宋", value: "华文仿宋", family: "STFangsong" },
+  { id: "华文宋体", name: "华文宋体", value: "华文宋体", family: "STSong" },
+  { id: "华文楷体", name: "华文楷体", value: "华文楷体", family: "STKaiti" },
+  { id: "华文细黑", name: "华文细黑", value: "华文细黑", family: "STXihei" },
+  { id: "宋体", name: "宋体", value: "宋体", family: "SimSun" },
+  { id: "幼圆", name: "幼圆", value: "幼圆", family: "YouYuan" },
+  { id: "微软雅黑", name: "微软雅黑", value: "微软雅黑", family: "Microsoft YaHei" },
+  { id: "微软雅黑 Light", name: "微软雅黑 Light", value: "微软雅黑 Light", family: "Microsoft YaHei Light" },
+  { id: "思源黑体 CN Normal", name: "思源黑体 CN Normal", value: "思源黑体 CN Normal", family: "Source Han Sans CN" },
+  { id: "新宋体", name: "新宋体", value: "新宋体", family: "NSimSun" },
+  { id: "楷体", name: "楷体", value: "楷体", family: "KaiTi" },
+  { id: "等线", name: "等线", value: "等线", family: "DengXian" },
+  { id: "等线 Light", name: "等线 Light", value: "等线 Light", family: "DengXian Light" }
+];
+
+export function resolveTerminalFont(options: TerminalFontOption[], value: string, defaultValue: string) {
+  return options.find((option) => option.value === value) || options.find((option) => option.value === defaultValue) || options[0];
+}
+
+export function buildTerminalFontFamily(englishFontFamily: string, chineseFontFamily: string) {
+  const fonts = [englishFontFamily, "Consolas", "Courier New", chineseFontFamily, "Microsoft YaHei", "monospace"];
+  const seen = new Set<string>();
+  return fonts
+    .map((font) => font.trim())
+    .filter((font) => {
+      const key = font.toLowerCase();
+      if (!font || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(", ");
+}
+
+export const defaultTerminalAppearance: TerminalAppearance = {
+  englishFont: "JetBrainsMono.ttf",
+  chineseFont: "微软雅黑",
+  fontSize: 13,
+  foreground: "",
+  background: ""
+};
+
+export function getTerminalAppearance(appearance?: TerminalAppearance) {
+  const englishFont = resolveTerminalFont(terminalEnglishFonts, appearance?.englishFont || "", defaultTerminalAppearance.englishFont);
+  const chineseFont = resolveTerminalFont(terminalChineseFonts, appearance?.chineseFont || "", defaultTerminalAppearance.chineseFont);
+  return {
+    englishFont: englishFont.value,
+    chineseFont: chineseFont.value,
+    fontFamily: buildTerminalFontFamily(englishFont.family, chineseFont.family),
+    fontSize: Number.isFinite(appearance?.fontSize) ? (appearance?.fontSize as number) : defaultTerminalAppearance.fontSize,
+    foreground: appearance?.foreground,
+    background: appearance?.background
+  };
+}
+
 export interface HighlightRule {
   id: string;
   name: string;

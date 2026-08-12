@@ -559,9 +559,44 @@ export interface DangerousCommandInfo {
   warningText?: string;
 }
 
-export function checkDangerousCommand(command: string): DangerousCommandInfo {
+export interface CustomDangerousRule {
+  id: string;
+  name: string;
+  pattern: string;
+  warningText: string;
+  enabled: boolean;
+}
+
+export interface AuditLogRecord {
+  id: string;
+  timestamp: number;
+  command: string;
+  patternName: string;
+  warningText: string;
+  action: "intercepted_cancelled" | "intercepted_force_sent";
+  hostTitle?: string;
+}
+
+export function checkDangerousCommand(command: string, customRules: CustomDangerousRule[] = []): DangerousCommandInfo {
   const clean = command.trim();
   if (!clean) return { isDangerous: false };
+
+  // 用户自定义高危规则优先审查
+  for (const rule of customRules) {
+    if (!rule.enabled || !rule.pattern) continue;
+    try {
+      const reg = new RegExp(rule.pattern, "i");
+      if (reg.test(clean)) {
+        return {
+          isDangerous: true,
+          patternName: rule.name || "自定义高危拦截规则",
+          warningText: rule.warningText || `匹配自定义拦截规则: ${rule.pattern}`
+        };
+      }
+    } catch {
+      // 忽略非法正则表达式
+    }
+  }
 
   // 1. Fork 炸弹特例识别
   if (/:{\s*:\|:&\s*};:/.test(clean.replace(/\s+/g, ""))) {
