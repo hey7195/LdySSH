@@ -10,7 +10,9 @@ const DEFAULT_IMPORT_FOLDER = "导入命令";
 const COMMAND_KEYS = ["command", "cmd", "commandText", "script", "shell", "content"];
 const NAME_KEYS = ["name", "title", "label"];
 const DESCRIPTION_KEYS = ["description", "desc", "remark", "memo"];
-const PARAMETER_PATTERN = /\[p#(\d+)(?:\s+([^\]]+))?\]/g;
+const FINAL_SHELL_PARAM_PATTERN = /\[p#(\d+)(?:\s+([^\]]+))?\]/g;
+const SHELL_VAR_PARAM_PATTERN = /\$\{([a-zA-Z0-9_\u4e00-\u9fa5]+)\}/g;
+const ANGLE_VAR_PARAM_PATTERN = /<([a-zA-Z0-9_\u4e00-\u9fa5]+)>/g;
 
 export interface CommandParameter {
   key: string;
@@ -21,21 +23,71 @@ export interface CommandParameter {
 export function extractCommandParameters(command: string): CommandParameter[] {
   const parameters: CommandParameter[] = [];
   const seen = new Set<string>();
-  for (const match of command.matchAll(PARAMETER_PATTERN)) {
+
+  // 1. FinalShell 经典 [p#1 参数名]
+  for (const match of command.matchAll(FINAL_SHELL_PARAM_PATTERN)) {
     const key = `p#${match[1]}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    parameters.push({
-      key,
-      name: (match[2] || key).trim(),
-      token: match[0]
-    });
+    if (!seen.has(key)) {
+      seen.add(key);
+      parameters.push({
+        key,
+        name: (match[2] || key).trim(),
+        token: match[0]
+      });
+    }
   }
+
+  // 2. Shell 常用变量 ${PORT}, ${IP}, ${端口}
+  for (const match of command.matchAll(SHELL_VAR_PARAM_PATTERN)) {
+    const name = match[1].trim();
+    const key = `var_${name}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      parameters.push({
+        key,
+        name,
+        token: match[0]
+      });
+    }
+  }
+
+  // 3. 尖括号占位符 <PORT>, <IP>
+  for (const match of command.matchAll(ANGLE_VAR_PARAM_PATTERN)) {
+    const name = match[1].trim();
+    if (["br", "p", "div", "span", "a", "b", "i", "code"].includes(name.toLowerCase())) continue;
+    const key = `angle_${name}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      parameters.push({
+        key,
+        name,
+        token: match[0]
+      });
+    }
+  }
+
   return parameters;
 }
 
 export function fillCommandParameters(command: string, values: Record<string, string>) {
-  return command.replace(PARAMETER_PATTERN, (_token, index: string) => values[`p#${index}`]?.trim() || "");
+  let res = command;
+  // 1. 替换 FinalShell [p#1]
+  res = res.replace(FINAL_SHELL_PARAM_PATTERN, (_token, index: string) => values[`p#${index}`]?.trim() || "");
+
+  // 2. 替换 ${VAR}
+  res = res.replace(SHELL_VAR_PARAM_PATTERN, (token, name: string) => {
+    const val = values[`var_${name}`]?.trim();
+    return val !== undefined && val !== "" ? val : token;
+  });
+
+  // 3. 替换 <VAR>
+  res = res.replace(ANGLE_VAR_PARAM_PATTERN, (token, name: string) => {
+    if (["br", "p", "div", "span", "a", "b", "i", "code"].includes(name.toLowerCase())) return token;
+    const val = values[`angle_${name}`]?.trim();
+    return val !== undefined && val !== "" ? val : token;
+  });
+
+  return res;
 }
 
 export function serializeCommandLibraryExport(folders: CommandFolder[]) {

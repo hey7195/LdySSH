@@ -76,4 +76,22 @@ describe("command library import/export", () => {
     expect(extractCommandParameters(command)).toEqual([{ key: "p#1", name: "参数名", token: "[p#1 参数名]" }]);
     expect(fillCommandParameters(command, { "p#1": "34285" })).toBe("sudo iptables -t nat -nL | grep 34285 && echo 34285");
   });
+
+  test("extracts and fills shell ${VAR} and <VAR> placeholders", () => {
+    const command = "ping ${IP} -p ${PORT} -f <FILE>";
+
+    const extracted = extractCommandParameters(command);
+    expect(extracted).toEqual([
+      { key: "var_IP", name: "IP", token: "${IP}" },
+      { key: "var_PORT", name: "PORT", token: "${PORT}" },
+      { key: "angle_FILE", name: "FILE", token: "<FILE>" }
+    ]);
+
+    const filled = fillCommandParameters(command, {
+      var_IP: "1.1.1.1",
+      var_PORT: "8080",
+      angle_FILE: "test.txt"
+    });
+    expect(filled).toBe("ping 1.1.1.1 -p 8080 -f test.txt");
+  });
 });
