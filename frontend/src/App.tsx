@@ -3791,18 +3791,25 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
                   {suggestion.description || suggestion.label || suggestion.source}
                 </span>
               </div>
-              {count > 0 && (
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-0.2 text-[9px] font-extrabold shrink-0 border font-mono",
-                    isActive
-                      ? "bg-white/20 text-white border-white/30"
-                      : "bg-amber-500/10 text-amber-500 border-amber-500/30"
-                  )}
-                >
-                  🔥 {count}
-                </span>
-              )}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {count > 0 && (
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.2 text-[9px] font-extrabold shrink-0 border font-mono",
+                      isActive
+                        ? "bg-white/20 text-white border-white/30"
+                        : "bg-amber-500/10 text-amber-500 border-amber-500/30"
+                    )}
+                  >
+                    🔥 {count}
+                  </span>
+                )}
+                {isActive && (
+                  <span className="rounded-md bg-white/20 border border-white/30 px-1.5 py-0.2 text-[9px] font-extrabold font-mono text-white animate-in fade-in duration-100">
+                    ↵ 选定
+                  </span>
+                )}
+              </div>
             </button>
           );
         })}
