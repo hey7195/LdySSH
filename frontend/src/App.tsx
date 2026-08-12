@@ -3389,6 +3389,21 @@ function TerminalSurface({
   commandSuggestionSourcesRef.current = commandSuggestionSources;
   commandSuggestionApplyKeyRef.current = commandSuggestionApplyKey;
   commandSuggestionCustomApplyKeyRef.current = commandSuggestionCustomApplyKey;
+
+  function sendInputToSessions(targetSessionId: string, text: string) {
+    if (!text || !targetSessionId) return;
+    const b64Data = bytesToBase64(new TextEncoder().encode(text));
+    if (useAppStore.getState().commandBroadcastingEnabled && sessions && sessions.length > 0) {
+      sessions.forEach((s) => {
+        if (s.connected || s.status === "connected") {
+          void nativeBridge.sendInputBase64(s.id, b64Data);
+        }
+      });
+    } else {
+      void nativeBridge.sendInputBase64(targetSessionId, b64Data);
+    }
+  }
+
   visibleRef.current = visible;
 
   function focusTerminal() {
@@ -3502,7 +3517,6 @@ function TerminalSurface({
         draft = "";
         continue;
       }
-      if (char < " ") continue;
       draft += char;
     }
 
@@ -3549,7 +3563,7 @@ function TerminalSurface({
       commandInputRef.current = "";
       setCommandSuggestionList([]);
       if (sessionId && eraseDraft) {
-        void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(eraseDraft)));
+        sendInputToSessions(sessionId, eraseDraft);
       }
       onShortcutParameterRequest(suggestion.shortcut);
       return;
@@ -3562,7 +3576,7 @@ function TerminalSurface({
     commandInputRef.current = suggestion.command;
     setCommandSuggestionList([]);
     if (!sessionId || !suffix) return;
-    void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(suffix)));
+    sendInputToSessions(sessionId, suffix);
   }
 
   function isCommandSuggestionApplyKey(event: globalThis.KeyboardEvent) {
