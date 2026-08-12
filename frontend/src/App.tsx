@@ -3735,33 +3735,33 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
     <div
       data-testid="command-suggestion-panel"
       role="listbox"
-      className="fixed z-30 flex min-w-0 flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg"
+      className="fixed z-30 flex min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)]/95 backdrop-blur-xl shadow-2xl animate-in zoom-in-95 duration-100 select-none"
       style={{ left: layout.left, bottom: layout.bottom, width: layout.width, height: layout.height }}
     >
-      <div className="flex h-5 shrink-0 items-center justify-between border-b border-slate-100 bg-slate-50 px-2 select-none">
+      <div className="flex h-6 shrink-0 items-center justify-between border-b border-[var(--app-line)] bg-[var(--panel-bg)]/90 px-3 select-none">
         <button
           type="button"
           aria-label="移动命令提示"
-          className="flex items-center gap-1 min-w-0 flex-1 h-full cursor-move text-[10px] font-bold text-slate-500 hover:text-slate-800 text-left bg-transparent border-0 p-0"
+          className="flex items-center gap-1.5 min-w-0 flex-1 h-full cursor-move text-[11px] font-extrabold text-[var(--app-text)] hover:text-emerald-500 text-left bg-transparent border-0 p-0 transition-colors"
           onMouseDown={startMove}
         >
-          <GripHorizontal className="h-3 w-3 text-slate-400 shrink-0" />
+          <GripHorizontal className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
           <span className="truncate">提示面板 (可拖拽)</span>
         </button>
         <button
           type="button"
           title="复位提示框到默认位置"
           aria-label="重置提示面板位置"
-          className="flex h-4 w-4 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700 cursor-pointer shrink-0"
+          className="flex h-4.5 w-4.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer shrink-0 transition-colors"
           onClick={(e) => {
             e.stopPropagation();
             updateLayout(defaultCommandSuggestionPanelLayout);
           }}
         >
-          <RotateCcw className="h-2.5 w-2.5" />
+          <RotateCcw className="h-3 w-3" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-1 pr-3 space-y-0.5">
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5 pr-2.5 space-y-1">
         {view.suggestions.map((suggestion, index) => {
           const count = getCommandUsageFrequency(suggestion.command);
           const isActive = index === view.activeIndex;
@@ -3775,10 +3775,10 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
               aria-selected={isActive}
               title={suggestion.command}
               className={cn(
-                "min-h-10 w-full min-w-0 shrink-0 rounded-lg px-2.5 py-1 text-left transition-colors flex items-center justify-between gap-2 border",
+                "min-h-10 w-full min-w-0 shrink-0 rounded-xl px-3 py-1.5 text-left transition-all flex items-center justify-between gap-2 border cursor-pointer",
                 isActive
-                  ? "bg-emerald-600 text-white font-extrabold shadow-2xs border-emerald-600"
-                  : "text-slate-700 hover:bg-slate-100 border-transparent dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  ? "bg-emerald-600 text-white font-extrabold shadow-sm shadow-emerald-500/20 border-emerald-500"
+                  : "text-[var(--app-text)] border-transparent hover:bg-[var(--fill-1)] hover:border-[var(--app-line)]"
               )}
               onMouseDown={(event) => {
                 event.preventDefault();
@@ -3786,18 +3786,18 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
               }}
             >
               <div className="min-w-0 flex-1">
-                <span className="block truncate text-[11px] font-bold font-mono">{suggestion.command}</span>
-                <span className={cn("mt-0.5 block truncate text-[10px]", isActive ? "text-white/80" : "text-slate-400 dark:text-zinc-400")}>
+                <span className="block truncate text-[11px] font-bold font-mono tracking-tight">{suggestion.command}</span>
+                <span className={cn("mt-0.5 block truncate text-[10px]", isActive ? "text-white/80" : "text-[var(--app-muted)]")}>
                   {suggestion.description || suggestion.label || suggestion.source}
                 </span>
               </div>
               {count > 0 && (
                 <span
                   className={cn(
-                    "rounded-full px-1.5 py-0.2 text-[9px] font-extrabold shrink-0 border font-mono",
+                    "rounded-full px-2 py-0.2 text-[9px] font-extrabold shrink-0 border font-mono",
                     isActive
                       ? "bg-white/20 text-white border-white/30"
-                      : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                      : "bg-amber-500/10 text-amber-500 border-amber-500/30"
                   )}
                 >
                   🔥 {count}
