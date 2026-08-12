@@ -104,8 +104,8 @@ export const nativeBridge = {
   },
   readFileContent(sessionId: string, remotePath: string) {
     return callNative<{ success: boolean; content?: string; error?: string }>(
-      "read_file_content",
-      { success: false, error: "Read file content bridge unavailable" },
+      "download_file_content",
+      { success: false, error: "Download file content bridge unavailable" },
       sessionId,
       remotePath
     );

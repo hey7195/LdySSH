@@ -2337,7 +2337,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = res.dump();
         }
-        else if (action == "download_file_content") {
+        else if (action == "download_file_content" || action == "read_file_content") {
             std::string sessId = args[0].get<std::string>();
             std::string path = args[1].get<std::string>();
             auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
