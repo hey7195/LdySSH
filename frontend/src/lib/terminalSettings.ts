@@ -17,6 +17,7 @@ export interface HighlightRule {
 
 export const THEMES: ThemeMode[] = ["dark", "nordic", "light"];
 export const TERMINAL_THEMES: TerminalThemeMode[] = ["dark", "nordic", "light"];
+export const DEFAULT_THEME: ThemeMode = "dark";
 export const DEFAULT_TERMINAL_THEME: TerminalThemeMode = "dark";
 
 export const DEFAULT_HIGHLIGHT_RULES: HighlightRule[] = [

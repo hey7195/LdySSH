@@ -81,6 +81,7 @@ import {
 } from "./lib/bridge";
 import {
   DEFAULT_HIGHLIGHT_RULES,
+  DEFAULT_THEME,
   DEFAULT_TERMINAL_THEME,
   THEMES,
   TERMINAL_THEMES,
@@ -596,12 +597,18 @@ const terminalSearchOptions: ISearchOptions = {
 
 function loadStoredTheme(): ThemeMode {
   const value = window.localStorage.getItem(storageKeys.theme);
-  return value === "dark" ? "dark" : "light";
+  if (value === "light" || value === "nordic" || value === "dark") {
+    return value;
+  }
+  return DEFAULT_THEME;
 }
 
 function loadStoredTerminalTheme(): TerminalThemeMode {
   const value = window.localStorage.getItem(storageKeys.terminalTheme);
-  return value === "light" ? "light" : DEFAULT_TERMINAL_THEME;
+  if (value === "light" || value === "nordic" || value === "dark") {
+    return value;
+  }
+  return DEFAULT_TERMINAL_THEME;
 }
 
 function loadStoredTerminalBackgroundImage() {

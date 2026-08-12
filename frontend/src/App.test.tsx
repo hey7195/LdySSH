@@ -860,10 +860,10 @@ describe("AI tools panel", () => {
     expect(screen.getByText(/复制以 ws:\/\/ 或 wss:\/\//)).toBeInTheDocument();
   });
 
-  test("keeps the app light while defaulting the terminal to a dark theme", async () => {
+  test("defaults both the app and terminal to dark themes", async () => {
     render(<App />);
 
-    expect(screen.getByTestId("app-root")).toHaveAttribute("data-theme", "light");
+    expect(screen.getByTestId("app-root")).toHaveAttribute("data-theme", "dark");
     fireEvent.click(screen.getByTitle("本地终端"));
     await waitFor(() => {
       expect(screen.getAllByRole("button").some((button) => button.textContent?.includes("Local Shell"))).toBe(true);
