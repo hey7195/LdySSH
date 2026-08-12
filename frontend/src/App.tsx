@@ -8888,7 +8888,7 @@ function CommandPaletteModal({
             <input
               autoFocus
               className="w-full bg-transparent text-sm font-extrabold text-[var(--app-text)] placeholder:text-[var(--app-muted)] focus:outline-none"
-              placeholder="搜索主机、快捷指令、应用功能或切换主题 (Ctrl+K)..."
+              placeholder="搜索 350+ Linux 指令、主机服务器、快捷工具与参数 (Ctrl+K)..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
