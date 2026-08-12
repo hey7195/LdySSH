@@ -21,6 +21,7 @@ import { useAppStore } from "../../store/useAppStore";
 import {
   THEMES,
   TERMINAL_THEMES,
+  PRESET_WALLPAPERS,
   terminalEnglishFonts,
   terminalChineseFonts,
   getTerminalAppearance,
@@ -284,6 +285,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                       onChange={handleBackgroundUpload}
                     />
                   </label>
+                </div>
+
+                {/* 4 款极客预设壁纸快捷选择卡 */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-extrabold text-[var(--app-muted)]">极客预设壁纸 (点击一键设置):</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {PRESET_WALLPAPERS.filter((p) => p.url).map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => setTerminalBackgroundImage(preset.url)}
+                        className={`group relative h-14 w-full overflow-hidden rounded-xl border transition-all cursor-pointer select-none ${
+                          terminalBackgroundImage === preset.url
+                            ? "border-purple-500 ring-2 ring-purple-500/40"
+                            : "border-[var(--app-line)] hover:border-purple-500/60"
+                        }`}
+                      >
+                        <img src={preset.url} alt={preset.name} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                        <div className="absolute inset-0 bg-black/50 group-hover:bg-black/30 transition-colors" />
+                        <div className="absolute inset-0 flex items-center justify-center p-1 text-center">
+                          <span className="text-[11px] font-extrabold text-white drop-shadow-md">{preset.name}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {terminalBackgroundImage ? (
