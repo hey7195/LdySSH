@@ -4687,6 +4687,7 @@ function TerminalCommandSidebar({
   const [newCmdName, setNewCmdName] = useState("");
   const [newCmdStr, setNewCmdStr] = useState("");
   const [newCmdDesc, setNewCmdDesc] = useState("");
+  const [addCmdCr, setAddCmdCr] = useState(true);
 
   const keyword = query.trim().toLowerCase();
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
@@ -4762,9 +4763,13 @@ function TerminalCommandSidebar({
     e.preventDefault();
     if (!newCmdName.trim() || !newCmdStr.trim()) return;
     const targetFolderId = activeFolder?.id || folders[0]?.id || "";
+    let finalCmdStr = newCmdStr.trim();
+    if (addCmdCr && !finalCmdStr.endsWith("\n")) {
+      finalCmdStr += "\n";
+    }
     onSaveCommand?.(targetFolderId, {
       name: newCmdName.trim(),
-      command: newCmdStr.trim(),
+      command: finalCmdStr,
       description: newCmdDesc.trim()
     });
     setNewCmdName("");
@@ -5028,59 +5033,96 @@ function TerminalCommandSidebar({
           </div>
         )}
 
-        {/* Add Command Modal */}
+        {/* Add Command Modal (1:1 FinalShell 经典动态参数生成弹窗) */}
         {addCmdOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in select-none">
             <form onSubmit={handleConfirmAddCmd} className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl space-y-4">
-              <h3 className="font-bold text-sm text-zinc-100 flex items-center gap-2">
-                <Plus className="h-4 w-4 text-emerald-400" /> 新建快捷指令 (写入 [{activeFolder?.name || "默认分类"}])
-              </h3>
+              <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
+                <h3 className="font-extrabold text-sm text-zinc-100 flex items-center gap-2">
+                  <Plus className="h-4 w-4 text-emerald-400" />
+                  <span>添加命令</span>
+                  <span className="text-[11px] text-zinc-500 font-normal">({activeFolder?.name || "默认分类"})</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setAddCmdOpen(false)}
+                  className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
               <div className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-zinc-400 mb-1 font-semibold">指令显示名称</label>
+                  <label className="block text-zinc-300 mb-1 font-extrabold">名称</label>
                   <input
                     type="text"
                     autoFocus
                     value={newCmdName}
                     onChange={(e) => setNewCmdName(e.target.value)}
-                    placeholder="例如: 检查系统负载 / 重启服务"
-                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+                    placeholder="例如: 检查系统负载 / 过滤端口"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
+
                 <div>
-                  <label className="block text-zinc-400 mb-1 font-semibold">Shell 脚本/指令</label>
+                  <label className="block text-zinc-300 mb-1 font-extrabold">命令</label>
                   <textarea
-                    rows={3}
+                    rows={4}
                     value={newCmdStr}
                     onChange={(e) => setNewCmdStr(e.target.value)}
                     placeholder="例如: top -b -n 1 | head -n 20"
-                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-100 font-mono text-[11px] focus:border-emerald-500 focus:outline-none"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-emerald-400 font-mono text-[11px] leading-relaxed focus:border-emerald-500 focus:outline-none shadow-inner"
                   />
                 </div>
-                <div>
-                  <label className="block text-zinc-400 mb-1 font-semibold">备注说明 (选填)</label>
+
+                {/* FinalShell 动态参数快捷插入按钮行 */}
+                <div className="space-y-1.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
+                  <div className="text-[11px] font-extrabold text-zinc-400">插入参数(动态生成命令):</div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {[1, 2, 3, 4, 5].map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => {
+                          setNewCmdStr((prev) => `${prev}[p#${num} 参数${num}]`);
+                        }}
+                        className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1 text-xs font-extrabold text-zinc-200 hover:border-emerald-500 hover:bg-emerald-500/20 hover:text-emerald-400 transition-all cursor-pointer shadow-2xs active:scale-95"
+                      >
+                        参数{num}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 末尾添加回车符 CR */}
+                <div className="flex items-center gap-2 pt-0.5">
                   <input
-                    type="text"
-                    value={newCmdDesc}
-                    onChange={(e) => setNewCmdDesc(e.target.value)}
-                    placeholder="选填提示信息..."
-                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+                    type="checkbox"
+                    id="addCrCheckbox"
+                    checked={addCmdCr}
+                    onChange={(e) => setAddCmdCr(e.target.checked)}
+                    className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
                   />
+                  <label htmlFor="addCrCheckbox" className="text-xs font-extrabold text-zinc-300 cursor-pointer select-none">
+                    末尾添加回车符 CR
+                  </label>
                 </div>
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
                 <button
                   type="button"
                   onClick={() => setAddCmdOpen(false)}
-                  className="rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-1.5 text-xs font-bold text-zinc-400 hover:text-zinc-200"
+                  className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-extrabold text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 text-xs font-bold text-white shadow-md shadow-emerald-600/20"
+                  className="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-5 py-2 text-xs font-extrabold text-white shadow-lg shadow-emerald-600/25 transition-all cursor-pointer"
                 >
-                  保存快捷指令
+                  确定
                 </button>
               </div>
             </form>
