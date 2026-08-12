@@ -486,6 +486,60 @@ function toAnsiPrefix(rule: HighlightRule) {
   return codes.length ? `\x1b[${codes.join(";")}m` : "";
 }
 
+export function colorToRgbParts(color: string) {
+  const match = /^#?([0-9a-f]{6})$/i.exec((color || "").trim());
+  if (!match) return "10, 10, 12";
+  const hex = match[1];
+  return [
+    Number.parseInt(hex.slice(0, 2), 16),
+    Number.parseInt(hex.slice(2, 4), 16),
+    Number.parseInt(hex.slice(4, 6), 16)
+  ].join(", ");
+}
+
+export function buildTerminalBackgroundImage(backgroundImage: string, backgroundColor: string, overlayAlpha: number) {
+  if (!backgroundImage) return undefined;
+  const rgb = colorToRgbParts(backgroundColor);
+  const cleanUrl = backgroundImage.trim().replace(/^url\((.*)\)$/i, "$1").replace(/^["']|["']$/g, "");
+  return `linear-gradient(rgba(${rgb}, ${overlayAlpha}), rgba(${rgb}, ${overlayAlpha})), url("${cleanUrl}")`;
+}
+
+export function compressWallpaperImage(file: File, maxWidth = 1920, maxHeight = 1080, quality = 0.85): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const src = e.target?.result as string;
+      if (!src) return resolve("");
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        if (height > maxHeight) {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return resolve(src);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => resolve(src);
+      img.src = src;
+    };
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
+}
+
 function parseHexColor(value: string) {
   const match = /^#?([0-9a-f]{6})$/i.exec(value.trim());
   if (!match) return null;

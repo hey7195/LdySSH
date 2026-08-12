@@ -13,7 +13,9 @@ import {
   Terminal,
   Pencil,
   Sun,
-  Sparkles
+  Sparkles,
+  Image as ImageIcon,
+  Upload
 } from "lucide-react";
 import { useAppStore } from "../../store/useAppStore";
 import {
@@ -22,6 +24,7 @@ import {
   terminalEnglishFonts,
   terminalChineseFonts,
   getTerminalAppearance,
+  compressWallpaperImage,
   type ThemeMode,
   type TerminalThemeMode,
   type HighlightRule,
@@ -131,16 +134,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
     setRuleWarning("");
   };
 
-  const handleBackgroundUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBackgroundUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setTerminalBackgroundImage(reader.result);
+    try {
+      const compressedDataUrl = await compressWallpaperImage(file);
+      if (compressedDataUrl) {
+        setTerminalBackgroundImage(compressedDataUrl);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error("Failed to process wallpaper image", err);
+    }
     e.currentTarget.value = "";
   };
 
@@ -154,12 +158,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
               偏好设置与个性化 (Settings)
             </h1>
             <p className="mt-1 text-xs text-zinc-400">
-              自定义外观主题、终端色彩字体、高危命令防护与正则高亮引擎。
+              自定义外观主题、终端色彩字体、壁纸背景、高危命令防护与正则高亮引擎。
             </p>
           </div>
           <button
             onClick={props.onClose}
-            className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
           >
             返回主页
           </button>
@@ -167,7 +171,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
 
         {/* 2-Column Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-[380px_minmax(0,1fr)] gap-6">
-          {/* 左栏：外观与高危防护 */}
+          {/* 左栏：外观与壁纸防护 */}
           <div className="space-y-6">
             {/* 主题选择 */}
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 space-y-4">
@@ -179,7 +183,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                   <button
                     key={t}
                     onClick={() => setTheme(t)}
-                    className={`rounded-xl border p-3 text-center text-xs transition-all ${
+                    className={`rounded-xl border p-3 text-center text-xs transition-all cursor-pointer ${
                       theme === t
                         ? "border-blue-500 bg-blue-500/10 font-bold text-blue-400"
                         : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700"
@@ -199,7 +203,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                     key={t}
                     data-testid={`terminal-theme-${t}`}
                     onClick={() => setTerminalTheme(t)}
-                    className={`rounded-xl border p-3 text-center text-xs transition-all ${
+                    className={`rounded-xl border p-3 text-center text-xs transition-all cursor-pointer ${
                       terminalTheme === t
                         ? "border-emerald-500 bg-emerald-500/10 font-bold text-emerald-400"
                         : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700"
@@ -275,11 +279,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                 </div>
               </div>
 
-              {/* 背景图上传 */}
-              <div className="pt-2 border-t border-zinc-800 space-y-2">
+              {/* 壁纸上传与实时预览卡片 */}
+              <div className="pt-2 border-t border-zinc-800 space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 transition-colors">
-                    上传壁纸
+                  <h4 className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
+                    <ImageIcon className="h-4 w-4 text-purple-400" /> 终端个性化壁纸
+                  </h4>
+                  <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-1 text-xs font-bold text-purple-300 hover:bg-purple-500/20 transition-colors">
+                    <Upload className="h-3.5 w-3.5" /> 上传壁纸
                     <input
                       data-testid="terminal-background-upload"
                       type="file"
@@ -288,31 +295,58 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                       onChange={handleBackgroundUpload}
                     />
                   </label>
-                  {terminalBackgroundImage && (
-                    <button
-                      onClick={() => setTerminalBackgroundImage("")}
-                      className="text-xs text-zinc-400 hover:text-red-400 transition-colors"
-                    >
-                      清除壁纸
-                    </button>
-                  )}
                 </div>
 
-                {terminalBackgroundImage && (
-                  <div className="space-y-1 pt-1">
-                    <div className="flex items-center justify-between text-xs text-zinc-400">
-                      <span>遮罩透明度</span>
-                      <span>{terminalBackgroundOverlay}%</span>
+                {terminalBackgroundImage ? (
+                  <div className="space-y-3 rounded-xl border border-purple-500/30 bg-zinc-950 p-3">
+                    {/* Live Image Preview Thumbnail Card */}
+                    <div className="relative h-28 w-full overflow-hidden rounded-lg border border-zinc-800 shadow-inner group">
+                      <img
+                        src={terminalBackgroundImage}
+                        alt="终端壁纸预览"
+                        className="h-full w-full object-cover"
+                      />
+                      {/* Live Tint Overlay */}
+                      <div
+                        className="absolute inset-0 transition-opacity"
+                        style={{
+                          backgroundColor: "#0a0a0c",
+                          opacity: terminalBackgroundOverlay / 100
+                        }}
+                      />
+                      <div className="absolute inset-0 flex flex-col justify-between p-2.5">
+                        <span className="self-start rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 backdrop-blur-md border border-emerald-500/30">
+                          ✓ 已成功生效终端壁纸
+                        </span>
+                        <button
+                          onClick={() => setTerminalBackgroundImage("")}
+                          className="self-end rounded-lg bg-red-600/80 px-2.5 py-1 text-[10px] font-bold text-white shadow-md hover:bg-red-600 transition-colors cursor-pointer"
+                        >
+                          清除壁纸
+                        </button>
+                      </div>
                     </div>
-                    <input
-                      aria-label="背景遮罩透明度"
-                      type="range"
-                      min={0}
-                      max={90}
-                      value={terminalBackgroundOverlay}
-                      onChange={(e) => setTerminalBackgroundOverlay(Number(e.target.value))}
-                      className="w-full h-2 rounded-lg bg-zinc-800 accent-blue-500 cursor-pointer"
-                    />
+
+                    {/* Opacity Slider */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs text-zinc-300">
+                        <span>遮罩纯色浓度 (调节壁纸显隐)</span>
+                        <span className="font-mono text-purple-400">{terminalBackgroundOverlay}%</span>
+                      </div>
+                      <input
+                        aria-label="背景遮罩透明度"
+                        type="range"
+                        min={0}
+                        max={90}
+                        value={terminalBackgroundOverlay}
+                        onChange={(e) => setTerminalBackgroundOverlay(Number(e.target.value))}
+                        className="w-full h-2 rounded-lg bg-zinc-800 accent-purple-500 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4 text-center text-xs text-zinc-500">
+                    未上传壁纸（点击右上角“上传壁纸”设置终端背景）
                   </div>
                 )}
               </div>
@@ -371,7 +405,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                 />
                 <button
                   type="submit"
-                  className="flex items-center justify-center gap-1 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500 transition-colors"
+                  className="flex items-center justify-center gap-1 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500 transition-colors cursor-pointer"
                 >
                   <Plus className="h-3.5 w-3.5" /> {editingHlId ? "保存" : "+ 添加"}
                 </button>
@@ -400,7 +434,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                       <button
                         onClick={() => handleEditHl(rule)}
                         aria-label={`编辑${rule.name}`}
-                        className="text-zinc-400 hover:text-blue-400 transition-colors p-1"
+                        className="text-zinc-400 hover:text-blue-400 transition-colors p-1 cursor-pointer"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
@@ -408,7 +442,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                         <button
                           onClick={() => deleteHighlightRule(rule.id)}
                           aria-label={`删除${rule.name}`}
-                          className="text-zinc-500 hover:text-red-400 transition-colors p-1"
+                          className="text-zinc-500 hover:text-red-400 transition-colors p-1 cursor-pointer"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -428,7 +462,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                 {store.auditLogs.length > 0 && (
                   <button
                     onClick={store.clearAuditLogs}
-                    className="text-[11px] text-zinc-400 hover:text-red-400 transition-colors"
+                    className="text-[11px] text-zinc-400 hover:text-red-400 transition-colors cursor-pointer"
                   >
                     清空记录
                   </button>

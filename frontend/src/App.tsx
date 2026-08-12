@@ -729,7 +729,8 @@ function colorToRgbParts(color: string) {
 function buildTerminalBackgroundImage(backgroundImage: string, backgroundColor: string, overlayAlpha: number) {
   if (!backgroundImage) return undefined;
   const rgb = colorToRgbParts(backgroundColor);
-  return `linear-gradient(rgba(${rgb}, ${overlayAlpha}), rgba(${rgb}, ${overlayAlpha})), url(${JSON.stringify(backgroundImage)})`;
+  const cleanUrl = backgroundImage.trim().replace(/^url\((.*)\)$/i, "$1").replace(/^["']|["']$/g, "");
+  return `linear-gradient(rgba(${rgb}, ${overlayAlpha}), rgba(${rgb}, ${overlayAlpha})), url("${cleanUrl}")`;
 }
 
 function loadStoredHighlightRules(): HighlightRule[] {
