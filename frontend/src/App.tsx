@@ -87,7 +87,7 @@ import { EbpfObserverPanel } from "./components/sidebar/EbpfObserverPanel";
 import { ClusterRunnerPanel } from "./components/sidebar/ClusterRunnerPanel";
 import { GitVisualizerPanel } from "./components/sidebar/GitVisualizerPanel";
 import { RUNOOB_LINUX_COMMAND_DATA, FLAT_RUNOOB_COMMANDS } from "./lib/runoobLinuxCommands";
-import { getShellSuggestion } from "./lib/terminalIntelliSense";
+import { getShellSuggestion, ALL_LINUX_COMMAND_NAMES } from "./lib/terminalIntelliSense";
 import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
 import { useAppStore } from "./store/useAppStore";
 import { Button, EmptyState, Input, Panel, Textarea } from "./components/ui";
@@ -8782,11 +8782,35 @@ function CommandPaletteModal({
       }
     }));
 
+  const linuxItems = keyword
+    ? ALL_LINUX_COMMAND_NAMES
+        .filter((cmd) => cmd.toLowerCase().includes(keyword))
+        .slice(0, 10)
+        .map((cmd) => {
+          const runoobInfo = FLAT_RUNOOB_COMMANDS.find((c) => c.name.toLowerCase() === cmd);
+          return {
+            id: `linux:${cmd}`,
+            category: "Linux 指令",
+            icon: "🐧",
+            title: cmd,
+            detail: runoobInfo ? `${runoobInfo.desc} [${runoobInfo.category}]` : `直接发送 $ ${cmd} 至当前活动终端`,
+            action: () => {
+              onSendCommand(cmd);
+              onOpenChange(false);
+            }
+          };
+        })
+    : [];
+
   const toolItems = [
     { id: "tool:ssh", category: "全局工具", icon: "🌐", title: "打开 SSH 会话工作台", detail: "切换到主机会话面板", action: () => { onNavigateTool("ssh"); onOpenChange(false); } },
     { id: "tool:local", category: "全局工具", icon: "💻", title: "新建 Local Shell 本地终端", detail: "基于 BusyBox 内置本地终端", action: () => { onCreateLocalSession(); onOpenChange(false); } },
     { id: "tool:cmd", category: "全局工具", icon: "📦", title: "打开 快捷命令库", detail: "管理与配置指令分类", action: () => { onNavigateTool("cmd"); onOpenChange(false); } },
     { id: "tool:monitor", category: "全局工具", icon: "📊", title: "打开 系统监控面板", detail: "实时推算硬件负载与进程", action: () => { onNavigateTool("monitor"); onOpenChange(false); } },
+    { id: "tool:serial", category: "全局工具", icon: "⚡", title: "打开 串口 TTY 调试面板", detail: "Linux /dev 串口与硬件调试", action: () => { onNavigateTool("serial"); onOpenChange(false); } },
+    { id: "tool:ebpf", category: "全局工具", icon: "🧬", title: "打开 eBPF 探针观察者", detail: "内核 VMA 内存映射与系统调用", action: () => { onNavigateTool("ebpf"); onOpenChange(false); } },
+    { id: "tool:cluster", category: "全局工具", icon: "🔄", title: "打开 多节点集群跑手", detail: "多服务器并发巡检与一键并行脚本", action: () => { onNavigateTool("cluster"); onOpenChange(false); } },
+    { id: "tool:git", category: "全局工具", icon: "🌱", title: "打开 Git 仓库结构可视化", detail: "分支 Commit 树与差异对比", action: () => { onNavigateTool("git"); onOpenChange(false); } },
     { id: "tool:browser", category: "全局工具", icon: "🌍", title: "打开 网页浏览器", detail: "访问路由器/容器后台", action: () => { onNavigateTool("browser"); onOpenChange(false); } },
     { id: "tool:settings", category: "全局工具", icon: "⚙️", title: "打开 应用设置", detail: "调整高亮规则与终端外观", action: () => { onNavigateTool("settings"); onOpenChange(false); } }
   ].filter((item) => !keyword || `${item.title} ${item.detail}`.toLowerCase().includes(keyword));
@@ -8796,7 +8820,7 @@ function CommandPaletteModal({
     { id: "theme:light", category: "外观主题", icon: "☀️", title: "切换为 日间晶透白 主题", detail: "高对比明亮 UI", action: () => { onSetTheme("light"); onOpenChange(false); } }
   ].filter((item) => !keyword || `${item.title} ${item.detail}`.toLowerCase().includes(keyword));
 
-  const allItems = [...hostItems, ...commandItems, ...toolItems, ...themeItems];
+  const allItems = [...hostItems, ...commandItems, ...linuxItems, ...toolItems, ...themeItems];
 
   useEffect(() => {
     setSelectedIndex(0);
