@@ -21,6 +21,18 @@ export function getCommandUsageMap(): Record<string, number> {
 }
 
 /**
+ * 💡 清空用户命令使用频率历史
+ */
+export function clearCommandUsageMap(): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY_COMMAND_FREQUENCY);
+  } catch {
+    // Ignore
+  }
+}
+
+/**
  * 💡 获取单个命令的使用次数
  */
 export function getCommandUsageFrequency(cmd: string): number {

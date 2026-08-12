@@ -32,6 +32,8 @@ import {
   type TerminalAppearance
 } from "../../lib/terminalSettings";
 
+import { clearCommandUsageMap } from "../../lib/terminalIntelliSense";
+
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
@@ -86,6 +88,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
   // 高亮规则编辑草稿
   const [hlDraft, setHlDraft] = useState({ name: "", pattern: "", foreground: "#00aa88" });
   const [editingHlId, setEditingHlId] = useState("");
+  const [clearNotice, setClearNotice] = useState(false);
 
   if (!props.isOpen) return null;
 
@@ -384,6 +387,27 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                   />
                   <div className="w-9 h-5 bg-[var(--fill-3)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[var(--app-line)] after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
                 </label>
+              </div>
+
+              {/* 重置习惯历史 */}
+              <div className="pt-3 border-t border-[var(--app-line)] flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-[var(--app-text)] flex items-center gap-1.5">
+                    <Clock className="h-4 w-4 text-amber-500" /> 命令习惯高频记忆
+                  </h4>
+                  <p className="text-[10px] text-[var(--app-muted)] mt-0.5">重置历史高频置顶排序与使用次数计数</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearCommandUsageMap();
+                    setClearNotice(true);
+                    setTimeout(() => setClearNotice(false), 2000);
+                  }}
+                  className="rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-3 py-1 text-xs font-bold text-[var(--app-text)] transition-colors cursor-pointer"
+                >
+                  {clearNotice ? "已重置习惯!" : "重置习惯历史"}
+                </button>
               </div>
             </div>
           </div>
