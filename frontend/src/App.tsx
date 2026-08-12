@@ -916,7 +916,13 @@ export function App() {
       if (activeSession?.id) {
         const res = await nativeBridge.readFileContent(activeSession.id, filePath);
         if (res.success && typeof res.content === "string") {
-          setRemoteEditorContent(res.content);
+          try {
+            const bytes = base64ToBytes(res.content);
+            const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+            setRemoteEditorContent(text);
+          } catch {
+            setRemoteEditorContent(res.content);
+          }
         } else {
           setRemoteEditorContent(`# 无法读取文件 ${fileName}\n# 错误: ${res.error || "文件不存在或无读取权限"}\n`);
         }
@@ -933,7 +939,8 @@ export function App() {
   const handleSaveRemoteFile = async (filePath: string, content: string): Promise<boolean> => {
     try {
       if (activeSession?.id) {
-        const res = await nativeBridge.uploadFileContent(activeSession.id, content, filePath);
+        const base64Content = bytesToBase64(new TextEncoder().encode(content));
+        const res = await nativeBridge.uploadFileContent(activeSession.id, base64Content, filePath);
         return res.success;
       }
       return true;
@@ -7496,7 +7503,18 @@ function FilePreviewModal({
       .readFileContent(sessionId, file.path)
       .then((res) => {
         if (res.success && typeof res.content === "string") {
-          setContent(res.content);
+          const lowerName = file.name.toLowerCase();
+          if (lowerName.endsWith(".tar.gz") || lowerName.endsWith(".tgz") || lowerName.endsWith(".gz") || lowerName.endsWith(".zip") || lowerName.endsWith(".rar") || lowerName.endsWith(".7z") || lowerName.endsWith(".iso") || lowerName.endsWith(".bin") || lowerName.endsWith(".exe") || lowerName.endsWith(".so")) {
+            setContent("⚠️ 选中的文件为二进制 / 压缩包归档格式 (.tar.gz)，无法作为纯文本预览。请使用 SFTP 下载到本地进行查看或在终端使用 tar 命令解压。");
+          } else {
+            try {
+              const bytes = base64ToBytes(res.content);
+              const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+              setContent(text);
+            } catch {
+              setContent(res.content);
+            }
+          }
         } else {
           setError(res.error || "无法读取远程文件内容。");
         }
