@@ -73,6 +73,7 @@ import { PortForwardingModal, type TunnelRule } from "./components/modals/PortFo
 import { ServerDiagnosticsModal, type DiagnosticCheckItem } from "./components/modals/ServerDiagnosticsModal";
 import { SessionLoggerModal } from "./components/modals/SessionLoggerModal";
 import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
+import { ParameterFillModal } from "./components/modals/ParameterFillModal";
 import { getShellSuggestion } from "./lib/terminalIntelliSense";
 import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
 import { useAppStore } from "./store/useAppStore";
@@ -1172,6 +1173,10 @@ export function App() {
 
   // Key Generator State
   const [keyGenOpen, setKeyGenOpen] = useState(false);
+
+  // Parameter Fill Modal State
+  const [paramModalOpen, setParamModalOpen] = useState(false);
+  const [paramCommandTarget, setParamCommandTarget] = useState({ name: "", template: "" });
 
   const runServerDiagnostics = async (): Promise<{ score: number; checks: DiagnosticCheckItem[] }> => {
     let score = 95;
@@ -2340,6 +2345,15 @@ export function App() {
         onClose={() => setKeyGenOpen(false)}
         onSaveKeyPair={(kp) => {
           setSshKeyPairs((prev) => [kp, ...prev]);
+        }}
+      />
+      <ParameterFillModal
+        isOpen={paramModalOpen}
+        onClose={() => setParamModalOpen(false)}
+        commandName={paramCommandTarget.name}
+        commandTemplate={paramCommandTarget.template}
+        onExecute={(finalCmd) => {
+          sendCommandToActiveSession(finalCmd);
         }}
       />
     </div>
