@@ -87,7 +87,7 @@ import { EbpfObserverPanel } from "./components/sidebar/EbpfObserverPanel";
 import { ClusterRunnerPanel } from "./components/sidebar/ClusterRunnerPanel";
 import { GitVisualizerPanel } from "./components/sidebar/GitVisualizerPanel";
 import { RUNOOB_LINUX_COMMAND_DATA, FLAT_RUNOOB_COMMANDS } from "./lib/runoobLinuxCommands";
-import { getShellSuggestion, ALL_LINUX_COMMAND_NAMES } from "./lib/terminalIntelliSense";
+import { getShellSuggestion, ALL_LINUX_COMMAND_NAMES, recordCommandExecution, getCommandUsageFrequency } from "./lib/terminalIntelliSense";
 import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
 import { useAppStore } from "./store/useAppStore";
 import { Button, EmptyState, Input, Panel, Textarea } from "./components/ui";
@@ -3761,30 +3761,51 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
           <RotateCcw className="h-2.5 w-2.5" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-1 pr-3">
-        {view.suggestions.map((suggestion, index) => (
-          <button
-            key={suggestion.id}
-            ref={index === view.activeIndex ? activeItemRef : undefined}
-            type="button"
-            role="option"
-            aria-selected={index === view.activeIndex}
-            title={suggestion.command}
-            className={cn(
-              "min-h-10 w-full min-w-0 shrink-0 rounded px-2 py-1 text-left transition-colors",
-              index === view.activeIndex ? "bg-emerald-600 text-white font-extrabold shadow-2xs" : "text-slate-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            )}
-            onMouseDown={(event) => {
-              event.preventDefault();
-              view.onApply(suggestion);
-            }}
-          >
-            <span className="block truncate text-[11px] font-bold font-mono">{suggestion.command}</span>
-            <span className={cn("mt-0.5 block truncate text-[10px]", index === view.activeIndex ? "text-white/80" : "text-slate-400 dark:text-zinc-400")}>
-              {suggestion.description || suggestion.label || suggestion.source}
-            </span>
-          </button>
-        ))}
+      <div className="min-h-0 flex-1 overflow-y-auto p-1 pr-3 space-y-0.5">
+        {view.suggestions.map((suggestion, index) => {
+          const count = getCommandUsageFrequency(suggestion.command);
+          const isActive = index === view.activeIndex;
+
+          return (
+            <button
+              key={suggestion.id}
+              ref={isActive ? activeItemRef : undefined}
+              type="button"
+              role="option"
+              aria-selected={isActive}
+              title={suggestion.command}
+              className={cn(
+                "min-h-10 w-full min-w-0 shrink-0 rounded-lg px-2.5 py-1 text-left transition-colors flex items-center justify-between gap-2 border",
+                isActive
+                  ? "bg-emerald-600 text-white font-extrabold shadow-2xs border-emerald-600"
+                  : "text-slate-700 hover:bg-slate-100 border-transparent dark:text-zinc-300 dark:hover:bg-zinc-800"
+              )}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                view.onApply(suggestion);
+              }}
+            >
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-[11px] font-bold font-mono">{suggestion.command}</span>
+                <span className={cn("mt-0.5 block truncate text-[10px]", isActive ? "text-white/80" : "text-slate-400 dark:text-zinc-400")}>
+                  {suggestion.description || suggestion.label || suggestion.source}
+                </span>
+              </div>
+              {count > 0 && (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 py-0.2 text-[9px] font-extrabold shrink-0 border font-mono",
+                    isActive
+                      ? "bg-white/20 text-white border-white/30"
+                      : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                  )}
+                >
+                  🔥 {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
       <button
         type="button"
@@ -4109,6 +4130,7 @@ function TerminalSurface({
   }
 
   function applyCommandSuggestion(suggestion: CommandSuggestion) {
+    recordCommandExecution(suggestion.command);
     const sessionId = activeIdRef.current;
     const draft = commandInputRef.current;
     const shortcutParameters = suggestion.shortcut ? extractCommandParameters(suggestion.command) : [];

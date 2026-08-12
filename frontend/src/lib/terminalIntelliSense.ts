@@ -5,34 +5,130 @@ export interface ShellDictionaryItem {
   completions: string[];
 }
 
+export const STORAGE_KEY_COMMAND_FREQUENCY = "ldyssh.terminal.commandFrequency";
+
+/**
+ * 💡 获取用户本地记录的命令使用频率表
+ */
+export function getCommandUsageMap(): Record<string, number> {
+  if (typeof window === "undefined" || !window.localStorage) return {};
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY_COMMAND_FREQUENCY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 💡 获取单个命令的使用次数
+ */
+export function getCommandUsageFrequency(cmd: string): number {
+  const map = getCommandUsageMap();
+  const mainCmd = cmd.trim().split(/\s+/)[0]?.toLowerCase() || "";
+  return (map[cmd.trim().toLowerCase()] || 0) + (map[mainCmd] || 0);
+}
+
+/**
+ * 💡 记录一次命令执行行为，累加频率并持久化
+ */
+export function recordCommandExecution(cmdString: string): void {
+  if (!cmdString || !cmdString.trim() || typeof window === "undefined" || !window.localStorage) return;
+  const clean = cmdString.trim();
+  const mainCmd = clean.split(/\s+/)[0]?.toLowerCase();
+  
+  const map = getCommandUsageMap();
+  map[clean] = (map[clean] || 0) + 1;
+  if (mainCmd && mainCmd !== clean) {
+    map[mainCmd] = (map[mainCmd] || 0) + 1;
+  }
+
+  try {
+    window.localStorage.setItem(STORAGE_KEY_COMMAND_FREQUENCY, JSON.stringify(map));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export const LINUX_SHELL_DICTIONARY: ShellDictionaryItem[] = [
+  // --- 系统服务与进程管理 ---
   {
     prefix: "systemctl",
     completions: ["status", "start", "stop", "restart", "enable", "disable", "reload", "daemon-reload", "is-active", "failed"]
   },
   {
     prefix: "journalctl",
-    completions: ["-u", "-f", "-n 100", "--since '1 hour ago'", "-p err", "-b"]
+    completions: ["-u", "-f", "-n 100", "--since '1 hour ago'", "-p err", "-b", "--disk-usage", "--vacuum-time=7d"]
   },
+  {
+    prefix: "service",
+    completions: ["status", "start", "stop", "restart", "--status-all"]
+  },
+  {
+    prefix: "ps",
+    completions: ["aux", "-ef", "aux | grep", "-eo pid,user,%cpu,%mem,cmd --sort=-%cpu", "-eo pid,user,args"]
+  },
+  {
+    prefix: "top",
+    completions: ["-b -n 1", "-u root", "-p", "-d 1"]
+  },
+  {
+    prefix: "htop",
+    completions: ["-u root", "-d 10", "-C"]
+  },
+  {
+    prefix: "btop",
+    completions: ["--utf-force"]
+  },
+  {
+    prefix: "kill",
+    completions: ["-9", "-15", "-HUP", "-2"]
+  },
+  {
+    prefix: "pkill",
+    completions: ["-9", "-f", "-u root"]
+  },
+  {
+    prefix: "killall",
+    completions: ["-9", "-v", "-I"]
+  },
+
+  // --- 容器 & DevOps 云原生 ---
   {
     prefix: "docker",
-    completions: ["ps -a", "logs -f --tail 100", "exec -it", "restart", "stop", "compose up -d", "compose down", "images", "system prune -f"]
+    completions: ["ps -a", "logs -f --tail 100", "exec -it", "restart", "stop", "compose up -d", "compose down", "images", "system prune -f", "inspect", "network ls", "volume ls"]
   },
+  {
+    prefix: "docker-compose",
+    completions: ["up -d", "down", "logs -f", "ps", "restart", "build", "config"]
+  },
+  {
+    prefix: "podman",
+    completions: ["ps -a", "run -d", "images", "exec -it", "logs -f"]
+  },
+  {
+    prefix: "kubectl",
+    completions: ["get pods -A", "logs -f --tail=100", "describe pod", "exec -it", "apply -f", "get svc -A", "top nodes", "top pods", "delete pod", "get nodes -o wide"]
+  },
+  {
+    prefix: "helm",
+    completions: ["list -A", "install", "upgrade", "uninstall", "repo update", "status"]
+  },
+
+  // --- 版本控制 Git ---
   {
     prefix: "git",
-    completions: ["status", "pull origin", "push origin", "commit -m ''", "checkout -b", "log --oneline -n 10", "diff", "stash", "stash pop", "clone"]
+    completions: ["status", "pull origin", "push origin", "commit -m ''", "checkout -b", "log --oneline -n 10", "diff", "stash", "stash pop", "clone", "branch -a", "remote -v", "rebase"]
   },
-  {
-    prefix: "nginx",
-    completions: ["-t", "-s reload", "-s stop", "-V"]
-  },
+
+  // --- 权限管理与用户 ---
   {
     prefix: "chmod",
-    completions: ["+x", "755", "644", "700", "600", "-R 755"]
+    completions: ["+x", "755", "644", "700", "600", "-R 755", "-R 644"]
   },
   {
     prefix: "chown",
-    completions: ["-R www-data:www-data", "-R root:root", "-R ubuntu:ubuntu"]
+    completions: ["-R www-data:www-data", "-R root:root", "-R ubuntu:ubuntu", "-R $USER:$USER"]
   },
   {
     prefix: "chattr",
@@ -43,80 +139,84 @@ export const LINUX_SHELL_DICTIONARY: ShellDictionaryItem[] = [
     completions: ["-R www-data", "-R root"]
   },
   {
+    prefix: "sudo",
+    completions: ["-i", "-u www-data", "systemctl restart", "su -"]
+  },
+  {
+    prefix: "useradd",
+    completions: ["-m -s /bin/bash", "-g sudo", "-G docker"]
+  },
+  {
+    prefix: "usermod",
+    completions: ["-aG docker", "-s /bin/bash", "-L", "-U"]
+  },
+  {
+    prefix: "passwd",
+    completions: ["root", "--status", "-l", "-u"]
+  },
+
+  // --- 文件与归档压缩 ---
+  {
     prefix: "tar",
     completions: ["-zxvf", "-czvf", "-xvf", "-tvf", "-jxvf", "-Jcvf"]
   },
   {
-    prefix: "grep",
-    completions: ["-rnI", "-i", "-E", "-v", "--color=auto", "-C 5"]
+    prefix: "gzip",
+    completions: ["-d", "-9", "-k", "-v", "-r"]
   },
   {
-    prefix: "find",
-    completions: [". -name ''", "/ -size +100M", ". -type f -mtime -7", ". -type d"]
+    prefix: "gunzip",
+    completions: ["-k", "-v"]
   },
   {
-    prefix: "curl",
-    completions: ["-I", "-v", "-X POST", "-H 'Content-Type: application/json'", "-k", "-s"]
+    prefix: "zip",
+    completions: ["-r", "-q", "-e", "-u"]
   },
   {
-    prefix: "wget",
-    completions: ["-c", "-q", "-O", "--no-check-certificate"]
-  },
-  {
-    prefix: "netstat",
-    completions: ["-tulnp", "-anp | grep", "-s"]
-  },
-  {
-    prefix: "ss",
-    completions: ["-tuln", "-tulpn", "-s", "-m"]
-  },
-  {
-    prefix: "ufw",
-    completions: ["status verbose", "allow 80/tcp", "allow 22/tcp", "deny 21", "reload", "enable", "disable"]
-  },
-  {
-    prefix: "iptables",
-    completions: ["-L -n -v", "-F", "-A INPUT -p tcp --dport 80 -j ACCEPT", "-t nat -L"]
-  },
-  {
-    prefix: "kubectl",
-    completions: ["get pods -A", "logs -f --tail=100", "describe pod", "exec -it", "apply -f", "get svc -A", "top nodes", "top pods"]
-  },
-  {
-    prefix: "dmesg",
-    completions: ["-wH --color=always", "-l err,crit,alert,emerg", "-T | tail -n 50", "-c"]
-  },
-  {
-    prefix: "perf",
-    completions: ["top -g", "record -F 99 -g -p", "report", "stat -p"]
-  },
-  {
-    prefix: "strace",
-    completions: ["-c -p", "-e trace=openat,read,write,connect -p", "-ff -o strace.log -p"]
-  },
-  {
-    prefix: "tcpdump",
-    completions: ["-i any port 80 -n -X", "-i eth0 tcp port 443", "-w capture.pcap"]
-  },
-  {
-    prefix: "lsof",
-    completions: ["-i :8080", "-i -P -n", "-p", "+D /var/log"]
-  },
-  {
-    prefix: "modprobe",
-    completions: ["-v", "-r", "--show-depends"]
+    prefix: "unzip",
+    completions: ["-l", "-q", "-d"]
   },
   {
     prefix: "rsync",
-    completions: ["-avz --progress", "-avz -e ssh ./", "--delete -avz"]
+    completions: ["-avz --progress", "-avz -e ssh ./", "--delete -avz", "-avzhP"]
+  },
+  {
+    prefix: "scp",
+    completions: ["-P 22", "-r", "-C", "-v"]
+  },
+
+  // --- 文本处理与搜索 ---
+  {
+    prefix: "grep",
+    completions: ["-rnI", "-i", "-E", "-v", "--color=auto", "-C 5", "-l", "-w"]
+  },
+  {
+    prefix: "find",
+    completions: [". -name ''", "/ -size +100M", ". -type f -mtime -7", ". -type d", ". -name '*.log' -delete"]
   },
   {
     prefix: "sed",
-    completions: ["'s/old/new/g'", "-i 's/old/new/g'", "-n '1,10p'"]
+    completions: ["'s/old/new/g'", "-i 's/old/new/g'", "-n '1,10p'", "-i.bak 's/old/new/g'"]
   },
   {
     prefix: "awk",
-    completions: ["'{print $1}'", " -F: '{print $1,$3}'", "'/pattern/ {print $0}'"]
+    completions: ["'{print $1}'", " -F: '{print $1,$3}'", "'/pattern/ {print $0}'", "'END {print NR}'"]
+  },
+  {
+    prefix: "cat",
+    completions: ["-n", "-b", "-A", "/etc/os-release", "/var/log/syslog"]
+  },
+  {
+    prefix: "head",
+    completions: ["-n 20", "-n 50", "-c 100"]
+  },
+  {
+    prefix: "tail",
+    completions: ["-f", "-n 100", "-f -n 50", "-F"]
+  },
+  {
+    prefix: "less",
+    completions: ["-N", "-S", "+G", "+/pattern"]
   },
   {
     prefix: "sort",
@@ -139,124 +239,160 @@ export const LINUX_SHELL_DICTIONARY: ShellDictionaryItem[] = [
     completions: ["-d':' -f1", "-c 1-10", "-f 2-4"]
   },
   {
-    prefix: "head",
-    completions: ["-n 20", "-n 50", "-c 100"]
+    prefix: "jq",
+    completions: [".", ".status", ".items[]", "-r", "-c"]
+  },
+
+  // --- 网络 & 诊断安全 ---
+  {
+    prefix: "curl",
+    completions: ["-I", "-v", "-X POST", "-H 'Content-Type: application/json'", "-k", "-s", "-u user:pass"]
   },
   {
-    prefix: "tail",
-    completions: ["-f", "-n 100", "-f -n 50", "-F"]
+    prefix: "wget",
+    completions: ["-c", "-q", "-O", "--no-check-certificate", "-b"]
   },
   {
-    prefix: "less",
-    completions: ["-N", "-S", "+G", "+/pattern"]
+    prefix: "netstat",
+    completions: ["-tulnp", "-anp | grep", "-s", "-r"]
   },
+  {
+    prefix: "ss",
+    completions: ["-tuln", "-tulpn", "-s", "-m", "-i"]
+  },
+  {
+    prefix: "ping",
+    completions: ["-c 4", "-i 0.2", "-s 1024", "-w 5"]
+  },
+  {
+    prefix: "ip",
+    completions: ["addr show", "link show", "route show", "-s link", "neigh"]
+  },
+  {
+    prefix: "ifconfig",
+    completions: ["eth0", "-a", "down", "up"]
+  },
+  {
+    prefix: "route",
+    completions: ["-n", "add default gw"]
+  },
+  {
+    prefix: "traceroute",
+    completions: ["-n", "-T -p 80", "-m 30"]
+  },
+  {
+    prefix: "mtr",
+    completions: ["--report", "-n", "-c 10"]
+  },
+  {
+    prefix: "dig",
+    completions: ["+short", "ANY", "MX", "NS", "@8.8.8.8", "+trace"]
+  },
+  {
+    prefix: "nslookup",
+    completions: ["-type=mx", "-type=ns"]
+  },
+  {
+    prefix: "tcpdump",
+    completions: ["-i any port 80 -n -X", "-i eth0 tcp port 443", "-w capture.pcap", "-c 100"]
+  },
+  {
+    prefix: "nc",
+    completions: ["-zv", "-l -p 8080", "-w 3"]
+  },
+  {
+    prefix: "ufw",
+    completions: ["status verbose", "allow 80/tcp", "allow 22/tcp", "deny 21", "reload", "enable", "disable"]
+  },
+  {
+    prefix: "iptables",
+    completions: ["-L -n -v", "-F", "-A INPUT -p tcp --dport 80 -j ACCEPT", "-t nat -L"]
+  },
+  {
+    prefix: "firewalld",
+    completions: ["--state", "--get-active-zones", "--add-port=80/tcp --permanent", "--reload"]
+  },
+
+  // --- 磁盘、文件系统与硬件 ---
   {
     prefix: "df",
     completions: ["-h", "-T", "-i"]
   },
   {
     prefix: "du",
-    completions: ["-sh *", "-h --max-depth=1", "-ah"]
+    completions: ["-sh *", "-h --max-depth=1", "-ah", "-sk * | sort -n"]
   },
   {
-    prefix: "mount",
-    completions: ["-a", "-t ext4", "-o loop", "-t nfs"]
-  },
-  {
-    prefix: "umount",
-    completions: ["-l", "-f"]
+    prefix: "lsblk",
+    completions: ["-f", "-m", "-p", "-o NAME,FSTYPE,SIZE,MOUNTPOINT"]
   },
   {
     prefix: "fdisk",
     completions: ["-l", "/dev/sda", "/dev/nvme0n1"]
   },
   {
-    prefix: "lsblk",
-    completions: ["-f", "-m", "-p"]
+    prefix: "parted",
+    completions: ["-l", "/dev/sda print"]
   },
   {
-    prefix: "top",
-    completions: ["-b -n 1", "-u root", "-p"]
+    prefix: "mount",
+    completions: ["-a", "-t ext4", "-o loop", "-t nfs", "-o remount,rw"]
   },
   {
-    prefix: "ps",
-    completions: ["aux", "-ef", "aux | grep", "-eo pid,user,%cpu,%mem,cmd --sort=-%cpu"]
+    prefix: "umount",
+    completions: ["-l", "-f"]
+  },
+
+  // --- Web 服务器 & 包管理器 ---
+  {
+    prefix: "nginx",
+    completions: ["-t", "-s reload", "-s stop", "-V"]
   },
   {
-    prefix: "kill",
-    completions: ["-9", "-15", "-HUP"]
+    prefix: "apt",
+    completions: ["update", "upgrade -y", "install", "remove", "autoremove", "search"]
   },
   {
-    prefix: "pkill",
-    completions: ["-9", "-f"]
+    prefix: "apt-get",
+    completions: ["update", "install -y", "remove", "dist-upgrade"]
   },
   {
-    prefix: "free",
-    completions: ["-h", "-m", "-s 1"]
+    prefix: "yum",
+    completions: ["update -y", "install", "remove", "search", "clean all"]
   },
   {
-    prefix: "uptime",
-    completions: ["-p", "-s"]
+    prefix: "dnf",
+    completions: ["update -y", "install", "remove", "search"]
+  },
+
+  // --- 内核调试 & 性能分析 ---
+  {
+    prefix: "dmesg",
+    completions: ["-wH --color=always", "-l err,crit,alert,emerg", "-T | tail -n 50", "-c"]
   },
   {
-    prefix: "uname",
-    completions: ["-a", "-r", "-m"]
+    prefix: "perf",
+    completions: ["top -g", "record -F 99 -g -p", "report", "stat -p"]
   },
   {
-    prefix: "hostname",
-    completions: ["-I", "-f"]
+    prefix: "strace",
+    completions: ["-c -p", "-e trace=openat,read,write,connect -p", "-ff -o strace.log -p"]
   },
   {
-    prefix: "su",
-    completions: ["-", "root", "-s /bin/bash"]
+    prefix: "lsof",
+    completions: ["-i :8080", "-i -P -n", "-p", "+D /var/log"]
   },
   {
-    prefix: "sudo",
-    completions: ["-i", "-u www-data", "systemctl restart"]
-  },
-  {
-    prefix: "crontab",
-    completions: ["-l", "-e", "-r", "-u root"]
+    prefix: "modprobe",
+    completions: ["-v", "-r", "--show-depends"]
   },
   {
     prefix: "sysctl",
     completions: ["-p", "-a", "net.ipv4.ip_forward=1"]
   },
   {
-    prefix: "history",
-    completions: ["| grep", "-c", "100"]
-  },
-  {
-    prefix: "echo",
-    completions: ["$PATH", "$USER", "$HOME", "$?"]
-  },
-  {
-    prefix: "date",
-    completions: ["'+%Y-%m-%d %H:%M:%S'", "-u", "-d '1 day ago'"]
-  },
-  {
-    prefix: "watch",
-    completions: ["-n 1 'df -h'", "-n 2 'free -m'"]
-  },
-  {
-    prefix: "which",
-    completions: ["python3", "docker", "git", "nginx"]
-  },
-  {
-    prefix: "whereis",
-    completions: ["nginx", "python", "php"]
-  },
-  {
-    prefix: "locate",
-    completions: ["*.conf", "*.log"]
-  },
-  {
-    prefix: "xargs",
-    completions: ["-i", "-n 1", "-P 4", "rm -f"]
-  },
-  {
-    prefix: "nohup",
-    completions: ["./app > app.log 2>&1 &"]
+    prefix: "crontab",
+    completions: ["-l", "-e", "-r", "-u root"]
   },
   {
     prefix: "screen",
@@ -269,12 +405,41 @@ export const LINUX_SHELL_DICTIONARY: ShellDictionaryItem[] = [
 ];
 
 // Extract ALL Linux command names from Runoob + dictionary
-export const ALL_LINUX_COMMAND_NAMES: string[] = Array.from(
+const RAW_COMMAND_NAMES: string[] = Array.from(
   new Set([
     ...LINUX_SHELL_DICTIONARY.map((d) => d.prefix),
-    ...FLAT_RUNOOB_COMMANDS.map((c) => c.name.split("/")[0].trim().toLowerCase())
+    ...FLAT_RUNOOB_COMMANDS.map((c) => c.name.split("/")[0].trim().toLowerCase()),
+    "ls", "cd", "pwd", "cp", "mv", "rm", "mkdir", "rmdir", "touch", "ln",
+    "cat", "more", "less", "head", "tail", "stat", "file", "find", "locate",
+    "grep", "sed", "awk", "cut", "sort", "uniq", "wc", "tr", "tee", "split",
+    "tar", "gzip", "gunzip", "zip", "unzip", "bzip2", "bunzip2", "xz",
+    "df", "du", "fdisk", "parted", "lsblk", "mkfs", "fsck", "mount", "umount",
+    "ps", "top", "htop", "btop", "kill", "pkill", "killall", "free", "uptime",
+    "uname", "hostname", "dmesg", "journalctl", "systemctl", "service", "crontab",
+    "ping", "ifconfig", "ip", "netstat", "ss", "route", "traceroute", "dig", "nslookup",
+    "tcpdump", "curl", "wget", "ssh", "scp", "rsync", "ufw", "iptables", "firewalld",
+    "docker", "podman", "kubectl", "helm", "git", "nginx", "apt", "yum", "dnf",
+    "python", "python3", "pip", "node", "npm", "yarn", "pnpm", "bun", "go", "make", "gcc",
+    "strace", "ltrace", "perf", "sysctl", "modprobe", "lsmod", "insmod", "rmmod", "lsof"
   ])
 );
+
+/**
+ * 💡 获取按用户使用频率倒序排序的 Linux 命令全量清单
+ */
+export function getSortedLinuxCommandNames(): string[] {
+  const usageMap = getCommandUsageMap();
+  return [...RAW_COMMAND_NAMES].sort((a, b) => {
+    const freqA = usageMap[a] || 0;
+    const freqB = usageMap[b] || 0;
+    if (freqB !== freqA) {
+      return freqB - freqA; // 经常使用的排在最上面
+    }
+    return a.localeCompare(b);
+  });
+}
+
+export const ALL_LINUX_COMMAND_NAMES: string[] = getSortedLinuxCommandNames();
 
 export function getShellSuggestion(
   input: string,
@@ -285,7 +450,7 @@ export function getShellSuggestion(
   const rawInput = input.trimStart();
   const lowerInput = rawInput.toLowerCase();
 
-  // 1. Search in history commands
+  // 1. Search in history commands (sorted by recency)
   const historyMatch = historyCommands.find(
     (cmd) => cmd && cmd.trim().toLowerCase().startsWith(lowerInput) && cmd.trim().length > rawInput.length
   );
@@ -303,9 +468,10 @@ export function getShellSuggestion(
     return `${input}${remaining}`;
   }
 
-  // 3. Command Name Completion (if no space typed yet)
+  // 3. Command Name Completion (sorted by user usage frequency)
   if (!rawInput.includes(" ")) {
-    const matchedCmd = ALL_LINUX_COMMAND_NAMES.find(
+    const sortedCommands = getSortedLinuxCommandNames();
+    const matchedCmd = sortedCommands.find(
       (cmd) => cmd.startsWith(lowerInput) && cmd.length > lowerInput.length
     );
     if (matchedCmd) {
