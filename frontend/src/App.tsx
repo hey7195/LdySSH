@@ -3699,6 +3699,27 @@ function TerminalSurface({
       if (!input || shouldDropFocusInputResidue(input)) {
         return;
       }
+
+      const isEnter = input.includes("\r") || input.includes("\n");
+      const currentDraft = commandInputRef.current.trim();
+
+      if (isEnter && dangerousCommandGuardEnabledRef.current && currentDraft) {
+        const info = checkDangerousCommand(currentDraft);
+        if (info.isDangerous) {
+          const eraseBytes = "\x15";
+          const targetSessionId = activeSession.id;
+          void nativeBridge.sendInputBase64(targetSessionId, bytesToBase64(new TextEncoder().encode(eraseBytes)));
+
+          commandInputRef.current = "";
+          setCommandSuggestionList([]);
+
+          onRequestDangerousCommandConfirmation?.(currentDraft, info, () => {
+            void nativeBridge.sendInputBase64(targetSessionId, bytesToBase64(new TextEncoder().encode(`${currentDraft}\n`)));
+          });
+          return;
+        }
+      }
+
       updateCommandInputFromData(input);
       void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(input)));
     });

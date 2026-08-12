@@ -1870,7 +1870,7 @@ describe("command library", () => {
 
     fireEvent.mouseEnter(shell);
 
-    expect(terminalMock.focusCalls).toBeGreaterThan(0);
+    await waitFor(() => expect(terminalMock.focusCalls).toBeGreaterThan(0));
     expect(terminalMock.fitCalls).toBeGreaterThan(0);
   });
 
