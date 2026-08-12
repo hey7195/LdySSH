@@ -159,18 +159,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
               <h3 className="text-sm font-bold text-[var(--app-text)] flex items-center gap-2">
                 <Sun className="h-4 w-4 text-amber-500" /> 应用外观主题
               </h3>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-2.5">
                 {THEMES.map((t) => (
                   <button
                     key={t}
                     onClick={() => setTheme(t)}
-                    className={`rounded-xl border p-3 text-center text-xs transition-all cursor-pointer ${
+                    className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center text-xs transition-all cursor-pointer ${
                       theme === t
-                        ? "border-emerald-500 bg-emerald-500/10 font-extrabold text-emerald-500 shadow-xs"
+                        ? "border-emerald-500 bg-emerald-500/10 font-extrabold text-emerald-500 shadow-sm ring-1 ring-emerald-500/30"
                         : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:border-[var(--app-line)] hover:text-[var(--app-text)]"
                     }`}
                   >
-                    {t === "dark" ? "夜间黑" : t === "nordic" ? "北欧灰" : "极简白"}
+                    <div className="flex items-center gap-1 h-3 w-10 rounded-full border border-black/10 overflow-hidden shadow-2xs">
+                      <div className={`h-full flex-1 ${t === "dark" ? "bg-zinc-950" : t === "nordic" ? "bg-slate-800" : "bg-white"}`} />
+                      <div className={`h-full w-2.5 ${t === "dark" ? "bg-emerald-500" : t === "nordic" ? "bg-sky-400" : "bg-emerald-600"}`} />
+                    </div>
+                    <span>{t === "dark" ? "夜间黑" : t === "nordic" ? "北欧灰" : "极简白"}</span>
                   </button>
                 ))}
               </div>
@@ -178,19 +182,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
               <h3 className="text-sm font-bold text-[var(--app-text)] flex items-center gap-2 pt-2 border-t border-[var(--app-line)]">
                 <Terminal className="h-4 w-4 text-emerald-500" /> 终端配色方案
               </h3>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-2.5">
                 {TERMINAL_THEMES.map((t) => (
                   <button
                     key={t}
                     data-testid={`terminal-theme-${t}`}
                     onClick={() => setTerminalTheme(t)}
-                    className={`rounded-xl border p-3 text-center text-xs transition-all cursor-pointer ${
+                    className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center text-xs transition-all cursor-pointer ${
                       terminalTheme === t
-                        ? "border-emerald-500 bg-emerald-500/10 font-extrabold text-emerald-500 shadow-xs"
+                        ? "border-emerald-500 bg-emerald-500/10 font-extrabold text-emerald-500 shadow-sm ring-1 ring-emerald-500/30"
                         : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:border-[var(--app-line)] hover:text-[var(--app-text)]"
                     }`}
                   >
-                    {t === "dark" ? "曜石黑" : t === "nordic" ? "深海灰" : "浅色白"}
+                    <div className="flex items-center gap-1 h-3 w-10 rounded-full border border-black/10 overflow-hidden shadow-2xs">
+                      <div className={`h-full flex-1 ${t === "dark" ? "bg-black" : t === "nordic" ? "bg-slate-900" : "bg-slate-100"}`} />
+                      <div className={`h-full w-2.5 ${t === "dark" ? "bg-emerald-400" : t === "nordic" ? "bg-cyan-400" : "bg-emerald-600"}`} />
+                    </div>
+                    <span>{t === "dark" ? "曜石黑" : t === "nordic" ? "深海灰" : "浅色白"}</span>
                   </button>
                 ))}
               </div>
