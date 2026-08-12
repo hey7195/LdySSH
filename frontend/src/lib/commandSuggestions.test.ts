@@ -86,18 +86,27 @@ describe("command suggestions", () => {
     expect(isFullScreenCommand("ls -la")).toBe(false);
   });
 
-  test("identifies dangerous destruction commands correctly", () => {
+  test("identifies dangerous destruction commands correctly regardless of parameter positions", () => {
     expect(checkDangerousCommand("rm -rf /").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm / -r").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm / -rf").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm -r / -f").isDangerous).toBe(true);
+    expect(checkDangerousCommand("sudo rm /var -r").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm --no-preserve-root /").isDangerous).toBe(true);
     expect(checkDangerousCommand("rm -rf *").isDangerous).toBe(true);
     expect(checkDangerousCommand("rm -rf /*").isDangerous).toBe(true);
     expect(checkDangerousCommand("rm -f -r /var/log/*").isDangerous).toBe(true);
     expect(checkDangerousCommand("mkfs.ext4 /dev/sda1").isDangerous).toBe(true);
     expect(checkDangerousCommand("dd if=/dev/zero of=/dev/sdb").isDangerous).toBe(true);
     expect(checkDangerousCommand("reboot").isDangerous).toBe(true);
+    expect(checkDangerousCommand("systemctl reboot").isDangerous).toBe(true);
     expect(checkDangerousCommand("shutdown -h now").isDangerous).toBe(true);
     expect(checkDangerousCommand("chmod -R 777 /").isDangerous).toBe(true);
+    expect(checkDangerousCommand("docker system prune -a").isDangerous).toBe(true);
+    expect(checkDangerousCommand("kubectl delete ns --all").isDangerous).toBe(true);
 
     expect(checkDangerousCommand("ls -la").isDangerous).toBe(false);
     expect(checkDangerousCommand("cat /etc/passwd").isDangerous).toBe(false);
+    expect(checkDangerousCommand("rm -rf ./node_modules").isDangerous).toBe(false);
   });
 });

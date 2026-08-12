@@ -563,62 +563,205 @@ export function checkDangerousCommand(command: string): DangerousCommandInfo {
   const clean = command.trim();
   if (!clean) return { isDangerous: false };
 
-  // 1. rm -rf 删库/级联删除 (rm -rf /, rm -rf *, rm -rf /*, rm -f -r / 等)
-  if (
-    /^rm\s+.*-[a-zA-Z]*[rRfF]+[a-zA-Z]*\s+.*(\/|\*|~\/|\.\/|\/\*)/.test(clean) ||
-    /^rm\s+.*-[a-zA-Z]*[rR][a-zA-Z]*\s+.*-[a-zA-Z]*[fF][a-zA-Z]*\s+.*(\/|\*|~\/|\.\/|\/\*)/.test(clean) ||
-    /^rm\s+.*-[a-zA-Z]*[rRfF]+\s+(\/|\*|~\/|\.\/|\/\*)/.test(clean)
-  ) {
-    return {
-      isDangerous: true,
-      patternName: "rm -rf 级联强制删除",
-      warningText: "该命令包含 rm -rf 强制删除根目录或通配符操作，将导致受影响目录或整台服务器数据永久不可逆清空！"
-    };
-  }
-
-  // 2. 格式化磁盘 mkfs
-  if (/\bmkfs(\.[a-zA-Z0-9]+)?\s+/.test(clean)) {
-    return {
-      isDangerous: true,
-      patternName: "mkfs 格式化文件系统",
-      warningText: "格式化文件系统将直接抹除指定磁盘分区的全部数据与文件系统表结构！"
-    };
-  }
-
-  // 3. 磁盘底层块写入 dd of=/dev/
-  if (/\bdd\s+.*of=\/dev\//.test(clean)) {
-    return {
-      isDangerous: true,
-      patternName: "dd 磁盘物理块改写",
-      warningText: "直接向 /dev/ 块设备写入原始字节将直接破坏系统 MBR/GPT 分区表或存储介质！"
-    };
-  }
-
-  // 4. 全局 chmod -R 777 /
-  if (/\bchmod\s+.*-[a-zA-Z]*R[a-zA-Z]*\s+777\s+(\/|\*)/.test(clean)) {
-    return {
-      isDangerous: true,
-      patternName: "chmod -R 777 全局权限修改",
-      warningText: "将根目录或全局文件赋予 777 权限会导致 Linux 安全验证失效并触发 SSH 拒绝连接！"
-    };
-  }
-
-  // 5. 服务器关机重启
-  if (/^(reboot|shutdown|poweroff|init\s+[06])\b/.test(clean)) {
-    return {
-      isDangerous: true,
-      patternName: "服务器关机与重启",
-      warningText: "该命令将导致服务器立即断开所有网络与 SSH 连接并重启/关机，可能造成线上进程异常中断！"
-    };
-  }
-
-  // 6. Fork 炸弹
+  // 1. Fork 炸弹特例识别
   if (/:{\s*:\|:&\s*};:/.test(clean.replace(/\s+/g, ""))) {
     return {
       isDangerous: true,
       patternName: "Fork 炸弹无限进程剥离",
-      warningText: "Fork 炸弹会瞬间耗尽系统 CPU 与进程 PID 资源，导致服务器无法响应并死机！"
+      warningText: "Fork 炸弹会瞬间耗尽系统 CPU 与进程 PID 资源，导致服务器死机卡死！"
     };
+  }
+
+  // 按管道符 | 或命令连接符 ; && || 拆分出多个子命令独立审查
+  const subCommands = clean.split(/;|&&|\|\||\|/).map((cmd) => cmd.trim()).filter(Boolean);
+
+  for (const subCmd of subCommands) {
+    const info = checkSingleCommandTokens(subCmd);
+    if (info.isDangerous) return info;
+  }
+
+  return { isDangerous: false };
+}
+
+function checkSingleCommandTokens(rawCmd: string): DangerousCommandInfo {
+  // Token 化处理
+  const tokens = rawCmd.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return { isDangerous: false };
+
+  // 剔除前缀修饰符 sudo / doas / pkexec / env / nohup / time / xargs
+  let startIndex = 0;
+  while (startIndex < tokens.length) {
+    const current = tokens[startIndex].toLowerCase();
+    if (["sudo", "doas", "pkexec", "env", "nohup", "time", "xargs", "busybox"].includes(current)) {
+      startIndex++;
+      continue;
+    }
+    if (current.includes("=") && !current.startsWith("-")) {
+      startIndex++;
+      continue;
+    }
+    break;
+  }
+
+  const cmdTokens = tokens.slice(startIndex);
+  if (cmdTokens.length === 0) return { isDangerous: false };
+
+  const rawExec = cmdTokens[0];
+  const exec = rawExec.split(/[\\/]/).at(-1)?.toLowerCase() || rawExec.toLowerCase();
+  const args = cmdTokens.slice(1);
+
+  // 1. rm 删除命令（支持参数在目标前、目标后或混合位置）
+  if (exec === "rm") {
+    let hasRecursive = false;
+    let hasForce = false;
+    let hasNoPreserveRoot = false;
+    const targets: string[] = [];
+
+    for (const arg of args) {
+      if (arg === "--no-preserve-root") {
+        hasNoPreserveRoot = true;
+        continue;
+      }
+      if (arg.startsWith("--recursive")) {
+        hasRecursive = true;
+        continue;
+      }
+      if (arg.startsWith("--force")) {
+        hasForce = true;
+        continue;
+      }
+      if (arg.startsWith("-") && !arg.startsWith("--")) {
+        const flags = arg.slice(1);
+        if (/[rR]/.test(flags)) hasRecursive = true;
+        if (/[fF]/.test(flags)) hasForce = true;
+        continue;
+      }
+      targets.push(arg);
+    }
+
+    // 判断目标是否涉及危险路径、通配符或系统根目录
+    const isDangerousTarget = targets.some((t) => {
+      const cleanT = t.trim();
+      return (
+        cleanT === "/" ||
+        cleanT === "/*" ||
+        cleanT === "*" ||
+        cleanT === "~" ||
+        cleanT === "~/" ||
+        cleanT === "." ||
+        cleanT === "./" ||
+        cleanT === ".." ||
+        cleanT === "../" ||
+        /^(\/|\*|~\/|\.\/|\.\.\/)+$/.test(cleanT) ||
+        /^\/(bin|boot|dev|etc|home|lib|lib64|media|mnt|opt|proc|root|run|sbin|srv|sys|tmp|usr|var)(\/.*)?$/.test(cleanT)
+      );
+    });
+
+    if (hasNoPreserveRoot || (hasRecursive && (isDangerousTarget || targets.length === 0))) {
+      return {
+        isDangerous: true,
+        patternName: "rm 级联强制删除",
+        warningText: `该命令包含 rm 递归删除参数，涉及路径 (${targets.join(" ") || "全盘"})，将导致数据永久不可逆清空！`
+      };
+    }
+  }
+
+  // 2. 关机与重启命令 (reboot, shutdown, poweroff, halt, init 0, init 6, systemctl reboot)
+  if (["reboot", "shutdown", "poweroff", "halt"].includes(exec)) {
+    return {
+      isDangerous: true,
+      patternName: "服务器关机与重启",
+      warningText: "该命令将导致服务器立即断开所有网络与 SSH 连接并重启/关机！"
+    };
+  }
+
+  if (exec === "init") {
+    const firstArg = args[0];
+    if (firstArg === "0" || firstArg === "6") {
+      return {
+        isDangerous: true,
+        patternName: `init ${firstArg} 关机与重启`,
+        warningText: `该命令 init ${firstArg} 将导致服务器立即关机或重启！`
+      };
+    }
+  }
+
+  if (exec === "systemctl") {
+    const subCmd = args[0]?.toLowerCase();
+    if (["reboot", "poweroff", "halt", "kexec", "suspend", "hibernate"].includes(subCmd)) {
+      return {
+        isDangerous: true,
+        patternName: "systemctl 重启与关机",
+        warningText: `systemctl ${subCmd} 会导致系统网络中断并关机重启！`
+      };
+    }
+  }
+
+  // 3. 磁盘格式化与分区改写 (mkfs, fdisk, gdisk, parted, sfdisk)
+  if (exec.startsWith("mkfs") || ["fdisk", "gdisk", "parted", "sfdisk"].includes(exec)) {
+    return {
+      isDangerous: true,
+      patternName: "磁盘格式化与分区改写",
+      warningText: "格式化或改写磁盘分区表将直接抹除目标磁盘分区的全部文件数据！"
+    };
+  }
+
+  // 4. dd 物理底层块覆盖
+  if (exec === "dd") {
+    const hasDangerousOf = args.some((arg) => {
+      const lower = arg.toLowerCase();
+      return lower.startsWith("of=/dev/") && !lower.startsWith("of=/dev/null") && !lower.startsWith("of=/dev/zero");
+    });
+    if (hasDangerousOf) {
+      return {
+        isDangerous: true,
+        patternName: "dd 磁盘物理块改写",
+        warningText: "直接向 /dev/ 块设备写入数据将破坏磁盘 MBR/GPT 分区表或存储介质！"
+      };
+    }
+  }
+
+  // 5. 全局 chmod / chown 递归修改 (chmod -R 777 /)
+  if (exec === "chmod" || exec === "chown") {
+    const hasRecursive = args.some((a) => a === "-R" || a === "-r" || a.startsWith("--recursive"));
+    const hasGlobalPerm = args.some((a) => a === "777" || a === "0777" || a === "a+rwx");
+    const hasRootTarget = args.some((a) => a === "/" || a === "/*" || a === "*" || a === ".");
+
+    if (hasRecursive && (hasGlobalPerm || hasRootTarget)) {
+      return {
+        isDangerous: true,
+        patternName: `${exec} -R 全局权限改写`,
+        warningText: "将系统路径递归修改权限/所有者会导致 Linux 安全体系崩溃并无法再次通过 SSH 登录！"
+      };
+    }
+  }
+
+  // 6. 容器/集群全局毁灭性命令 (docker, kubectl)
+  if (exec === "docker") {
+    const joined = args.join(" ").toLowerCase();
+    if (joined.includes("system prune -a") || joined.includes("rmi -f") || joined.includes("rm -f $(docker ps")) {
+      return {
+        isDangerous: true,
+        patternName: "Docker 批量容器/镜像清空",
+        warningText: "该命令将批量强制销毁所有运行中的容器或本地镜像！"
+      };
+    }
+  }
+
+  if (exec === "kubectl") {
+    const joined = args.join(" ").toLowerCase();
+    if (
+      joined.includes("delete ns --all") ||
+      joined.includes("delete namespace --all") ||
+      joined.includes("delete all --all") ||
+      joined.includes("delete node")
+    ) {
+      return {
+        isDangerous: true,
+        patternName: "Kubernetes 集群资源全量删除",
+        warningText: "该命令将批量清空 K8s 命名空间、节点或全部集群 Workload 资源！"
+      };
+    }
   }
 
   return { isDangerous: false };
