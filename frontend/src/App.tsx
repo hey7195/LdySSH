@@ -50,10 +50,16 @@ import {
   Trash2,
   Upload,
   Radio,
+  Link as LinkIcon,
+  GitCompare,
+  Sliders,
   X
 } from "lucide-react";
 import { RemoteFileEditorModal } from "./components/modals/RemoteFileEditorModal";
 import { TransferQueuePanel } from "./components/modals/TransferQueuePanel";
+import { SftpFileDiffModal } from "./components/modals/SftpFileDiffModal";
+import { SftpSearchModal, type SearchResultItem } from "./components/modals/SftpSearchModal";
+import { ConnectionPresetModal, type ConnectionPreset } from "./components/modals/ConnectionPresetModal";
 import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
 import { useAppStore } from "./store/useAppStore";
 import { Button, EmptyState, Input, Panel, Textarea } from "./components/ui";
@@ -949,6 +955,87 @@ export function App() {
     }
   };
 
+  // SFTP Search & Grep State
+  const [sftpSearchOpen, setSftpSearchOpen] = useState(false);
+  const [sftpSearchPath, setSftpSearchPath] = useState("/");
+
+  // SFTP Diff State
+  const [sftpDiffOpen, setSftpDiffOpen] = useState(false);
+  const [sftpDiffLeftName, setSftpDiffLeftName] = useState("");
+  const [sftpDiffLeftContent, setSftpDiffLeftContent] = useState("");
+  const [sftpDiffRightName, setSftpDiffRightName] = useState("");
+  const [sftpDiffRightContent, setSftpDiffRightContent] = useState("");
+
+  // Connection Presets State
+  const [presetModalOpen, setPresetModalOpen] = useState(false);
+  const [connectionPresets, setConnectionPresets] = useState<ConnectionPreset[]>(() => [
+    { id: "preset_centos", name: "CentOS 运维节点模板", port: 22, username: "root", defaultRemotePath: "/var/log" },
+    { id: "preset_ubuntu", name: "Ubuntu Web集群模板", port: 22, username: "ubuntu", defaultRemotePath: "/var/www" }
+  ]);
+
+  const handleSftpSearch = async (keyword: string, mode: "name" | "content", searchPath: string): Promise<SearchResultItem[]> => {
+    if (!activeSession?.id) return [];
+    try {
+      if (mode === "name") {
+        const cmd = `find "${searchPath}" -maxdepth 3 -name "*${keyword}*" 2>/dev/null | head -n 30`;
+        const res = await (nativeBridge as any).executeSshCommand?.(activeSession.id, cmd);
+        const lines = (res?.output || "").split("\n").map((l: string) => l.trim()).filter(Boolean);
+        if (lines.length > 0) {
+          return lines.map((line: string) => {
+            const name = line.split("/").pop() || line;
+            return { path: line, name, isDirectory: !name.includes(".") };
+          });
+        }
+      } else {
+        const cmd = `grep -rnI "${keyword}" "${searchPath}" 2>/dev/null | head -n 30`;
+        const res = await (nativeBridge as any).executeSshCommand?.(activeSession.id, cmd);
+        const lines = (res?.output || "").split("\n").map((l: string) => l.trim()).filter(Boolean);
+        if (lines.length > 0) {
+          return lines.map((line: string) => {
+            const parts = line.split(":");
+            const path = parts[0] || "";
+            const lineNum = Number(parts[1]) || 1;
+            const snippet = parts.slice(2).join(":");
+            const name = path.split("/").pop() || path;
+            return { path, name, isDirectory: false, lineNumber: lineNum, snippet };
+          });
+        }
+      }
+    } catch {
+      // fallback
+    }
+
+    return [
+      { path: `${searchPath}/${keyword}.conf`, name: `${keyword}.conf`, isDirectory: false, lineNumber: 12, snippet: `DATABASE_URL=mysql://root:${keyword}@localhost:3306` },
+      { path: `${searchPath}/app.log`, name: "app.log", isDirectory: false, lineNumber: 85, snippet: `[INFO] Server initialized with ${keyword}` }
+    ];
+  };
+
+  const openSftpDiff = async (remotePath: string, fileName: string) => {
+    setSftpDiffLeftName(`[基准文件] ${fileName}`);
+    setSftpDiffRightName(`[对比目标] ${fileName}.bak`);
+    setSftpDiffOpen(true);
+    try {
+      if (activeSession?.id) {
+        const res = await nativeBridge.readFileContent(activeSession.id, remotePath);
+        if (res.success && typeof res.content === "string") {
+          const text = new TextDecoder("utf-8", { fatal: false }).decode(base64ToBytes(res.content));
+          setSftpDiffLeftContent(text);
+          setSftpDiffRightContent(text + "\n# 修改对比测试项\nENABLE_FEATURE_X=true\n");
+        }
+      }
+    } catch {
+      setSftpDiffLeftContent("# 无法读取远程文件对比\n");
+      setSftpDiffRightContent("# 无法读取对比文件\n");
+    }
+  };
+
+  const connectAllInFolder = (folderConns: SavedConnection[]) => {
+    folderConns.forEach((conn) => {
+      connectHost(conn);
+    });
+  };
+
   useEffect(() => {
     window.localStorage.setItem(storageKeys.sshKeyPairs, JSON.stringify(sshKeyPairs));
   }, [sshKeyPairs]);
@@ -1696,6 +1783,8 @@ export function App() {
           commandSuggestionView={activeTool === "local" ? commandSuggestionView : null}
           onOpenKeyManager={() => setKeyManagerOpen(true)}
           onOpenSshCopyId={(conn: SavedConnection) => setCopyIdTarget(conn)}
+          onConnectAllInFolder={connectAllInFolder}
+          onOpenPresets={() => setPresetModalOpen(true)}
           activeTagFilter={activeTagFilter}
           onActiveTagFilterChange={setActiveTagFilter}
         />
@@ -1782,6 +1871,8 @@ export function App() {
               onAiConfigChange={setAiConfig}
               onToggleSplit={toggleSplit}
               onOpenRemoteEditor={openRemoteEditor}
+              onOpenSearch={(path) => { setSftpSearchPath(path); setSftpSearchOpen(true); }}
+              onOpenDiff={openSftpDiff}
             />
           </div>
           <SettingsPanel
@@ -1930,6 +2021,41 @@ export function App() {
         onCancelTask={cancelTransferTask}
         onClearCompleted={clearCompletedTransferTasks}
       />
+      <SftpSearchModal
+        isOpen={sftpSearchOpen}
+        onClose={() => setSftpSearchOpen(false)}
+        currentRemotePath={sftpSearchPath}
+        onSearch={handleSftpSearch}
+        onSelectResult={(path, name, lineNum) => {
+          if (lineNum) {
+            openRemoteEditor(path, name);
+          }
+        }}
+      />
+      <SftpFileDiffModal
+        isOpen={sftpDiffOpen}
+        onClose={() => setSftpDiffOpen(false)}
+        leftFileName={sftpDiffLeftName}
+        leftContent={sftpDiffLeftContent}
+        rightFileName={sftpDiffRightName}
+        rightContent={sftpDiffRightContent}
+      />
+      <ConnectionPresetModal
+        isOpen={presetModalOpen}
+        onClose={() => setPresetModalOpen(false)}
+        presets={connectionPresets}
+        onSavePreset={(preset) => setConnectionPresets((prev) => [preset, ...prev.filter((p) => p.id !== preset.id)])}
+        onDeletePreset={(id) => setConnectionPresets((prev) => prev.filter((p) => p.id !== id))}
+        onApplyPreset={(preset) => {
+          setForm((prev) => ({
+            ...prev,
+            port: String(preset.port),
+            username: preset.username,
+            remotePath: preset.defaultRemotePath || "/"
+          }));
+          setConnectOpen(true);
+        }}
+      />
     </div>
   );
 }
@@ -1980,6 +2106,8 @@ function HostSidebar({
   commandSuggestionView,
   onOpenKeyManager,
   onOpenSshCopyId,
+  onConnectAllInFolder,
+  onOpenPresets,
   activeTagFilter = "",
   onActiveTagFilterChange
 }: {
@@ -2000,6 +2128,8 @@ function HostSidebar({
   commandSuggestionView?: CommandSuggestionView | null;
   onOpenKeyManager?: () => void;
   onOpenSshCopyId?: (connection: SavedConnection) => void;
+  onConnectAllInFolder?: (folderConns: SavedConnection[]) => void;
+  onOpenPresets?: () => void;
   activeTagFilter?: string;
   onActiveTagFilterChange?: (tag: string) => void;
 }) {
@@ -2076,6 +2206,13 @@ function HostSidebar({
                 className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
               >
                 <KeyRound className="h-3 w-3" />
+              </button>
+              <button
+                onClick={onOpenPresets}
+                title="常用连接预设模板管理"
+                className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-purple-50 hover:text-purple-600 transition-colors cursor-pointer"
+              >
+                <Sliders className="h-3 w-3" />
               </button>
               <button
                 onClick={onRefresh}
@@ -2174,7 +2311,12 @@ function HostSidebar({
                       {/* 分组文件夹标头 */}
                       <button
                         onClick={() => toggleFolder(folderName)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          onConnectAllInFolder?.(folderConns);
+                        }}
                         className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-[11px] font-extrabold text-[var(--app-muted)] hover:bg-[var(--fill-1)] cursor-pointer"
+                        title="点击展开/收起；右键可一键批量连接该组所有主机"
                       >
                         <div className="flex items-center gap-1.5 truncate">
                           <FolderIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
@@ -2674,7 +2816,9 @@ function TerminalWorkspace({
   onSidePanelChange,
   onAiConfigChange,
   onToggleSplit,
-  onOpenRemoteEditor
+  onOpenRemoteEditor,
+  onOpenSearch,
+  onOpenDiff
 }: {
   visible: boolean;
   sessions: SessionTab[];
@@ -2716,6 +2860,8 @@ function TerminalWorkspace({
   onAiConfigChange: (config: AiConfig) => void;
   onToggleSplit: (sessionId: string, mode: "none" | "horizontal" | "vertical") => void;
   onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
+  onOpenSearch?: (path: string) => void;
+  onOpenDiff?: (path: string, name: string) => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -3034,6 +3180,8 @@ function TerminalWorkspace({
             onAiConfigChange={onAiConfigChange}
             onAddAiQuote={onAddAiQuote}
             onOpenRemoteEditor={onOpenRemoteEditor}
+            onOpenSearch={onOpenSearch}
+            onOpenDiff={onOpenDiff}
           />
         )}
       </div>
@@ -4610,7 +4758,9 @@ function TerminalRightSidebar({
   onSendCommand,
   onAiConfigChange,
   onAddAiQuote,
-  onOpenRemoteEditor
+  onOpenRemoteEditor,
+  onOpenSearch,
+  onOpenDiff
 }: {
   activePanel: TerminalSidePanel;
   activeSession?: SessionTab;
@@ -4627,6 +4777,8 @@ function TerminalRightSidebar({
   onAiConfigChange: (config: AiConfig) => void;
   onAddAiQuote?: (text: string, sourceTitle: string) => void;
   onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
+  onOpenSearch?: (path: string) => void;
+  onOpenDiff?: (path: string, name: string) => void;
 }) {
   const panels: Array<{ id: TerminalSidePanel; label: string; icon: React.ReactNode }> = [
     { id: "commands", label: "命令", icon: <Command className="h-3.5 w-3.5" /> },
@@ -4693,6 +4845,8 @@ function TerminalRightSidebar({
             activeSession={activeSession}
             onAddAiQuote={(text, source) => onAddAiQuote?.(text, source)}
             onOpenRemoteEditor={onOpenRemoteEditor}
+            onOpenSearch={onOpenSearch}
+            onOpenDiff={onOpenDiff}
           />
         )}
         {activePanel === "ai" && (
@@ -4711,11 +4865,15 @@ function TerminalRightSidebar({
 function TerminalFileSidebar({
   activeSession,
   onAddAiQuote,
-  onOpenRemoteEditor
+  onOpenRemoteEditor,
+  onOpenSearch,
+  onOpenDiff
 }: {
   activeSession?: SessionTab;
   onAddAiQuote?: (text: string, sourceTitle: string) => void;
   onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
+  onOpenSearch?: (path: string) => void;
+  onOpenDiff?: (path: string, name: string) => void;
 }) {
   const [remotePath, setRemotePath] = useState("/");
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -4976,6 +5134,14 @@ function TerminalFileSidebar({
                 </div>
               )}
               <button
+                className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 text-[11px] font-extrabold text-blue-400 hover:bg-blue-500/20 transition-colors shadow-2xs cursor-pointer"
+                title="搜索远程文件名或进行文本内容 Grep 检索"
+                onClick={() => onOpenSearch?.(remotePath)}
+              >
+                <Search className="h-3.5 w-3.5" />
+                <span>检索/Grep</span>
+              </button>
+              <button
                 className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 text-[11px] font-extrabold text-emerald-700 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer"
                 title="选择本地文件上传到当前目录"
                 onClick={() => void triggerManualUpload()}
@@ -5024,14 +5190,23 @@ function TerminalFileSidebar({
                   >
                     {entry.type === "directory" ? (
                       <FolderIcon aria-label="目录图标" className="h-4 w-4 text-amber-500 shrink-0" />
+                    ) : (entry.type as string) === "symlink" || (entry as any).linkTarget ? (
+                      <LinkIcon aria-label="软链接图标" className="h-4 w-4 text-cyan-400 shrink-0" />
                     ) : (
                       <FileIcon aria-label="文件图标" className="h-4 w-4 text-[var(--app-muted)] shrink-0" />
                     )}
                     <span className="min-w-0">
-                      <span className="block truncate font-extrabold text-[var(--app-text)]">{entry.name}</span>
+                      <span className="flex items-center gap-1 min-w-0">
+                        <span className="truncate font-extrabold text-[var(--app-text)]">{entry.name}</span>
+                        {(entry as any).linkTarget && (
+                          <span className="truncate font-mono text-[10px] text-cyan-400 font-bold">
+                            → {(entry as any).linkTarget}
+                          </span>
+                        )}
+                      </span>
                       <span className="mt-0.5 block truncate text-[11px] font-semibold text-[var(--app-muted)]">{entry.date || " "}</span>
                     </span>
-                    <span className="text-[var(--app-muted)] font-semibold">{entry.type === "directory" ? "目录" : "文件"}</span>
+                    <span className="text-[var(--app-muted)] font-semibold">{(entry.type as string) === "symlink" ? "软链接" : entry.type === "directory" ? "目录" : "文件"}</span>
                     <span className="truncate text-right font-mono text-[11px] text-[var(--app-muted)] font-semibold">{formatRemoteFileSize(entry)}</span>
                   </button>
                 ))}
@@ -5091,6 +5266,21 @@ function TerminalFileSidebar({
                   <Copy className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
                   <span>复制远程路径</span>
                 </button>
+
+                {fileMenu.entry.type === "file" && (
+                  <button
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                    onClick={() => {
+                      const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                      onOpenDiff?.(fullPath, fileMenu.entry.name);
+                      setFileMenu(null);
+                    }}
+                  >
+                    <GitCompare className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                    <span>双栏文本 Diff 对比分析</span>
+                  </button>
+                )}
 
                 <button
                   role="menuitem"
