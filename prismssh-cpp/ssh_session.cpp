@@ -1645,7 +1645,7 @@ std::string SSHSession::GetProcessList() {
             }
         }
     } else if (os == "linux") {
-        std::string output = ExecuteCommand("ps aux --sort=-%cpu | head -11");
+        std::string output = ExecuteCommand("ps aux --sort=-%cpu | head -n 50");
         auto lines = SplitString(output, '\n');
         int count = 0;
         for (auto& line : lines) {
@@ -1659,12 +1659,16 @@ std::string SSHSession::GetProcessList() {
                     cmd += " " + parts[i];
                 }
                 nlohmann::json proc;
-                proc["name"] = cmd.size() > 30 ? cmd.substr(0, 30) + "..." : cmd;
+                proc["user"] = parts[0];
                 proc["pid"] = parts[1];
                 proc["cpu"] = parts[2] + "%";
                 proc["memory"] = parts[3] + "%";
+                proc["stat"] = parts[7];
+                proc["name"] = cmd;
+                proc["command"] = parts[10];
+                proc["args"] = cmd;
                 process_array.push_back(proc);
-                if (++count >= 10) break;
+                if (++count >= 40) break;
             }
         }
     }
