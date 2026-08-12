@@ -98,6 +98,8 @@ export const LINUX_SHELL_DICTIONARY: ShellDictionaryItem[] = [
   }
 ];
 
+import { FLAT_RUNOOB_COMMANDS } from "./runoobLinuxCommands";
+
 export function getShellSuggestion(
   input: string,
   historyCommands: string[] = [],
@@ -125,7 +127,16 @@ export function getShellSuggestion(
     return `${input}${remaining}`;
   }
 
-  // 3. Search in system dictionary
+  // 3. Search in Runoob Linux Manual dataset
+  const runoobMatch = FLAT_RUNOOB_COMMANDS.find(
+    (cmd) => cmd.name.toLowerCase().startsWith(lowerInput) && cmd.name.length > lowerInput.length
+  );
+  if (runoobMatch && !rawInput.includes(" ")) {
+    const remaining = runoobMatch.name.slice(lowerInput.length);
+    return `${input}${remaining}`;
+  }
+
+  // 4. Search in system dictionary
   const parts = rawInput.split(/\s+/);
   const mainCmd = parts[0]?.toLowerCase();
   if (!mainCmd) return null;
