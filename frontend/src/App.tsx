@@ -1065,19 +1065,17 @@ export function App() {
   const fetchRemoteProcesses = async (): Promise<ProcessItem[]> => {
     if (!activeSession?.id) return [];
     try {
-      const cmd = "ps -eo pid,user,pcpu,pmem,stat,comm,args --sort=-pcpu | head -n 40";
-      const res = await (nativeBridge as any).executeSshCommand?.(activeSession.id, cmd);
-      const lines = (res?.output || "").split("\n").map((l: string) => l.trim()).filter(Boolean);
-      if (lines.length > 1) {
-        return lines.slice(1).map((line: string) => {
-          const parts = line.split(/\s+/);
-          const pid = Number(parts[0]) || 0;
-          const user = parts[1] || "root";
-          const cpu = parseFloat(parts[2]) || 0;
-          const mem = parseFloat(parts[3]) || 0;
-          const stat = parts[4] || "S";
-          const command = parts[5] || "process";
-          const args = parts.slice(6).join(" ");
+      const res = await nativeBridge.getProcessList(activeSession.id);
+      const list = monitorList(res, "processes");
+      if (list.length > 0) {
+        return list.map((item) => {
+          const pid = Number(item.pid) || 0;
+          const user = String(item.user || item.USER || "root");
+          const cpu = monitorPercent(item.cpu || item.pcpu || item.PCPU || item["%CPU"]);
+          const mem = monitorPercent(item.mem || item.pmem || item.PMEM || item["%MEM"]);
+          const stat = String(item.stat || item.STAT || "S");
+          const command = String(item.command || item.COMMAND || item.comm || "process");
+          const args = String(item.args || item.ARGS || item.command || "");
           return { pid, user, cpu, mem, stat, command, args };
         });
       }
@@ -1096,8 +1094,9 @@ export function App() {
   const killRemoteProcess = async (pid: number, signal: 9 | 15): Promise<boolean> => {
     if (!activeSession?.id) return false;
     try {
-      const cmd = `kill -${signal} ${pid}`;
-      await (nativeBridge as any).executeSshCommand?.(activeSession.id, cmd);
+      const cmd = `kill -${signal} ${pid}\n`;
+      const b64Data = bytesToBase64(new TextEncoder().encode(cmd));
+      await nativeBridge.sendInputBase64(activeSession.id, b64Data);
       return true;
     } catch {
       return true;
