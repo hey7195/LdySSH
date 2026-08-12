@@ -29,15 +29,24 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    if (!isOpen) return;
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        if (isOpen) onClose();
-        else setQuery("");
+        e.stopPropagation();
+        onClose();
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+
+    window.addEventListener("keydown", handleGlobalKeyDown, true);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown, true);
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
@@ -134,9 +143,13 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-black/75 backdrop-blur-sm animate-fade-in select-none">
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-black/75 backdrop-blur-sm animate-fade-in select-none"
+      onClick={onClose}
+    >
       <div
         className="flex w-full max-w-xl flex-col rounded-2xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
         onKeyDown={handleFormKeyDown}
       >
         {/* Search Header */}
@@ -153,9 +166,15 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
             placeholder="搜索主机、快捷命令、全局操作... (↑↓ 选择, Enter 执行, Esc 退出)"
             className="w-full bg-transparent text-sm font-medium text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
           />
-          <span className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[10px] font-mono text-zinc-400 shrink-0 ml-2">
-            ESC
-          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            title="关闭罗盘 (ESC)"
+            className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[10px] font-mono text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100 transition-colors shrink-0 ml-2 cursor-pointer"
+          >
+            <span>ESC</span>
+            <X className="h-3 w-3" />
+          </button>
         </div>
 
         {/* Results List */}
