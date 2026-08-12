@@ -59,6 +59,7 @@ import {
   ArrowRightLeft,
   Stethoscope,
   Disc,
+  Wrench,
   X
 } from "lucide-react";
 import { RemoteFileEditorModal } from "./components/modals/RemoteFileEditorModal";
@@ -74,6 +75,7 @@ import { ServerDiagnosticsModal, type DiagnosticCheckItem } from "./components/m
 import { SessionLoggerModal } from "./components/modals/SessionLoggerModal";
 import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
 import { ParameterFillModal } from "./components/modals/ParameterFillModal";
+import { KernelDevOpsToolboxModal } from "./components/modals/KernelDevOpsToolboxModal";
 import { getShellSuggestion } from "./lib/terminalIntelliSense";
 import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
 import { useAppStore } from "./store/useAppStore";
@@ -1178,6 +1180,9 @@ export function App() {
   const [paramModalOpen, setParamModalOpen] = useState(false);
   const [paramCommandTarget, setParamCommandTarget] = useState({ name: "", template: "" });
 
+  // Kernel & DevOps ToolKit State
+  const [kernelToolboxOpen, setKernelToolboxOpen] = useState(false);
+
 
 
   const runServerDiagnostics = async (): Promise<{ score: number; checks: DiagnosticCheckItem[] }> => {
@@ -1967,6 +1972,15 @@ export function App() {
               </button>
 
               <button
+                onClick={() => setKernelToolboxOpen(true)}
+                title="运维与内核开发常用工具箱 (dmesg, perf, strace, insmod)"
+                className="flex items-center gap-1.5 rounded-full bg-purple-500/10 border border-purple-500/30 px-3 py-1 text-xs font-bold text-purple-400 hover:bg-purple-500/20 hover:border-purple-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
+              >
+                <Wrench className="h-3.5 w-3.5" />
+                <span>运维内核</span>
+              </button>
+
+              <button
                 onClick={() => setSessionLoggerOpen(true)}
                 title="终端会话 ANSI 日志录制与导出"
                 className="flex items-center gap-1.5 rounded-full bg-rose-500/10 border border-rose-500/30 px-3 py-1 text-xs font-bold text-rose-400 hover:bg-rose-500/20 hover:border-rose-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
@@ -2367,6 +2381,11 @@ export function App() {
         onExecute={(finalCmd) => {
           sendCommandToActiveSession(finalCmd);
         }}
+      />
+      <KernelDevOpsToolboxModal
+        isOpen={kernelToolboxOpen}
+        onClose={() => setKernelToolboxOpen(false)}
+        onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)}
       />
     </div>
   );
