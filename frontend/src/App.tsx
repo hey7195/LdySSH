@@ -25,6 +25,7 @@ import {
   FolderOpen,
   Grid2X2,
   Globe2,
+  GripHorizontal,
   HardDrive,
   Home,
   Image as ImageIcon,
@@ -37,6 +38,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  RotateCcw,
   Rows2,
   Search,
   Send,
@@ -2977,12 +2979,29 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
       className="fixed z-30 flex min-w-0 flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg"
       style={{ left: layout.left, bottom: layout.bottom, width: layout.width, height: layout.height }}
     >
-      <button
-        type="button"
-        aria-label="移动命令提示"
-        className="h-4 shrink-0 cursor-move border-b border-slate-100 bg-slate-50 hover:bg-blue-50"
-        onMouseDown={startMove}
-      />
+      <div className="flex h-5 shrink-0 items-center justify-between border-b border-slate-100 bg-slate-50 px-2 select-none">
+        <button
+          type="button"
+          aria-label="移动命令提示"
+          className="flex items-center gap-1 min-w-0 flex-1 h-full cursor-move text-[10px] font-bold text-slate-500 hover:text-slate-800 text-left bg-transparent border-0 p-0"
+          onMouseDown={startMove}
+        >
+          <GripHorizontal className="h-3 w-3 text-slate-400 shrink-0" />
+          <span className="truncate">提示面板 (可拖拽)</span>
+        </button>
+        <button
+          type="button"
+          title="复位提示框到默认位置"
+          aria-label="重置提示面板位置"
+          className="flex h-4 w-4 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700 cursor-pointer shrink-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            updateLayout(defaultCommandSuggestionPanelLayout);
+          }}
+        >
+          <RotateCcw className="h-2.5 w-2.5" />
+        </button>
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-1 pr-3">
         {view.suggestions.slice(0, 6).map((suggestion, index) => (
           <button
