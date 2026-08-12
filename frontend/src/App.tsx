@@ -2617,19 +2617,25 @@ function HostSidebar({
                           {folderConns.map((connection, index) => (
                             <div
                               key={`${connection.hostname}-${connection.username}-${index}`}
-                              className="relative flex flex-col gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2 transition-all hover:border-emerald-500 hover:shadow-xs group"
+                              className="relative flex flex-col gap-1.5 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 transition-all duration-200 hover:border-emerald-500/50 hover:shadow-md group select-none"
                             >
                               <div className="flex items-center gap-2 min-w-0 w-full">
-                                <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/60 shrink-0">
+                                <div className="relative flex h-7.5 w-7.5 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 shrink-0 shadow-2xs">
                                   <Server className="h-3.5 w-3.5" />
+                                  <span className="absolute -bottom-0.5 -right-0.5 flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                  </span>
                                 </div>
                                 
                                 <button className="min-w-0 flex-1 text-left cursor-pointer" onClick={() => onConnect(connection)}>
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate text-xs font-extrabold text-[var(--app-text)] max-w-[110px]" title={connection.name || connection.hostname}>
+                                  <div className="flex items-center justify-between min-w-0 pr-1">
+                                    <span className="truncate text-xs font-extrabold text-[var(--app-text)] max-w-[100px]" title={connection.name || connection.hostname}>
                                       {connection.name || connection.hostname}
                                     </span>
-                                    {connection.environment && renderEnvironmentBadge(connection.environment, true)}
+                                    <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 font-mono text-[9px] font-bold text-emerald-500 shrink-0">
+                                      24ms
+                                    </span>
                                   </div>
                                   <div className="truncate font-mono text-[10px] font-semibold text-[var(--app-muted)] max-w-[125px]" title={`${connection.username || "user"}@${connection.hostname || "host"}`}>
                                     {connection.username || "user"}@{connection.hostname || "host"}
