@@ -63,6 +63,38 @@ export const LINUX_SHELL_DICTIONARY: ShellDictionaryItem[] = [
   {
     prefix: "iptables",
     completions: ["-L -n -v", "-F", "-A INPUT -p tcp --dport"]
+  },
+  {
+    prefix: "kubectl",
+    completions: ["get pods -A", "logs -f --tail=100", "describe pod", "exec -it", "apply -f", "get svc -A", "top nodes", "top pods"]
+  },
+  {
+    prefix: "dmesg",
+    completions: ["-wH --color=always", "-l err,crit,alert,emerg", "-T | tail -n 50", "-c"]
+  },
+  {
+    prefix: "perf",
+    completions: ["top -g", "record -F 99 -g -p", "report", "stat -p"]
+  },
+  {
+    prefix: "strace",
+    completions: ["-c -p", "-e trace=openat,read,write,connect -p", "-ff -o strace.log -p"]
+  },
+  {
+    prefix: "tcpdump",
+    completions: ["-i any port 80 -n -X", "-i eth0 tcp port 443", "-w capture.pcap"]
+  },
+  {
+    prefix: "lsof",
+    completions: ["-i :8080", "-i -P -n", "-p", "+D /var/log"]
+  },
+  {
+    prefix: "modprobe",
+    completions: ["-v", "-r", "--show-depends"]
+  },
+  {
+    prefix: "rsync",
+    completions: ["-avz --progress", "-avz -e ssh ./", "--delete -avz"]
   }
 ];
 
