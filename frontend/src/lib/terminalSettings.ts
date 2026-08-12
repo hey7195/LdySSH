@@ -1,5 +1,8 @@
 import animeCyberCity from "../assets/wallpapers/anime_cyber_city.jpg";
 import animeSunsetSkyline from "../assets/wallpapers/anime_sunset_skyline.jpg";
+import animeStarryNight from "../assets/wallpapers/anime_starry_night.jpg";
+import animeCozyRoom from "../assets/wallpapers/anime_cozy_room.jpg";
+import animeShrineSakura from "../assets/wallpapers/anime_shrine_sakura.jpg";
 
 export type ThemeMode = "light" | "dark" | "nordic";
 export type TerminalThemeMode = "light" | "dark" | "nordic";
@@ -26,6 +29,9 @@ export const PRESET_WALLPAPERS: PresetWallpaper[] = [
   { id: "none", name: "无壁纸 (纯色底纹)", url: "" },
   { id: "anime_cyber", name: "🌌 霓虹雨夜 (新海诚风)", url: animeCyberCity },
   { id: "anime_sunset", name: "🌸 晚霞樱花 (日落都市)", url: animeSunsetSkyline },
+  { id: "anime_starry", name: "🌙 璀璨月夜 (紫海星空)", url: animeStarryNight },
+  { id: "anime_cozy", name: "💻 极客书房 (雨夜猫咪)", url: animeCozyRoom },
+  { id: "anime_shrine", name: "⛩️ 鸟居日出 (日式云海)", url: animeShrineSakura },
   { id: "cyberpunk", name: "🌆 赛博黑客 (Cyberpunk)", url: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1200&q=80" },
   { id: "aurora", name: "🌌 深邃极光 (Aurora)", url: "https://images.unsplash.com/photo-1531366936337-7c912a4589a7?auto=format&fit=crop&w=1200&q=80" },
   { id: "obsidian", name: "🖤 黑曜晶石 (Obsidian)", url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80" }
