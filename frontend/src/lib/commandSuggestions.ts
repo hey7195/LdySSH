@@ -1,5 +1,5 @@
 import type { CommandFolder } from "./bridge";
-import { getCommandUsageFrequency } from "./terminalIntelliSense";
+import { LINUX_SHELL_DICTIONARY, getCommandUsageFrequency } from "./terminalIntelliSense";
 
 export type CommandSuggestionSource = "history" | "shortcut" | "linux";
 export type CommandSuggestionApplyKey = "enter" | "tab" | "ctrlSpace" | "altEnter" | "custom";
@@ -521,8 +521,20 @@ const LINUXCOOL_COMMAND_NAMES = [
   "tty"
 ];
 
+// 动态全量展开 LINUX_SHELL_DICTIONARY 中所有的 命令 + 参数/选项 组合
+const DICTIONARY_PARAMETRIZED_SUGGESTIONS: Array<Omit<CommandSuggestion, "id" | "source">> = LINUX_SHELL_DICTIONARY.flatMap((item) =>
+  item.completions.map((comp) => {
+    const fullCmd = `${item.prefix} ${comp}`.trim();
+    return {
+      label: fullCmd,
+      command: fullCmd
+    };
+  })
+);
+
 const LINUX_COMMAND_SUGGESTIONS: Array<Omit<CommandSuggestion, "id" | "source">> = [
   ...LINUX_COMMANDS,
+  ...DICTIONARY_PARAMETRIZED_SUGGESTIONS,
   ...LINUXCOOL_COMMAND_NAMES.map((command) => ({ label: command, command }))
 ];
 
