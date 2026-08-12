@@ -14,6 +14,8 @@ import {
   type CustomDangerousRule
 } from "../lib/commandSuggestions";
 
+import { type TransferTaskItem } from "../components/modals/TransferQueuePanel";
+
 const STORAGE_KEYS = {
   theme: "ldyssh.ui.theme",
   terminalTheme: "ldyssh.terminal.theme",
@@ -56,6 +58,8 @@ interface AppState {
   terminalBackgroundOverlay: number;
   commandSuggestionsEnabled: boolean;
   dangerousCommandGuardEnabled: boolean;
+  commandBroadcastingEnabled: boolean;
+  transferTasks: TransferTaskItem[];
   customDangerousRules: CustomDangerousRule[];
   auditLogs: AuditLogRecord[];
   highlightRules: HighlightRule[];
@@ -67,6 +71,11 @@ interface AppState {
   setTerminalBackgroundOverlay: (overlay: number) => void;
   setCommandSuggestionsEnabled: (enabled: boolean) => void;
   setDangerousCommandGuardEnabled: (enabled: boolean) => void;
+  setCommandBroadcastingEnabled: (enabled: boolean) => void;
+  addTransferTask: (task: Omit<TransferTaskItem, "id">) => string;
+  updateTransferTask: (id: string, patch: Partial<TransferTaskItem>) => void;
+  cancelTransferTask: (id: string) => void;
+  clearCompletedTransferTasks: () => void;
   addCustomDangerousRule: (rule: Omit<CustomDangerousRule, "id">) => void;
   updateCustomDangerousRule: (id: string, rule: Partial<CustomDangerousRule>) => void;
   deleteCustomDangerousRule: (id: string) => void;
@@ -92,6 +101,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   terminalBackgroundOverlay: Number(window.localStorage.getItem(STORAGE_KEYS.terminalBackgroundOverlay) || 50),
   commandSuggestionsEnabled: window.localStorage.getItem(STORAGE_KEYS.commandSuggestionsEnabled) !== "false",
   dangerousCommandGuardEnabled: window.localStorage.getItem(STORAGE_KEYS.dangerousCommandGuardEnabled) !== "false",
+  commandBroadcastingEnabled: false,
+  transferTasks: [],
   customDangerousRules: getStoredJSON<CustomDangerousRule[]>(STORAGE_KEYS.customDangerousRules, [
     {
       id: "drop-db",
@@ -138,6 +149,30 @@ export const useAppStore = create<AppState>((set, get) => ({
   setDangerousCommandGuardEnabled: (enabled) => {
     window.localStorage.setItem(STORAGE_KEYS.dangerousCommandGuardEnabled, String(enabled));
     set({ dangerousCommandGuardEnabled: enabled });
+  },
+  setCommandBroadcastingEnabled: (enabled) => {
+    set({ commandBroadcastingEnabled: enabled });
+  },
+  addTransferTask: (task) => {
+    const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const newTask: TransferTaskItem = { ...task, id };
+    set((state) => ({ transferTasks: [newTask, ...state.transferTasks] }));
+    return id;
+  },
+  updateTransferTask: (id, patch) => {
+    set((state) => ({
+      transferTasks: state.transferTasks.map((t) => (t.id === id ? { ...t, ...patch } : t))
+    }));
+  },
+  cancelTransferTask: (id) => {
+    set((state) => ({
+      transferTasks: state.transferTasks.map((t) => (t.id === id ? { ...t, status: "failed", error: "用户手动取消" } : t))
+    }));
+  },
+  clearCompletedTransferTasks: () => {
+    set((state) => ({
+      transferTasks: state.transferTasks.filter((t) => t.status === "transferring")
+    }));
   },
   addCustomDangerousRule: (rule) => {
     const newRule: CustomDangerousRule = { ...rule, id: `custom-rule-${Date.now()}` };

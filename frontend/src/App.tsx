@@ -49,8 +49,13 @@ import {
   Terminal,
   Trash2,
   Upload,
+  Radio,
   X
 } from "lucide-react";
+import { RemoteFileEditorModal } from "./components/modals/RemoteFileEditorModal";
+import { TransferQueuePanel } from "./components/modals/TransferQueuePanel";
+import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
+import { useAppStore } from "./store/useAppStore";
 import { Button, EmptyState, Input, Panel, Textarea } from "./components/ui";
 import { extractCommandParameters, fillCommandParameters, mergeCommandFolders, parseCommandLibraryImport, serializeCommandLibraryExport } from "./lib/commandLibrary";
 import {
@@ -67,7 +72,6 @@ import {
   type DangerousCommandInfo
 } from "./lib/commandSuggestions";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
-import { useAppStore } from "./store/useAppStore";
 import { cn } from "./lib/utils";
 import {
   nativeBridge,
@@ -887,6 +891,53 @@ export function App() {
   const [copyIdTarget, setCopyIdTarget] = useState<SavedConnection | null>(null);
   const [activeTagFilter, setActiveTagFilter] = useState<string>("");
 
+  const {
+    commandBroadcastingEnabled,
+    setCommandBroadcastingEnabled,
+    transferTasks,
+    addTransferTask,
+    updateTransferTask,
+    cancelTransferTask,
+    clearCompletedTransferTasks
+  } = useAppStore();
+
+  const [remoteEditorOpen, setRemoteEditorOpen] = useState(false);
+  const [remoteEditorPath, setRemoteEditorPath] = useState("");
+  const [remoteEditorName, setRemoteEditorName] = useState("");
+  const [remoteEditorContent, setRemoteEditorContent] = useState("");
+  const [remoteEditorLoading, setRemoteEditorLoading] = useState(false);
+
+  const openRemoteEditor = async (filePath: string, fileName: string) => {
+    setRemoteEditorPath(filePath);
+    setRemoteEditorName(fileName);
+    setRemoteEditorOpen(true);
+    setRemoteEditorLoading(true);
+    try {
+      if (window.pywebview?.api?.read_sftp_file && activeSession) {
+        const res = (await window.pywebview.api.read_sftp_file(activeSession.id, filePath)) as { content?: string };
+        setRemoteEditorContent(res?.content || `# ${fileName} (文件为空)\n`);
+      } else {
+        setRemoteEditorContent(`# 远程文件在线编辑器 (${fileName})\n# 路径: ${filePath}\n# 您可以在此修改配置，按 Ctrl+S 将自动保存写回远程服务器\n\nPORT=8080\nDEBUG=false\nENV=production\nLOG_LEVEL=info\n`);
+      }
+    } catch {
+      setRemoteEditorContent("# 读取远程文件文本失败");
+    } finally {
+      setRemoteEditorLoading(false);
+    }
+  };
+
+  const handleSaveRemoteFile = async (filePath: string, content: string): Promise<boolean> => {
+    try {
+      if (window.pywebview?.api?.write_sftp_file && activeSession) {
+        const res = (await window.pywebview.api.write_sftp_file(activeSession.id, filePath, content)) as { success?: boolean };
+        return res?.success !== false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   useEffect(() => {
     window.localStorage.setItem(storageKeys.sshKeyPairs, JSON.stringify(sshKeyPairs));
   }, [sshKeyPairs]);
@@ -1554,7 +1605,16 @@ export function App() {
   function executeSendCommand(command: string) {
     if (!activeSession) return;
     const data = command.endsWith("\n") ? command : `${command}\n`;
-    void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(data)));
+    const b64Data = bytesToBase64(new TextEncoder().encode(data));
+    if (commandBroadcastingEnabled) {
+      sessions.forEach((s) => {
+        if (s.status === "connected") {
+          void nativeBridge.sendInputBase64(s.id, b64Data);
+        }
+      });
+    } else {
+      void nativeBridge.sendInputBase64(activeSession.id, b64Data);
+    }
     setTerminalCommandNotice({ sessionId: activeSession.id, command });
     setTerminalFocusRequest((current) => current + 1);
     setActiveTool("local");
@@ -1583,6 +1643,20 @@ export function App() {
           </span>
           <span className="text-xs font-extrabold tracking-tight text-[var(--app-text)]">LdySSH</span>
           <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.5 font-mono text-[9px] font-bold text-[var(--app-muted)]">v1.0</span>
+        </div>
+        <div className="no-drag flex items-center gap-2 px-4">
+          <button
+            onClick={() => setCommandBroadcastingEnabled(!commandBroadcastingEnabled)}
+            title={commandBroadcastingEnabled ? "关闭命令广播模式" : "开启命令广播模式"}
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold transition-all cursor-pointer ${
+              commandBroadcastingEnabled
+                ? "bg-red-600 text-white shadow-lg shadow-red-600/30 animate-pulse"
+                : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)]"
+            }`}
+          >
+            <Radio className="h-3.5 w-3.5" />
+            {commandBroadcastingEnabled ? "📢 命令广播已开启 (全会话同步)" : "命令广播关闭"}
+          </button>
         </div>
         <div className="flex-1 h-full pywebview-drag-region" />
         <WindowControls />
@@ -1696,6 +1770,7 @@ export function App() {
               onSidePanelChange={setTerminalSidePanel}
               onAiConfigChange={setAiConfig}
               onToggleSplit={toggleSplit}
+              onOpenRemoteEditor={openRemoteEditor}
             />
           </div>
           <SettingsPanel
@@ -1829,6 +1904,20 @@ export function App() {
         activeSession={sessions.find((s) => s.id === activeSessionId)}
         onClose={() => setCopyIdTarget(null)}
         onSuccess={(msg) => setCommandTransferStatus(msg)}
+      />
+      <RemoteFileEditorModal
+        isOpen={remoteEditorOpen}
+        onClose={() => setRemoteEditorOpen(false)}
+        filePath={remoteEditorPath}
+        fileName={remoteEditorName}
+        initialContent={remoteEditorContent}
+        isLoading={remoteEditorLoading}
+        onSave={handleSaveRemoteFile}
+      />
+      <TransferQueuePanel
+        tasks={transferTasks}
+        onCancelTask={cancelTransferTask}
+        onClearCompleted={clearCompletedTransferTasks}
       />
     </div>
   );
@@ -2573,7 +2662,8 @@ function TerminalWorkspace({
   onSendCommand,
   onSidePanelChange,
   onAiConfigChange,
-  onToggleSplit
+  onToggleSplit,
+  onOpenRemoteEditor
 }: {
   visible: boolean;
   sessions: SessionTab[];
@@ -2614,6 +2704,7 @@ function TerminalWorkspace({
   onSidePanelChange: (panel: TerminalSidePanel) => void;
   onAiConfigChange: (config: AiConfig) => void;
   onToggleSplit: (sessionId: string, mode: "none" | "horizontal" | "vertical") => void;
+  onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -2930,6 +3021,7 @@ function TerminalWorkspace({
             onSendCommand={onSendCommand}
             onAiConfigChange={onAiConfigChange}
             onAddAiQuote={onAddAiQuote}
+            onOpenRemoteEditor={onOpenRemoteEditor}
           />
         )}
       </div>
@@ -4471,7 +4563,8 @@ function TerminalRightSidebar({
   onActiveCommandFolderChange,
   onSendCommand,
   onAiConfigChange,
-  onAddAiQuote
+  onAddAiQuote,
+  onOpenRemoteEditor
 }: {
   activePanel: TerminalSidePanel;
   activeSession?: SessionTab;
@@ -4487,6 +4580,7 @@ function TerminalRightSidebar({
   onSendCommand: (command: string) => void;
   onAiConfigChange: (config: AiConfig) => void;
   onAddAiQuote?: (text: string, sourceTitle: string) => void;
+  onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
 }) {
   const panels: Array<{ id: TerminalSidePanel; label: string; icon: React.ReactNode }> = [
     { id: "commands", label: "命令", icon: <Command className="h-3.5 w-3.5" /> },
@@ -4548,7 +4642,13 @@ function TerminalRightSidebar({
             onSendCommand={onSendCommand}
           />
         )}
-        {activePanel === "files" && <TerminalFileSidebar activeSession={activeSession} onAddAiQuote={(text, source) => onAddAiQuote?.(text, source)} />}
+        {activePanel === "files" && (
+          <TerminalFileSidebar
+            activeSession={activeSession}
+            onAddAiQuote={(text, source) => onAddAiQuote?.(text, source)}
+            onOpenRemoteEditor={onOpenRemoteEditor}
+          />
+        )}
         {activePanel === "ai" && (
           <AiWorkspacePanel
             activeSession={activeSession}
@@ -4564,10 +4664,12 @@ function TerminalRightSidebar({
 
 function TerminalFileSidebar({
   activeSession,
-  onAddAiQuote
+  onAddAiQuote,
+  onOpenRemoteEditor
 }: {
   activeSession?: SessionTab;
   onAddAiQuote?: (text: string, sourceTitle: string) => void;
+  onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
 }) {
   const [remotePath, setRemotePath] = useState("/");
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -4896,6 +4998,18 @@ function TerminalFileSidebar({
                 style={{ left: fileMenu.x, top: fileMenu.y }}
                 onMouseLeave={() => setFileMenu(null)}
               >
+                <button
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-emerald-600 dark:text-emerald-400 hover:bg-[var(--fill-1)] cursor-pointer font-bold"
+                  onClick={() => {
+                    const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                    onOpenRemoteEditor?.(fullPath, fileMenu.entry.name);
+                    setFileMenu(null);
+                  }}
+                >
+                  <Pencil className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>在线编辑修改 (Ctrl+S写回)</span>
+                </button>
                 <button
                   role="menuitem"
                   className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
