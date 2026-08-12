@@ -1920,26 +1920,26 @@ export function App() {
           </div>
         </div>
 
-        <div className="no-drag flex items-center gap-2 px-2">
+        <div className="no-drag flex items-center gap-1.5 px-2 overflow-x-auto scrollbar-none max-w-full">
           <button
             onClick={() => setIsCommandPaletteOpen(true)}
             title="全局指令罗盘与搜索 (Ctrl+K)"
-            className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
+            className="flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
           >
-            <Search className="h-3.5 w-3.5" />
-            <span>Ctrl+K 罗盘</span>
+            <Search className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden xl:inline">Ctrl+K 罗盘</span>
           </button>
           <button
             onClick={() => setCommandBroadcastingEnabled(!commandBroadcastingEnabled)}
             title={commandBroadcastingEnabled ? "关闭命令广播模式" : "开启命令广播模式"}
-            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-extrabold transition-all duration-200 cursor-pointer shadow-2xs border ${
+            className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-extrabold transition-all cursor-pointer shadow-2xs border shrink-0 ${
               commandBroadcastingEnabled
                 ? "bg-rose-600 text-white border-rose-400/50 shadow-lg shadow-rose-600/30 animate-pulse"
-                : "bg-[var(--fill-1)] text-[var(--app-muted)] border-[var(--app-line)]/50 hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] hover:border-zinc-700"
+                : "bg-[var(--fill-1)] text-[var(--app-muted)] border-[var(--app-line)]/50 hover:bg-[var(--fill-2)] hover:text-[var(--app-text)]"
             }`}
           >
-            <Radio className="h-3.5 w-3.5" />
-            {commandBroadcastingEnabled ? "📢 命令广播已开启" : "命令广播关闭"}
+            <Radio className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden xl:inline">{commandBroadcastingEnabled ? "📢 命令广播已开启" : "广播关闭"}</span>
           </button>
 
           {activeSession?.kind === "ssh" && activeSession.connected && (
@@ -1947,46 +1947,46 @@ export function App() {
               <button
                 onClick={() => setProcessModalOpen(true)}
                 title="远程进程与任务管理器"
-                className="flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 px-3 py-1 text-xs font-bold text-amber-400 hover:bg-amber-500/20 hover:border-amber-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
+                className="flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 text-xs font-bold text-amber-400 hover:bg-amber-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
               >
-                <Cpu className="h-3.5 w-3.5" />
-                <span>进程管理</span>
+                <Cpu className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden xl:inline">进程管理</span>
               </button>
 
               <button
                 onClick={() => setPortForwardingOpen(true)}
                 title="SSH 端口转发与加密隧道管理"
-                className="flex items-center gap-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 px-3 py-1 text-xs font-bold text-cyan-400 hover:bg-cyan-500/20 hover:border-cyan-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
+                className="flex items-center gap-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 px-2.5 py-1 text-xs font-bold text-cyan-400 hover:bg-cyan-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
               >
-                <ArrowRightLeft className="h-3.5 w-3.5" />
-                <span>端口转发</span>
+                <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden xl:inline">端口转发</span>
               </button>
 
               <button
                 onClick={() => setDiagnosticsOpen(true)}
                 title="服务器健康排查与一键诊断"
-                className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
+                className="flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
               >
-                <Stethoscope className="h-3.5 w-3.5" />
-                <span>健康诊断</span>
+                <Stethoscope className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden xl:inline">健康诊断</span>
               </button>
 
               <button
                 onClick={() => setKernelToolboxOpen(true)}
                 title="运维与内核开发常用工具箱 (dmesg, perf, strace, insmod)"
-                className="flex items-center gap-1.5 rounded-full bg-purple-500/10 border border-purple-500/30 px-3 py-1 text-xs font-bold text-purple-400 hover:bg-purple-500/20 hover:border-purple-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
+                className="flex items-center gap-1 rounded-full bg-purple-500/10 border border-purple-500/30 px-2.5 py-1 text-xs font-bold text-purple-400 hover:bg-purple-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
               >
-                <Wrench className="h-3.5 w-3.5" />
-                <span>运维内核</span>
+                <Wrench className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden xl:inline">运维内核</span>
               </button>
 
               <button
                 onClick={() => setSessionLoggerOpen(true)}
                 title="终端会话 ANSI 日志录制与导出"
-                className="flex items-center gap-1.5 rounded-full bg-rose-500/10 border border-rose-500/30 px-3 py-1 text-xs font-bold text-rose-400 hover:bg-rose-500/20 hover:border-rose-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
+                className="flex items-center gap-1 rounded-full bg-rose-500/10 border border-rose-500/30 px-2.5 py-1 text-xs font-bold text-rose-400 hover:bg-rose-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
               >
-                <Disc className={`h-3.5 w-3.5 ${isRecordingSession ? "animate-spin text-rose-500" : ""}`} />
-                <span>{isRecordingSession ? "录制中" : "日志录制"}</span>
+                <Disc className={`h-3.5 w-3.5 shrink-0 ${isRecordingSession ? "animate-spin text-rose-500" : ""}`} />
+                <span className="hidden xl:inline">{isRecordingSession ? "录制中" : "日志录制"}</span>
               </button>
             </>
           )}
@@ -1994,10 +1994,10 @@ export function App() {
           <button
             onClick={() => setCloudSyncModalOpen(true)}
             title="WebDAV / Gist 云端跨设备同步"
-            className="flex items-center gap-1.5 rounded-full bg-blue-500/10 border border-blue-500/30 px-3 py-1 text-xs font-bold text-blue-400 hover:bg-blue-500/20 hover:border-blue-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
+            className="flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/30 px-2.5 py-1 text-xs font-bold text-blue-400 hover:bg-blue-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
           >
-            <Cloud className="h-3.5 w-3.5" />
-            <span>云同步</span>
+            <Cloud className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden xl:inline">云同步</span>
           </button>
 
           <button
@@ -2009,10 +2009,10 @@ export function App() {
               }
             }}
             title={masterPassword ? "锁屏防护" : "设置锁屏主密码"}
-            className="flex items-center gap-1.5 rounded-full bg-purple-500/10 border border-purple-500/30 px-3 py-1 text-xs font-bold text-purple-400 hover:bg-purple-500/20 hover:border-purple-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
+            className="flex items-center gap-1 rounded-full bg-purple-500/10 border border-purple-500/30 px-2.5 py-1 text-xs font-bold text-purple-400 hover:bg-purple-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
           >
-            <Lock className="h-3.5 w-3.5" />
-            <span>{masterPassword ? "锁屏" : "设置主密码"}</span>
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden xl:inline">{masterPassword ? "锁屏" : "主密码"}</span>
           </button>
         </div>
         <div className="flex-1 h-full pywebview-drag-region" />
