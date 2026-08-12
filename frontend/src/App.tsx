@@ -74,7 +74,6 @@ import { ServerDiagnosticsModal, type DiagnosticCheckItem } from "./components/m
 import { SessionLoggerModal } from "./components/modals/SessionLoggerModal";
 import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
 import { ParameterFillModal } from "./components/modals/ParameterFillModal";
-import { GlobalCommandPaletteModal } from "./components/modals/GlobalCommandPaletteModal";
 import { getShellSuggestion } from "./lib/terminalIntelliSense";
 import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
 import { useAppStore } from "./store/useAppStore";
@@ -1179,19 +1178,7 @@ export function App() {
   const [paramModalOpen, setParamModalOpen] = useState(false);
   const [paramCommandTarget, setParamCommandTarget] = useState({ name: "", template: "" });
 
-  // Command Palette Ctrl+K State
-  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setCommandPaletteOpen((prev) => !prev);
-      }
-    };
-    window.addEventListener("keydown", handleGlobalKeyDown);
-    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
 
   const runServerDiagnostics = async (): Promise<{ score: number; checks: DiagnosticCheckItem[] }> => {
     let score = 95;
@@ -1930,7 +1917,7 @@ export function App() {
 
         <div className="no-drag flex items-center gap-2 px-2">
           <button
-            onClick={() => setCommandPaletteOpen(true)}
+            onClick={() => setIsCommandPaletteOpen(true)}
             title="全局指令罗盘与搜索 (Ctrl+K)"
             className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
           >
@@ -2380,17 +2367,6 @@ export function App() {
         onExecute={(finalCmd) => {
           sendCommandToActiveSession(finalCmd);
         }}
-      />
-      <GlobalCommandPaletteModal
-        isOpen={commandPaletteOpen}
-        onClose={() => setCommandPaletteOpen(false)}
-        connections={savedConnections}
-        commandFolders={commandFolders}
-        onConnectHost={(conn) => connectHost(conn)}
-        onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)}
-        onOpenSettings={() => setActiveTool("settings")}
-        onOpenCloudSync={() => setCloudSyncModalOpen(true)}
-        onOpenKeyGen={() => setKeyGenOpen(true)}
       />
     </div>
   );
