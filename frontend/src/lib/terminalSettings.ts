@@ -17,6 +17,10 @@ export interface TerminalAppearance {
   bgImageUrl?: string;
   bgOpacity?: number;
   bgBlur?: number;
+  cursorStyle?: "block" | "underline" | "bar";
+  cursorBlink?: boolean;
+  copyOnSelect?: boolean;
+  rightClickPaste?: boolean;
 }
 
 export interface PresetWallpaper {
@@ -59,24 +63,21 @@ export const terminalEnglishFonts: TerminalFontOption[] = [
   { id: "NovaMono-Regular.ttf", name: "NovaMono-Regular.ttf", value: "NovaMono-Regular.ttf", family: "Nova Mono" },
   { id: "PTMono-Regular.ttf", name: "PTMono-Regular.ttf", value: "PTMono-Regular.ttf", family: "PT Mono" },
   { id: "RobotoMono.ttf", name: "RobotoMono.ttf", value: "RobotoMono.ttf", family: "Roboto Mono" },
-  { id: "ShareTechMono-Regular.ttf", name: "ShareTechMono-Regular.ttf", value: "ShareTechMono-Regular.ttf", family: "Share Tech Mono" }
+  { id: "ShareTechMono-Regular.ttf", name: "ShareTechMono-Regular.ttf", value: "ShareTechMono-Regular.ttf", family: "Share Tech Mono" },
+  { id: "SourceCodePro-Bold.ttf", name: "SourceCodePro-Bold.ttf", value: "SourceCodePro-Bold.ttf", family: "Source Code Pro" },
+  { id: "SourceCodePro-Medium.ttf", name: "SourceCodePro-Medium.ttf", value: "SourceCodePro-Medium.ttf", family: "Source Code Pro" },
+  { id: "SourceCodePro-Regular.ttf", name: "SourceCodePro-Regular.ttf", value: "SourceCodePro-Regular.ttf", family: "Source Code Pro" }
 ];
 
 export const terminalChineseFonts: TerminalFontOption[] = [
-  { id: "仿宋", name: "仿宋", value: "仿宋", family: "FangSong" },
-  { id: "华文中宋", name: "华文中宋", value: "华文中宋", family: "STZhongsong" },
-  { id: "华文仿宋", name: "华文仿宋", value: "华文仿宋", family: "STFangsong" },
-  { id: "华文宋体", name: "华文宋体", value: "华文宋体", family: "STSong" },
-  { id: "华文楷体", name: "华文楷体", value: "华文楷体", family: "STKaiti" },
-  { id: "华文细黑", name: "华文细黑", value: "华文细黑", family: "STXihei" },
-  { id: "宋体", name: "宋体", value: "宋体", family: "SimSun" },
-  { id: "幼圆", name: "幼圆", value: "幼圆", family: "YouYuan" },
   { id: "微软雅黑", name: "微软雅黑", value: "微软雅黑", family: "Microsoft YaHei" },
-  { id: "微软雅黑 Light", name: "微软雅黑 Light", value: "微软雅黑 Light", family: "Microsoft YaHei Light" },
-  { id: "思源黑体 CN Normal", name: "思源黑体 CN Normal", value: "思源黑体 CN Normal", family: "Source Han Sans CN" },
-  { id: "新宋体", name: "新宋体", value: "新宋体", family: "NSimSun" },
+  { id: "宋体", name: "宋体", value: "宋体", family: "SimSun" },
+  { id: "黑体", name: "黑体", value: "黑体", family: "SimHei" },
   { id: "楷体", name: "楷体", value: "楷体", family: "KaiTi" },
+  { id: "仿宋", name: "仿宋", value: "仿宋", family: "FangSong" },
+  { id: "新宋体", name: "新宋体", value: "新宋体", family: "NSimSun" },
   { id: "等线", name: "等线", value: "等线", family: "DengXian" },
+  { id: "等线 Bold", name: "等线 Bold", value: "等线 Bold", family: "DengXian Bold" },
   { id: "等线 Light", name: "等线 Light", value: "等线 Light", family: "DengXian Light" }
 ];
 
@@ -107,7 +108,11 @@ export const defaultTerminalAppearance: TerminalAppearance = {
   bgType: "color",
   bgImageUrl: "",
   bgOpacity: 0.95,
-  bgBlur: 8
+  bgBlur: 8,
+  cursorStyle: "block",
+  cursorBlink: true,
+  copyOnSelect: true,
+  rightClickPaste: true
 };
 
 export function getTerminalAppearance(appearance?: TerminalAppearance) {
@@ -123,7 +128,11 @@ export function getTerminalAppearance(appearance?: TerminalAppearance) {
     bgType: appearance?.bgType || "color",
     bgImageUrl: appearance?.bgImageUrl || "",
     bgOpacity: typeof appearance?.bgOpacity === "number" ? appearance.bgOpacity : 0.95,
-    bgBlur: typeof appearance?.bgBlur === "number" ? appearance.bgBlur : 8
+    bgBlur: typeof appearance?.bgBlur === "number" ? appearance.bgBlur : 8,
+    cursorStyle: appearance?.cursorStyle || "block",
+    cursorBlink: typeof appearance?.cursorBlink === "boolean" ? appearance.cursorBlink : true,
+    copyOnSelect: typeof appearance?.copyOnSelect === "boolean" ? appearance.copyOnSelect : true,
+    rightClickPaste: typeof appearance?.rightClickPaste === "boolean" ? appearance.rightClickPaste : true
   };
 }
 

@@ -270,6 +270,63 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                     </select>
                   </div>
                 </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <div>
+                    <label className="text-[11px] text-[var(--app-muted)] mb-1 block">终端光标形状</label>
+                    <select
+                      aria-label="终端光标形状"
+                      value={resolvedAppearance.cursorStyle}
+                      onChange={(e) => setTerminalAppearance({ ...terminalAppearance, cursorStyle: e.target.value as "block" | "underline" | "bar" })}
+                      className="w-full rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-2.5 py-1.5 text-xs text-[var(--app-text)] focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="block">方块 █ (Block)</option>
+                      <option value="underline">下划线 _ (Underline)</option>
+                      <option value="bar">竖线 | (Bar)</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-4">
+                    <span className="text-xs text-[var(--app-text)] font-semibold">光标呼吸闪烁</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={resolvedAppearance.cursorBlink}
+                        onChange={(e) => setTerminalAppearance({ ...terminalAppearance, cursorBlink: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4.5 bg-[var(--fill-3)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[var(--app-line)] after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-500"></div>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <div className="flex items-center justify-between rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-2.5">
+                    <span className="text-[11px] text-[var(--app-text)] font-semibold">选中文本自动复制</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={resolvedAppearance.copyOnSelect}
+                        onChange={(e) => setTerminalAppearance({ ...terminalAppearance, copyOnSelect: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4.5 bg-[var(--fill-3)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[var(--app-line)] after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-500"></div>
+                    </label>
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-2.5">
+                    <span className="text-[11px] text-[var(--app-text)] font-semibold">右键终端快捷粘贴</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={resolvedAppearance.rightClickPaste}
+                        onChange={(e) => setTerminalAppearance({ ...terminalAppearance, rightClickPaste: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4.5 bg-[var(--fill-3)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[var(--app-line)] after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-500"></div>
+                    </label>
+                  </div>
+                </div>
               </div>
 
               {/* 壁纸上传与实时预览卡片 */}

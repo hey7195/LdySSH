@@ -329,6 +329,10 @@ interface TerminalAppearance {
   fontSize: number;
   foreground: string;
   background: string;
+  cursorStyle?: "block" | "underline" | "bar";
+  cursorBlink?: boolean;
+  copyOnSelect?: boolean;
+  rightClickPaste?: boolean;
 }
 
 interface TerminalFontOption {
@@ -744,7 +748,11 @@ function getTerminalAppearance(appearance: TerminalAppearance) {
     fontFamily: buildTerminalFontFamily(englishFont.family, chineseFont.family),
     fontSize: Number.isFinite(appearance.fontSize) ? appearance.fontSize : defaultTerminalAppearance.fontSize,
     foreground: appearance.foreground,
-    background: appearance.background
+    background: appearance.background,
+    cursorStyle: appearance.cursorStyle || "block",
+    cursorBlink: typeof appearance.cursorBlink === "boolean" ? appearance.cursorBlink : true,
+    copyOnSelect: typeof appearance.copyOnSelect === "boolean" ? appearance.copyOnSelect : true,
+    rightClickPaste: typeof appearance.rightClickPaste === "boolean" ? appearance.rightClickPaste : true
   };
 }
 
@@ -4343,8 +4351,8 @@ function TerminalSurface({
     const terminal = new XTerm({
       allowProposedApi: true,
       customGlyphs: true,
-      cursorBlink: true,
-      cursorStyle: "block",
+      cursorBlink: appearance.cursorBlink ?? true,
+      cursorStyle: appearance.cursorStyle ?? "block",
       fontFamily: appearance.fontFamily,
       fontSize: appearance.fontSize,
       lineHeight: 1.25,
@@ -4442,7 +4450,15 @@ function TerminalSurface({
       }
     });
     const selectionDisposable = terminal.onSelectionChange(() => {
-      setSelectedText(terminal.getSelection().trim());
+      const selected = terminal.getSelection();
+      setSelectedText(selected.trim());
+      if (selected && appearance.copyOnSelect !== false) {
+        try {
+          void navigator.clipboard.writeText(selected);
+        } catch {
+          // Ignore
+        }
+      }
     });
     const searchResultDisposable = searchAddon.onDidChangeResults((event) => {
       setSearchResult({ resultIndex: event.resultIndex, resultCount: event.resultCount });
