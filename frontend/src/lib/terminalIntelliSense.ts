@@ -66,12 +66,36 @@ export const LINUX_SHELL_DICTIONARY: ShellDictionaryItem[] = [
   }
 ];
 
-export function getShellSuggestion(input: string): string | null {
+export function getShellSuggestion(
+  input: string,
+  historyCommands: string[] = [],
+  userCommands: string[] = []
+): string | null {
   if (!input || !input.trim()) return null;
-  const trimmed = input.trimStart();
-  const parts = trimmed.split(/\s+/);
-  const mainCmd = parts[0]?.toLowerCase();
+  const rawInput = input.trimStart();
+  const lowerInput = rawInput.toLowerCase();
 
+  // 1. Search in history commands
+  const historyMatch = historyCommands.find(
+    (cmd) => cmd && cmd.trim().toLowerCase().startsWith(lowerInput) && cmd.trim().length > rawInput.length
+  );
+  if (historyMatch) {
+    const remaining = historyMatch.trim().slice(rawInput.length);
+    return `${input}${remaining}`;
+  }
+
+  // 2. Search in user quick commands
+  const userMatch = userCommands.find(
+    (cmd) => cmd && cmd.trim().toLowerCase().startsWith(lowerInput) && cmd.trim().length > rawInput.length
+  );
+  if (userMatch) {
+    const remaining = userMatch.trim().slice(rawInput.length);
+    return `${input}${remaining}`;
+  }
+
+  // 3. Search in system dictionary
+  const parts = rawInput.split(/\s+/);
+  const mainCmd = parts[0]?.toLowerCase();
   if (!mainCmd) return null;
 
   const item = LINUX_SHELL_DICTIONARY.find((d) => d.prefix === mainCmd);
@@ -79,13 +103,12 @@ export function getShellSuggestion(input: string): string | null {
 
   const subInput = parts.slice(1).join(" ");
   if (!subInput) {
-    return `${trimmed} ${item.completions[0]}`;
+    return `${rawInput} ${item.completions[0]}`;
   }
 
   const match = item.completions.find((c) => c.toLowerCase().startsWith(subInput.toLowerCase()) && c.length > subInput.length);
   if (match) {
-    const fullMatchedSub = match;
-    const remaining = fullMatchedSub.slice(subInput.length);
+    const remaining = match.slice(subInput.length);
     return `${input}${remaining}`;
   }
 

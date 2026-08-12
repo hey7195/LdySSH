@@ -7,7 +7,25 @@ export interface TerminalAppearance {
   fontSize: number;
   foreground: string;
   background: string;
+  bgType?: "color" | "image";
+  bgImageUrl?: string;
+  bgOpacity?: number;
+  bgBlur?: number;
 }
+
+export interface PresetWallpaper {
+  id: string;
+  name: string;
+  url: string;
+}
+
+export const PRESET_WALLPAPERS: PresetWallpaper[] = [
+  { id: "none", name: "无壁纸 (纯色底纹)", url: "" },
+  { id: "cyberpunk", name: "赛博霓虹 (Cyberpunk)", url: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1200&q=80" },
+  { id: "aurora", name: "深邃极光 (Aurora)", url: "https://images.unsplash.com/photo-1531366936337-7c912a4589a7?auto=format&fit=crop&w=1200&q=80" },
+  { id: "matrix", name: "代码矩阵 (Matrix Code)", url: "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=1200&q=80" },
+  { id: "obsidian", name: "黑曜晶石 (Obsidian Mesh)", url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80" }
+];
 
 export interface TerminalFontOption {
   id: string;
@@ -75,7 +93,11 @@ export const defaultTerminalAppearance: TerminalAppearance = {
   chineseFont: "微软雅黑",
   fontSize: 13,
   foreground: "",
-  background: ""
+  background: "",
+  bgType: "color",
+  bgImageUrl: "",
+  bgOpacity: 0.95,
+  bgBlur: 8
 };
 
 export function getTerminalAppearance(appearance?: TerminalAppearance) {
@@ -87,7 +109,11 @@ export function getTerminalAppearance(appearance?: TerminalAppearance) {
     fontFamily: buildTerminalFontFamily(englishFont.family, chineseFont.family),
     fontSize: Number.isFinite(appearance?.fontSize) ? (appearance?.fontSize as number) : defaultTerminalAppearance.fontSize,
     foreground: appearance?.foreground,
-    background: appearance?.background
+    background: appearance?.background,
+    bgType: appearance?.bgType || "color",
+    bgImageUrl: appearance?.bgImageUrl || "",
+    bgOpacity: typeof appearance?.bgOpacity === "number" ? appearance.bgOpacity : 0.95,
+    bgBlur: typeof appearance?.bgBlur === "number" ? appearance.bgBlur : 8
   };
 }
 
