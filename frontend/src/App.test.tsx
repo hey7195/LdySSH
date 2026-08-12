@@ -1314,9 +1314,9 @@ describe("command library", () => {
     const activeTab = activeTabButton.closest("div");
 
     expect(activeTabButton).toHaveAttribute("aria-current", "page");
-    expect(activeTab).toHaveClass("border-blue-500", "border-b-white", "bg-white", "text-slate-950", "shadow-sm");
+    expect(activeTab).toHaveClass("border-emerald-600", "bg-emerald-600", "text-white");
     expect(inactiveTabButton).not.toHaveAttribute("aria-current");
-    expect(inactiveTab).toHaveClass("border-slate-200", "bg-slate-100", "text-slate-600");
+    expect(inactiveTab).toHaveClass("border-[var(--app-line)]", "bg-[var(--panel-bg)]", "text-[var(--app-text)]");
   });
 
   test("shows green connected indicators on terminal tabs without changing tab names", async () => {

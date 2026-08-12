@@ -1991,7 +1991,7 @@ function HostSidebar({
                           {folderConns.map((connection, index) => (
                             <div
                               key={`${connection.hostname}-${connection.username}-${index}`}
-                              className="relative flex flex-col gap-1 rounded-xl border border-transparent p-2 transition-all hover:border-[var(--app-line)] hover:bg-[var(--panel-bg)] hover:shadow-2xs group"
+                              className="relative flex flex-col gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2 transition-all hover:border-emerald-500 hover:shadow-xs group"
                             >
                               <div className="flex items-center gap-2 min-w-0 w-full">
                                 <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/60 shrink-0">
@@ -2270,7 +2270,7 @@ function Workbench({
                 return (
                   <div
                     key={`${connection.hostname}-${connection.username}-${index}`}
-                    className="group relative flex flex-col justify-between rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5.5 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:border-[var(--accent)]"
+                    className="group relative flex flex-col justify-between rounded-3xl border-2 border-[var(--app-line)] bg-[var(--panel-bg)] p-5.5 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-xl hover:border-emerald-500"
                   >
                     <div>
                       <div className="flex items-start justify-between gap-3">
@@ -2406,20 +2406,27 @@ function Metric({
   icon: React.ComponentType<{ className?: string }>;
   variant?: "indigo" | "emerald" | "amber" | "violet";
 }) {
+  const topBorderClass = {
+    indigo: "border-t-indigo-500",
+    emerald: "border-t-emerald-500",
+    amber: "border-t-amber-500",
+    violet: "border-t-purple-500"
+  }[variant];
+
   const iconMeta = {
-    indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/60",
-    emerald: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/60",
-    amber: "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 border-amber-100 dark:border-amber-900/60",
-    violet: "bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400 border-purple-100 dark:border-purple-900/60"
+    indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800",
+    emerald: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
+    amber: "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 border-amber-200 dark:border-amber-800",
+    violet: "bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400 border-purple-200 dark:border-purple-800"
   }[variant];
 
   return (
-    <div className="flex items-center justify-between rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-4.5 shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+    <div className={cn("flex items-center justify-between rounded-2xl border border-t-2 border-[var(--app-line)] bg-[var(--panel-bg)] p-4.5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-emerald-500", topBorderClass)}>
       <div>
-        <div className="text-xs font-semibold text-[var(--app-muted)]">{label}</div>
+        <div className="text-xs font-extrabold text-[var(--app-muted)]">{label}</div>
         <div className="mt-1.5 flex items-baseline gap-1">
-          <span className="font-mono text-2xl font-extrabold tracking-tight text-[var(--app-text)]">{value}</span>
-          {unit && <span className="text-xs font-semibold text-[var(--app-muted)]">{unit}</span>}
+          <span className="font-mono text-2xl font-black tracking-tight text-[var(--app-text)]">{value}</span>
+          {unit && <span className="text-xs font-bold text-[var(--app-muted)]">{unit}</span>}
         </div>
       </div>
       <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl border shadow-2xs", iconMeta)}>
@@ -2593,8 +2600,8 @@ function TerminalWorkspace({
                 className={cn(
                   "group relative flex h-8 min-w-[120px] max-w-56 cursor-pointer items-center justify-between gap-2 rounded-full border px-3 text-xs font-extrabold transition-all select-none shrink-0",
                   isActive
-                    ? "border-blue-500 border-b-white bg-white text-slate-950 shadow-sm"
-                    : "border-slate-200 bg-slate-100 text-slate-600"
+                    ? "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-500/25"
+                    : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"
                 )}
               >
                 <button

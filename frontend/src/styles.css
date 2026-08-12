@@ -23,8 +23,8 @@
   --app-muted: #64748b;
   --text-quaternary: #94a3b8;
 
-  /* 分隔线与填充：极细 1px 微光边框 */
-  --app-line: #e2e8f0;
+  /* 分隔线与填充：极细高对比 1px 结构边框，彻底消除“线条过淡”问题 */
+  --app-line: #cbd5e1;
   --fill-1: #f8fafc;
   --fill-2: #f1f5f9;
   --fill-3: #e2e8f0;
@@ -85,7 +85,7 @@
   --app-muted: #6e7681;
   --text-quaternary: #484f58;
 
-  --app-line: #30363d;
+  --app-line: #334155;
   --fill-1: #21262d;
   --fill-2: #30363d;
   --fill-3: #484f58;
