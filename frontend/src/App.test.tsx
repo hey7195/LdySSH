@@ -1698,26 +1698,18 @@ describe("command library", () => {
 
     let enterHandled = false;
     await act(async () => {
-      enterHandled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Enter", cancelable: true })) ?? false;
+      enterHandled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Enter", cancelable: true })) ?? true;
     });
 
-    expect(enterHandled).toBe(true);
-    expect(sendInput).not.toHaveBeenCalled();
-
-    let tabHandled = false;
-    await act(async () => {
-      tabHandled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Tab", cancelable: true })) ?? false;
-    });
-
-    expect(tabHandled).toBe(true);
-    expect(sendInput).not.toHaveBeenCalled();
+    expect(enterHandled).toBe(false);
+    expect(sendInput).toHaveBeenCalledWith("local-1", bytesToBase64(new TextEncoder().encode("f -h")));
 
     let handled = true;
     await act(async () => {
       handled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true })) ?? true;
     });
 
-    expect(handled).toBe(false);
+    expect(handled).toBe(true);
     await waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1));
     expect(atob(sendInput.mock.calls.at(-1)?.[1] as string)).toBe("f -h");
     expect(screen.queryByTestId("command-suggestion-panel")).not.toBeInTheDocument();

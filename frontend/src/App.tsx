@@ -644,7 +644,7 @@ function loadStoredCommandSuggestionSources(): CommandSuggestionSources {
 
 function loadStoredCommandSuggestionApplyKey(): CommandSuggestionApplyKey {
   const value = window.localStorage.getItem(storageKeys.commandSuggestionApplyKey);
-  return value === "ctrlSpace" || value === "altEnter" || value === "custom" ? value : defaultCommandSuggestionApplyKey;
+  return value === "enter" || value === "tab" || value === "ctrlSpace" || value === "altEnter" || value === "custom" ? value : defaultCommandSuggestionApplyKey;
 }
 
 function loadStoredCommandSuggestionCustomApplyKey(): CommandSuggestionCustomApplyKey | null {
@@ -3464,9 +3464,10 @@ function TerminalSurface({
 
   function isCommandSuggestionApplyKey(event: globalThis.KeyboardEvent) {
     const applyKey = commandSuggestionApplyKeyRef.current;
-    if (applyKey === "tab") return event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey;
-    if (applyKey === "ctrlSpace") return event.ctrlKey && !event.altKey && !event.metaKey && (event.code === "Space" || event.key === " ");
-    if (applyKey === "altEnter") return event.altKey && !event.ctrlKey && !event.metaKey && event.key === "Enter";
+    if (applyKey === "enter" || applyKey === "tab" || applyKey === "altEnter") {
+      return (event.key === "Enter" || event.key === "Tab") && !event.ctrlKey && !event.metaKey;
+    }
+    if (applyKey === "ctrlSpace") return event.ctrlKey && !event.metaKey && (event.code === "Space" || event.key === " ");
 
     const custom = commandSuggestionCustomApplyKeyRef.current;
     return Boolean(

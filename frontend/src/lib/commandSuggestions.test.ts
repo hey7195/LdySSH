@@ -14,8 +14,8 @@ describe("command suggestions", () => {
     }
   ];
 
-  test("defaults suggestion apply key to Alt+Enter", () => {
-    expect(defaultCommandSuggestionApplyKey).toBe("altEnter");
+  test("defaults suggestion apply key to Enter", () => {
+    expect(defaultCommandSuggestionApplyKey).toBe("enter");
   });
 
   test("prioritizes session history before local shortcuts and built-in Linux commands", () => {

@@ -1,7 +1,7 @@
 import type { CommandFolder } from "./bridge";
 
 export type CommandSuggestionSource = "history" | "shortcut" | "linux";
-export type CommandSuggestionApplyKey = "tab" | "ctrlSpace" | "altEnter" | "custom";
+export type CommandSuggestionApplyKey = "enter" | "tab" | "ctrlSpace" | "altEnter" | "custom";
 
 export interface CommandSuggestionCustomApplyKey {
   key: string;
@@ -35,7 +35,7 @@ const MAX_HISTORY_ITEMS = 80;
 const MAX_SUGGESTIONS = 6;
 const FULL_SCREEN_COMMANDS = new Set(["vi", "vim", "nvim", "nano", "less", "more", "man", "top", "htop", "watch", "tmux", "screen"]);
 
-export const defaultCommandSuggestionApplyKey: CommandSuggestionApplyKey = "altEnter";
+export const defaultCommandSuggestionApplyKey: CommandSuggestionApplyKey = "enter";
 export const defaultCommandSuggestionSources: CommandSuggestionSources = {
   history: true,
   shortcuts: true,
