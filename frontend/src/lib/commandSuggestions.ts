@@ -1,4 +1,5 @@
 import type { CommandFolder } from "./bridge";
+import { getCommandUsageFrequency } from "./terminalIntelliSense";
 
 export type CommandSuggestionSource = "history" | "shortcut" | "linux";
 export type CommandSuggestionApplyKey = "enter" | "tab" | "ctrlSpace" | "altEnter" | "custom";
@@ -122,26 +123,79 @@ const LINUXCOOL_COMMAND_DESCRIPTIONS: Record<string, string> = {
 };
 
 const LINUX_COMMANDS: Array<Omit<CommandSuggestion, "id" | "source">> = [
-  { label: "ls", command: "ls -la" },
+  { label: "ls -la", command: "ls -la" },
+  { label: "ls -lh", command: "ls -lh" },
   { label: "cd", command: "cd " },
   { label: "cat", command: "cat " },
-  { label: "grep", command: "grep -R " },
-  { label: "find", command: "find . -name " },
+  { label: "chmod +x", command: "chmod +x " },
+  { label: "chmod 755", command: "chmod 755 " },
+  { label: "chmod -R 755", command: "chmod -R 755 " },
+  { label: "chown -R www-data", command: "chown -R www-data:www-data " },
+  { label: "chown -R root", command: "chown -R root:root " },
+  { label: "grep -rnI", command: "grep -rnI " },
+  { label: "grep -i", command: "grep -i " },
+  { label: "grep -E", command: "grep -E " },
+  { label: "find . -name", command: "find . -name " },
+  { label: "find / -size +100M", command: "find / -size +100M" },
   { label: "systemctl status", command: "systemctl status " },
-  { label: "journalctl", command: "journalctl -u " },
+  { label: "systemctl restart", command: "systemctl restart " },
+  { label: "systemctl start", command: "systemctl start " },
+  { label: "systemctl stop", command: "systemctl stop " },
+  { label: "systemctl enable", command: "systemctl enable " },
+  { label: "systemctl daemon-reload", command: "systemctl daemon-reload" },
+  { label: "journalctl -u", command: "journalctl -u " },
+  { label: "journalctl -f", command: "journalctl -f -n 100" },
   { label: "docker ps", command: "docker ps" },
+  { label: "docker ps -a", command: "docker ps -a" },
+  { label: "docker compose up -d", command: "docker compose up -d" },
+  { label: "docker compose down", command: "docker compose down" },
+  { label: "docker logs -f", command: "docker logs -f --tail 100 " },
+  { label: "docker exec -it", command: "docker exec -it " },
+  { label: "docker images", command: "docker images" },
+  { label: "docker system prune", command: "docker system prune -f" },
   { label: "podman ps", command: "podman ps" },
-  { label: "ps", command: "ps aux" },
+  { label: "podman ps -a", command: "podman ps -a" },
+  { label: "kubectl get pods", command: "kubectl get pods -A" },
+  { label: "kubectl logs -f", command: "kubectl logs -f --tail=100 " },
+  { label: "kubectl exec -it", command: "kubectl exec -it " },
+  { label: "kubectl describe pod", command: "kubectl describe pod " },
+  { label: "ps aux", command: "ps aux" },
+  { label: "ps -ef", command: "ps -ef" },
   { label: "top", command: "top" },
-  { label: "free", command: "free -m" },
-  { label: "df", command: "df -h" },
-  { label: "du", command: "du -sh *" },
-  { label: "tar", command: "tar -czf archive.tar.gz " },
-  { label: "curl", command: "curl -I " },
-  { label: "wget", command: "wget " },
+  { label: "htop", command: "htop" },
+  { label: "btop", command: "btop" },
+  { label: "free -h", command: "free -h" },
+  { label: "free -m", command: "free -m" },
+  { label: "df -h", command: "df -h" },
+  { label: "du -sh *", command: "du -sh *" },
+  { label: "du -h --max-depth=1", command: "du -h --max-depth=1" },
+  { label: "tar -zxvf", command: "tar -zxvf " },
+  { label: "tar -czvf", command: "tar -czvf " },
+  { label: "tar -xvf", command: "tar -xvf " },
+  { label: "curl -I", command: "curl -I " },
+  { label: "curl -v", command: "curl -v " },
+  { label: "curl -X POST", command: "curl -X POST " },
+  { label: "wget -c", command: "wget -c " },
   { label: "ssh", command: "ssh user@host" },
-  { label: "scp", command: "scp " },
-  { label: "iptables", command: "iptables -L -n" }
+  { label: "scp -P 22", command: "scp -P 22 " },
+  { label: "rsync -avz", command: "rsync -avz --progress " },
+  { label: "netstat -tulnp", command: "netstat -tulnp" },
+  { label: "ss -tuln", command: "ss -tuln" },
+  { label: "ufw status", command: "ufw status verbose" },
+  { label: "ufw allow 80", command: "ufw allow 80/tcp" },
+  { label: "iptables -L -n", command: "iptables -L -n -v" },
+  { label: "tail -f", command: "tail -f " },
+  { label: "tail -n 100", command: "tail -n 100 " },
+  { label: "sed 's/old/new/g'", command: "sed -i 's/old/new/g' " },
+  { label: "awk '{print $1}'", command: "awk '{print $1}' " },
+  { label: "kill -9", command: "kill -9 " },
+  { label: "pkill -9", command: "pkill -9 " },
+  { label: "crontab -l", command: "crontab -l" },
+  { label: "crontab -e", command: "crontab -e" },
+  { label: "dmesg -wH", command: "dmesg -wH --color=always" },
+  { label: "perf top", command: "perf top -g" },
+  { label: "strace -c -p", command: "strace -c -p " },
+  { label: "lsof -i :8080", command: "lsof -i :8080" }
 ];
 
 const LINUXCOOL_COMMAND_NAMES = [
@@ -541,6 +595,15 @@ export function buildCommandSuggestions(
       });
     });
   }
+
+  suggestions.sort((a, b) => {
+    const freqA = getCommandUsageFrequency(a.command);
+    const freqB = getCommandUsageFrequency(b.command);
+    if (freqB !== freqA) {
+      return freqB - freqA;
+    }
+    return 0;
+  });
 
   return suggestions.slice(0, limit);
 }

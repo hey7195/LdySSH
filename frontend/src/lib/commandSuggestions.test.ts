@@ -38,7 +38,7 @@ describe("command suggestions", () => {
     });
 
     expect(suggestions.every((item) => item.source === "linux")).toBe(true);
-    expect(suggestions.map((item) => item.command).slice(0, 3)).toEqual(["docker ps", "df -h", "du -sh *"]);
+    expect(suggestions.map((item) => item.command).slice(0, 3)).toEqual(["docker ps", "docker ps -a", "docker compose up -d"]);
   });
 
   test("includes distilled linuxcool command names in built-in Linux suggestions", () => {
