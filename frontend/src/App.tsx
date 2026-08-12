@@ -6711,24 +6711,6 @@ function CommandPanel({
           </div>
 
           <div className="mt-3 space-y-1">
-            <button
-              type="button"
-              onClick={() => setShowRunoobManual(!showRunoobManual)}
-              className={cn(
-                "w-full flex items-center justify-between rounded-xl px-3 py-1.5 text-xs transition-all duration-150 cursor-pointer select-none border",
-                showRunoobManual
-                  ? "bg-amber-600 text-white font-extrabold shadow-2xs border-amber-600"
-                  : "bg-amber-500/10 text-amber-600 border-amber-500/30 hover:bg-amber-500/20 font-bold"
-              )}
-            >
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-xs">📖</span>
-                <span className="truncate text-[11px]">菜鸟教程 Linux 命令大全</span>
-              </div>
-              <span className="rounded-full bg-amber-500/20 px-1.5 py-0.2 font-mono text-[9px] font-extrabold text-amber-700 dark:text-amber-300">
-                {FLAT_RUNOOB_COMMANDS.length}
-              </span>
-            </button>
             {folders.map((folder) => {
               const active = folder.id === activeFolder?.id;
               return (
@@ -6772,89 +6754,7 @@ function CommandPanel({
       </aside>
 
       <section className="min-h-0 overflow-auto bg-[var(--app-bg)] px-5 py-5">
-        {showRunoobManual ? (
-          <div className="mx-auto max-w-6xl space-y-4 select-none">
-            <div className="flex items-center justify-between border-b border-[var(--app-line)] pb-3">
-              <div>
-                <h2 className="text-lg font-extrabold tracking-tight text-[var(--app-text)] flex items-center gap-2">
-                  <span>📖 菜鸟教程 Linux 命令大全</span>
-                  <span className="rounded-full bg-amber-500/10 border border-amber-500/30 px-2.5 py-0.5 text-xs text-amber-500 font-mono">
-                    Runoob Manual ({FLAT_RUNOOB_COMMANDS.length} Commands)
-                  </span>
-                </h2>
-                <p className="text-xs text-[var(--app-muted)] mt-1">完整集成 Runoob Linux 指令速查手册，点击可直接发送至终端执行或一键复制</p>
-              </div>
-              <Button
-                variant="outline"
-                size={26}
-                className="h-8 rounded-full px-3 text-xs font-bold"
-                onClick={() => setShowRunoobManual(false)}
-              >
-                关闭手册
-              </Button>
-            </div>
-
-            {/* Category Filter Pills */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {["全部", ...RUNOOB_LINUX_COMMAND_DATA.map((c) => c.category)].map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setRunoobCategory(cat)}
-                  className={cn(
-                    "rounded-full px-3 py-1 text-xs font-extrabold transition-all cursor-pointer border",
-                    runoobCategory === cat
-                      ? "bg-amber-600 text-white border-amber-600 shadow-2xs"
-                      : "bg-[var(--panel-bg)] text-[var(--app-text)] border-[var(--app-line)] hover:bg-[var(--fill-1)]"
-                  )}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-
-            {/* Command Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {FLAT_RUNOOB_COMMANDS.filter((cmd) => {
-                const matchCat = runoobCategory === "全部" || cmd.category === runoobCategory;
-                const matchQuery = !keyword || cmd.name.toLowerCase().includes(keyword) || cmd.desc.toLowerCase().includes(keyword);
-                return matchCat && matchQuery;
-              }).map((cmd, idx) => (
-                <div
-                  key={`${cmd.name}-${idx}`}
-                  className="group rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3.5 shadow-2xs hover:border-amber-500/60 hover:shadow-md transition-all flex flex-col justify-between space-y-2"
-                >
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <code className="text-sm font-black font-mono text-amber-500">{cmd.name}</code>
-                      <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.2 text-[10px] font-bold text-[var(--app-muted)]">
-                        {cmd.category}
-                      </span>
-                    </div>
-                    <p className="text-xs text-[var(--text-secondary)] mt-1.5 leading-relaxed">{cmd.desc}</p>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 pt-2 border-t border-[var(--app-line)]/50">
-                    <button
-                      onClick={() => onSendCommand(cmd.name)}
-                      className="flex-1 flex items-center justify-center gap-1 rounded-xl bg-amber-600 hover:bg-amber-500 py-1.5 text-xs font-extrabold text-white shadow-2xs transition-all cursor-pointer"
-                    >
-                      <Play className="h-3 w-3" />
-                      <span>发送到终端</span>
-                    </button>
-                    <button
-                      onClick={() => navigator.clipboard.writeText(cmd.name)}
-                      className="flex items-center justify-center rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] p-1.5 text-xs font-bold text-[var(--app-text)] transition-all cursor-pointer"
-                      title="复制指令"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="mx-auto max-w-6xl space-y-4">
+        <div className="mx-auto max-w-6xl space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-extrabold tracking-tight text-[var(--app-text)]">{keyword ? "搜索结果" : activeFolder?.name || "默认分类"}</h2>
@@ -6999,8 +6899,7 @@ function CommandPanel({
             </div>
           </div>
         </div>
-      )}
-    </section>
+      </section>
     </div>
   );
 }
