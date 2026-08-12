@@ -1894,27 +1894,32 @@ export function App() {
       className="app-root flex h-screen w-screen flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)] select-none"
       onContextMenu={(event) => event.preventDefault()}
     >
-      {/* 顶部全功能鼠标抓取拖拽 Header：零割裂横线，背景与应用一体，保证 100% 鼠标按住移动窗口 */}
-      <header className="pywebview-drag-region flex h-9.5 shrink-0 items-center justify-between px-4 bg-[var(--app-bg)] select-none">
-        <div className="no-drag flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-600 text-white font-extrabold text-xs shadow-xs">
+      {/* 顶部全功能鼠标抓取拖拽 Header：微光磨砂玻璃高质感沉浸 Header */}
+      <header className="pywebview-drag-region flex h-10 shrink-0 items-center justify-between px-4 bg-[var(--app-bg)]/90 backdrop-blur-md border-b border-[var(--app-line)]/60 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] select-none">
+        <div className="no-drag flex items-center gap-2.5">
+          <div className="relative flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white font-black text-xs shadow-md shadow-emerald-500/20 ring-1 ring-white/20">
             L
-          </span>
-          <span className="text-xs font-extrabold tracking-tight text-[var(--app-text)]">LdySSH</span>
-          <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.5 font-mono text-[9px] font-bold text-[var(--app-muted)]">v1.0</span>
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-xs font-black tracking-tight text-[var(--app-text)] font-sans">LdySSH</span>
+            <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.2 font-mono text-[9px] font-extrabold text-emerald-400">
+              PRO v1.0
+            </span>
+          </div>
         </div>
-        <div className="no-drag flex items-center gap-2 px-4">
+
+        <div className="no-drag flex items-center gap-2 px-2">
           <button
             onClick={() => setCommandBroadcastingEnabled(!commandBroadcastingEnabled)}
             title={commandBroadcastingEnabled ? "关闭命令广播模式" : "开启命令广播模式"}
-            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-extrabold transition-all duration-200 cursor-pointer shadow-2xs border ${
               commandBroadcastingEnabled
-                ? "bg-red-600 text-white shadow-lg shadow-red-600/30 animate-pulse"
-                : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)]"
+                ? "bg-rose-600 text-white border-rose-400/50 shadow-lg shadow-rose-600/30 animate-pulse"
+                : "bg-[var(--fill-1)] text-[var(--app-muted)] border-[var(--app-line)]/50 hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] hover:border-zinc-700"
             }`}
           >
             <Radio className="h-3.5 w-3.5" />
-            {commandBroadcastingEnabled ? "📢 命令广播已开启 (全会话同步)" : "命令广播关闭"}
+            {commandBroadcastingEnabled ? "📢 命令广播已开启" : "命令广播关闭"}
           </button>
 
           {activeSession?.kind === "ssh" && activeSession.connected && (
@@ -1922,7 +1927,7 @@ export function App() {
               <button
                 onClick={() => setProcessModalOpen(true)}
                 title="远程进程与任务管理器"
-                className="flex items-center gap-1 rounded-full bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-2.5 py-1 text-xs font-bold text-amber-500 transition-all cursor-pointer"
+                className="flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 px-3 py-1 text-xs font-bold text-amber-400 hover:bg-amber-500/20 hover:border-amber-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
               >
                 <Cpu className="h-3.5 w-3.5" />
                 <span>进程管理</span>
@@ -1931,7 +1936,7 @@ export function App() {
               <button
                 onClick={() => setPortForwardingOpen(true)}
                 title="SSH 端口转发与加密隧道管理"
-                className="flex items-center gap-1 rounded-full bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-2.5 py-1 text-xs font-bold text-cyan-500 transition-all cursor-pointer"
+                className="flex items-center gap-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 px-3 py-1 text-xs font-bold text-cyan-400 hover:bg-cyan-500/20 hover:border-cyan-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
               >
                 <ArrowRightLeft className="h-3.5 w-3.5" />
                 <span>端口转发</span>
@@ -1940,7 +1945,7 @@ export function App() {
               <button
                 onClick={() => setDiagnosticsOpen(true)}
                 title="服务器健康排查与一键诊断"
-                className="flex items-center gap-1 rounded-full bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-2.5 py-1 text-xs font-bold text-emerald-500 transition-all cursor-pointer"
+                className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
               >
                 <Stethoscope className="h-3.5 w-3.5" />
                 <span>健康诊断</span>
@@ -1949,7 +1954,7 @@ export function App() {
               <button
                 onClick={() => setSessionLoggerOpen(true)}
                 title="终端会话 ANSI 日志录制与导出"
-                className="flex items-center gap-1 rounded-full bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-2.5 py-1 text-xs font-bold text-rose-500 transition-all cursor-pointer"
+                className="flex items-center gap-1.5 rounded-full bg-rose-500/10 border border-rose-500/30 px-3 py-1 text-xs font-bold text-rose-400 hover:bg-rose-500/20 hover:border-rose-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
               >
                 <Disc className={`h-3.5 w-3.5 ${isRecordingSession ? "animate-spin text-rose-500" : ""}`} />
                 <span>{isRecordingSession ? "录制中" : "日志录制"}</span>
@@ -1960,7 +1965,7 @@ export function App() {
           <button
             onClick={() => setCloudSyncModalOpen(true)}
             title="WebDAV / Gist 云端跨设备同步"
-            className="flex items-center gap-1 rounded-full bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-2.5 py-1 text-xs font-bold text-blue-500 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 rounded-full bg-blue-500/10 border border-blue-500/30 px-3 py-1 text-xs font-bold text-blue-400 hover:bg-blue-500/20 hover:border-blue-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
           >
             <Cloud className="h-3.5 w-3.5" />
             <span>云同步</span>
@@ -1975,7 +1980,7 @@ export function App() {
               }
             }}
             title={masterPassword ? "锁屏防护" : "设置锁屏主密码"}
-            className="flex items-center gap-1 rounded-full bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-2.5 py-1 text-xs font-bold text-purple-500 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 rounded-full bg-purple-500/10 border border-purple-500/30 px-3 py-1 text-xs font-bold text-purple-400 hover:bg-purple-500/20 hover:border-purple-500/50 transition-all duration-200 cursor-pointer shadow-2xs"
           >
             <Lock className="h-3.5 w-3.5" />
             <span>{masterPassword ? "锁屏" : "设置主密码"}</span>

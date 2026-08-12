@@ -1,48 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 /* ============================================================
-   LdySSH Design System
-   基于 Kimi Design Tokens（principles + tokens.json）
-   语义令牌 → 全应用 Tailwind 类重映射，深浅双主题
+   LdySSH Ultra-Premium Design System (Linear / Cursor / Warp Aesthetic)
    ============================================================ */
 
 :root {
   color-scheme: light;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 
-  /* 表面层级：极致通透纯白与微光冰冷面板，告别“灰蒙蒙”脏感 */
-  --app-bg: #ffffff;
+  --app-bg: #f8fafc;
   --panel-bg: #ffffff;
-  --sidebar-bg: #f8fafc;
+  --sidebar-bg: #f1f5f9;
   --subtle-bg: #f1f5f9;
   --raised-bg: #ffffff;
   --ground-bg: #ffffff;
 
-  /* 文本：高对比度 Slate 极清晰色阶 */
   --app-text: #0f172a;
   --text-secondary: #334155;
   --app-muted: #64748b;
   --text-quaternary: #94a3b8;
 
-  /* 分隔线与填充：极细高对比 1px 结构边框，彻底消除“线条过淡”问题 */
   --app-line: #cbd5e1;
   --fill-1: #f8fafc;
   --fill-2: #f1f5f9;
   --fill-3: #e2e8f0;
 
-  /* 品牌与主按键：采用 Apple/Linear/Raycast 级曜石深蓝黑主色系，消灭俗气蓝光气泡感 */
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-active: #1e40af;
-  --accent-soft: rgba(37, 99, 235, 0.08);
-  --accent-soft-strong: rgba(37, 99, 235, 0.16);
-  --accent-text: #1d4ed8;
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --accent-active: #047857;
+  --accent-soft: rgba(16, 185, 129, 0.1);
+  --accent-soft-strong: rgba(16, 185, 129, 0.2);
+  --accent-text: #059669;
   --on-accent: #ffffff;
-  --text-selected: rgba(37, 99, 235, 0.15);
+  --text-selected: rgba(16, 185, 129, 0.15);
   
-  /* 高级翡翠绿与深黑渐变主按钮 (Linear/Vercel Style) */
-  --accent-grad: linear-gradient(135deg, #059669 0%, #10b981 100%);
-  --accent-glow: 0 4px 16px rgba(16, 185, 129, 0.35);
-  --accent-grad-soft: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.1) 100%);
+  --accent-grad: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+  --accent-glow: 0 4px 20px rgba(16, 185, 129, 0.4);
+  --accent-grad-soft: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(6, 182, 212, 0.12) 100%);
 
   --success: #10b981;
   --success-soft: rgba(16, 185, 129, 0.1);
@@ -55,7 +50,6 @@
   --warning-soft: rgba(245, 158, 11, 0.1);
   --warning-text: #d97706;
 
-  /* 终端与遮罩 */
   --terminal-bg: #0b0e14;
   --terminal-text: #e5e7eb;
   --mask-base: rgba(15, 23, 42, 0.4);
@@ -71,55 +65,56 @@
 
 .app-root[data-theme="dark"] {
   color-scheme: dark;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 
-  /* 曜石极客工程风 (Warp / Termius Pro 级别) */
-  --app-bg: #0d1117;
-  --panel-bg: #161b22;
-  --sidebar-bg: #0d1117;
-  --subtle-bg: #21262d;
-  --raised-bg: #21262d;
-  --ground-bg: #0d1117;
+  /* 超凡黑曜石亚克力微光 (Linear / Cursor Pro 级别) */
+  --app-bg: #060709;
+  --panel-bg: #0d0f14;
+  --sidebar-bg: #08090c;
+  --subtle-bg: #141720;
+  --raised-bg: #13161f;
+  --ground-bg: #060709;
 
-  --app-text: #f0f6fc;
-  --text-secondary: #8b949e;
-  --app-muted: #6e7681;
-  --text-quaternary: #484f58;
+  --app-text: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --app-muted: #6b7280;
+  --text-quaternary: #4b5563;
 
-  --app-line: #334155;
-  --fill-1: #21262d;
-  --fill-2: #30363d;
-  --fill-3: #484f58;
+  --app-line: rgba(255, 255, 255, 0.08);
+  --fill-1: rgba(255, 255, 255, 0.03);
+  --fill-2: rgba(255, 255, 255, 0.06);
+  --fill-3: rgba(255, 255, 255, 0.1);
 
-  --accent: #38bdf8;
-  --accent-hover: #0ea5e9;
-  --accent-active: #0284c7;
-  --accent-soft: rgba(56, 189, 248, 0.12);
-  --accent-soft-strong: rgba(56, 189, 248, 0.24);
-  --accent-text: #38bdf8;
+  --accent: #10b981;
+  --accent-hover: #34d399;
+  --accent-active: #059669;
+  --accent-soft: rgba(16, 185, 129, 0.15);
+  --accent-soft-strong: rgba(16, 185, 129, 0.28);
+  --accent-text: #34d399;
   --on-accent: #ffffff;
-  --text-selected: rgba(56, 189, 248, 0.25);
+  --text-selected: rgba(16, 185, 129, 0.2);
 
-  --accent-grad: linear-gradient(135deg, #238636 0%, #2ea043 100%);
-  --accent-glow: 0 4px 20px rgba(46, 160, 67, 0.4);
-  --accent-grad-soft: linear-gradient(135deg, rgba(35, 134, 54, 0.15) 0%, rgba(46, 160, 67, 0.15) 100%);
+  --accent-grad: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+  --accent-glow: 0 0 25px rgba(16, 185, 129, 0.35);
+  --accent-grad-soft: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(6, 182, 212, 0.15) 100%);
 
-  --success: #3fb950;
-  --success-soft: rgba(63, 185, 80, 0.15);
-  --success-text: #56d364;
-  --danger: #f85149;
-  --danger-hover: #da3633;
-  --danger-soft: rgba(248, 81, 73, 0.15);
-  --danger-text: #ff7b72;
-  --warning: #d29922;
-  --warning-soft: rgba(210, 153, 34, 0.15);
-  --warning-text: #e3b341;
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.15);
+  --success-text: #34d399;
+  --danger: #f43f5e;
+  --danger-hover: #e11d48;
+  --danger-soft: rgba(244, 63, 94, 0.15);
+  --danger-text: #fb7185;
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.15);
+  --warning-text: #fbbf24;
 
-  --terminal-bg: #090d13;
-  --terminal-text: #f0f6fc;
+  --terminal-bg: #07080b;
+  --terminal-text: #f3f4f6;
 
-  --mask-base: rgba(1, 4, 9, 0.7);
-  --shadow-raised: 0 16px 40px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-input: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --mask-base: rgba(0, 0, 0, 0.8);
+  --shadow-raised: inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+  --shadow-input: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
 }
 
 .app-root[data-theme="cyber"] {
