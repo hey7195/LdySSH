@@ -2108,6 +2108,8 @@ export function App() {
               onOpenRemoteEditor={openRemoteEditor}
               onOpenSearch={(path) => { setSftpSearchPath(path); setSftpSearchOpen(true); }}
               onOpenDiff={openSftpDiff}
+              onAddFolder={addCommandFolder}
+              onSaveCommand={saveCommand}
             />
           </div>
           <SettingsPanel
@@ -3124,7 +3126,9 @@ function TerminalWorkspace({
   onToggleSplit,
   onOpenRemoteEditor,
   onOpenSearch,
-  onOpenDiff
+  onOpenDiff,
+  onAddFolder,
+  onSaveCommand
 }: {
   visible: boolean;
   sessions: SessionTab[];
@@ -3168,6 +3172,8 @@ function TerminalWorkspace({
   onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
   onOpenSearch?: (path: string) => void;
   onOpenDiff?: (path: string, name: string) => void;
+  onAddFolder?: (name: string) => void;
+  onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -3488,6 +3494,8 @@ function TerminalWorkspace({
             onOpenRemoteEditor={onOpenRemoteEditor}
             onOpenSearch={onOpenSearch}
             onOpenDiff={onOpenDiff}
+            onAddFolder={onAddFolder}
+            onSaveCommand={onSaveCommand}
           />
         )}
       </div>
@@ -4648,7 +4656,9 @@ function TerminalCommandSidebar({
   activeSession,
   shortcutParameterRequest,
   onActiveFolderChange,
-  onSendCommand
+  onSendCommand,
+  onAddFolder,
+  onSaveCommand
 }: {
   folders: CommandFolder[];
   activeFolderId: string;
@@ -4656,6 +4666,8 @@ function TerminalCommandSidebar({
   shortcutParameterRequest: ShortcutParameterRequest | null;
   onActiveFolderChange: (folderId: string) => void;
   onSendCommand: (command: string) => void;
+  onAddFolder?: (name: string) => void;
+  onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [detailCommandKey, setDetailCommandKey] = useState("");
@@ -4666,6 +4678,16 @@ function TerminalCommandSidebar({
     y: number;
     command: CommandItem & { folderId: string; folderName: string };
   } | null>(null);
+
+  // Blank space right-click menu & Dialog states
+  const [blankMenu, setBlankMenu] = useState<{ x: number; y: number } | null>(null);
+  const [addFolderOpen, setAddFolderOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [addCmdOpen, setAddCmdOpen] = useState(false);
+  const [newCmdName, setNewCmdName] = useState("");
+  const [newCmdStr, setNewCmdStr] = useState("");
+  const [newCmdDesc, setNewCmdDesc] = useState("");
+
   const keyword = query.trim().toLowerCase();
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
   const commands = (keyword
@@ -4717,7 +4739,38 @@ function TerminalCommandSidebar({
 
   function openCommandMenu(event: ReactMouseEvent, command: CommandItem & { folderId: string; folderName: string }) {
     event.preventDefault();
+    event.stopPropagation();
+    setBlankMenu(null);
     setCommandMenu({ x: event.clientX, y: event.clientY, command });
+  }
+
+  function handleBlankContextMenu(event: ReactMouseEvent) {
+    event.preventDefault();
+    setCommandMenu(null);
+    setBlankMenu({ x: event.clientX, y: event.clientY });
+  }
+
+  function handleConfirmAddFolder(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    onAddFolder?.(newFolderName.trim());
+    setNewFolderName("");
+    setAddFolderOpen(false);
+  }
+
+  function handleConfirmAddCmd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newCmdName.trim() || !newCmdStr.trim()) return;
+    const targetFolderId = activeFolder?.id || folders[0]?.id || "";
+    onSaveCommand?.(targetFolderId, {
+      name: newCmdName.trim(),
+      command: newCmdStr.trim(),
+      description: newCmdDesc.trim()
+    });
+    setNewCmdName("");
+    setNewCmdStr("");
+    setNewCmdDesc("");
+    setAddCmdOpen(false);
   }
 
   async function copyCommand(command: CommandItem) {
@@ -4726,24 +4779,31 @@ function TerminalCommandSidebar({
   }
 
   return (
-    <div className="grid h-full min-h-0 w-full min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[var(--app-bg)]">
-      <div className="border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3.5">
+    <div
+      className="grid h-full min-h-0 w-full min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[var(--app-bg)] select-none"
+      onContextMenu={handleBlankContextMenu}
+      onClick={() => {
+        if (blankMenu) setBlankMenu(null);
+        if (commandMenu) setCommandMenu(null);
+      }}
+    >
+      <div className="border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-extrabold text-[var(--app-text)] flex items-center gap-2">
-              <Command className="h-4 w-4 text-purple-600" />
+              <Command className="h-4 w-4 text-emerald-500" />
               <span>快捷命令侧边栏</span>
               <span className="sr-only">快捷命令栏</span>
             </h2>
-            <p className="mt-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
-              {activeSession ? `写入目标：${activeSession.title}` : "打开终端后可发送命令"}
+            <p className="mt-0.5 text-[11px] font-medium text-[var(--app-muted)]">
+              {activeSession ? `目标：${activeSession.title}` : "支持空白处右键新增"}
             </p>
           </div>
         </div>
-        <div className="relative mt-3">
+        <div className="relative mt-2.5">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
           <Input
-            className="h-8.5 pl-8 text-xs rounded-full shadow-2xs"
+            className="h-8 pl-8 text-xs rounded-full shadow-2xs"
             value={query}
             placeholder="搜索命令或文件夹"
             onChange={(event) => setQuery(event.target.value)}
@@ -4752,8 +4812,23 @@ function TerminalCommandSidebar({
       </div>
 
       <div className="flex min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden">
-        <div className="w-full min-w-0 max-w-full overflow-hidden border-b border-[var(--app-line)] px-3.5 py-3">
-          <div className="mb-2 text-[11px] font-extrabold text-[var(--app-muted)]">分类文件夹</div>
+        <div className="w-full min-w-0 max-w-full overflow-hidden border-b border-[var(--app-line)] px-3.5 py-2.5">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[11px] font-extrabold text-[var(--app-muted)]">分类文件夹</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setAddFolderOpen(true);
+              }}
+              className="flex items-center gap-1 text-[10px] font-extrabold text-emerald-500 hover:text-emerald-400 cursor-pointer"
+              title="新建分类文件夹"
+            >
+              <Plus className="h-3 w-3" />
+              <span>新建分类</span>
+            </button>
+          </div>
+
           <div className="flex w-full min-w-0 max-w-full flex-wrap gap-2 overflow-x-hidden">
             {folders.map((folder) => {
               const active = folder.id === activeFolder?.id;
@@ -4761,15 +4836,15 @@ function TerminalCommandSidebar({
                 <button
                   key={folder.id}
                   className={cn(
-                    "flex h-8 flex-1 min-w-[90px] items-center justify-between rounded-full border px-3 text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
+                    "flex h-7 flex-1 min-w-[85px] items-center justify-between rounded-full border px-3 text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
                     active
-                      ? "border-emerald-500 bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
-                      : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-emerald-50 hover:text-emerald-700"
+                      ? "border-emerald-500 bg-emerald-600 text-white shadow-sm shadow-emerald-500/20"
+                      : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:border-emerald-500/50 hover:text-emerald-500"
                   )}
                   onClick={() => onActiveFolderChange(folder.id)}
                 >
                   <span className="truncate mr-1 font-extrabold">{folder.name}</span>
-                  <span className={cn("rounded-full px-2 py-0.5 font-mono text-[9px] font-extrabold shrink-0", active ? "bg-white/25 text-white" : "bg-[var(--fill-2)] text-[var(--app-muted)]")}>
+                  <span className={cn("rounded-full px-1.5 py-0.2 font-mono text-[9px] font-extrabold shrink-0", active ? "bg-white/25 text-white" : "bg-[var(--fill-2)] text-[var(--app-muted)]")}>
                     {folder.commands.length}
                   </span>
                 </button>
@@ -4778,12 +4853,26 @@ function TerminalCommandSidebar({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto p-2.5 space-y-3" aria-label="快捷命令列表">
+        <div className="min-h-0 flex-1 overflow-auto p-3 space-y-3" aria-label="快捷命令列表">
           <div className="flex items-center justify-between text-[10px] font-extrabold text-[var(--app-muted)] px-1">
             <span>快捷指令 (FinalShell 流式)</span>
-            <span className="font-mono text-[10px] text-[var(--app-text)] font-extrabold">
-              {commands.length} 条
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAddCmdOpen(true);
+                }}
+                className="flex items-center gap-1 text-[10px] font-extrabold text-emerald-500 hover:text-emerald-400 cursor-pointer"
+                title="新建快捷指令"
+              >
+                <Plus className="h-3 w-3" />
+                <span>新建指令</span>
+              </button>
+              <span className="font-mono text-[10px] text-[var(--app-text)] font-extrabold">
+                {commands.length} 条
+              </span>
+            </div>
           </div>
 
           {/* FinalShell 经典 100% 动态宽度横向流式分布 */}
@@ -4799,10 +4888,10 @@ function TerminalCommandSidebar({
                   role="button"
                   aria-label={`发送 ${command.name}`}
                   className={cn(
-                    "group inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-all duration-150 cursor-pointer select-none max-w-full",
+                    "group inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs transition-all duration-150 cursor-pointer select-none max-w-full shadow-2xs",
                     isPending
                       ? "border-emerald-500 bg-emerald-600 text-white font-extrabold shadow-md shadow-emerald-500/20"
-                      : "border-[var(--app-line)] bg-[var(--panel-bg)] hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-700 text-[var(--app-text)] font-extrabold"
+                      : "border-[var(--app-line)] bg-[var(--panel-bg)] hover:border-emerald-500/60 hover:text-emerald-500 text-[var(--app-text)] font-extrabold"
                   )}
                   title={`点击发送: $ ${command.command}${command.description ? ` (${command.description})` : ""}`}
                   onClick={() => runCommand(command)}
@@ -4814,7 +4903,7 @@ function TerminalCommandSidebar({
 
                   <button
                     type="button"
-                    className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-[var(--app-muted)] hover:bg-emerald-100 hover:text-emerald-700 transition-colors"
+                    className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-[var(--app-muted)] hover:text-emerald-500 transition-colors"
                     title={parameters.length ? `填参数 (${parameters.length})` : "查看/编辑"}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -4828,18 +4917,19 @@ function TerminalCommandSidebar({
               );
             })}
             {commands.length === 0 && (
-              <div className="w-full rounded-xl border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-6 text-center text-xs font-semibold text-[var(--app-muted)]">
-                暂无命令
+              <div className="w-full rounded-2xl border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-6 text-center text-xs font-semibold text-[var(--app-muted)]">
+                右键空白处或点击顶部“+ 新建指令”
               </div>
             )}
           </div>
         </div>
+
         {pendingCommand && (
-          <div className="border-t border-slate-200 bg-white p-3" aria-label={`快捷命令参数 ${pendingCommand.name}`}>
-            <div className="mb-2 truncate text-xs font-semibold text-slate-900">{pendingCommand.name}</div>
+          <div className="border-t border-[var(--app-line)] bg-[var(--panel-bg)] p-3" aria-label={`快捷命令参数 ${pendingCommand.name}`}>
+            <div className="mb-2 truncate text-xs font-semibold text-[var(--app-text)]">{pendingCommand.name}</div>
             <div className="space-y-2">
               {pendingParameters.map((parameter) => (
-                <label key={parameter.key} className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-xs text-slate-600">
+                <label key={parameter.key} className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-xs text-[var(--app-muted)]">
                   <span className="truncate">{parameter.name}</span>
                   <Input
                     className="h-8 text-xs"
@@ -4859,25 +4949,154 @@ function TerminalCommandSidebar({
             </Button>
           </div>
         )}
+
         {detailCommand && (
-          <div className="border-t border-slate-200 bg-white p-3">
-            <div className="mb-2 text-xs font-semibold text-slate-900">命令详情</div>
-            <div className="truncate text-xs font-semibold text-slate-700">{detailCommand.name}</div>
-            <code className="mt-2 block max-h-24 overflow-auto rounded-md bg-slate-50 px-2 py-1.5 text-xs text-slate-700">
+          <div className="border-t border-[var(--app-line)] bg-[var(--panel-bg)] p-3">
+            <div className="mb-2 text-xs font-semibold text-[var(--app-text)]">命令详情</div>
+            <div className="truncate text-xs font-semibold text-[var(--app-text)]">{detailCommand.name}</div>
+            <code className="mt-2 block max-h-24 overflow-auto rounded-md bg-[var(--fill-1)] px-2 py-1.5 text-xs text-emerald-400 font-mono">
               {detailCommand.command}
             </code>
-            {detailCommand.description && <p className="mt-2 text-xs text-slate-500">{detailCommand.description}</p>}
+            {detailCommand.description && <p className="mt-2 text-xs text-[var(--app-muted)]">{detailCommand.description}</p>}
           </div>
         )}
-        {commandMenu && (
+
+        {/* Blank Space Context Menu (FinalShell 右键空白弹窗) */}
+        {blankMenu && (
           <div
             role="menu"
-            className="fixed z-50 min-w-32 rounded-md border border-slate-200 bg-white p-1 text-xs shadow-lg"
-            style={{ left: commandMenu.x, top: commandMenu.y }}
+            className="fixed z-50 min-w-36 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-fade-in"
+            style={{ left: blankMenu.x, top: blankMenu.y }}
+            onClick={(e) => e.stopPropagation()}
           >
             <button
               role="menuitem"
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-emerald-500/10 hover:text-emerald-500 transition-colors cursor-pointer"
+              onClick={() => {
+                setBlankMenu(null);
+                setAddCmdOpen(true);
+              }}
+            >
+              <Plus className="h-3.5 w-3.5 text-emerald-500" />
+              <span>➕ 新建快捷指令</span>
+            </button>
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-purple-500/10 hover:text-purple-500 transition-colors cursor-pointer"
+              onClick={() => {
+                setBlankMenu(null);
+                setAddFolderOpen(true);
+              }}
+            >
+              <FolderIcon className="h-3.5 w-3.5 text-purple-500" />
+              <span>📁 新建分类文件夹</span>
+            </button>
+          </div>
+        )}
+
+        {/* Add Folder Prompt Modal */}
+        {addFolderOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in select-none">
+            <form onSubmit={handleConfirmAddFolder} className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl space-y-4">
+              <h3 className="font-bold text-sm text-zinc-100 flex items-center gap-2">
+                <FolderIcon className="h-4 w-4 text-purple-400" /> 新建分类文件夹
+              </h3>
+              <input
+                type="text"
+                autoFocus
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="例如: 部署工具 / Docker指令..."
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 focus:border-purple-500 focus:outline-none"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAddFolderOpen(false)}
+                  className="rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-1.5 text-xs font-bold text-zinc-400 hover:text-zinc-200"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-purple-600 hover:bg-purple-500 px-4 py-1.5 text-xs font-bold text-white shadow-md shadow-purple-600/20"
+                >
+                  确认添加
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Add Command Modal */}
+        {addCmdOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in select-none">
+            <form onSubmit={handleConfirmAddCmd} className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl space-y-4">
+              <h3 className="font-bold text-sm text-zinc-100 flex items-center gap-2">
+                <Plus className="h-4 w-4 text-emerald-400" /> 新建快捷指令 (写入 [{activeFolder?.name || "默认分类"}])
+              </h3>
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-zinc-400 mb-1 font-semibold">指令显示名称</label>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={newCmdName}
+                    onChange={(e) => setNewCmdName(e.target.value)}
+                    placeholder="例如: 检查系统负载 / 重启服务"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-zinc-400 mb-1 font-semibold">Shell 脚本/指令</label>
+                  <textarea
+                    rows={3}
+                    value={newCmdStr}
+                    onChange={(e) => setNewCmdStr(e.target.value)}
+                    placeholder="例如: top -b -n 1 | head -n 20"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-100 font-mono text-[11px] focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-zinc-400 mb-1 font-semibold">备注说明 (选填)</label>
+                  <input
+                    type="text"
+                    value={newCmdDesc}
+                    onChange={(e) => setNewCmdDesc(e.target.value)}
+                    placeholder="选填提示信息..."
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setAddCmdOpen(false)}
+                  className="rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-1.5 text-xs font-bold text-zinc-400 hover:text-zinc-200"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 text-xs font-bold text-white shadow-md shadow-emerald-600/20"
+                >
+                  保存快捷指令
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {commandMenu && (
+          <div
+            role="menu"
+            className="fixed z-50 min-w-32 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md"
+            style={{ left: commandMenu.x, top: commandMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)]"
               onClick={() => void copyCommand(commandMenu.command)}
             >
               <Copy className="h-3.5 w-3.5" />
@@ -5066,7 +5285,9 @@ function TerminalRightSidebar({
   onAddAiQuote,
   onOpenRemoteEditor,
   onOpenSearch,
-  onOpenDiff
+  onOpenDiff,
+  onAddFolder,
+  onSaveCommand
 }: {
   activePanel: TerminalSidePanel;
   activeSession?: SessionTab;
@@ -5085,6 +5306,8 @@ function TerminalRightSidebar({
   onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
   onOpenSearch?: (path: string) => void;
   onOpenDiff?: (path: string, name: string) => void;
+  onAddFolder?: (name: string) => void;
+  onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
 }) {
   const panels: Array<{ id: TerminalSidePanel; label: string; icon: React.ReactNode }> = [
     { id: "commands", label: "命令", icon: <Command className="h-3.5 w-3.5" /> },
@@ -5144,6 +5367,8 @@ function TerminalRightSidebar({
             shortcutParameterRequest={shortcutParameterRequest}
             onActiveFolderChange={onActiveCommandFolderChange}
             onSendCommand={onSendCommand}
+            onAddFolder={onAddFolder}
+            onSaveCommand={onSaveCommand}
           />
         )}
         {activePanel === "files" && (
