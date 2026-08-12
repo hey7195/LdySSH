@@ -34,20 +34,23 @@ export const TerminalPaneGrid: React.FC<TerminalPaneGridProps> = ({
     return (
       <div className="relative h-full w-full min-h-0 min-w-0 overflow-hidden">
         {/* Pane Toolbar Header */}
-        <div className="absolute right-3 top-2.5 z-20 flex items-center gap-1 rounded-lg border border-zinc-800/80 bg-zinc-950/80 p-1 opacity-0 hover:opacity-100 transition-opacity backdrop-blur-xs select-none">
+        <div className="absolute right-3 top-2.5 z-20 flex items-center gap-1.5 rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)]/90 px-2 py-1 opacity-40 hover:opacity-100 transition-opacity backdrop-blur-md select-none shadow-md">
           <button
             onClick={() => onSplitHorizontal(pane.id)}
             title="左右垂直分屏 (Split Right)"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors cursor-pointer"
+            className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-extrabold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-emerald-500 transition-colors cursor-pointer"
           >
-            <Columns className="h-3.5 w-3.5" />
+            <Columns className="h-3 w-3 text-emerald-500" />
+            <span>左右分屏</span>
           </button>
+          <span className="h-3 w-[1px] bg-[var(--app-line)]" />
           <button
             onClick={() => onSplitVertical(pane.id)}
             title="上下水平分屏 (Split Down)"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors cursor-pointer"
+            className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-extrabold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-blue-500 transition-colors cursor-pointer"
           >
-            <Rows className="h-3.5 w-3.5" />
+            <Rows className="h-3 w-3 text-blue-500" />
+            <span>上下分屏</span>
           </button>
         </div>
 
