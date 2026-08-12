@@ -2994,6 +2994,7 @@ function TerminalWorkspace({
       >
         <TerminalSurface
           visible={visible}
+          sessions={sessions}
           activeSession={activeSession}
           terminalTheme={terminalTheme}
           terminalAppearance={terminalAppearance}
@@ -3297,6 +3298,7 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
 
 function TerminalSurface({
   visible,
+  sessions,
   activeSession,
   terminalTheme,
   terminalAppearance,
@@ -3320,6 +3322,7 @@ function TerminalSurface({
   onOutput
 }: {
   visible: boolean;
+  sessions?: SessionTab[];
   activeSession?: SessionTab;
   terminalTheme: TerminalThemeMode;
   terminalAppearance: TerminalAppearance;
@@ -3689,7 +3692,16 @@ function TerminalSurface({
   async function pasteTerminalClipboard(sessionId: string) {
     const result = await nativeBridge.clipboardPaste();
     if (result.success && result.text) {
-      await nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(normalizePasteText(result.text))));
+      const b64Data = bytesToBase64(new TextEncoder().encode(normalizePasteText(result.text)));
+      if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
+        sessions.forEach((s) => {
+          if (s.connected || s.status === "connected") {
+            void nativeBridge.sendInputBase64(s.id, b64Data);
+          }
+        });
+      } else {
+        await nativeBridge.sendInputBase64(sessionId, b64Data);
+      }
     }
   }
 
@@ -3821,7 +3833,16 @@ function TerminalSurface({
       }
 
       updateCommandInputFromData(input);
-      void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(input)));
+      const b64Data = bytesToBase64(new TextEncoder().encode(input));
+      if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
+        sessions.forEach((s) => {
+          if (s.connected || s.status === "connected") {
+            void nativeBridge.sendInputBase64(s.id, b64Data);
+          }
+        });
+      } else {
+        void nativeBridge.sendInputBase64(activeSession.id, b64Data);
+      }
     });
     const selectionDisposable = terminal.onSelectionChange(() => {
       setSelectedText(terminal.getSelection().trim());
