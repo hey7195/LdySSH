@@ -2869,64 +2869,63 @@ function HostSidebar({
                                 setHostContextMenu({ x: e.clientX, y: e.clientY, connection });
                                 setMoveSubmenuOpen(false);
                               }}
-                              className="relative flex flex-col gap-1.5 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 transition-all duration-200 hover:border-emerald-500/50 hover:shadow-md group select-none cursor-pointer"
+                              className="relative flex flex-col gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2 transition-all duration-150 hover:border-emerald-500/50 hover:shadow-sm group select-none cursor-pointer w-full min-w-0 overflow-hidden"
                               title={`${connection.name || connection.hostname}\n地址: ${connection.username || "root"}@${connection.hostname || "localhost"}:${connection.port || 22}\n分组: ${connection.group || connection.folder || "未分组"}`}
                             >
                               <div className="flex items-center gap-2 min-w-0 w-full">
-                                <div className="relative flex h-7.5 w-7.5 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 shrink-0 shadow-2xs">
-                                  <Server className="h-3.5 w-3.5" />
-                                  <span className="absolute -bottom-0.5 -right-0.5 flex h-2 w-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                <div className="relative flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shrink-0">
+                                  <Server className="h-3 w-3" />
+                                  <span className="absolute -bottom-0.5 -right-0.5 flex h-1.5 w-1.5">
+                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
                                   </span>
                                 </div>
                                 
                                 <button className="min-w-0 flex-1 text-left cursor-pointer overflow-hidden" onClick={() => onConnect(connection)}>
-                                  <div className="flex items-center justify-between min-w-0 gap-1">
-                                    <span className="truncate text-xs font-extrabold text-[var(--app-text)] flex-1 min-w-0" title={connection.name || connection.hostname}>
+                                  <div className="flex items-center justify-between gap-1 w-full min-w-0">
+                                    <span className="truncate text-xs font-extrabold text-[var(--app-text)] min-w-0 flex-1" title={connection.name || connection.hostname}>
                                       {connection.name || connection.hostname}
                                     </span>
-                                    <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 font-mono text-[9px] font-bold text-emerald-500 shrink-0">
+                                    <span className="rounded-md bg-emerald-500/10 border border-emerald-500/20 px-1 py-0.2 font-mono text-[9px] font-bold text-emerald-500 shrink-0">
                                       24ms
                                     </span>
                                   </div>
-                                  <div className="truncate font-mono text-[10px] font-semibold text-[var(--app-muted)] w-full block" title={`${connection.username || "user"}@${connection.hostname || "host"}:${connection.port || 22}`}>
-                                    {connection.username || "root"}@{connection.hostname || "host"}
+                                  <div className="truncate font-mono text-[10px] font-medium text-[var(--app-muted)] w-full block mt-0.5" title={`${connection.username || "root"}@${connection.hostname || "localhost"}:${connection.port || 22}`}>
+                                    {connection.username || "root"}@{connection.hostname || "localhost"}
                                   </div>
                                 </button>
 
-                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-[var(--panel-bg)]/90 backdrop-blur-xs pl-1 rounded-md">
                                   <button
                                     title="部署公钥"
-                                    className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/50 cursor-pointer"
+                                    className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-muted)] hover:bg-emerald-500/10 hover:text-emerald-500 cursor-pointer"
                                     onClick={(e) => { e.stopPropagation(); onOpenSshCopyId?.(connection); }}
                                   >
-                                    <KeyRound className="h-3 w-3" />
+                                    <KeyRound className="h-2.5 w-2.5" />
                                   </button>
                                   <button
                                     aria-label={`编辑 ${connection.name || connection.hostname}`}
-                                    className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer"
+                                    className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer"
                                     onClick={(e) => { e.stopPropagation(); onEditConnection(connection); }}
                                   >
-                                    <Pencil className="h-3 w-3" />
+                                    <Pencil className="h-2.5 w-2.5" />
                                   </button>
                                   <button
                                     aria-label={`删除 ${connection.name || connection.hostname}`}
-                                    className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 cursor-pointer"
+                                    className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-muted)] hover:bg-rose-500/10 hover:text-rose-500 cursor-pointer"
                                     onClick={(e) => { e.stopPropagation(); onDeleteConnection(connection); }}
                                   >
-                                    <X className="h-3 w-3" />
+                                    <X className="h-2.5 w-2.5" />
                                   </button>
                                 </div>
                               </div>
 
                               {/* 标签列 */}
                               {connection.tags && connection.tags.length > 0 && (
-                                <div className="flex items-center gap-1 flex-wrap pl-8">
+                                <div className="flex items-center gap-1 flex-wrap pl-8 mt-0.5">
                                   {connection.tags.map((tag) => {
                                     const colorInfo = HOST_TAG_COLORS[tag] || { bg: "bg-indigo-500/15", text: "text-indigo-600", border: "border-indigo-300" };
                                     return (
-                                      <span key={tag} className={cn("rounded-md px-1.5 py-0.2 text-[9px] font-extrabold border", colorInfo.bg, colorInfo.text, colorInfo.border)}>
+                                      <span key={tag} className={cn("rounded px-1 py-0.2 text-[8px] font-extrabold border", colorInfo.bg, colorInfo.text, colorInfo.border)}>
                                         #{tag}
                                       </span>
                                     );
@@ -3198,22 +3197,20 @@ function SidebarSection({
   const [isOpen, setIsOpen] = useState(open ?? true);
 
   return (
-    <section className="border-t border-[var(--app-line)] px-4 py-3">
-      <div className="mb-2 flex items-center justify-between">
+    <section className="border-t border-[var(--app-line)] px-2.5 py-2.5">
+      <div className="mb-2 flex items-center justify-between gap-1 w-full min-w-0">
         <button
           type="button"
           aria-label={`${isOpen ? "折叠" : "展开"}${title}`}
           aria-expanded={isOpen}
-          className="flex items-center gap-2 text-left cursor-pointer"
+          className="flex items-center gap-1.5 text-left cursor-pointer min-w-0 shrink whitespace-nowrap"
           onClick={() => setIsOpen((current) => !current)}
         >
-          <div className="text-xs font-medium uppercase tracking-wider text-[var(--app-muted)]">{title}</div>
-          <div className="flex items-center gap-1.5">
-            {typeof count === "number" && (
-              <span className="rounded-md bg-[var(--fill-2)] px-1.5 py-0.5 text-xs tabular-nums text-[var(--app-muted)]">{count}</span>
-            )}
-            <ChevronDown className={cn("h-3.5 w-3.5 text-[var(--app-muted)] transition-transform", !isOpen && "-rotate-90")} />
-          </div>
+          <span className="text-xs font-extrabold uppercase tracking-wide text-[var(--app-muted)] whitespace-nowrap shrink-0">{title}</span>
+          {typeof count === "number" && (
+            <span className="rounded-md bg-[var(--fill-2)] px-1.5 py-0.5 text-[10px] font-mono tabular-nums text-[var(--app-muted)] shrink-0">{count}</span>
+          )}
+          <ChevronDown className={cn("h-3.5 w-3.5 text-[var(--app-muted)] transition-transform shrink-0", !isOpen && "-rotate-90")} />
         </button>
         {action && <div className="shrink-0">{action}</div>}
       </div>
