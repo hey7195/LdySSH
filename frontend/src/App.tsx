@@ -16,6 +16,7 @@ import {
   Columns2,
   Copy,
   Command,
+  CornerDownLeft,
   Cpu,
   Download,
   Eye,
@@ -2685,50 +2686,63 @@ function HostSidebar({
             <span>新建 SSH 连接</span>
           </button>
 
-          {/* Row 2: 搜索框与独立工具栏按钮 */}
-          <div className="flex items-center gap-1.5">
-            <div className="relative flex-1 min-w-0">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
-              <Input
-                className="pl-7 pr-2.5 h-8 text-xs rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-emerald-500"
-                value={query}
-                placeholder="搜索主机..."
-                onChange={(event) => onQueryChange(event.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-0.5 shrink-0">
+          {/* Row 2: 独立全宽搜索框 */}
+          <div className="relative w-full">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
+            <Input
+              className="pl-7 pr-7 h-8 text-xs rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-emerald-500"
+              value={query}
+              placeholder="搜索主机 / IP / 标签..."
+              onChange={(event) => onQueryChange(event.target.value)}
+            />
+            {query && (
               <button
-                onClick={() => setShowTagMenu((prev) => !prev)}
-                title="按标签筛选主机"
-                className={cn(
-                  "flex h-8 w-7 items-center justify-center rounded-lg border border-[var(--app-line)] text-xs transition-colors cursor-pointer",
-                  activeTagFilter ? "bg-indigo-600 border-indigo-600 text-white shadow-2xs" : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-[var(--app-text)]"
-                )}
+                type="button"
+                onClick={() => onQueryChange("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer"
               >
-                <Filter className="h-3.5 w-3.5" />
+                <X className="h-3.5 w-3.5" />
               </button>
-              <button
-                onClick={onOpenKeyManager}
-                title="密钥库管理"
-                className="flex h-8 w-7 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-indigo-500 transition-colors cursor-pointer"
-              >
-                <KeyRound className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={onOpenPresets}
-                title="常用连接预设模板管理"
-                className="flex h-8 w-7 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-purple-500 transition-colors cursor-pointer"
-              >
-                <Sliders className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={onRefresh}
-                title="刷新主机"
-                className="flex h-8 w-7 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-[var(--app-text)] transition-colors cursor-pointer"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </button>
-            </div>
+            )}
+          </div>
+
+          {/* Row 3: 4-按钮子工具栏 (均等分布，防止横向挤压) */}
+          <div className="grid grid-cols-4 gap-1 w-full pt-0.5">
+            <button
+              onClick={() => setShowTagMenu((prev) => !prev)}
+              title="按标签筛选主机"
+              className={cn(
+                "flex h-7.5 items-center justify-center gap-1 rounded-lg border border-[var(--app-line)] text-[11px] font-extrabold transition-colors cursor-pointer w-full",
+                activeTagFilter ? "bg-indigo-600 border-indigo-600 text-white shadow-2xs" : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-[var(--app-text)]"
+              )}
+            >
+              <Filter className="h-3.5 w-3.5 shrink-0" />
+              <span>筛选</span>
+            </button>
+            <button
+              onClick={onOpenKeyManager}
+              title="密钥库管理"
+              className="flex h-7.5 items-center justify-center gap-1 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-extrabold text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-indigo-500 transition-colors cursor-pointer w-full"
+            >
+              <KeyRound className="h-3.5 w-3.5 shrink-0" />
+              <span>密钥</span>
+            </button>
+            <button
+              onClick={onOpenPresets}
+              title="常用连接预设模板管理"
+              className="flex h-7.5 items-center justify-center gap-1 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-extrabold text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-purple-500 transition-colors cursor-pointer w-full"
+            >
+              <Sliders className="h-3.5 w-3.5 shrink-0" />
+              <span>预设</span>
+            </button>
+            <button
+              onClick={onRefresh}
+              title="刷新主机列表"
+              className="flex h-7.5 items-center justify-center gap-1 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-extrabold text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-[var(--app-text)] transition-colors cursor-pointer w-full"
+            >
+              <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+              <span>刷新</span>
+            </button>
           </div>
 
           {/* 默认折叠，仅在点击筛选按钮或存在激活标签时展开 */}
@@ -5207,7 +5221,7 @@ function TerminalCommandSidebar({
     setParameterValues({});
   }, [shortcutParameterRequest, folders, onActiveFolderChange]);
 
-  function runCommand(command: CommandItem & { folderId: string }) {
+  function runCommand(command: CommandItem & { folderId: string }, autoExecute = true) {
     const parameters = extractCommandParameters(command.command);
     if (parameters.length) {
       setPendingCommandKey(commandKey(command));
@@ -5215,7 +5229,13 @@ function TerminalCommandSidebar({
       setParameterValues({});
       return;
     }
-    onSendCommand(command.command);
+    let cmdStr = command.command;
+    if (!autoExecute) {
+      cmdStr = cmdStr.replace(/[\r\n]+$/, "");
+    } else {
+      if (!cmdStr.endsWith("\n")) cmdStr += "\n";
+    }
+    onSendCommand(cmdStr);
   }
 
   function sendPendingCommand() {
@@ -5619,8 +5639,8 @@ function TerminalCommandSidebar({
         {commandMenu && (
           <div
             role="menu"
-            className="fixed z-50 min-w-36 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
-            style={{ left: Math.min(commandMenu.x, window.innerWidth - 160), top: Math.min(commandMenu.y, window.innerHeight - 200) }}
+            className="fixed z-50 min-w-44 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+            style={{ left: Math.min(commandMenu.x, window.innerWidth - 180), top: Math.min(commandMenu.y, window.innerHeight - 240) }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -5629,12 +5649,25 @@ function TerminalCommandSidebar({
               onClick={() => {
                 const cmd = commandMenu.command;
                 setCommandMenu(null);
-                runCommand(cmd);
+                runCommand(cmd, true);
               }}
             >
               <Send className="h-3.5 w-3.5" />
-              发送到终端
+              🚀 发送并执行
             </button>
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-indigo-500 hover:bg-indigo-500/10 cursor-pointer"
+              onClick={() => {
+                const cmd = commandMenu.command;
+                setCommandMenu(null);
+                runCommand(cmd, false);
+              }}
+            >
+              <CornerDownLeft className="h-3.5 w-3.5 text-indigo-500" />
+              ✏️ 填入终端 (不执行)
+            </button>
+            <div className="my-1 border-t border-[var(--app-line)]" />
             <button
               role="menuitem"
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
@@ -5645,7 +5678,7 @@ function TerminalCommandSidebar({
               }}
             >
               <Copy className="h-3.5 w-3.5" />
-              复制命令
+              📋 复制命令
             </button>
             <button
               role="menuitem"
@@ -5660,7 +5693,7 @@ function TerminalCommandSidebar({
               }}
             >
               <Pencil className="h-3.5 w-3.5" />
-              修改指令
+              ✏️ 修改指令
             </button>
           </div>
         )}

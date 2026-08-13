@@ -1933,7 +1933,7 @@ describe("command library", () => {
     const quickCommandList = await screen.findByLabelText("快捷命令列表");
     const quickCommand = within(quickCommandList).getByText("磁盘使用");
     fireEvent.contextMenu(quickCommand, { clientX: 120, clientY: 160 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "复制命令" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /复制命令/ }));
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("df -h");
   });
