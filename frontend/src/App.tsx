@@ -3815,7 +3815,7 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
                 )}
                 {isActive && (
                   <span className="rounded-md bg-white/20 border border-white/30 px-1.5 py-0.2 text-[9px] font-extrabold font-mono text-white animate-in fade-in duration-100">
-                    ↵ 选定
+                    Tab / ↵ 选定
                   </span>
                 )}
               </div>
@@ -3967,6 +3967,7 @@ function TerminalSurface({
   const commandSuggestionCustomApplyKeyRef = useRef(commandSuggestionCustomApplyKey);
   const commandSuggestionsRef = useRef<CommandSuggestion[]>([]);
   const activeCommandSuggestionIndexRef = useRef(0);
+  const hasUserNavigatedListRef = useRef(false);
   const commandInputRef = useRef("");
   const commandHistoryRef = useRef<string[]>([]);
   const rawCommandModeRef = useRef(false);
@@ -4059,6 +4060,7 @@ function TerminalSurface({
     commandSuggestionsRef.current = next;
     setCommandSuggestions(next);
     setActiveCommandSuggestionIndex(0);
+    hasUserNavigatedListRef.current = false;
   }
 
   function refreshCommandSuggestionList(draft = commandInputRef.current) {
@@ -4142,6 +4144,7 @@ function TerminalSurface({
   function moveCommandSuggestion(direction: 1 | -1) {
     const count = commandSuggestionsRef.current.length;
     if (count === 0) return;
+    hasUserNavigatedListRef.current = true;
     setActiveCommandSuggestionIndex((activeCommandSuggestionIndexRef.current + direction + count) % count);
   }
 
@@ -4173,7 +4176,10 @@ function TerminalSurface({
 
   function isCommandSuggestionApplyKey(event: globalThis.KeyboardEvent) {
     const applyKey = commandSuggestionApplyKeyRef.current;
-    if (applyKey === "enter" || applyKey === "tab" || applyKey === "altEnter") {
+    if (applyKey === "altEnter") {
+      return event.key === "Enter" && event.altKey;
+    }
+    if (applyKey === "enter" || applyKey === "tab") {
       return (event.key === "Enter" || event.key === "Tab") && !event.ctrlKey && !event.metaKey;
     }
     if (applyKey === "ctrlSpace") return event.ctrlKey && !event.metaKey && (event.code === "Space" || event.key === " ");
@@ -4205,6 +4211,24 @@ function TerminalSurface({
       event.stopPropagation();
       applyCommandSuggestion(commandSuggestionsRef.current[activeCommandSuggestionIndexRef.current] || commandSuggestionsRef.current[0]);
       return false;
+    }
+
+    if (event.key === "Tab" || event.key === "ArrowRight") {
+      event.preventDefault();
+      event.stopPropagation();
+      applyCommandSuggestion(commandSuggestionsRef.current[activeCommandSuggestionIndexRef.current] || commandSuggestionsRef.current[0]);
+      return false;
+    }
+
+    if (event.key === "Enter") {
+      if (hasUserNavigatedListRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        applyCommandSuggestion(commandSuggestionsRef.current[activeCommandSuggestionIndexRef.current] || commandSuggestionsRef.current[0]);
+        return false;
+      }
+      setCommandSuggestionList([]);
+      return true;
     }
 
     if (event.key === "Escape") {

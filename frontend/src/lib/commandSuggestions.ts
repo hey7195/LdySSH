@@ -36,7 +36,7 @@ const MAX_HISTORY_ITEMS = 80;
 const MAX_SUGGESTIONS = 6;
 const FULL_SCREEN_COMMANDS = new Set(["vi", "vim", "nvim", "nano", "less", "more", "man", "top", "htop", "watch", "tmux", "screen"]);
 
-export const defaultCommandSuggestionApplyKey: CommandSuggestionApplyKey = "enter";
+export const defaultCommandSuggestionApplyKey: CommandSuggestionApplyKey = "tab";
 export const defaultCommandSuggestionSources: CommandSuggestionSources = {
   history: true,
   shortcuts: true,
