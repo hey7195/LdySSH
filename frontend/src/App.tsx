@@ -2554,46 +2554,48 @@ function HostSidebar({
             <span>新建 SSH 连接</span>
           </button>
 
-          {/* Row 2: 搜索框与内嵌动作组 */}
-          <div className="relative flex items-center">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)] shrink-0" />
-            <Input
-              className="pl-8 pr-20 h-8 text-xs rounded-full shadow-2xs"
-              value={query}
-              placeholder="搜索主机..."
-              onChange={(event) => onQueryChange(event.target.value)}
-            />
-            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 shrink-0">
+          {/* Row 2: 搜索框与独立工具栏按钮 */}
+          <div className="flex items-center gap-1.5">
+            <div className="relative flex-1 min-w-0">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
+              <Input
+                className="pl-7 pr-2.5 h-8 text-xs rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-emerald-500"
+                value={query}
+                placeholder="搜索主机..."
+                onChange={(event) => onQueryChange(event.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-0.5 shrink-0">
               <button
                 onClick={() => setShowTagMenu((prev) => !prev)}
                 title="按标签筛选主机"
                 className={cn(
-                  "flex h-5.5 w-5.5 items-center justify-center rounded-full text-xs transition-colors cursor-pointer",
-                  activeTagFilter ? "bg-indigo-600 text-white shadow-2xs" : "text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
+                  "flex h-8 w-7 items-center justify-center rounded-lg border border-[var(--app-line)] text-xs transition-colors cursor-pointer",
+                  activeTagFilter ? "bg-indigo-600 border-indigo-600 text-white shadow-2xs" : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-[var(--app-text)]"
                 )}
               >
-                <Filter className="h-3 w-3" />
+                <Filter className="h-3.5 w-3.5" />
               </button>
               <button
                 onClick={onOpenKeyManager}
                 title="密钥库管理"
-                className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
+                className="flex h-8 w-7 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-indigo-500 transition-colors cursor-pointer"
               >
-                <KeyRound className="h-3 w-3" />
+                <KeyRound className="h-3.5 w-3.5" />
               </button>
               <button
                 onClick={onOpenPresets}
                 title="常用连接预设模板管理"
-                className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-purple-50 hover:text-purple-600 transition-colors cursor-pointer"
+                className="flex h-8 w-7 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-purple-500 transition-colors cursor-pointer"
               >
-                <Sliders className="h-3 w-3" />
+                <Sliders className="h-3.5 w-3.5" />
               </button>
               <button
                 onClick={onRefresh}
                 title="刷新主机"
-                className="flex h-5.5 w-5.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-1)] transition-colors cursor-pointer"
+                className="flex h-8 w-7 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-[var(--app-text)] transition-colors cursor-pointer"
               >
-                <RefreshCw className="h-3 w-3" />
+                <RefreshCw className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>

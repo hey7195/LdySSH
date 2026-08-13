@@ -1,7 +1,9 @@
 import { cpSync, existsSync, mkdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = resolve(process.cwd(), "..");
+const here = dirname(fileURLToPath(import.meta.url));
+const root = resolve(here, "../..");
 const releaseDir = resolve(root, "prismssh-cpp/x64/Release");
 const distDir = resolve(root, "LdySSH_Portable_v1.0.0");
 
