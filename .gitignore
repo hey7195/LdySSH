@@ -23,3 +23,6 @@ prismssh-cpp/WebView2Loader.dll
 prismssh-cpp/x64/Release/tools/
 *.png
 design-preview.html
+*.zip
+*.tar.gz
+LdySSH_Portable_v1.0.0/
