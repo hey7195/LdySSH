@@ -2556,14 +2556,14 @@ function HostSidebar({
 
           {/* Row 2: 搜索框与内嵌动作组 */}
           <div className="relative flex items-center">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)] shrink-0" />
             <Input
-              className="pl-8.5 pr-16 h-8 text-xs rounded-full shadow-2xs"
+              className="pl-8 pr-20 h-8 text-xs rounded-full shadow-2xs"
               value={query}
-              placeholder="搜索主机 / IP..."
+              placeholder="搜索主机..."
               onChange={(event) => onQueryChange(event.target.value)}
             />
-            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 shrink-0">
               <button
                 onClick={() => setShowTagMenu((prev) => !prev)}
                 title="按标签筛选主机"

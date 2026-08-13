@@ -39,7 +39,7 @@
   <ImportGroup Label="Shared" />
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros">
-    <VcpkgRoot>$(ProjectDir)..\..\.tools\vcpkg\</VcpkgRoot>
+    <VcpkgRoot>$(ProjectDir)..\.tools\vcpkg\</VcpkgRoot>
     <VcpkgTriplet>x64-windows-static-md</VcpkgTriplet>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">

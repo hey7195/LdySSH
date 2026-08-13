@@ -1,0 +1,103 @@
+:root {
+    --neon-border: 1px solid rgba(0, 212, 255, 0.25);
+    --neon-glow: 0 0 12px rgba(0, 212, 255, 0.15);
+    --neon-glow-strong: 0 0 20px rgba(0, 212, 255, 0.3);
+    --neon-bg: rgba(0, 212, 255, 0.03);
+}
+
+/* --- GLOBAL NEON BORDER UPGRADES --- */
+
+/* Modals */
+.modal-content, .command-modal-content, .connection-modal-content {
+    border: var(--neon-border) !important;
+    border-top: 1px solid rgba(0, 212, 255, 0.5) !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), var(--neon-glow) !important;
+    background: linear-gradient(145deg, rgba(20, 24, 30, 0.9), rgba(15, 18, 24, 0.95)) !important;
+    backdrop-filter: blur(16px) !important;
+}
+
+/* Inputs, Selects, Textareas, Search Bar */
+input[type="text"], input[type="password"], input[type="number"], select, textarea, .custom-select, .home-search input {
+    border: 1px solid rgba(0, 212, 255, 0.15) !important;
+    border-top: 1px solid rgba(0, 212, 255, 0.3) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.2)) !important;
+    backdrop-filter: blur(10px) !important;
+    transition: all 0.3s ease !important;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.5) !important;
+}
+input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus, select:focus, textarea:focus, .custom-select:focus, .home-search input:focus {
+    border-color: rgba(0, 212, 255, 0.6) !important;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.5), var(--neon-glow-strong) !important;
+    background: rgba(0, 212, 255, 0.05) !important;
+}
+
+/* Panels and Dividers */
+.sftp-panel, .terminal-container, .pf-card, .monitor-card {
+    border: var(--neon-border) !important;
+    background: linear-gradient(145deg, rgba(20, 24, 30, 0.7), rgba(15, 18, 24, 0.8)) !important;
+    backdrop-filter: blur(10px) !important;
+}
+.sftp-header, .pf-header {
+    border-bottom: var(--neon-border) !important;
+}
+
+/* Connection Cards - Deep Space Gradient */
+.home-connection-card, .recent-connection-item {
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    border-top: 1px solid rgba(0, 212, 255, 0.3) !important;
+    border-left: 1px solid rgba(121, 40, 202, 0.3) !important;
+    background: rgba(17, 24, 39, 0.4) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5) !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.home-connection-card:hover, .recent-connection-item:hover {
+    border-top: 1px solid rgba(0, 212, 255, 0.6) !important;
+    border-left: 1px solid rgba(121, 40, 202, 0.6) !important;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.6), var(--neon-glow-strong) !important;
+    transform: translateY(-4px) !important;
+    background: rgba(30, 41, 59, 0.5) !important;
+}
+
+/* Context Menus */
+.context-menu {
+    border: var(--neon-border) !important;
+    border-top: 1px solid rgba(0, 212, 255, 0.5) !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.8), var(--neon-glow) !important;
+    background: rgba(20, 24, 30, 0.85) !important;
+    backdrop-filter: blur(12px) !important;
+}
+.context-menu-item:hover {
+    background: var(--neon-bg) !important;
+}
+
+/* Command Library Elements and Tabs */
+.command-item, .library-sidebar-item, .command-folder-tab, .terminal-command-item {
+    border: 1px solid rgba(0, 212, 255, 0.1) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: linear-gradient(180deg, #2a2f3a, #1a1e24) !important;
+    box-shadow: inset 0 -2px 5px rgba(0,0,0,0.5) !important;
+    transition: all 0.2s ease !important;
+}
+.command-item:hover, .library-sidebar-item.active, .command-folder-tab.active, .command-folder-tab:hover, .terminal-command-item:hover {
+    border-color: rgba(0, 212, 255, 0.4) !important;
+    border-top: 1px solid rgba(0, 212, 255, 0.6) !important;
+    box-shadow: var(--neon-glow), inset 0 2px 5px rgba(0,0,0,0.5) !important;
+    background: linear-gradient(180deg, #1a1e24, #2a2f3a) !important;
+    color: #fff !important;
+}
+
+/* Top Action Buttons (Refresh, Privacy Mode, Views) */
+.home-refresh, .privacy-mode-btn, button[data-view="grid"], button[data-view="list"] {
+    background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(0,0,0,0.2)) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-top: 1px solid rgba(255,255,255,0.2) !important;
+    backdrop-filter: blur(8px) !important;
+    transition: all 0.3s ease !important;
+}
+.home-refresh:hover, .privacy-mode-btn:hover, button[data-view="grid"]:hover, button[data-view="list"]:hover, .privacy-mode-btn.active {
+    border-color: rgba(0, 212, 255, 0.5) !important;
+    box-shadow: var(--neon-glow) !important;
+    background: rgba(0, 212, 255, 0.1) !important;
+}
