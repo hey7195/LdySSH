@@ -220,6 +220,7 @@ interface ConnectionForm {
   password: string;
   keyPath: string;
   save: boolean;
+  group?: string;
   folder?: string;
   tags?: string[];
   environment?: "prod" | "staging" | "local";
@@ -362,6 +363,7 @@ const emptyForm: ConnectionForm = {
   password: "",
   keyPath: "",
   save: true,
+  group: "未分组",
   folder: "未分组",
   tags: [],
   environment: "local"
@@ -1400,6 +1402,7 @@ export function App() {
   }
 
   function toConnectionForm(connection: SavedConnection): ConnectionForm {
+    const grp = connection.group || connection.folder || "未分组";
     return {
       name: connection.name || "",
       hostname: connection.hostname || "",
@@ -1408,13 +1411,15 @@ export function App() {
       password: connection.password || connection.password_unavailable ? PASSWORD_PLACEHOLDER : "",
       keyPath: connection.keyPath || "",
       save: true,
-      folder: connection.folder || "未分组",
+      group: grp,
+      folder: grp,
       tags: connection.tags || [],
       environment: connection.environment
     };
   }
 
   function toConnectParams(connection: SavedConnection): ConnectParams {
+    const grp = connection.group || connection.folder || "未分组";
     return {
       name: connection.name,
       hostname: connection.hostname || "",
@@ -1423,8 +1428,8 @@ export function App() {
       password: connection.password || "",
       keyPath: connection.keyPath || "",
       save: false,
-      group: connection.group,
-      folder: connection.folder || "未分组",
+      group: grp,
+      folder: grp,
       tags: connection.tags || [],
       environment: connection.environment
     };
@@ -1499,6 +1504,7 @@ export function App() {
     setConnectError("");
     const existingConnection = savedConnections.find((connection) => savedConnectionKey(connection) === editingConnectionKey);
     const preservePassword = form.password === PASSWORD_PLACEHOLDER;
+    const targetGroup = (form.folder || form.group || "未分组").trim() || "未分组";
     const params: ConnectParams = {
       name: form.name || `${form.username}@${form.hostname}`,
       hostname: form.hostname,
@@ -1507,7 +1513,11 @@ export function App() {
       password: preservePassword ? existingConnection?.password || "" : form.password,
       keyPath: form.keyPath,
       save: true,
-      preservePassword
+      preservePassword,
+      group: targetGroup,
+      folder: targetGroup,
+      tags: form.tags,
+      environment: form.environment
     };
 
     if (!params.hostname || !params.username) {
@@ -1530,6 +1540,7 @@ export function App() {
   async function connectHost(connection?: SavedConnection) {
     setConnectError("");
 
+    const targetGroup = (form.folder || form.group || "未分组").trim() || "未分组";
     const params: ConnectParams = connection
       ? toConnectParams(connection)
       : {
@@ -1539,7 +1550,11 @@ export function App() {
           username: form.username,
           password: form.password,
           keyPath: form.keyPath,
-          save: form.save
+          save: form.save,
+          group: targetGroup,
+          folder: targetGroup,
+          tags: form.tags,
+          environment: form.environment
         };
 
     if (!params.hostname || !params.username) {
