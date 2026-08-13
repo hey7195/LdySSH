@@ -9,8 +9,10 @@ import {
   Activity,
   AlertTriangle,
   Bot,
+  Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Columns2,
   Copy,
   Command,
@@ -23,7 +25,9 @@ import {
   FileCode,
   Filter,
   Folder as FolderIcon,
+  FolderInput,
   FolderOpen,
+  FolderPlus,
   Grid2X2,
   Globe2,
   GripHorizontal,
@@ -938,6 +942,81 @@ export function App() {
   const [keyManagerOpen, setKeyManagerOpen] = useState(false);
   const [copyIdTarget, setCopyIdTarget] = useState<SavedConnection | null>(null);
   const [activeTagFilter, setActiveTagFilter] = useState<string>("");
+
+  const [customGroups, setCustomGroups] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem("ldyssh.customGroups");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ldyssh.customGroups", JSON.stringify(customGroups));
+    } catch {}
+  }, [customGroups]);
+
+  function createNewGroupPrompt() {
+    const name = window.prompt("请输入新主机分组名称：", "");
+    if (name && name.trim()) {
+      const trimmed = name.trim();
+      if (!customGroups.includes(trimmed)) {
+        setCustomGroups((prev) => [...prev, trimmed]);
+      }
+    }
+  }
+
+  async function renameGroup(oldName: string, newName: string) {
+    if (!newName || newName === oldName) return;
+    const connsInGroup = savedConnections.filter((c) => (c.group || c.folder || "未分组") === oldName);
+    for (const c of connsInGroup) {
+      const key = savedConnectionKey(c);
+      const params: ConnectParams = {
+        ...toConnectParams(c),
+        save: true,
+        group: newName,
+        folder: newName
+      };
+      await nativeBridge.saveSavedConnection(key, params);
+    }
+    setCustomGroups((prev) => Array.from(new Set([...prev.map((g) => (g === oldName ? newName : g)), newName])));
+    void refreshConnections();
+  }
+
+  async function deleteGroup(groupName: string) {
+    const connsInGroup = savedConnections.filter((c) => (c.group || c.folder || "未分组") === groupName);
+    for (const c of connsInGroup) {
+      const key = savedConnectionKey(c);
+      const params: ConnectParams = {
+        ...toConnectParams(c),
+        save: true,
+        group: "未分组",
+        folder: "未分组"
+      };
+      await nativeBridge.saveSavedConnection(key, params);
+    }
+    setCustomGroups((prev) => prev.filter((g) => g !== groupName));
+    void refreshConnections();
+  }
+
+  async function moveHostToGroup(connection: SavedConnection, targetGroup: string) {
+    const key = savedConnectionKey(connection);
+    const params: ConnectParams = {
+      ...toConnectParams(connection),
+      save: true,
+      group: targetGroup,
+      folder: targetGroup
+    };
+    const result = await nativeBridge.saveSavedConnection(key, params);
+    if (result.success) {
+      if (!customGroups.includes(targetGroup) && targetGroup !== "未分组") {
+        setCustomGroups((prev) => [...prev, targetGroup]);
+      }
+      void refreshConnections();
+    }
+  }
 
   const {
     commandBroadcastingEnabled,
@@ -2087,6 +2166,11 @@ export function App() {
           onOpenPresets={() => setPresetModalOpen(true)}
           activeTagFilter={activeTagFilter}
           onActiveTagFilterChange={setActiveTagFilter}
+          customGroups={customGroups}
+          onCreateGroup={createNewGroupPrompt}
+          onRenameGroup={renameGroup}
+          onDeleteGroup={deleteGroup}
+          onMoveHostToGroup={moveHostToGroup}
         />
         <main className="min-w-0 overflow-hidden">
           {activeTool === "ssh" && (
@@ -2223,6 +2307,7 @@ export function App() {
         form={form}
         error={connectError}
         mode={editingConnectionKey ? "edit" : "create"}
+        customGroups={customGroups}
         onOpenChange={setConnectOpen}
         onFormChange={setForm}
         onConnect={() => connectHost()}
@@ -2498,7 +2583,12 @@ function HostSidebar({
   onConnectAllInFolder,
   onOpenPresets,
   activeTagFilter = "",
-  onActiveTagFilterChange
+  onActiveTagFilterChange,
+  customGroups = [],
+  onCreateGroup,
+  onRenameGroup,
+  onDeleteGroup,
+  onMoveHostToGroup
 }: {
   query: string;
   activeTool: Tool;
@@ -2521,9 +2611,26 @@ function HostSidebar({
   onOpenPresets?: () => void;
   activeTagFilter?: string;
   onActiveTagFilterChange?: (tag: string) => void;
+  customGroups?: string[];
+  onCreateGroup?: () => void;
+  onRenameGroup?: (oldName: string, newName: string) => void;
+  onDeleteGroup?: (groupName: string) => void;
+  onMoveHostToGroup?: (connection: SavedConnection, targetGroup: string) => void;
 }) {
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [showTagMenu, setShowTagMenu] = useState(false);
+  const [groupContextMenu, setGroupContextMenu] = useState<{
+    x: number;
+    y: number;
+    folderName: string;
+    folderConns: SavedConnection[];
+  } | null>(null);
+  const [hostContextMenu, setHostContextMenu] = useState<{
+    x: number;
+    y: number;
+    connection: SavedConnection;
+  } | null>(null);
+  const [moveSubmenuOpen, setMoveSubmenuOpen] = useState(false);
 
   function toggleFolder(folderName: string) {
     setCollapsedFolders((prev) => ({ ...prev, [folderName]: !prev[folderName] }));
@@ -2545,18 +2652,27 @@ function HostSidebar({
   // Group connections by folder
   const groupedConnections = useMemo(() => {
     const map: Record<string, SavedConnection[]> = {};
+    (customGroups || []).forEach((g) => {
+      if (g && !map[g]) map[g] = [];
+    });
     filteredConnections.forEach((conn) => {
-      const folder = conn.folder || "未分组";
+      const folder = conn.group || conn.folder || "未分组";
       if (!map[folder]) map[folder] = [];
       map[folder].push(conn);
     });
     return map;
-  }, [filteredConnections]);
+  }, [filteredConnections, customGroups]);
 
   const presetTags = ["Prod", "Nginx", "MySQL", "K8s", "Web", "Dev", "GPU"];
 
   return (
-    <aside className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none">
+    <aside
+      className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none relative"
+      onClick={() => {
+        if (groupContextMenu) setGroupContextMenu(null);
+        if (hostContextMenu) setHostContextMenu(null);
+      }}
+    >
       <div className="flex h-full flex-col">
         <div className="px-3 pb-2.5 pt-3 border-b border-[var(--app-line)] space-y-2">
           {/* Row 1: 全宽新建连接按钮 */}
@@ -2692,8 +2808,26 @@ function HostSidebar({
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          <SidebarSection title="最近主机" count={filteredConnections.length} open>
-            {filteredConnections.length === 0 ? (
+          <SidebarSection
+            title="最近主机"
+            count={filteredConnections.length}
+            open
+            action={
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCreateGroup?.();
+                }}
+                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-extrabold text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+                title="新建主机分组/文件夹"
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+                <span>新建分组</span>
+              </button>
+            }
+          >
+            {filteredConnections.length === 0 && Object.keys(groupedConnections).length === 0 ? (
               <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-4 text-center text-xs font-semibold text-[var(--app-muted)]">
                 {query || activeTagFilter ? "无匹配主机" : "暂无保存主机"}
               </div>
@@ -2708,14 +2842,16 @@ function HostSidebar({
                         onClick={() => toggleFolder(folderName)}
                         onContextMenu={(e) => {
                           e.preventDefault();
-                          onConnectAllInFolder?.(folderConns);
+                          e.stopPropagation();
+                          setHostContextMenu(null);
+                          setGroupContextMenu({ x: e.clientX, y: e.clientY, folderName, folderConns });
                         }}
                         className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-[11px] font-extrabold text-[var(--app-muted)] hover:bg-[var(--fill-1)] cursor-pointer"
-                        title="点击展开/收起；右键可一键批量连接该组所有主机"
+                        title="点击展开/收起；右键可查看分组选项与一键批量连接"
                       >
                         <div className="flex items-center gap-1.5 truncate">
                           <FolderIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
-                          <span className="truncate">{folderName}</span>
+                          <span className="truncate font-extrabold text-[var(--app-text)]">{folderName}</span>
                           <span className="rounded-full bg-[var(--fill-2)] px-1.5 text-[9px] font-mono font-bold">{folderConns.length}</span>
                         </div>
                         <ChevronDown className={cn("h-3 w-3 transition-transform", isCollapsed && "-rotate-90")} />
@@ -2726,7 +2862,15 @@ function HostSidebar({
                           {folderConns.map((connection, index) => (
                             <div
                               key={`${connection.hostname}-${connection.username}-${index}`}
-                              className="relative flex flex-col gap-1.5 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 transition-all duration-200 hover:border-emerald-500/50 hover:shadow-md group select-none"
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setGroupContextMenu(null);
+                                setHostContextMenu({ x: e.clientX, y: e.clientY, connection });
+                                setMoveSubmenuOpen(false);
+                              }}
+                              className="relative flex flex-col gap-1.5 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 transition-all duration-200 hover:border-emerald-500/50 hover:shadow-md group select-none cursor-pointer"
+                              title={`${connection.name || connection.hostname}\n地址: ${connection.username || "root"}@${connection.hostname || "localhost"}:${connection.port || 22}\n分组: ${connection.group || connection.folder || "未分组"}`}
                             >
                               <div className="flex items-center gap-2 min-w-0 w-full">
                                 <div className="relative flex h-7.5 w-7.5 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 shrink-0 shadow-2xs">
@@ -2737,17 +2881,17 @@ function HostSidebar({
                                   </span>
                                 </div>
                                 
-                                <button className="min-w-0 flex-1 text-left cursor-pointer" onClick={() => onConnect(connection)}>
-                                  <div className="flex items-center justify-between min-w-0 pr-1">
-                                    <span className="truncate text-xs font-extrabold text-[var(--app-text)] max-w-[100px]" title={connection.name || connection.hostname}>
+                                <button className="min-w-0 flex-1 text-left cursor-pointer overflow-hidden" onClick={() => onConnect(connection)}>
+                                  <div className="flex items-center justify-between min-w-0 gap-1">
+                                    <span className="truncate text-xs font-extrabold text-[var(--app-text)] flex-1 min-w-0" title={connection.name || connection.hostname}>
                                       {connection.name || connection.hostname}
                                     </span>
                                     <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 font-mono text-[9px] font-bold text-emerald-500 shrink-0">
                                       24ms
                                     </span>
                                   </div>
-                                  <div className="truncate font-mono text-[10px] font-semibold text-[var(--app-muted)] max-w-[125px]" title={`${connection.username || "user"}@${connection.hostname || "host"}`}>
-                                    {connection.username || "user"}@{connection.hostname || "host"}
+                                  <div className="truncate font-mono text-[10px] font-semibold text-[var(--app-muted)] w-full block" title={`${connection.username || "user"}@${connection.hostname || "host"}:${connection.port || 22}`}>
+                                    {connection.username || "root"}@{connection.hostname || "host"}
                                   </div>
                                 </button>
 
@@ -2799,6 +2943,185 @@ function HostSidebar({
               </div>
             )}
           </SidebarSection>
+
+        {/* 分组右键菜单 */}
+        {groupContextMenu && (
+          <div
+            role="menu"
+            className="fixed z-50 min-w-44 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+            style={{ left: Math.min(groupContextMenu.x, window.innerWidth - 180), top: Math.min(groupContextMenu.y, window.innerHeight - 200) }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 font-extrabold text-[var(--app-muted)] border-b border-[var(--app-line)] mb-1 truncate">
+              📁 {groupContextMenu.folderName} ({groupContextMenu.folderConns.length})
+            </div>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-extrabold text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+              onClick={() => {
+                const conns = groupContextMenu.folderConns;
+                setGroupContextMenu(null);
+                conns.forEach((c) => onConnect(c));
+              }}
+            >
+              <Play className="h-3.5 w-3.5" />
+              一键批量连接该组
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+              onClick={() => {
+                setGroupContextMenu(null);
+                onOpenDialog();
+              }}
+            >
+              <Plus className="h-3.5 w-3.5 text-emerald-500" />
+              组内新建 SSH 主机
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+              onClick={() => {
+                const folder = groupContextMenu.folderName;
+                setGroupContextMenu(null);
+                const newName = window.prompt("请输入重命名后的分组名称：", folder);
+                if (newName && newName.trim() && newName.trim() !== folder) {
+                  onRenameGroup?.(folder, newName.trim());
+                }
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              重命名分组
+            </button>
+            {groupContextMenu.folderName !== "未分组" && (
+              <button
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                onClick={() => {
+                  const folder = groupContextMenu.folderName;
+                  setGroupContextMenu(null);
+                  if (window.confirm(`确定删除分组“${folder}”？该组下的主机将移至“未分组”`)) {
+                    onDeleteGroup?.(folder);
+                  }
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                删除分组
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* 主机右键菜单 */}
+        {hostContextMenu && (
+          <div
+            role="menu"
+            className="fixed z-50 min-w-44 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+            style={{ left: Math.min(hostContextMenu.x, window.innerWidth - 200), top: Math.min(hostContextMenu.y, window.innerHeight - 260) }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 font-extrabold text-[var(--app-text)] border-b border-[var(--app-line)] mb-1 truncate">
+              🖥️ {hostContextMenu.connection.name || hostContextMenu.connection.hostname}
+            </div>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-extrabold text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+              onClick={() => {
+                const conn = hostContextMenu.connection;
+                setHostContextMenu(null);
+                onConnect(conn);
+              }}
+            >
+              <Play className="h-3.5 w-3.5" />
+              连接此主机
+            </button>
+
+            {/* 移动到分组 */}
+            <div className="relative">
+              <button
+                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                onClick={() => setMoveSubmenuOpen((prev) => !prev)}
+              >
+                <div className="flex items-center gap-2">
+                  <FolderInput className="h-3.5 w-3.5 text-indigo-500" />
+                  <span>移动到分组...</span>
+                </div>
+                <ChevronRight className="h-3 w-3 text-[var(--app-muted)]" />
+              </button>
+
+              {moveSubmenuOpen && (
+                <div className="my-1 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] p-1 space-y-0.5 max-h-40 overflow-y-auto shadow-inner">
+                  {Array.from(new Set(["未分组", ...Object.keys(groupedConnections), ...(customGroups || [])])).map((g) => {
+                    const currentGrp = hostContextMenu.connection.group || hostContextMenu.connection.folder || "未分组";
+                    const isCurrent = currentGrp === g;
+                    return (
+                      <button
+                        key={g}
+                        disabled={isCurrent}
+                        className={cn(
+                          "flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-[11px] font-extrabold cursor-pointer transition-colors",
+                          isCurrent ? "text-emerald-500 bg-emerald-500/15" : "text-[var(--app-text)] hover:bg-[var(--raised-bg)]"
+                        )}
+                        onClick={() => {
+                          const conn = hostContextMenu.connection;
+                          setHostContextMenu(null);
+                          onMoveHostToGroup?.(conn, g);
+                        }}
+                      >
+                        <span className="truncate">📁 {g}</span>
+                        {isCurrent && <Check className="h-3 w-3" />}
+                      </button>
+                    );
+                  })}
+                  <button
+                    className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] font-extrabold text-indigo-500 hover:bg-indigo-500/10 cursor-pointer border-t border-[var(--app-line)] pt-1"
+                    onClick={() => {
+                      const conn = hostContextMenu.connection;
+                      setHostContextMenu(null);
+                      const newG = window.prompt("请输入新建分组名称：");
+                      if (newG && newG.trim()) {
+                        onMoveHostToGroup?.(conn, newG.trim());
+                      }
+                    }}
+                  >
+                    <Plus className="h-3 w-3" />
+                    <span>新建分组并移动...</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+              onClick={() => {
+                const conn = hostContextMenu.connection;
+                setHostContextMenu(null);
+                onOpenSshCopyId?.(conn);
+              }}
+            >
+              <KeyRound className="h-3.5 w-3.5 text-indigo-500" />
+              部署 SSH 公钥
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+              onClick={() => {
+                const conn = hostContextMenu.connection;
+                setHostContextMenu(null);
+                onEditConnection(conn);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              编辑主机设置
+            </button>
+            <div className="my-1 border-t border-[var(--app-line)]" />
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+              onClick={() => {
+                const conn = hostContextMenu.connection;
+                setHostContextMenu(null);
+                onDeleteConnection(conn);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              删除主机
+            </button>
+          </div>
+        )}
 
           <SidebarSection title="活动会话" count={sessions.length} open>
             {sessions.length > 0 && (
@@ -2863,32 +3186,37 @@ function SidebarSection({
   title,
   count,
   open,
+  action,
   children
 }: {
   title: string;
   count?: number;
   open?: boolean;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [isOpen, setIsOpen] = useState(open ?? true);
 
   return (
     <section className="border-t border-[var(--app-line)] px-4 py-3">
-      <button
-        type="button"
-        aria-label={`${isOpen ? "折叠" : "展开"}${title}`}
-        aria-expanded={isOpen}
-        className="mb-2 flex w-full items-center justify-between rounded-md py-1 text-left"
-        onClick={() => setIsOpen((current) => !current)}
-      >
-        <div className="text-xs font-medium uppercase tracking-wider text-[var(--app-muted)]">{title}</div>
-        <div className="flex items-center gap-2">
-          {typeof count === "number" && (
-            <span className="rounded-md bg-[var(--fill-2)] px-1.5 py-0.5 text-xs tabular-nums text-[var(--app-muted)]">{count}</span>
-          )}
-          <ChevronDown className={cn("h-3.5 w-3.5 text-[var(--app-muted)]", !isOpen && "-rotate-90")} />
-        </div>
-      </button>
+      <div className="mb-2 flex items-center justify-between">
+        <button
+          type="button"
+          aria-label={`${isOpen ? "折叠" : "展开"}${title}`}
+          aria-expanded={isOpen}
+          className="flex items-center gap-2 text-left cursor-pointer"
+          onClick={() => setIsOpen((current) => !current)}
+        >
+          <div className="text-xs font-medium uppercase tracking-wider text-[var(--app-muted)]">{title}</div>
+          <div className="flex items-center gap-1.5">
+            {typeof count === "number" && (
+              <span className="rounded-md bg-[var(--fill-2)] px-1.5 py-0.5 text-xs tabular-nums text-[var(--app-muted)]">{count}</span>
+            )}
+            <ChevronDown className={cn("h-3.5 w-3.5 text-[var(--app-muted)] transition-transform", !isOpen && "-rotate-90")} />
+          </div>
+        </button>
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
       {isOpen && children}
     </section>
   );
@@ -5294,17 +5622,48 @@ function TerminalCommandSidebar({
         {commandMenu && (
           <div
             role="menu"
-            className="fixed z-50 min-w-32 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md"
-            style={{ left: commandMenu.x, top: commandMenu.y }}
+            className="fixed z-50 min-w-36 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+            style={{ left: Math.min(commandMenu.x, window.innerWidth - 160), top: Math.min(commandMenu.y, window.innerHeight - 200) }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
               role="menuitem"
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)]"
-              onClick={() => void copyCommand(commandMenu.command)}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-extrabold text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+              onClick={() => {
+                const cmd = commandMenu.command;
+                setCommandMenu(null);
+                runCommand(cmd);
+              }}
+            >
+              <Send className="h-3.5 w-3.5" />
+              发送到终端
+            </button>
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+              onClick={() => {
+                const cmd = commandMenu.command;
+                setCommandMenu(null);
+                void copyCommand(cmd);
+              }}
             >
               <Copy className="h-3.5 w-3.5" />
               复制命令
+            </button>
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+              onClick={() => {
+                const cmd = commandMenu.command;
+                setCommandMenu(null);
+                setNewCmdName(cmd.name);
+                setNewCmdStr(cmd.command);
+                setNewCmdDesc(cmd.description || "");
+                setAddCmdOpen(true);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              修改指令
             </button>
           </div>
         )}
@@ -8609,6 +8968,7 @@ function ConnectDialog({
   form,
   error,
   mode,
+  customGroups = [],
   onOpenChange,
   onFormChange,
   onConnect,
@@ -8619,6 +8979,7 @@ function ConnectDialog({
   form: ConnectionForm;
   error: string;
   mode: "create" | "edit";
+  customGroups?: string[];
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: ConnectionForm) => void;
   onConnect: () => void;
@@ -8682,10 +9043,19 @@ function ConnectDialog({
             </Field>
             <Field label="所属分组/文件夹">
               <Input
+                list="existing-groups-datalist"
                 placeholder="例如: 生产集群 (默认: 未分组)"
-                value={form.folder || ""}
-                onChange={(event) => update("folder", event.target.value)}
+                value={form.folder || form.group || ""}
+                onChange={(event) => {
+                  update("folder", event.target.value);
+                  update("group", event.target.value);
+                }}
               />
+              <datalist id="existing-groups-datalist">
+                {Array.from(new Set(["未分组", "开发服务器", "安卓容器组", "生产集群", "测试环境", "DB数据库", ...(customGroups || [])])).map((g) => (
+                  <option key={g} value={g} />
+                ))}
+              </datalist>
             </Field>
             <Field label="彩色标签 (逗号分隔)">
               <Input
