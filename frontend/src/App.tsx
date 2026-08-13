@@ -9088,40 +9088,59 @@ function ConnectDialog({
             </Field>
             <Field label="所属分组/文件夹">
               <div className="space-y-1.5">
-                <select
-                  className="h-10 w-full rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs text-[var(--app-text)] shadow-2xs focus:outline-none focus:ring-2 focus:ring-emerald-500 font-extrabold cursor-pointer"
-                  value={availableGroups.includes(form.folder || form.group || "未分组") ? (form.folder || form.group || "未分组") : "__custom__"}
-                  onChange={(event) => {
-                    const val = event.target.value;
-                    if (val === "__custom__") {
-                      const newG = window.prompt("请输入新建分组名称：", "");
-                      if (newG && newG.trim()) {
-                        update("folder", newG.trim());
-                        update("group", newG.trim());
-                      }
-                    } else {
-                      update("folder", val);
-                      update("group", val);
-                    }
-                  }}
-                >
-                  {availableGroups.map((g) => (
-                    <option key={g} value={g}>
-                      📁 {g}
-                    </option>
-                  ))}
-                  <option value="__custom__">➕ 新建自定义分组...</option>
-                </select>
-                {!availableGroups.includes(form.folder || form.group || "未分组") && (form.folder || form.group) && (
-                  <Input
-                    placeholder="请输入自定义分组名称"
-                    value={form.folder || form.group || ""}
-                    onChange={(event) => {
-                      update("folder", event.target.value);
-                      update("group", event.target.value);
-                    }}
-                  />
-                )}
+                {(() => {
+                  const currentGroup = (form.folder || form.group || "未分组").trim() || "未分组";
+                  const isCustom = !availableGroups.includes(currentGroup);
+                  return (
+                    <>
+                      <select
+                        className="h-10 w-full rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs text-[var(--app-text)] shadow-2xs focus:outline-none focus:ring-2 focus:ring-emerald-500 font-extrabold cursor-pointer"
+                        value={isCustom ? "__custom__" : currentGroup}
+                        onChange={(event) => {
+                          const val = event.target.value;
+                          if (val === "__custom__") {
+                            const newG = window.prompt("请输入新建分组名称：", "");
+                            if (newG && newG.trim()) {
+                              const trimmed = newG.trim();
+                              onFormChange({
+                                ...form,
+                                folder: trimmed,
+                                group: trimmed
+                              });
+                            }
+                          } else {
+                            onFormChange({
+                              ...form,
+                              folder: val,
+                              group: val
+                            });
+                          }
+                        }}
+                      >
+                        {availableGroups.map((g) => (
+                          <option key={g} value={g}>
+                            📁 {g}
+                          </option>
+                        ))}
+                        <option value="__custom__">➕ 新建自定义分组...</option>
+                      </select>
+                      {isCustom && (
+                        <Input
+                          placeholder="请输入自定义分组名称"
+                          value={form.folder || form.group || ""}
+                          onChange={(event) => {
+                            const val = event.target.value;
+                            onFormChange({
+                              ...form,
+                              folder: val,
+                              group: val
+                            });
+                          }}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </Field>
             <Field label="彩色标签 (逗号分隔)">
