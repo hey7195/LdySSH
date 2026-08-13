@@ -2309,6 +2309,7 @@ export function App() {
         error={connectError}
         mode={editingConnectionKey ? "edit" : "create"}
         customGroups={customGroups}
+        savedConnections={savedConnections}
         onOpenChange={setConnectOpen}
         onFormChange={setForm}
         onConnect={() => connectHost()}
@@ -8999,6 +9000,7 @@ function ConnectDialog({
   error,
   mode,
   customGroups = [],
+  savedConnections = [],
   onOpenChange,
   onFormChange,
   onConnect,
@@ -9010,12 +9012,25 @@ function ConnectDialog({
   error: string;
   mode: "create" | "edit";
   customGroups?: string[];
+  savedConnections?: SavedConnection[];
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: ConnectionForm) => void;
   onConnect: () => void;
   onSave: () => void;
   onBrowseKey: () => void;
 }) {
+  const availableGroups = useMemo(() => {
+    const set = new Set<string>(["未分组"]);
+    (savedConnections || []).forEach((c) => {
+      const g = c.group || c.folder;
+      if (g && g.trim()) set.add(g.trim());
+    });
+    (customGroups || []).forEach((g) => {
+      if (g && g.trim()) set.add(g.trim());
+    });
+    return Array.from(set);
+  }, [savedConnections, customGroups]);
+
   function update<K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) {
     onFormChange({ ...form, [key]: value });
   }
@@ -9072,20 +9087,42 @@ function ConnectDialog({
               </select>
             </Field>
             <Field label="所属分组/文件夹">
-              <Input
-                list="existing-groups-datalist"
-                placeholder="例如: 生产集群 (默认: 未分组)"
-                value={form.folder || form.group || ""}
-                onChange={(event) => {
-                  update("folder", event.target.value);
-                  update("group", event.target.value);
-                }}
-              />
-              <datalist id="existing-groups-datalist">
-                {Array.from(new Set(["未分组", "开发服务器", "安卓容器组", "生产集群", "测试环境", "DB数据库", ...(customGroups || [])])).map((g) => (
-                  <option key={g} value={g} />
-                ))}
-              </datalist>
+              <div className="space-y-1.5">
+                <select
+                  className="h-10 w-full rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs text-[var(--app-text)] shadow-2xs focus:outline-none focus:ring-2 focus:ring-emerald-500 font-extrabold cursor-pointer"
+                  value={availableGroups.includes(form.folder || form.group || "未分组") ? (form.folder || form.group || "未分组") : "__custom__"}
+                  onChange={(event) => {
+                    const val = event.target.value;
+                    if (val === "__custom__") {
+                      const newG = window.prompt("请输入新建分组名称：", "");
+                      if (newG && newG.trim()) {
+                        update("folder", newG.trim());
+                        update("group", newG.trim());
+                      }
+                    } else {
+                      update("folder", val);
+                      update("group", val);
+                    }
+                  }}
+                >
+                  {availableGroups.map((g) => (
+                    <option key={g} value={g}>
+                      📁 {g}
+                    </option>
+                  ))}
+                  <option value="__custom__">➕ 新建自定义分组...</option>
+                </select>
+                {!availableGroups.includes(form.folder || form.group || "未分组") && (form.folder || form.group) && (
+                  <Input
+                    placeholder="请输入自定义分组名称"
+                    value={form.folder || form.group || ""}
+                    onChange={(event) => {
+                      update("folder", event.target.value);
+                      update("group", event.target.value);
+                    }}
+                  />
+                )}
+              </div>
             </Field>
             <Field label="彩色标签 (逗号分隔)">
               <Input
