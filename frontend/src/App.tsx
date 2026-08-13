@@ -3478,45 +3478,45 @@ function TerminalWorkspace({
         {menuSession && tabMenu && (
           <div
             role="menu"
-            className="fixed z-50 w-36 rounded-md border border-slate-200 bg-white py-1 text-xs font-medium text-slate-700 shadow-lg"
+            className="fixed z-50 w-40 rounded-xl border border-[var(--app-line)] bg-[var(--raised-bg)]/95 backdrop-blur-xl p-1 text-xs font-semibold text-[var(--app-text)] shadow-2xl animate-in zoom-in-95 duration-100"
             style={{ left: tabMenu.x, top: tabMenu.y }}
             onMouseLeave={() => setTabMenu(null)}
           >
-            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onDuplicate)}>
-              <Plus className="h-3.5 w-3.5" />
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onDuplicate)}>
+              <Plus className="h-3.5 w-3.5 text-emerald-500" />
               复制标签
             </button>
             <button
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
               disabled={menuSession.kind !== "ssh" || !menuSession.connectParams}
               onClick={() => runTabAction(onReconnect)}
             >
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw className="h-3.5 w-3.5 text-sky-500" />
               重连
             </button>
-            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onDisconnect)}>
-              <X className="h-3.5 w-3.5" />
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onDisconnect)}>
+              <X className="h-3.5 w-3.5 text-amber-500" />
               断开
             </button>
-            <div className="my-1 border-t border-slate-100" />
-            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onClose)}>
-              <X className="h-3.5 w-3.5" />
+            <div className="my-1 border-t border-[var(--app-line)]" />
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onClose)}>
+              <X className="h-3.5 w-3.5 text-rose-500" />
               关闭
             </button>
-            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onCloseOther)}>
-              <Menu className="h-3.5 w-3.5" />
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onCloseOther)}>
+              <Menu className="h-3.5 w-3.5 text-[var(--app-muted)]" />
               关闭其他
             </button>
             <button
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
               onClick={() => {
                 onCloseAll();
                 setTabMenu(null);
               }}
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3.5 w-3.5 text-rose-500" />
               关闭全部
             </button>
           </div>
@@ -6979,7 +6979,7 @@ function TerminalFontList({
       <div className="mb-1 text-xs font-semibold text-[var(--app-muted)]">{label}</div>
       <div
         aria-label={label}
-        className="h-40 overflow-auto rounded-md border border-slate-200 bg-white py-1"
+        className="h-40 overflow-auto rounded-xl border border-[var(--app-line)] bg-[var(--raised-bg)] p-1 space-y-0.5"
         role="listbox"
         tabIndex={0}
       >
@@ -6990,8 +6990,8 @@ function TerminalFontList({
               key={`${option.label}-${option.value}`}
               aria-selected={selected}
               className={cn(
-                "block h-6 w-full truncate px-2 text-left text-xs leading-6 text-slate-900",
-                selected ? "bg-slate-300" : "hover:bg-slate-100"
+                "block min-h-7 w-full truncate rounded-lg px-2.5 text-left text-xs leading-7 font-bold transition-all cursor-pointer",
+                selected ? "bg-emerald-500/20 text-emerald-500 font-extrabold shadow-2xs" : "text-[var(--app-text)] hover:bg-[var(--fill-1)]"
               )}
               role="option"
               style={{ fontFamily: `${option.family}, sans-serif` }}
@@ -7328,20 +7328,20 @@ function AiWorkspacePanel({
   }
 
   return (
-    <div className="grid h-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-white">
-      <header className="border-b border-slate-200 px-4 py-4">
+    <div className="grid h-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-[var(--panel-bg)] border-l border-[var(--app-line)]">
+      <header className="border-b border-[var(--app-line)] px-4 py-3 bg-[var(--panel-bg)]">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-slate-950">AI 对话栏</h2>
-            <p className="mt-1 text-xs text-slate-500">{isCodex ? "当前工具：本地 Codex CLI" : "当前工具：Hermes 本地 / 远端"}</p>
+            <h2 className="text-sm font-extrabold text-[var(--app-text)]">AI 对话栏</h2>
+            <p className="mt-0.5 text-xs text-[var(--app-muted)]">{isCodex ? "当前工具：本地 Codex CLI" : "当前工具：Hermes 本地 / 远端"}</p>
           </div>
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5" />
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold text-emerald-500">
+            <CheckCircle2 className="h-3 w-3" />
             可用
           </span>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <AiToolButton
             active={selectedTool === "codex"}
             icon={<Cpu className="h-4 w-4" />}
@@ -7359,31 +7359,31 @@ function AiWorkspacePanel({
         </div>
 
         {selectedTool === "codex" && (
-          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/80 p-2.5 text-xs text-amber-900 shadow-2xs">
-            <div className="flex items-center justify-between font-extrabold text-amber-800">
+          <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-500 shadow-2xs">
+            <div className="flex items-center justify-between font-extrabold text-amber-500">
               <span className="flex items-center gap-1.5">
-                <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
                 提示：需系统安装 codex 命令行
               </span>
               <button
                 aria-label="一键切换免安装引擎"
-                className="text-[11px] font-extrabold text-blue-600 hover:text-blue-800 cursor-pointer underline shrink-0"
+                className="text-[11px] font-extrabold text-sky-400 hover:text-sky-300 cursor-pointer underline shrink-0"
                 onClick={() => setSelectedTool("hermes")}
               >
                 切换 Hermes (免安装) →
               </button>
             </div>
-            <p className="mt-1 text-[11px] text-amber-700 leading-4">
-              未安装可通过 <code className="rounded bg-amber-100 px-1 py-0.5 font-mono font-bold text-amber-900 select-all">npm i -g @openai/codex</code> 安装，或直接无缝切换 Hermes/API 使用。
+            <p className="mt-1 text-[11px] text-[var(--app-muted)] leading-4">
+              未安装可通过 <code className="rounded bg-amber-500/20 px-1 py-0.5 font-mono font-bold text-amber-400 select-all">npm i -g @openai/codex</code> 安装，或直接无缝切换 Hermes/API 使用。
             </p>
           </div>
         )}
 
         <div className="mt-3 grid grid-cols-2 gap-2">
           <label className="block">
-            <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">模型</span>
+            <span className="mb-1 block text-[11px] font-semibold text-[var(--app-muted)]">模型</span>
             <select
-              className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              className="h-8.5 w-full rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-2.5 text-xs font-bold text-[var(--app-text)] focus:outline-none focus:border-emerald-500"
               aria-label="模型"
               value={activeAiSession?.model || ""}
               onChange={(event) => updateAiModel(event.target.value)}
@@ -7396,9 +7396,9 @@ function AiWorkspacePanel({
             </select>
           </label>
           <label className="block">
-            <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">降噪模式</span>
+            <span className="mb-1 block text-[11px] font-semibold text-[var(--app-muted)]">降噪模式</span>
             <select
-              className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              className="h-8.5 w-full rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-2.5 text-xs font-bold text-[var(--app-text)] focus:outline-none focus:border-emerald-500"
               aria-label="降噪模式"
               value={activeAiSession?.noiseMode || "standard"}
               onChange={(event) => updateNoiseMode(event.target.value as AiNoiseMode)}
@@ -7412,7 +7412,7 @@ function AiWorkspacePanel({
 
         <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
           <select
-            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+            className="h-8.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-2.5 text-xs font-bold text-[var(--app-text)] focus:outline-none focus:border-emerald-500"
             aria-label="AI 会话记录"
             value={activeAiSession?.id || ""}
             onChange={(event) => setActiveAiSessionId(event.target.value)}
@@ -7423,28 +7423,28 @@ function AiWorkspacePanel({
               </option>
             ))}
           </select>
-          <Button variant="outline" className="h-9 px-3" onClick={createNewAiSession}>
+          <Button variant="outline" className="h-8.5 px-3 rounded-xl border-[var(--app-line)] bg-[var(--fill-1)] text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] cursor-pointer" onClick={createNewAiSession}>
             新会话
           </Button>
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-3">
-          <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+          <label className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--app-text)] cursor-pointer">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              className="h-4 w-4 rounded border-[var(--app-line)] bg-[var(--fill-2)] text-emerald-500 focus:ring-0 cursor-pointer"
               checked={activeAiSession?.continueSession ?? true}
               onChange={(event) => updateContinueSession(event.target.checked)}
             />
             继续当前会话
           </label>
-          <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => setConfigOpen((open) => !open)}>
+          <Button variant="outline" className="h-7.5 px-2.5 text-xs font-bold rounded-lg border-[var(--app-line)] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer" onClick={() => setConfigOpen((open) => !open)}>
             高级配置
           </Button>
         </div>
       </header>
 
-      <div className="min-h-0 overflow-auto bg-slate-50">
+      <div className="min-h-0 overflow-auto bg-[var(--panel-bg)]">
         {configOpen && (
           <AiConfigPanel
             selectedTool={selectedTool}
@@ -7455,12 +7455,12 @@ function AiWorkspacePanel({
           />
         )}
 
-        <section className="border-b border-slate-200 bg-white px-4 py-3">
+        <section className="border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3">
           <label className="block">
-            <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">会话记忆</span>
+            <span className="mb-1 block text-[11px] font-semibold text-[var(--app-muted)]">会话记忆</span>
             <textarea
               data-testid="ai-memory-input"
-              className="h-16 w-full resize-none rounded-md border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-800 outline-none placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              className="h-14 w-full resize-none rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-2 text-xs leading-5 text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] focus:border-emerald-500"
               value={activeAiSession?.memory || ""}
               placeholder="例如：优先检查最新日志、默认使用当前项目目录"
               onChange={(event) => updateAiMemory(event.target.value)}
@@ -7468,10 +7468,10 @@ function AiWorkspacePanel({
           </label>
         </section>
 
-        <section className="border-b border-slate-200 bg-white px-4 py-3">
+        <section className="border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="text-[11px] font-semibold text-slate-500">当前上下文</div>
-            <div className="text-[11px] text-slate-400">{contextChips.length} 项</div>
+            <div className="text-[11px] font-semibold text-[var(--app-muted)]">当前上下文</div>
+            <div className="text-[11px] font-bold text-emerald-500 font-mono">{contextChips.length} 项</div>
           </div>
           <div className="flex flex-wrap gap-2">
             {contextChips.map((context) => (
@@ -7484,13 +7484,13 @@ function AiWorkspacePanel({
               />
             ))}
             {contextChips.length === 0 && (
-              <div className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">
+              <div className="rounded-xl border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-2 text-xs text-[var(--app-muted)]">
                 暂无附加上下文
               </div>
             )}
           </div>
           {previewContext && (
-            <pre className="mt-3 max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
+            <pre className="mt-3 max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-3 text-xs leading-5 text-[var(--app-text)] font-mono">
               {previewContext.text}
             </pre>
           )}
@@ -7501,8 +7501,8 @@ function AiWorkspacePanel({
             <AiMessage key={message.id} role={message.role} attachments={message.attachments}>{message.text}</AiMessage>
           ))}
           {messages.length === 0 && (
-            <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-400">
-              暂无对话
+            <div className="rounded-2xl border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-6 text-center text-xs font-semibold text-[var(--app-muted)]">
+              暂无对话记录
             </div>
           )}
           {running && <AiRunStatus text={runStatus || "Codex 执行中..."} thinking />}
@@ -7510,11 +7510,11 @@ function AiWorkspacePanel({
         </div>
       </div>
 
-      <footer className="border-t border-slate-200 bg-white p-4">
-        <div className="mb-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
-          <span className="rounded-full bg-slate-100 px-2 py-1">附加当前会话</span>
-          <span className="rounded-full bg-slate-100 px-2 py-1">附加终端输出</span>
-          <span className="rounded-full bg-slate-100 px-2 py-1">附加选区日志</span>
+      <footer className="border-t border-[var(--app-line)] bg-[var(--panel-bg)] p-4">
+        <div className="mb-2 flex flex-wrap gap-2 text-[10px] text-[var(--app-muted)] font-medium">
+          <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.5">附加当前会话</span>
+          <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.5">附加终端输出</span>
+          <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.5">附加选区日志</span>
         </div>
         {attachments.length > 0 && (
           <div className="mb-3 grid gap-2">
@@ -7527,7 +7527,7 @@ function AiWorkspacePanel({
             ))}
           </div>
         )}
-        {attachmentStatus && <div className="mb-2 text-xs text-amber-600">{attachmentStatus}</div>}
+        {attachmentStatus && <div className="mb-2 text-xs text-amber-500 font-semibold">{attachmentStatus}</div>}
         <input
           ref={attachmentInputRef}
           data-testid="ai-attachment-input"
@@ -7539,7 +7539,7 @@ function AiWorkspacePanel({
         />
         <div className="grid grid-cols-[40px_1fr_44px] gap-2">
           <button
-            className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+            className="inline-flex h-9.5 items-center justify-center rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)] disabled:opacity-50 cursor-pointer transition-colors"
             title="添加附件"
             disabled={running}
             onClick={() => attachmentInputRef.current?.click()}
@@ -7547,7 +7547,7 @@ function AiWorkspacePanel({
             <Paperclip className="h-4 w-4" />
           </button>
           <input
-            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+            className="h-9.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 text-xs text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] focus:border-emerald-500"
             value={prompt}
             placeholder="输入任务，选择 Codex 或 Hermes 执行..."
             onChange={(event) => setPrompt(event.target.value)}
@@ -7559,7 +7559,7 @@ function AiWorkspacePanel({
             }}
           />
           <button
-            className="inline-flex h-10 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+            className="inline-flex h-9.5 items-center justify-center rounded-xl bg-emerald-500 text-white font-bold hover:bg-emerald-600 disabled:opacity-50 transition-all cursor-pointer shadow-2xs"
             title="发送"
             disabled={running}
             onClick={() => void sendPrompt()}
