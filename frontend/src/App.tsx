@@ -1971,15 +1971,6 @@ export function App() {
           {activeSession?.kind === "ssh" && activeSession.connected && (
             <>
               <button
-                onClick={() => setProcessModalOpen(true)}
-                title="远程进程与任务管理器"
-                className="flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 text-xs font-bold text-amber-400 hover:bg-amber-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
-              >
-                <Cpu className="h-3.5 w-3.5 shrink-0" />
-                <span className="hidden xl:inline">进程管理</span>
-              </button>
-
-              <button
                 onClick={() => setPortForwardingOpen(true)}
                 title="SSH 端口转发与加密隧道管理"
                 className="flex items-center gap-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 px-2.5 py-1 text-xs font-bold text-cyan-400 hover:bg-cyan-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
@@ -2367,13 +2358,6 @@ export function App() {
           }));
           setConnectOpen(true);
         }}
-      />
-      <ProcessManagerModal
-        isOpen={processModalOpen}
-        onClose={() => setProcessModalOpen(false)}
-        sessionTitle={activeSession?.title}
-        onFetchProcesses={fetchRemoteProcesses}
-        onKillProcess={killRemoteProcess}
       />
       <MasterPasswordModal
         mode={isAppLocked ? "lock" : "settings"}
