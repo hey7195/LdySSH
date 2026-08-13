@@ -105,10 +105,71 @@ export const LINUX_SHELL_DICTIONARY: ShellDictionaryItem[] = [
     completions: ["-9", "-v", "-I"]
   },
 
-  // --- 容器 & DevOps 云原生 ---
+  // --- 容器 & DevOps 云原生 & 安卓容器 ---
   {
     prefix: "docker",
-    completions: ["ps -a", "logs -f --tail 100", "exec -it", "restart", "stop", "compose up -d", "compose down", "images", "system prune -f", "inspect", "network ls", "volume ls"]
+    completions: [
+      "ps -a",
+      "logs -f --tail 100",
+      "exec -it",
+      "restart",
+      "stop",
+      "compose up -d",
+      "compose down",
+      "images",
+      "system prune -f",
+      "inspect",
+      "exec -it redroid sh",
+      "exec -it redroid getprop ro.build.version.release",
+      "exec -it redroid logcat -v time",
+      "run -d --name redroid -p 5555:5555 --privileged redroid/redroid:11.0.0-latest"
+    ]
+  },
+  {
+    prefix: "adb",
+    completions: [
+      "connect 127.0.0.1:5555",
+      "devices -l",
+      "shell getprop ro.build.version.release",
+      "shell dumpsys battery",
+      "shell pm list packages -3",
+      "shell top -m 5",
+      "shell logcat -v time",
+      "shell screencap -p /sdcard/screen.png",
+      "pull /sdcard/screen.png .",
+      "push app.apk /sdcard/",
+      "install -r -g app.apk",
+      "reboot",
+      "disconnect",
+      "kill-server",
+      "start-server"
+    ]
+  },
+  {
+    prefix: "waydroid",
+    completions: [
+      "status",
+      "session start",
+      "session stop",
+      "container start",
+      "container stop",
+      "app launch",
+      "prop get ro.build.version.release",
+      "logcat"
+    ]
+  },
+  {
+    prefix: "scrcpy",
+    completions: [
+      "--serial 127.0.0.1:5555",
+      "-s 127.0.0.1:5555 --max-size 1024",
+      "--no-audio",
+      "-m 1024 -b 2M"
+    ]
+  },
+  {
+    prefix: "fastboot",
+    completions: ["devices", "reboot", "flash boot", "getvar all"]
   },
   {
     prefix: "docker-compose",
@@ -433,8 +494,8 @@ const RAW_COMMAND_NAMES: string[] = Array.from(
     "useradd", "userdel", "usermod", "groupadd", "groupdel", "groupmod", "passwd", "chfn", "chsh", "gpasswd", "newgrp", "id", "whoami", "who", "w", "last", "lastb", "users", "su", "sudo", "sudoedit", "visudo", "chmod", "chown", "chgrp", "umask", "faillock", "pam_tally2", "chage", "logname", "finger", "write", "wall", "mesg", "talk",
     // Archive & Compression & Backup (25)
     "tar", "gzip", "gunzip", "zcat", "bzip2", "bunzip2", "bzcat", "xz", "unxz", "xzcat", "lzma", "unlzma", "zip", "unzip", "zipinfo", "7z", "rar", "unrar", "cpio", "pax", "ar", "zstd", "unzstd", "zstdcat", "dump", "restore",
-    // DevOps & Containers & Cloud & Orchestration (35)
-    "docker", "docker-compose", "podman", "buildah", "skopeo", "crictl", "ctr", "containerd", "kubectl", "kubectx", "kubens", "helm", "minikube", "kind", "k3s", "terraform", "ansible", "ansible-playbook", "vagrant", "packer", "git", "git-lfs", "gh", "glab", "nginx", "apache2", "httpd", "caddy", "haproxy", "envoy", "redis-cli", "mysql", "mysqldump", "psql", "pg_dump", "sqlite3",
+    // DevOps & Containers & Android Containers & Cloud & Orchestration (45)
+    "docker", "docker-compose", "podman", "buildah", "skopeo", "crictl", "ctr", "containerd", "kubectl", "kubectx", "kubens", "helm", "minikube", "kind", "k3s", "terraform", "ansible", "ansible-playbook", "vagrant", "packer", "git", "git-lfs", "gh", "glab", "nginx", "apache2", "httpd", "caddy", "haproxy", "envoy", "redis-cli", "mysql", "mysqldump", "psql", "pg_dump", "sqlite3", "adb", "scrcpy", "waydroid", "redroid", "fastboot", "aapt", "apksigner", "zipalign",
     // Package Management & System Installers (30)
     "apt", "apt-get", "apt-cache", "dpkg", "dpkg-reconfigure", "snap", "flatpak", "yum", "dnf", "rpm", "repoquery", "zypper", "pacman", "makepkg", "apk", "emerge", "brew", "pip", "pip3", "npm", "npx", "pnpm", "yarn", "bun", "gem", "cargo", "go", "composer", "cpan", "luarocks",
     // Kernel, Hardware & Low-Level Diagnostics (35)

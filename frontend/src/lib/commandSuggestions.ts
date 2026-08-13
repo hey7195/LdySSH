@@ -44,6 +44,11 @@ export const defaultCommandSuggestionSources: CommandSuggestionSources = {
 };
 
 const LINUXCOOL_COMMAND_DESCRIPTIONS: Record<string, string> = {
+  adb: "Android 调试桥命令行工具 (Android Debug Bridge)",
+  redroid: "云手机 ReDroid 安卓容器环境",
+  waydroid: "Wayland 原生 Linux 安卓容器系统",
+  scrcpy: "Android 屏幕实时镜像与操控工具",
+  fastboot: "Android Bootloader 刷机与诊断工具",
   "apt-get": "APT 软件包管理工具",
   cat: "在终端设备上显示文件内容",
   cd: "切换当前工作目录",
