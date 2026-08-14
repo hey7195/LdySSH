@@ -1700,7 +1700,7 @@ describe("command library", () => {
 
     let enterHandled = false;
     await act(async () => {
-      enterHandled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Enter", cancelable: true })) ?? true;
+      enterHandled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "ArrowRight", cancelable: true })) ?? true;
     });
 
     expect(enterHandled).toBe(false);
@@ -1708,7 +1708,7 @@ describe("command library", () => {
 
     let handled = true;
     await act(async () => {
-      handled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true })) ?? true;
+      handled = terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Tab", cancelable: true })) ?? true;
     });
 
     expect(handled).toBe(true);
@@ -1730,8 +1730,8 @@ describe("command library", () => {
     });
     render(<App />);
 
-    fireEvent.click(screen.getByTitle("\u672c\u5730\u7ec8\u7aef"));
-    fireEvent.click(await screen.findByRole("button", { name: /\u6253\u5f00 Local Shell/ }));
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
     await waitFor(() => expect(terminalMock.keyHandler).toBeTypeOf("function"));
     const sendInput = window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>;
@@ -1744,7 +1744,7 @@ describe("command library", () => {
     expect(await screen.findByTestId("command-suggestion-panel")).toHaveTextContent("sudo iptables");
 
     await act(async () => {
-      terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true }));
+      terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "ArrowRight", cancelable: true }));
     });
 
     await screen.findByLabelText("快捷命令参数 NAT check");

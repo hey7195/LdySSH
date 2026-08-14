@@ -719,7 +719,7 @@ function loadStoredCommandSuggestionSources(): CommandSuggestionSources {
 
 function loadStoredCommandSuggestionApplyKey(): CommandSuggestionApplyKey {
   const value = window.localStorage.getItem(storageKeys.commandSuggestionApplyKey);
-  return value === "enter" || value === "tab" || value === "ctrlSpace" || value === "altEnter" || value === "custom" ? value : defaultCommandSuggestionApplyKey;
+  return value === "enter" || value === "tab" || value === "ctrlSpace" || value === "altEnter" || value === "shiftTab" || value === "arrowRight" || value === "custom" ? value : defaultCommandSuggestionApplyKey;
 }
 
 function loadStoredCommandSuggestionCustomApplyKey(): CommandSuggestionCustomApplyKey | null {
@@ -4828,7 +4828,7 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
                 )}
                 {isActive && (
                   <span className="rounded-md bg-white/20 border border-white/30 px-1.5 py-0.2 text-[9px] font-extrabold font-mono text-white animate-in fade-in duration-100">
-                    Tab / ↵ 选定
+                    Shift+Tab / → / ↵ 选定
                   </span>
                 )}
               </div>
@@ -5267,8 +5267,11 @@ function TerminalSurface({
     if (applyKey === "altEnter") {
       return event.key === "Enter" && event.altKey;
     }
-    if (applyKey === "enter" || applyKey === "tab") {
-      return (event.key === "Enter" || event.key === "Tab") && !event.ctrlKey && !event.metaKey;
+    if (applyKey === "enter") {
+      return event.key === "Enter" && !event.ctrlKey && !event.metaKey;
+    }
+    if (applyKey === "shiftTab") {
+      return event.key === "Tab" && event.shiftKey;
     }
     if (applyKey === "ctrlSpace") return event.ctrlKey && !event.metaKey && (event.code === "Space" || event.key === " ");
 
@@ -5301,11 +5304,18 @@ function TerminalSurface({
       return false;
     }
 
-    if (event.key === "Tab" || event.key === "ArrowRight") {
+    // Shift + Tab or ArrowRight (like modern zsh/warp suggestion accept) applies the suggestion
+    if ((event.key === "Tab" && event.shiftKey) || event.key === "ArrowRight") {
       event.preventDefault();
       event.stopPropagation();
       applyCommandSuggestion(commandSuggestionsRef.current[activeCommandSuggestionIndexRef.current] || commandSuggestionsRef.current[0]);
       return false;
+    }
+
+    // Pure Tab key is 100% dedicated to Linux remote shell native auto-completion!
+    if (event.key === "Tab" && !event.shiftKey) {
+      setCommandSuggestionList([]);
+      return true;
     }
 
     if (event.key === "Enter") {

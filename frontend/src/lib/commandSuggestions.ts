@@ -2,7 +2,7 @@ import type { CommandFolder } from "./bridge";
 import { LINUX_SHELL_DICTIONARY, getCommandUsageFrequency } from "./terminalIntelliSense";
 
 export type CommandSuggestionSource = "history" | "shortcut" | "linux";
-export type CommandSuggestionApplyKey = "enter" | "tab" | "ctrlSpace" | "altEnter" | "custom";
+export type CommandSuggestionApplyKey = "enter" | "tab" | "ctrlSpace" | "altEnter" | "shiftTab" | "arrowRight" | "custom";
 
 export interface CommandSuggestionCustomApplyKey {
   key: string;
