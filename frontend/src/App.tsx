@@ -4647,6 +4647,24 @@ function TerminalWorkspace({
   );
 }
 
+function getTerminalCursorPosition(): { left: number; top: number; bottom: number } | null {
+  const cursorEl = document.querySelector(".xterm-cursor, .terminal .xterm-cursor") as HTMLElement | null;
+  if (cursorEl) {
+    const rect = cursorEl.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0 && rect.top > 0) {
+      return { left: rect.left, top: rect.top, bottom: rect.bottom };
+    }
+  }
+  const textareaEl = document.querySelector("textarea.xterm-helper-textarea") as HTMLElement | null;
+  if (textareaEl) {
+    const rect = textareaEl.getBoundingClientRect();
+    if (rect.top > 0 && rect.left > 0) {
+      return { left: rect.left, top: rect.top, bottom: rect.bottom + 18 };
+    }
+  }
+  return null;
+}
+
 interface CommandSuggestionResizeEdges {
   left?: boolean;
   right?: boolean;
@@ -4655,7 +4673,11 @@ interface CommandSuggestionResizeEdges {
 }
 
 function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
+  const [hasCustomPosition, setHasCustomPosition] = useState<boolean>(() => {
+    return Boolean(window.localStorage.getItem(storageKeys.commandSuggestionPanel));
+  });
   const [layout, setLayout] = useState<CommandSuggestionPanelLayout>(() => loadStoredCommandSuggestionPanelLayout());
+  const [cursorPos, setCursorPos] = useState<{ left: number; top: number } | null>(null);
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -4664,10 +4686,50 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
     }
   }, [view.activeIndex]);
 
-  function updateLayout(next: CommandSuggestionPanelLayout) {
+  useEffect(() => {
+    if (hasCustomPosition) return;
+
+    function updateCursorCoords() {
+      const cursor = getTerminalCursorPosition();
+      if (!cursor) return;
+
+      const viewportWidth = window.innerWidth || 1280;
+      const viewportHeight = window.innerHeight || 720;
+      const panelWidth = layout.width || 260;
+      const panelHeight = layout.height || 180;
+
+      // Position horizontally aligned with cursor, clamp within screen
+      const left = clampNumber(cursor.left, 16, Math.max(16, viewportWidth - panelWidth - 16));
+
+      // Position vertically directly below the cursor
+      // If bottom has enough space (> panelHeight + 20), put below; otherwise put above cursor
+      let top = cursor.bottom + 6;
+      if (top + panelHeight > viewportHeight - 16) {
+        top = Math.max(16, cursor.top - panelHeight - 6);
+      }
+
+      setCursorPos({ left, top });
+    }
+
+    updateCursorCoords();
+    const timer = window.setTimeout(updateCursorCoords, 30);
+    return () => window.clearTimeout(timer);
+  }, [hasCustomPosition, layout.width, layout.height, view.suggestions]);
+
+  function updateLayout(next: CommandSuggestionPanelLayout, isManualDrag: boolean = true) {
     const normalized = normalizeCommandSuggestionPanelLayout(next);
     setLayout(normalized);
-    window.localStorage.setItem(storageKeys.commandSuggestionPanel, JSON.stringify(normalized));
+    if (isManualDrag) {
+      setHasCustomPosition(true);
+      window.localStorage.setItem(storageKeys.commandSuggestionPanel, JSON.stringify(normalized));
+    }
+  }
+
+  function resetToCursorDefault() {
+    setHasCustomPosition(false);
+    setCursorPos(null);
+    window.localStorage.removeItem(storageKeys.commandSuggestionPanel);
+    setLayout(defaultCommandSuggestionPanelLayout);
   }
 
   function startMove(event: ReactMouseEvent<HTMLButtonElement>) {
@@ -4682,7 +4744,7 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
         ...startLayout,
         left: startLayout.left + moveEvent.clientX - startX,
         bottom: startLayout.bottom - (moveEvent.clientY - startY)
-      });
+      }, true);
     }
 
     function stopMove() {
@@ -4730,7 +4792,7 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
       next.bottom = viewportHeight - top - next.height;
     }
 
-    updateLayout(next);
+    updateLayout(next, true);
   }
 
   function startResize(event: ReactMouseEvent<HTMLButtonElement>, edges: CommandSuggestionResizeEdges) {
@@ -4753,12 +4815,16 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
     window.addEventListener("mouseup", stopResize);
   }
 
+  const panelStyle = hasCustomPosition || !cursorPos
+    ? { left: layout.left, bottom: layout.bottom, width: layout.width, height: layout.height }
+    : { left: cursorPos.left, top: cursorPos.top, width: layout.width, height: layout.height };
+
   return (
     <div
       data-testid="command-suggestion-panel"
       role="listbox"
       className="fixed z-30 flex min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)]/95 backdrop-blur-xl shadow-2xl animate-in zoom-in-95 duration-100 select-none"
-      style={{ left: layout.left, bottom: layout.bottom, width: layout.width, height: layout.height }}
+      style={panelStyle}
     >
       <div className="flex h-6 shrink-0 items-center justify-between border-b border-[var(--app-line)] bg-[var(--panel-bg)]/90 px-3 select-none">
         <button
@@ -4768,16 +4834,16 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
           onMouseDown={startMove}
         >
           <GripHorizontal className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-          <span className="truncate">提示面板 (可拖拽)</span>
+          <span className="truncate">{hasCustomPosition ? "提示面板 (固定位置)" : "提示面板 (光标跟随)"}</span>
         </button>
         <button
           type="button"
-          title="复位提示框到默认位置"
+          title="复位提示框到光标下方跟随"
           aria-label="重置提示面板位置"
           className="flex h-4.5 w-4.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer shrink-0 transition-colors"
           onClick={(e) => {
             e.stopPropagation();
-            updateLayout(defaultCommandSuggestionPanelLayout);
+            resetToCursorDefault();
           }}
         >
           <RotateCcw className="h-3 w-3" />
