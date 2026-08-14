@@ -50,6 +50,7 @@ import {
   Send,
   Server,
   Settings,
+  Smartphone,
   Sparkles,
   Sun,
   Terminal,
@@ -84,6 +85,7 @@ import { ProcessManagerModal, type ProcessItem } from "./components/modals/Proce
 import { MasterPasswordModal } from "./components/modals/MasterPasswordModal";
 import { CloudSyncModal, type CloudSyncConfig } from "./components/modals/CloudSyncModal";
 import { PortForwardingModal, type TunnelRule } from "./components/modals/PortForwardingModal";
+import { AdbForwardModal } from "./components/modals/AdbForwardModal";
 import { ServerDiagnosticsModal, type DiagnosticCheckItem } from "./components/modals/ServerDiagnosticsModal";
 import { SessionLoggerModal } from "./components/modals/SessionLoggerModal";
 import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
@@ -909,6 +911,7 @@ export function App() {
   const [activeTool, setActiveTool] = useState<Tool>("ssh");
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [splitMode, setSplitMode] = useState<"none" | "horizontal" | "vertical">("none");
+  const [adbForwardModalOpen, setAdbForwardModalOpen] = useState(false);
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
   const [sessions, setSessions] = useState<SessionTab[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
@@ -2327,6 +2330,7 @@ export function App() {
               onAiConfigChange={setAiConfig}
               splitMode={splitMode}
               onToggleSplit={toggleSplit}
+              onOpenAdbForward={() => setAdbForwardModalOpen(true)}
               onOpenRemoteEditor={openRemoteEditor}
               onOpenSearch={(path) => { setSftpSearchPath(path); setSftpSearchOpen(true); }}
               onOpenDiff={openSftpDiff}
@@ -2545,6 +2549,25 @@ export function App() {
         onToggleTunnel={(id) =>
           setTunnels((prev) => prev.map((t) => (t.id === id ? { ...t, active: !t.active } : t)))
         }
+      />
+      <AdbForwardModal
+        isOpen={adbForwardModalOpen}
+        onClose={() => setAdbForwardModalOpen(false)}
+        sessionTitle={activeSession?.title || "活动终端"}
+        onExecuteCommand={(cmd) => {
+          if (activeSessionId) {
+            void sendCommandToActiveSession(`${cmd}\n`);
+          }
+        }}
+        onSaveCommand={(name, cmd) => {
+          if (commandFolders.length > 0) {
+            saveCommand(commandFolders[0].id, {
+              name,
+              command: cmd,
+              description: "远程 ADB 端口转发直连指令"
+            });
+          }
+        }}
       />
       <ServerDiagnosticsModal
         isOpen={diagnosticsOpen}
@@ -3611,7 +3634,8 @@ function TerminalWorkspace({
   onOpenDiff,
   onAddFolder,
   onSaveCommand,
-  onRenameTab
+  onRenameTab,
+  onOpenAdbForward
 }: {
   visible: boolean;
   sessions: SessionTab[];
@@ -3661,6 +3685,7 @@ function TerminalWorkspace({
   onAddFolder?: (name: string) => void;
   onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
   onRenameTab?: (sessionId: string, newTitle: string) => void;
+  onOpenAdbForward?: () => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -3760,6 +3785,16 @@ function TerminalWorkspace({
           >
             <Plus className="h-3.5 w-3.5 text-emerald-400" />
             <span>新建终端</span>
+          </button>
+
+          {/* ADB 远程转发快捷入口 */}
+          <button
+            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 px-2.5 text-xs font-bold text-sky-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
+            onClick={onOpenAdbForward}
+            title="一键开启远程 ADB 端口转发与直连 (Android 调试)"
+          >
+            <Smartphone className="h-3.5 w-3.5 text-sky-400" />
+            <span>ADB 转发</span>
           </button>
 
           <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0 mb-1.5" />
@@ -3935,6 +3970,20 @@ function TerminalWorkspace({
 
               <button
                 role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] text-sky-400 hover:text-sky-300 transition-colors cursor-pointer font-bold"
+                onClick={() => {
+                  onOpenAdbForward?.();
+                  setTopMenuOpen(false);
+                }}
+              >
+                <Smartphone className="h-3.5 w-3.5 text-sky-400" />
+                <span>开启远程 ADB 转发</span>
+              </button>
+
+              <div className="my-1 border-t border-[var(--app-line)]" />
+
+              <button
+                role="menuitem"
                 className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:opacity-40"
                 disabled={!activeSessionId}
                 onClick={() => {
@@ -4048,6 +4097,20 @@ function TerminalWorkspace({
                 </button>
               </>
             )}
+
+            <div className="my-1 border-t border-[var(--app-line)]" />
+
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] text-sky-400 hover:text-sky-300 transition-colors cursor-pointer font-bold"
+              onClick={() => {
+                onOpenAdbForward?.();
+                setTabMenu(null);
+              }}
+            >
+              <Smartphone className="h-3.5 w-3.5 text-sky-400" />
+              开启远程 ADB 转发
+            </button>
 
             <div className="my-1 border-t border-[var(--app-line)]" />
 
