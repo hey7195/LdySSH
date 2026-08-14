@@ -7330,6 +7330,7 @@ function TerminalRightSidebar({
             onOpenRemoteEditor={onOpenRemoteEditor}
             onOpenSearch={onOpenSearch}
             onOpenDiff={onOpenDiff}
+            onSendCommand={onSendCommand}
           />
         )}
         {activePanel === "ai" && (
@@ -7345,18 +7346,31 @@ function TerminalRightSidebar({
   );
 }
 
+const QUICK_REMOTE_LOCATIONS = [
+  { label: "根目录", path: "/" },
+  { label: "家目录", path: "~" },
+  { label: "日志", path: "/var/log" },
+  { label: "配置", path: "/etc" },
+  { label: "临时", path: "/tmp" },
+  { label: "软件", path: "/opt" },
+  { label: "Web", path: "/var/www" },
+  { label: "数据", path: "/data" }
+];
+
 function TerminalFileSidebar({
   activeSession,
   onAddAiQuote,
   onOpenRemoteEditor,
   onOpenSearch,
-  onOpenDiff
+  onOpenDiff,
+  onSendCommand
 }: {
   activeSession?: SessionTab;
   onAddAiQuote?: (text: string, sourceTitle: string) => void;
   onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
   onOpenSearch?: (path: string) => void;
   onOpenDiff?: (path: string, name: string) => void;
+  onSendCommand?: (command: string) => void;
 }) {
   const [remotePath, setRemotePath] = useState("/");
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -7425,7 +7439,6 @@ function TerminalFileSidebar({
   }
 
   function openFileMenu(event: ReactMouseEvent, entry: DirectoryEntry) {
-    if (entry.type === "directory") return;
     event.preventDefault();
     setFileMenu({ x: event.clientX, y: event.clientY, entry });
   }
@@ -7460,6 +7473,57 @@ function TerminalFileSidebar({
     } catch (err) {
       setUploadStatus(`❌ 上传发生异常`);
     }
+  }
+
+  async function createNewFile() {
+    if (!activeSession?.id || !canBrowseRemote) return;
+    const name = window.prompt("请输入新建文件的文件名（如 script.sh, config.json 等）：");
+    if (!name || !name.trim()) return;
+    const cleanName = name.trim();
+    const fullPath = joinRemotePath(remotePath, cleanName);
+    try {
+      const res = await nativeBridge.uploadFileContent(activeSession.id, "", fullPath);
+      if (res.success) {
+        setUploadStatus(`✅ 新建文件成功: ${cleanName}`);
+        setReloadToken((t) => t + 1);
+        onOpenRemoteEditor?.(fullPath, cleanName);
+      } else {
+        setUploadStatus(`❌ 新建文件失败: ${res.error || "未知错误"}`);
+      }
+    } catch {
+      setUploadStatus(`❌ 新建文件发生异常`);
+    }
+  }
+
+  async function createNewFolder() {
+    if (!activeSession?.id || !canBrowseRemote) return;
+    const name = window.prompt("请输入新建文件夹的名称：");
+    if (!name || !name.trim()) return;
+    const cleanName = name.trim();
+    const fullPath = joinRemotePath(remotePath, cleanName);
+    onSendCommand?.(`mkdir -p "${fullPath}"\r`);
+    setUploadStatus(`📁 正在创建文件夹: ${cleanName}`);
+    setTimeout(() => {
+      setReloadToken((t) => t + 1);
+    }, 500);
+  }
+
+  async function deleteRemoteItem(entry: DirectoryEntry) {
+    if (!activeSession?.id || !canBrowseRemote) return;
+    setFileMenu(null);
+    const isDir = entry.type === "directory";
+    const fullPath = joinRemotePath(remotePath, entry.name);
+    const confirmed = window.confirm(`确定要永久删除${isDir ? "目录及其全部内容" : "文件"} "${entry.name}" 吗？\n目标路径: ${fullPath}`);
+    if (!confirmed) return;
+    if (isDir) {
+      onSendCommand?.(`rm -rf "${fullPath}"\r`);
+    } else {
+      onSendCommand?.(`rm -f "${fullPath}"\r`);
+    }
+    setUploadStatus(`🗑️ 已发送删除指令: ${entry.name}`);
+    setTimeout(() => {
+      setReloadToken((t) => t + 1);
+    }, 500);
   }
 
   async function handleDropFiles(files: FileList) {
@@ -7652,12 +7716,28 @@ function TerminalFileSidebar({
                 </div>
               )}
               <button
+                className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors shadow-2xs cursor-pointer"
+                title="在当前目录新建空白文件"
+                onClick={() => void createNewFile()}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>新建文件</span>
+              </button>
+              <button
+                className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-[11px] font-extrabold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 transition-colors shadow-2xs cursor-pointer"
+                title="在当前目录新建子文件夹"
+                onClick={() => void createNewFolder()}
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+                <span>新建目录</span>
+              </button>
+              <button
                 className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 text-[11px] font-extrabold text-blue-400 hover:bg-blue-500/20 transition-colors shadow-2xs cursor-pointer"
                 title="搜索远程文件名或进行文本内容 Grep 检索"
                 onClick={() => onOpenSearch?.(remotePath)}
               >
                 <Search className="h-3.5 w-3.5" />
-                <span>检索/Grep</span>
+                <span>检索</span>
               </button>
               <button
                 className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 text-[11px] font-extrabold text-emerald-700 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer"
@@ -7674,6 +7754,26 @@ function TerminalFileSidebar({
               >
                 <RefreshCw className="h-3.5 w-3.5" />
               </button>
+            </div>
+            {/* 常用目录快速跳转 Chips 栏 */}
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none border-b border-[var(--app-line)] px-3 py-1.5 bg-[var(--sidebar-bg)]">
+              <span className="text-[10px] font-extrabold text-[var(--app-muted)] shrink-0 select-none">常用跳转:</span>
+              {QUICK_REMOTE_LOCATIONS.map((loc) => (
+                <button
+                  key={loc.path}
+                  type="button"
+                  onClick={() => setRemotePath(loc.path)}
+                  className={cn(
+                    "rounded-md px-2 py-0.5 text-[10px] font-mono font-bold transition-all shrink-0 cursor-pointer select-none",
+                    remotePath === loc.path
+                      ? "bg-purple-500 text-white shadow-2xs"
+                      : "bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-purple-400 border border-[var(--app-line)]"
+                  )}
+                  title={`快速跳转至: ${loc.path}`}
+                >
+                  {loc.label} ({loc.path})
+                </button>
+              ))}
             </div>
             <div className="flex items-center gap-2 border-b border-[var(--app-line)] px-3 py-1.5 bg-[var(--fill-1)]">
               <Search className="h-3.5 w-3.5 text-[var(--app-muted)] shrink-0" />
@@ -7701,7 +7801,7 @@ function TerminalFileSidebar({
                     key={`${entry.type}-${entry.name}`}
                     className={cn(
                       "grid w-full min-w-0 grid-cols-[18px_minmax(0,1fr)_64px_82px] items-center gap-2 px-3 py-2 text-left text-xs transition-colors",
-                      entry.type === "directory" ? "hover:bg-[var(--fill-1)] cursor-pointer" : "cursor-default"
+                      entry.type === "directory" ? "hover:bg-[var(--fill-1)] cursor-pointer" : "hover:bg-[var(--fill-1)]/60 cursor-default"
                     )}
                     onClick={() => openDirectory(entry)}
                     onContextMenu={(event) => openFileMenu(event, entry)}
@@ -7733,100 +7833,230 @@ function TerminalFileSidebar({
             {fileMenu && (
               <div
                 role="menu"
-                className="fixed z-50 min-w-44 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1.5 text-xs font-extrabold shadow-xl animate-in fade-in zoom-in-95 duration-150"
+                className="fixed z-50 min-w-48 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1.5 text-xs font-extrabold shadow-xl animate-in fade-in zoom-in-95 duration-150"
                 style={{ left: fileMenu.x, top: fileMenu.y }}
                 onMouseLeave={() => setFileMenu(null)}
               >
-                <button
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-emerald-600 dark:text-emerald-400 hover:bg-[var(--fill-1)] cursor-pointer font-bold"
-                  onClick={() => {
-                    const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
-                    onOpenRemoteEditor?.(fullPath, fileMenu.entry.name);
-                    setFileMenu(null);
-                  }}
-                >
-                  <Pencil className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                  <span>在线编辑修改 (Ctrl+S写回)</span>
-                </button>
-                <button
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
-                  onClick={() => {
-                    const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
-                    setPreviewFile({ path: fullPath, name: fileMenu.entry.name });
-                    setFileMenu(null);
-                  }}
-                >
-                  <Eye className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
-                  <span>预览文件内容</span>
-                </button>
+                {fileMenu.entry.type === "directory" ? (
+                  <>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-amber-600 dark:text-amber-400 hover:bg-[var(--fill-1)] cursor-pointer font-bold"
+                      onClick={() => {
+                        openDirectory(fileMenu.entry);
+                        setFileMenu(null);
+                      }}
+                    >
+                      <FolderOpen className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                      <span>进入此目录</span>
+                    </button>
+                    {onSendCommand && (
+                      <button
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sky-600 dark:text-sky-400 hover:bg-[var(--fill-1)] cursor-pointer font-bold"
+                        onClick={() => {
+                          const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                          onSendCommand(`cd "${fullPath}"\r`);
+                          setUploadStatus(`💻 已在终端中执行: cd "${fullPath}"`);
+                          setFileMenu(null);
+                        }}
+                      >
+                        <Terminal className="h-3.5 w-3.5 text-sky-500 shrink-0" />
+                        <span>在终端中跳转 (cd)</span>
+                      </button>
+                    )}
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        navigator.clipboard.writeText(fullPath);
+                        setUploadStatus(`📋 已复制路径: ${fullPath}`);
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span>复制目录绝对路径</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-emerald-600 dark:text-emerald-400 hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        setRemotePath(joinRemotePath(remotePath, fileMenu.entry.name));
+                        setFileMenu(null);
+                        setTimeout(() => void createNewFile(), 100);
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                      <span>在此新建文件</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-indigo-600 dark:text-indigo-400 hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        setRemotePath(joinRemotePath(remotePath, fileMenu.entry.name));
+                        setFileMenu(null);
+                        setTimeout(() => void createNewFolder(), 100);
+                      }}
+                    >
+                      <FolderPlus className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                      <span>在此新建子目录</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        setPermissionFile({ name: fileMenu.entry.name, path: fullPath, isDirectory: true });
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Settings className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                      <span>修改目录权限 (Chmod)</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 cursor-pointer font-bold"
+                      onClick={() => void deleteRemoteItem(fileMenu.entry)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                      <span>删除此目录 (rm -rf)</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-emerald-600 dark:text-emerald-400 hover:bg-[var(--fill-1)] cursor-pointer font-bold"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        onOpenRemoteEditor?.(fullPath, fileMenu.entry.name);
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                      <span>在线编辑修改 (Ctrl+S写回)</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        setPreviewFile({ path: fullPath, name: fileMenu.entry.name });
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Eye className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                      <span>预览文件内容</span>
+                    </button>
 
-                <button
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
-                  onClick={() => void downloadRemoteFile(fileMenu.entry)}
-                >
-                  <Download className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                  <span>下载文件</span>
-                </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => void downloadRemoteFile(fileMenu.entry)}
+                    >
+                      <Download className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                      <span>下载文件</span>
+                    </button>
 
-                <button
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
-                  onClick={() => {
-                    const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
-                    navigator.clipboard.writeText(fullPath);
-                    setUploadStatus(`📋 已复制路径: ${fullPath}`);
-                    setFileMenu(null);
-                  }}
-                >
-                  <Copy className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                  <span>复制远程路径</span>
-                </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        navigator.clipboard.writeText(fullPath);
+                        setUploadStatus(`📋 已复制路径: ${fullPath}`);
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span>复制远程路径</span>
+                    </button>
 
-                {fileMenu.entry.type === "file" && (
-                  <button
-                    role="menuitem"
-                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
-                    onClick={() => {
-                      const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
-                      onOpenDiff?.(fullPath, fileMenu.entry.name);
-                      setFileMenu(null);
-                    }}
-                  >
-                    <GitCompare className="h-3.5 w-3.5 text-purple-600 shrink-0" />
-                    <span>双栏文本 Diff 对比分析</span>
-                  </button>
-                )}
+                    {onSendCommand && (
+                      <>
+                        <button
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sky-600 dark:text-sky-400 hover:bg-[var(--fill-1)] cursor-pointer"
+                          onClick={() => {
+                            const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                            onSendCommand(`cat "${fullPath}"\r`);
+                            setUploadStatus(`💻 在终端中查看: cat "${fullPath}"`);
+                            setFileMenu(null);
+                          }}
+                        >
+                          <Terminal className="h-3.5 w-3.5 text-sky-500 shrink-0" />
+                          <span>在终端中查看 (cat)</span>
+                        </button>
+                        <button
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sky-600 dark:text-sky-400 hover:bg-[var(--fill-1)] cursor-pointer"
+                          onClick={() => {
+                            const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                            onSendCommand(`tail -n 100 "${fullPath}"\r`);
+                            setUploadStatus(`📜 查看末尾日志: tail -n 100 "${fullPath}"`);
+                            setFileMenu(null);
+                          }}
+                        >
+                          <Terminal className="h-3.5 w-3.5 text-sky-500 shrink-0" />
+                          <span>查看末尾100行 (tail)</span>
+                        </button>
+                      </>
+                    )}
 
-                <button
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
-                  onClick={() => {
-                    const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
-                    setPermissionFile({ name: fileMenu.entry.name, path: fullPath, isDirectory: fileMenu.entry.type === "directory" });
-                    setFileMenu(null);
-                  }}
-                >
-                  <Settings className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                  <span>修改权限 / 属性 (Chmod)</span>
-                </button>
+                    {fileMenu.entry.type === "file" && (
+                      <button
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                        onClick={() => {
+                          const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                          onOpenDiff?.(fullPath, fileMenu.entry.name);
+                          setFileMenu(null);
+                        }}
+                      >
+                        <GitCompare className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                        <span>双栏文本 Diff 对比分析</span>
+                      </button>
+                    )}
 
-                {onAddAiQuote && (
-                  <button
-                    role="menuitem"
-                    className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
-                    onClick={() => {
-                      const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
-                      onAddAiQuote(`远程文件路径: ${fullPath}`, activeSession?.title || "远程文件");
-                      setUploadStatus(`💬 已引用路径至 AI 问答`);
-                      setFileMenu(null);
-                    }}
-                  >
-                    <Bot className="h-3.5 w-3.5 text-purple-600 shrink-0" />
-                    <span>引用路径至 AI 问答</span>
-                  </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        setPermissionFile({ name: fileMenu.entry.name, path: fullPath, isDirectory: fileMenu.entry.type === "directory" });
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Settings className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                      <span>修改权限 / 属性 (Chmod)</span>
+                    </button>
+
+                    {onAddAiQuote && (
+                      <button
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                        onClick={() => {
+                          const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                          onAddAiQuote(`远程文件路径: ${fullPath}`, activeSession?.title || "远程文件");
+                          setUploadStatus(`💬 已引用路径至 AI 问答`);
+                          setFileMenu(null);
+                        }}
+                      >
+                        <Bot className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                        <span>引用路径至 AI 问答</span>
+                      </button>
+                    )}
+
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 cursor-pointer font-bold"
+                      onClick={() => void deleteRemoteItem(fileMenu.entry)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                      <span>删除文件 (rm -f)</span>
+                    </button>
+                  </>
                 )}
               </div>
             )}
