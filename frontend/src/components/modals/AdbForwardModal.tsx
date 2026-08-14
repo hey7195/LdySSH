@@ -15,7 +15,9 @@ import {
   History,
   AlertCircle,
   CheckCircle2,
-  Calendar
+  Calendar,
+  Cast,
+  FolderOpen
 } from "lucide-react";
 import { nativeBridge } from "../../lib/bridge";
 
@@ -76,10 +78,16 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
   const [authToken, setAuthToken] = useState(
     () => localStorage.getItem("ldyssh_adb_token") || "b7c2d9a1e4f86c3d0a9b5e7f2c1d8a46"
   );
+  const [scrcpyDir, setScrcpyDir] = useState(
+    () => localStorage.getItem("ldyssh_scrcpy_path") || "D:\\tools\\scrcpy-win64-v4.1"
+  );
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [loadingIp, setLoadingIp] = useState(false);
+  const [scrcpyLoading, setScrcpyLoading] = useState(false);
+  const [scrcpySuccess, setScrcpySuccess] = useState<string | null>(null);
+  const [scrcpyError, setScrcpyError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AdbForwardResult | null>(null);
   const [copied, setCopied] = useState(false);
@@ -102,7 +110,8 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
     if (allowIp) localStorage.setItem("ldyssh_adb_allow_ip", allowIp);
     if (apiEndpoint) localStorage.setItem("ldyssh_adb_endpoint", apiEndpoint);
     if (authToken) localStorage.setItem("ldyssh_adb_token", authToken);
-  }, [user, allowIp, apiEndpoint, authToken]);
+    if (scrcpyDir) localStorage.setItem("ldyssh_scrcpy_path", scrcpyDir);
+  }, [user, allowIp, apiEndpoint, authToken, scrcpyDir]);
 
   // 打开弹窗时，重置设备ID为空并自动获取本机公网 IP
   useEffect(() => {
@@ -110,6 +119,8 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
       setDeviceId("");
       setError(null);
       setResult(null);
+      setScrcpySuccess(null);
+      setScrcpyError(null);
       if (!allowIp) {
         void fetchPublicIp();
       }
@@ -305,6 +316,52 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
     setTimeout(() => setSaved(false), 2000);
   };
 
+  const handleBrowseScrcpyFolder = async () => {
+    try {
+      const res = await nativeBridge.showOpenFolderDialog("选择 Scrcpy 所在文件夹 (包含 scrcpy.exe)");
+      if (res && res.folderPath) {
+        setScrcpyDir(res.folderPath);
+      }
+    } catch {
+      // Fallback
+    }
+  };
+
+  const handleLaunchScrcpy = async () => {
+    if (!scrcpyDir.trim()) {
+      setScrcpyError("请配置 Scrcpy 所在目录路径！");
+      return;
+    }
+    setScrcpyLoading(true);
+    setScrcpyError(null);
+    setScrcpySuccess(null);
+
+    try {
+      let serial = "";
+      if (result?.command) {
+        const match = result.command.match(/adb\s+connect\s+([\w\.\:\-]+)/i);
+        if (match && match[1]) {
+          serial = match[1].trim();
+        }
+      }
+      if (!serial) {
+        serial = deviceId.trim();
+      }
+
+      const res = await nativeBridge.launchScrcpy(scrcpyDir.trim(), serial, "--always-on-top");
+      if (res && res.success) {
+        setScrcpySuccess(`✓ 已成功调起 Scrcpy 投屏窗口: ${res.command || `scrcpy -s ${serial}`}`);
+        setTimeout(() => setScrcpySuccess(null), 6000);
+      } else {
+        throw new Error(res?.error || "启动 Scrcpy 失败，请检查目录路径");
+      }
+    } catch (err: any) {
+      setScrcpyError(err.message || "启动 Scrcpy 失败，请检查 Scrcpy 目录与设备网络");
+    } finally {
+      setScrcpyLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in select-none">
       <div className="flex h-[88vh] max-h-[780px] w-full max-w-2xl flex-col rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)] text-[var(--app-text)] shadow-2xl overflow-hidden">
@@ -487,6 +544,31 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                       className="w-full h-8 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2.5 text-xs font-mono text-[var(--app-text)] focus:border-emerald-500 focus:outline-none"
                     />
                   </div>
+
+                  {/* Scrcpy 目录配置 */}
+                  <div className="space-y-1 pt-1 border-t border-[var(--app-line)]">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-medium text-purple-400 flex items-center gap-1">
+                        <FolderOpen className="h-3 w-3" />
+                        <span>Scrcpy 工具所在目录 (包含 scrcpy.exe)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleBrowseScrcpyFolder}
+                        className="text-[10px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <FolderOpen className="h-2.5 w-2.5" />
+                        <span>浏览选取</span>
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="例如: D:\tools\scrcpy-win64-v4.1"
+                      value={scrcpyDir}
+                      onChange={(e) => setScrcpyDir(e.target.value)}
+                      className="w-full h-8 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2.5 text-xs font-mono text-[var(--app-text)] focus:border-purple-500 focus:outline-none"
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -546,26 +628,54 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
               </div>
 
               {/* Quick Actions */}
-              <div className="flex flex-wrap items-center gap-2 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                 <button
                   type="button"
                   onClick={handleExecuteInTerminal}
-                  className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                  className="flex items-center justify-center gap-1.5 h-8.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
                 >
                   <Zap className="h-3.5 w-3.5" />
                   <span>{executed ? "已发送至终端！" : `在当前终端执行 (${sessionTitle})`}</span>
                 </button>
 
+                {/* 一键拉起 Scrcpy 投屏 */}
+                <button
+                  type="button"
+                  onClick={handleLaunchScrcpy}
+                  disabled={scrcpyLoading}
+                  className="flex items-center justify-center gap-1.5 h-8.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md shadow-purple-500/25 transition-all cursor-pointer disabled:opacity-50"
+                  title={`调用 ${scrcpyDir} 下的 scrcpy.exe 拉起独立投屏操作窗口`}
+                >
+                  <Cast className="h-3.5 w-3.5" />
+                  <span>{scrcpyLoading ? "正在拉起投屏..." : "一键唤起 Scrcpy 投屏"}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleSaveToLibrary}
-                  className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[var(--app-text)] font-bold text-xs transition-colors cursor-pointer"
+                  className="w-full flex items-center justify-center gap-1.5 h-8 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[var(--app-text)] font-bold text-xs transition-colors cursor-pointer"
                   title="保存到快捷命令库"
                 >
                   <BookmarkPlus className="h-3.5 w-3.5 text-purple-400" />
-                  <span>{saved ? "已保存" : "收藏命令"}</span>
+                  <span>{saved ? "已保存到命令库" : "收藏连接命令到快捷库"}</span>
                 </button>
               </div>
+
+              {/* Scrcpy Success/Error Feedback */}
+              {scrcpySuccess && (
+                <div className="flex items-center gap-2 rounded-xl border border-purple-500/40 bg-purple-500/10 p-2.5 text-xs text-purple-300 font-mono">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-purple-400" />
+                  <span>{scrcpySuccess}</span>
+                </div>
+              )}
+              {scrcpyError && (
+                <div className="flex items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 p-2.5 text-xs text-rose-400">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                  <span>{scrcpyError}</span>
+                </div>
+              )}
 
               {/* Raw Details */}
               <div className="text-[10px] font-mono text-[var(--app-muted)] bg-[var(--fill-1)] p-2 rounded-lg whitespace-pre-wrap">

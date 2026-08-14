@@ -415,6 +415,33 @@ std::wstring ShowOpenFileDialog(const std::wstring& title = L"Select file") {
     return L"";
 }
 
+std::wstring ShowOpenFolderDialog(const std::wstring& title = L"选择文件夹") {
+    std::wstring folderPath;
+    IFileDialog* pfd = NULL;
+    if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd)))) {
+        DWORD dwOptions;
+        if (SUCCEEDED(pfd->GetOptions(&dwOptions))) {
+            pfd->SetOptions(dwOptions | FOS_PICKFOLDERS);
+        }
+        if (!title.empty()) {
+            pfd->SetTitle(title.c_str());
+        }
+        if (SUCCEEDED(pfd->Show(hWnd))) {
+            IShellItem* psi = NULL;
+            if (SUCCEEDED(pfd->GetResult(&psi))) {
+                PWSTR pszPath = NULL;
+                if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath))) {
+                    folderPath = pszPath;
+                    CoTaskMemFree(pszPath);
+                }
+                psi->Release();
+            }
+        }
+        pfd->Release();
+    }
+    return folderPath;
+}
+
 bool OpenLocalFile(const std::wstring& filePath) {
     HINSTANCE res = ShellExecuteW(NULL, L"open", filePath.c_str(), NULL, NULL, SW_SHOWNORMAL);
     return ((INT_PTR)res > 32);
@@ -1724,6 +1751,91 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::wstring path = ShowOpenFileDialog(Utf8ToUtf16(titleUtf8));
             nlohmann::json retObj;
             retObj["filePath"] = Utf16ToUtf8(path);
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "show_open_folder_dialog") {
+            std::string titleUtf8 = args.empty() ? "" : args[0].get<std::string>();
+            std::wstring path = ShowOpenFolderDialog(Utf8ToUtf16(titleUtf8));
+            nlohmann::json retObj;
+            retObj["folderPath"] = Utf16ToUtf8(path);
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "launch_scrcpy") {
+            std::string dirUtf8 = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+            std::string extraArgsUtf8 = args.size() > 2 ? args[2].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+            std::wstring extraArgs = Utf8ToUtf16(extraArgsUtf8);
+
+            // Trim quotes or trailing slashes
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+            while (!scrcpyDir.empty() && (scrcpyDir.front() == L' ' || scrcpyDir.front() == L'"')) {
+                scrcpyDir.erase(scrcpyDir.begin());
+            }
+
+            std::wstring exePath;
+            if (!scrcpyDir.empty()) {
+                // Check if scrcpyDir ends with scrcpy.exe
+                if (scrcpyDir.size() >= 10 && _wcsicmp(scrcpyDir.c_str() + scrcpyDir.size() - 10, L"scrcpy.exe") == 0) {
+                    exePath = scrcpyDir;
+                    size_t lastSlash = scrcpyDir.find_last_of(L"\\/");
+                    if (lastSlash != std::wstring::npos) {
+                        scrcpyDir = scrcpyDir.substr(0, lastSlash);
+                    }
+                } else {
+                    exePath = scrcpyDir + L"\\scrcpy.exe";
+                }
+            } else {
+                exePath = L"scrcpy.exe";
+            }
+
+            // Command line
+            std::wstring cmdLine = L"\"" + exePath + L"\"";
+            if (!serial.empty()) {
+                cmdLine += L" -s \"" + serial + L"\"";
+            }
+            if (!extraArgs.empty()) {
+                cmdLine += L" " + extraArgs;
+            }
+
+            STARTUPINFOW si;
+            PROCESS_INFORMATION pi;
+            ZeroMemory(&si, sizeof(si));
+            si.cb = sizeof(si);
+            ZeroMemory(&pi, sizeof(pi));
+
+            LPCWSTR lpCurrentDirectory = scrcpyDir.empty() ? NULL : scrcpyDir.c_str();
+
+            BOOL success = CreateProcessW(
+                NULL,
+                &cmdLine[0],
+                NULL,
+                NULL,
+                FALSE,
+                0,
+                NULL,
+                lpCurrentDirectory,
+                &si,
+                &pi
+            );
+
+            nlohmann::json retObj;
+            if (success) {
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                retObj["success"] = true;
+                retObj["command"] = Utf16ToUtf8(cmdLine);
+            } else {
+                DWORD errCode = GetLastError();
+                retObj["success"] = false;
+                retObj["error"] = "启动 Scrcpy 失败 (Windows 错误码 " + std::to_string(errCode) + ")，请确认目录有效并包含 scrcpy.exe！";
+            }
             response["status"] = "success";
             response["result"] = retObj.dump();
         }

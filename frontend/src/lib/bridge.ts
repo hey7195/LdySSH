@@ -127,6 +127,18 @@ export const nativeBridge = {
   showOpenFileDialog(title = "") {
     return callNative<{ filePath?: string }>("show_open_file_dialog", {}, title);
   },
+  showOpenFolderDialog(title = "") {
+    return callNative<{ folderPath?: string }>("show_open_folder_dialog", {}, title);
+  },
+  launchScrcpy(scrcpyDir: string, serial: string, extraArgs = "") {
+    return callNative<{ success: boolean; command?: string; error?: string }>(
+      "launch_scrcpy",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial,
+      extraArgs
+    );
+  },
   showSaveFileDialog(defaultName: string) {
     return callNative<{ filePath?: string }>("show_save_file_dialog", {}, defaultName);
   },

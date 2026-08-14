@@ -74,6 +74,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelLeft,
+  Cast,
   X
 } from "lucide-react";
 import { RemoteFileEditorModal } from "./components/modals/RemoteFileEditorModal";
@@ -86,6 +87,7 @@ import { MasterPasswordModal } from "./components/modals/MasterPasswordModal";
 import { CloudSyncModal, type CloudSyncConfig } from "./components/modals/CloudSyncModal";
 import { PortForwardingModal, type TunnelRule } from "./components/modals/PortForwardingModal";
 import { AdbForwardModal } from "./components/modals/AdbForwardModal";
+import { ScrcpyModal } from "./components/modals/ScrcpyModal";
 import { ServerDiagnosticsModal, type DiagnosticCheckItem } from "./components/modals/ServerDiagnosticsModal";
 import { SessionLoggerModal } from "./components/modals/SessionLoggerModal";
 import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
@@ -913,6 +915,8 @@ export function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [splitMode, setSplitMode] = useState<"none" | "horizontal" | "vertical">("none");
   const [adbForwardModalOpen, setAdbForwardModalOpen] = useState(false);
+  const [scrcpyModalOpen, setScrcpyModalOpen] = useState(false);
+  const [scrcpyTargetSerial, setScrcpyTargetSerial] = useState("");
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
   const [sessions, setSessions] = useState<SessionTab[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
@@ -2338,6 +2342,10 @@ export function App() {
               onToggleSplit={toggleSplit}
               isAdmin={isAdmin}
               onOpenAdbForward={() => setAdbForwardModalOpen(true)}
+              onOpenScrcpy={() => {
+                setScrcpyTargetSerial("");
+                setScrcpyModalOpen(true);
+              }}
               onOpenRemoteEditor={openRemoteEditor}
               onOpenSearch={(path) => { setSftpSearchPath(path); setSftpSearchOpen(true); }}
               onOpenDiff={openSftpDiff}
@@ -2575,6 +2583,11 @@ export function App() {
             });
           }
         }}
+      />
+      <ScrcpyModal
+        isOpen={scrcpyModalOpen}
+        onClose={() => setScrcpyModalOpen(false)}
+        defaultSerial={scrcpyTargetSerial}
       />
       <ServerDiagnosticsModal
         isOpen={diagnosticsOpen}
@@ -3643,6 +3656,7 @@ function TerminalWorkspace({
   onSaveCommand,
   onRenameTab,
   onOpenAdbForward,
+  onOpenScrcpy,
   isAdmin
 }: {
   visible: boolean;
@@ -3694,6 +3708,7 @@ function TerminalWorkspace({
   onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
   onRenameTab?: (sessionId: string, newTitle: string) => void;
   onOpenAdbForward?: () => void;
+  onOpenScrcpy?: () => void;
   isAdmin?: boolean;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
@@ -3804,6 +3819,16 @@ function TerminalWorkspace({
           >
             <Smartphone className="h-3.5 w-3.5 text-sky-400" />
             <span>ADB 转发</span>
+          </button>
+
+          {/* Scrcpy 投屏快捷入口 */}
+          <button
+            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 px-2.5 text-xs font-bold text-purple-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
+            onClick={onOpenScrcpy}
+            title="一键拉起 Scrcpy 极速安卓投屏与控制"
+          >
+            <Cast className="h-3.5 w-3.5 text-purple-400" />
+            <span>Scrcpy 投屏</span>
           </button>
 
           {/* 管理员身份指示徽章 */}
