@@ -908,6 +908,7 @@ function createSessionContext(activeSession?: SessionTab): AiContextChip | null 
 export function App() {
   const [activeTool, setActiveTool] = useState<Tool>("ssh");
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [splitMode, setSplitMode] = useState<"none" | "horizontal" | "vertical">("none");
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
   const [sessions, setSessions] = useState<SessionTab[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
@@ -1420,20 +1421,18 @@ export function App() {
   }, []);
 
   async function toggleSplit(sessionId: string, mode: "none" | "horizontal" | "vertical") {
-    const session = sessions.find((s) => s.id === sessionId);
-    if (mode !== "none" && sessions.length <= 1 && session) {
-      if (session.kind === "local") {
-        await openLocalSession();
-      } else if (session.connectParams) {
-        await connectHost(session.connectParams);
+    const nextMode = mode !== "none" ? mode : splitMode === "none" ? "horizontal" : "none";
+    setSplitMode(nextMode);
+    if (nextMode !== "none" && sessions.length <= 1) {
+      const session = sessions.find((s) => s.id === sessionId) || sessions[0];
+      if (session) {
+        if (session.kind === "local") {
+          await openLocalSession();
+        } else if (session.connectParams) {
+          await connectHost(session.connectParams);
+        }
       }
     }
-    setSessions((current) =>
-      current.map((s) => ({
-        ...s,
-        splitMode: s.id === sessionId ? mode : mode === "none" ? "none" : s.splitMode
-      }))
-    );
   }
 
   const activeSession = useMemo(
@@ -2326,6 +2325,7 @@ export function App() {
               onSendCommand={sendCommandToActiveSession}
               onSidePanelChange={setTerminalSidePanel}
               onAiConfigChange={setAiConfig}
+              splitMode={splitMode}
               onToggleSplit={toggleSplit}
               onOpenRemoteEditor={openRemoteEditor}
               onOpenSearch={(path) => { setSftpSearchPath(path); setSftpSearchOpen(true); }}
@@ -3604,6 +3604,7 @@ function TerminalWorkspace({
   onSendCommand,
   onSidePanelChange,
   onAiConfigChange,
+  splitMode,
   onToggleSplit,
   onOpenRemoteEditor,
   onOpenSearch,
@@ -3652,6 +3653,7 @@ function TerminalWorkspace({
   onSendCommand: (command: string) => void;
   onSidePanelChange: (panel: TerminalSidePanel) => void;
   onAiConfigChange: (config: AiConfig) => void;
+  splitMode?: "none" | "horizontal" | "vertical";
   onToggleSplit: (sessionId: string, mode: "none" | "horizontal" | "vertical") => void;
   onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
   onOpenSearch?: (path: string) => void;
@@ -4034,6 +4036,7 @@ function TerminalWorkspace({
           onRequestDangerousCommandConfirmation={onRequestDangerousCommandConfirmation}
           onOutput={onTerminalOutput}
           onActivate={onActivate}
+          splitMode={splitMode}
           onToggleSplit={onToggleSplit}
         />
         {visible && !rightSidebarCollapsed && (
@@ -4480,6 +4483,7 @@ function TerminalSurface({
   onRequestDangerousCommandConfirmation,
   onOutput,
   onActivate,
+  splitMode = "none",
   onToggleSplit
 }: {
   visible: boolean;
@@ -4506,6 +4510,7 @@ function TerminalSurface({
   onRequestDangerousCommandConfirmation?: (command: string, info: DangerousCommandInfo, onConfirm: () => void) => void;
   onOutput: (sessionId: string, text: string) => void;
   onActivate?: (sessionId: string) => void;
+  splitMode?: "none" | "horizontal" | "vertical";
   onToggleSplit?: (sessionId: string, mode: "none" | "horizontal" | "vertical") => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -4520,8 +4525,9 @@ function TerminalSurface({
   const secondaryTerminalRef = useRef<XTerm | null>(null);
   const secondaryFitRef = useRef<FitAddon | null>(null);
   const secondaryDecoderRef = useRef<TextDecoder | null>(null);
-  const isSplit = Boolean(activeSession?.splitMode && activeSession.splitMode !== "none" && sessions && sessions.length >= 2);
-  const secondarySession = isSplit ? sessions?.find((s) => s.id !== activeSession?.id) : undefined;
+  const isSplit = Boolean(splitMode && splitMode !== "none" && sessions && sessions.length >= 2);
+  const primarySession = activeSession || sessions?.[0];
+  const secondarySession = isSplit ? (sessions?.find((s) => s.id !== primarySession?.id) || sessions?.[1]) : undefined;
   const activeIdRef = useRef("");
   const visibleRef = useRef(visible);
   const lastValidTerminalSizeRef = useRef({ cols: 80, rows: 24 });
@@ -5339,24 +5345,24 @@ function TerminalSurface({
       onKeyDown={handleTerminalKeyDown}
       onContextMenu={openTerminalMenu}
     >
-      {!isSplit || !activeSession ? (
+      {!isSplit || !primarySession ? (
         <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
       ) : (
         <div className={cn(
           "grid h-full w-full gap-1.5 p-1 min-h-0 overflow-hidden",
-          activeSession.splitMode === "vertical" ? "grid-rows-2" : "grid-cols-2"
+          splitMode === "vertical" ? "grid-rows-2" : "grid-cols-2"
         )}>
           {/* 主分屏 (Active) */}
           <div className="relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-xl border border-emerald-500/80 shadow-md ring-1 ring-emerald-500/30">
             <div className="flex items-center justify-between border-b border-emerald-500/30 bg-emerald-950/40 px-3 py-1 text-[11px] font-mono select-none text-emerald-300 font-bold">
               <div className="flex items-center gap-1.5 min-w-0">
                 <Terminal className="h-3 w-3 text-emerald-400 shrink-0" />
-                <span className="truncate">{activeSession.title}</span>
+                <span className="truncate">{primarySession.title}</span>
                 <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动中</span>
               </div>
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => onToggleSplit?.(activeSession.id, "none")}
+                  onClick={() => onToggleSplit?.(primarySession.id, "none")}
                   title="退出分屏 (全屏)"
                   className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
                 >
@@ -5384,7 +5390,7 @@ function TerminalSurface({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onToggleSplit?.(activeSession.id, "none");
+                      onToggleSplit?.(primarySession.id, "none");
                     }}
                     title="关闭分屏"
                     className="rounded p-0.5 text-[var(--app-muted)] hover:text-rose-500 transition-colors cursor-pointer"
