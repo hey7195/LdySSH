@@ -122,6 +122,7 @@ import {
   type DangerousCommandInfo
 } from "./lib/commandSuggestions";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
+import { parseOpenSshConfig, exportToOpenSshConfig } from "./lib/sshConfigParser";
 import { cn } from "./lib/utils";
 import {
   nativeBridge,
@@ -1133,6 +1134,42 @@ export function App() {
     { id: "preset_centos", name: "CentOS 运维节点模板", port: 22, username: "root", defaultRemotePath: "/var/log" },
     { id: "preset_ubuntu", name: "Ubuntu Web集群模板", port: 22, username: "ubuntu", defaultRemotePath: "/var/www" }
   ]);
+
+  // OpenSSH ~/.ssh/config 导入导出状态
+  const [openSshModalOpen, setOpenSshModalOpen] = useState(false);
+  const [openSshConfigText, setOpenSshConfigText] = useState("");
+  const [openSshImportSuccess, setOpenSshImportSuccess] = useState<string | null>(null);
+
+  const handleImportOpenSsh = async (text: string) => {
+    const parsed = parseOpenSshConfig(text);
+    if (parsed.length === 0) {
+      alert("未能在文本中识别到有效的 Host 配置！请确认格式包含类似：\nHost my-server\n  HostName 1.2.3.4\n  User root");
+      return;
+    }
+    for (const c of parsed) {
+      const key = savedConnectionKey(c);
+      const params = toConnectParams(c);
+      await nativeBridge.saveSavedConnection(key, { ...params, save: true });
+    }
+    await refreshConnections();
+    setOpenSshImportSuccess(`✓ 成功导入 ${parsed.length} 台 OpenSSH 主机！`);
+    setTimeout(() => {
+      setOpenSshModalOpen(false);
+      setOpenSshImportSuccess(null);
+      setOpenSshConfigText("");
+    }, 1200);
+  };
+
+  const handleExportOpenSsh = () => {
+    const text = exportToOpenSshConfig(savedConnections);
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "config";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleSftpSearch = async (keyword: string, mode: "name" | "content", searchPath: string): Promise<SearchResultItem[]> => {
     if (!activeSession?.id) return [];
@@ -2315,6 +2352,8 @@ export function App() {
               onConnect={connectHost}
               onEditConnection={openEditConnectionDialog}
               onDeleteConnection={requestDeleteSavedConnection}
+              onImportOpenSsh={() => setOpenSshModalOpen(true)}
+              onExportOpenSsh={handleExportOpenSsh}
             />
           )}
           {activeTool === "cmd" && (
@@ -2717,6 +2756,56 @@ export function App() {
         savedConnections={savedConnections}
         adbDevices={[]}
       />
+
+      {/* OpenSSH ~/.ssh/config 导入弹窗 */}
+      {openSshModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in select-none">
+          <div className="w-full max-w-lg rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--app-line)] pb-3">
+              <div className="flex items-center gap-2">
+                <Download className="h-5 w-5 text-purple-400" />
+                <h3 className="text-sm font-extrabold text-[var(--app-text)]">导入 OpenSSH 配置文件 (~/.ssh/config)</h3>
+              </div>
+              <button
+                onClick={() => setOpenSshModalOpen(false)}
+                className="rounded-lg p-1 text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)] cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-[var(--app-muted)] leading-5">
+              将您现有的 <code className="text-purple-400 font-mono">~/.ssh/config</code> 文本粘贴至下方，系统将自动解析别名、IP、端口、用户、密钥路径及跳板机代理 (ProxyJump) 并批量保存到主机列表：
+            </p>
+
+            <textarea
+              className="w-full h-44 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] p-3 text-xs font-mono text-[var(--app-text)] focus:border-purple-500 focus:outline-none"
+              placeholder={`Host my-web-server\n  HostName 123.45.67.89\n  User ubuntu\n  Port 22\n  IdentityFile ~/.ssh/id_rsa\n  ProxyJump bastion.example.com`}
+              value={openSshConfigText}
+              onChange={(e) => setOpenSshConfigText(e.target.value)}
+            />
+
+            {openSshImportSuccess && (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/15 p-2.5 text-xs font-bold text-emerald-400 text-center animate-in fade-in">
+                {openSshImportSuccess}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--app-line)]">
+              <Button variant="outline" size={26} className="rounded-xl px-4 text-xs font-bold" onClick={() => setOpenSshModalOpen(false)}>
+                取消
+              </Button>
+              <Button
+                size={26}
+                className="rounded-xl px-5 text-xs font-extrabold bg-purple-600 hover:bg-purple-700 text-white cursor-pointer"
+                onClick={() => void handleImportOpenSsh(openSshConfigText)}
+              >
+                解析并批量导入
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3428,7 +3517,9 @@ function Workbench({
   onConnect,
   onEditConnection,
   onDeleteConnection,
-  onCreateLocal
+  onCreateLocal,
+  onImportOpenSsh,
+  onExportOpenSsh
 }: {
   savedConnections: SavedConnection[];
   sessions?: SessionTab[];
@@ -3440,6 +3531,8 @@ function Workbench({
   onEditConnection: (connection: SavedConnection) => void;
   onDeleteConnection: (connection: SavedConnection) => void;
   onCreateLocal?: () => void;
+  onImportOpenSsh?: () => void;
+  onExportOpenSsh?: () => void;
 }) {
   const onlineCount = savedConnections.filter((connection) => getHostLiveStatus(connection, sessions) === "connected").length;
   const keyCount = savedConnections.filter((item) => item.keyPath).length;
@@ -3474,6 +3567,14 @@ function Workbench({
             </div>
             <Button variant="outline" size={32} className="rounded-full w-10 h-10 px-0 shadow-2xs" onClick={onRefresh} title="刷新主机状态">
               <RefreshCw className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size={32} className="rounded-full px-3.5 h-10 text-xs font-bold shadow-2xs gap-1.5" onClick={onImportOpenSsh} title="一键解析并导入本地 OpenSSH ~/.ssh/config">
+              <Download className="h-4 w-4 text-purple-400" />
+              <span className="hidden md:inline">导入配置</span>
+            </Button>
+            <Button variant="outline" size={32} className="rounded-full px-3.5 h-10 text-xs font-bold shadow-2xs gap-1.5" onClick={onExportOpenSsh} title="将全部已保存主机导出为标准 OpenSSH ~/.ssh/config 格式">
+              <Upload className="h-4 w-4 text-sky-400" />
+              <span className="hidden md:inline">导出配置</span>
             </Button>
             <Button onClick={onOpenDialog} size={32} className="rounded-full px-5 h-10 text-xs font-extrabold shadow-md bg-emerald-600 hover:bg-emerald-700 text-white">
               <Plus className="h-4 w-4" />
@@ -5382,6 +5483,36 @@ function TerminalSurface({
     terminal.open(container);
     fitAddon.fit();
     terminal.focus();
+
+    // 智能终端超链接与 IP 端口识别器 (Smart Terminal Link Provider)
+    if (typeof (terminal as any).registerLinkProvider === "function") {
+      terminal.registerLinkProvider({
+        provideLinks(bufferLineNumber, callback) {
+          try {
+            const line = terminal.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true) || "";
+            const links: any[] = [];
+            const urlRegex = /(https?:\/\/[^\s"'<>()]+|\b(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}\b)/g;
+            let match: RegExpExecArray | null;
+            while ((match = urlRegex.exec(line)) !== null) {
+              const text = match[0];
+              const start = match.index + 1;
+              const end = start + text.length;
+              links.push({
+                range: { start: { x: start, y: bufferLineNumber }, end: { x: end, y: bufferLineNumber } },
+                text,
+                activate(_event: MouseEvent, uri: string) {
+                  const targetUrl = uri.startsWith("http") ? uri : `http://${uri}`;
+                  window.open(targetUrl, "_blank");
+                }
+              });
+            }
+            callback(links);
+          } catch {
+            callback([]);
+          }
+        }
+      });
+    }
     terminal.attachCustomKeyEventHandler((event) => {
       const key = event.key.toLowerCase();
       const isCtrlOrMeta = event.ctrlKey || event.metaKey;
@@ -5547,6 +5678,36 @@ function TerminalSurface({
     term.loadAddon(fitAddon);
     term.open(container);
     fitAddon.fit();
+
+    // 智能终端超链接与 IP 端口识别器
+    if (typeof (term as any).registerLinkProvider === "function") {
+      term.registerLinkProvider({
+        provideLinks(bufferLineNumber, callback) {
+          try {
+            const line = term.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true) || "";
+            const links: any[] = [];
+            const urlRegex = /(https?:\/\/[^\s"'<>()]+|\b(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}\b)/g;
+            let match: RegExpExecArray | null;
+            while ((match = urlRegex.exec(line)) !== null) {
+              const text = match[0];
+              const start = match.index + 1;
+              const end = start + text.length;
+              links.push({
+                range: { start: { x: start, y: bufferLineNumber }, end: { x: end, y: bufferLineNumber } },
+                text,
+                activate(_event: MouseEvent, uri: string) {
+                  const targetUrl = uri.startsWith("http") ? uri : `http://${uri}`;
+                  window.open(targetUrl, "_blank");
+                }
+              });
+            }
+            callback(links);
+          } catch {
+            callback([]);
+          }
+        }
+      });
+    }
     term.attachCustomKeyEventHandler((event) => {
       const key = event.key.toLowerCase();
       const isCtrlOrMeta = event.ctrlKey || event.metaKey;
@@ -6006,31 +6167,75 @@ function TerminalSurface({
         >
           <button
             role="menuitem"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[var(--subtle-bg)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] disabled:cursor-not-allowed disabled:opacity-40 font-bold"
             disabled={!terminalMenu.selection}
             onClick={() => void copyTerminalSelection(terminalMenu.selection)}
           >
-            <Copy className="h-3.5 w-3.5" />
-            复制
+            <Copy className="h-3.5 w-3.5 text-emerald-400" />
+            <span>复制 (Ctrl+C)</span>
           </button>
+
           <button
             role="menuitem"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[var(--subtle-bg)]"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] font-bold"
             onClick={() => {
               setTerminalMenu(null);
               void pasteTerminalClipboard(activeSession.id);
             }}
           >
-            <Paperclip className="h-3.5 w-3.5" />
-            粘贴
+            <Paperclip className="h-3.5 w-3.5 text-sky-400" />
+            <span>粘贴 (Ctrl+V)</span>
           </button>
+
           <button
             role="menuitem"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[var(--subtle-bg)]"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] font-bold"
             onClick={selectAllTerminal}
           >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            全选
+            <CheckCircle2 className="h-3.5 w-3.5 text-purple-400" />
+            <span>全选 (Ctrl+A)</span>
+          </button>
+
+          <div className="h-px bg-[var(--app-line)] my-1" />
+
+          {terminalMenu.selection && (
+            <>
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] text-blue-400 font-bold"
+                onClick={() => {
+                  setTerminalMenu(null);
+                  window.open(`https://www.bing.com/search?q=${encodeURIComponent(terminalMenu.selection)}`, "_blank");
+                }}
+              >
+                <Search className="h-3.5 w-3.5 text-blue-400" />
+                <span>在浏览器中搜索选中文本</span>
+              </button>
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] text-purple-400 font-bold"
+                onClick={() => {
+                  onAddAiQuote(terminalMenu.selection);
+                  setTerminalMenu(null);
+                }}
+              >
+                <Bot className="h-3.5 w-3.5 text-purple-400" />
+                <span>投送给 AI 助手排错分析</span>
+              </button>
+            </>
+          )}
+
+          <button
+            role="menuitem"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] text-amber-400 font-bold"
+            onClick={() => {
+              setTerminalMenu(null);
+              terminalRef.current?.clear();
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5 text-amber-400" />
+            <span>清空屏幕 (Clear)</span>
           </button>
         </div>
       )}

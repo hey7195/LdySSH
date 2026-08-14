@@ -90,6 +90,7 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
   const [pairIpPort, setPairIpPort] = useState("");
   const [pairCode, setPairCode] = useState("");
   const [connectIpPort, setConnectIpPort] = useState("");
+  const [pushTextContent, setPushTextContent] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
@@ -367,6 +368,30 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
       }
     } catch (err: any) {
       setError(err.message || "发送硬件按键异常");
+    } finally {
+      setActionInProgress(null);
+    }
+  }
+
+  async function handlePushTextToPhone() {
+    const targetSerial = serial || devices[0]?.serial || "";
+    if (!targetSerial.trim() || !pushTextContent.trim()) {
+      setError("请确保目标设备在线且输入了需要推送的文本！");
+      return;
+    }
+    setActionInProgress(`正在推送文本至设备 [${targetSerial}]...`);
+    setError(null);
+    try {
+      const escaped = pushTextContent.replace(/ /g, "%s").replace(/&/g, "\\&").replace(/"/g, '\\"');
+      const res = await nativeBridge.runAdbCommand(scrcpyDir.trim(), ["-s", targetSerial.trim(), "shell", "input", "text", escaped]);
+      if (res && res.success) {
+        setSuccessMsg(`✓ 成功将文本推送到手机输入框！`);
+        setPushTextContent("");
+      } else {
+        throw new Error(res?.error || "推送失败");
+      }
+    } catch (err: any) {
+      setError(err.message || "文本推送失败");
     } finally {
       setActionInProgress(null);
     }
@@ -712,6 +737,28 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
                 >
                   <Volume1 className="h-3 w-3 text-emerald-400" />
                   <span>音量-</span>
+                </button>
+              </div>
+
+              {/* Windows 剪贴板 / 自定义文本一键推送到手机输入框 */}
+              <div className="pt-2 flex items-center gap-1.5">
+                <input
+                  type="text"
+                  placeholder="在此输入文本，一键推送到手机焦点输入框 (如长密码、网址)..."
+                  value={pushTextContent}
+                  onChange={(e) => setPushTextContent(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handlePushTextToPhone();
+                  }}
+                  className="flex-1 h-7.5 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2.5 text-[11px] font-mono text-[var(--app-text)] focus:border-purple-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handlePushTextToPhone()}
+                  className="h-7.5 px-2.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 text-[10px] font-bold transition-colors cursor-pointer shrink-0"
+                  title="执行 adb shell input text 发送给手机"
+                >
+                  推送文本
                 </button>
               </div>
             </div>
