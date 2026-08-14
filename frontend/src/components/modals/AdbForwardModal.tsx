@@ -96,6 +96,13 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
     if (authToken) localStorage.setItem("ldyssh_adb_token", authToken);
   }, [user, deviceId, allowIp, apiEndpoint, authToken]);
 
+  // 打开弹窗时，如果 IP 为空则自动获取本机公网 IP
+  useEffect(() => {
+    if (isOpen && !allowIp) {
+      void fetchPublicIp();
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   async function fetchPublicIp() {
@@ -327,7 +334,7 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="例如: hy、xq 或个人昵称"
+                  placeholder=""
                   value={user}
                   onChange={(e) => setUser(e.target.value)}
                   className="w-full h-9 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-emerald-500 focus:outline-none transition-colors"
@@ -342,7 +349,7 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="例如: 6120778 或 6275855"
+                  placeholder="海外设备加hw，例如: 6120778 或 hw6120778"
                   value={deviceId}
                   onChange={(e) => setDeviceId(e.target.value)}
                   className="w-full h-9 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-emerald-500 focus:outline-none transition-colors"
