@@ -552,19 +552,21 @@ function normalizeCommandSuggestionPanelLayout(layout: CommandSuggestionPanelLay
   };
 }
 
-function loadStoredCommandSuggestionPanelLayout() {
+function loadStoredCommandSuggestionPanelLayout(): { layout: CommandSuggestionPanelLayout; isUserCustom: boolean } {
   const raw = window.localStorage.getItem(storageKeys.commandSuggestionPanel);
-  if (!raw) return defaultCommandSuggestionPanelLayout;
+  if (!raw) return { layout: defaultCommandSuggestionPanelLayout, isUserCustom: false };
   try {
-    const parsed = JSON.parse(raw) as Partial<CommandSuggestionPanelLayout>;
-    return normalizeCommandSuggestionPanelLayout({
+    const parsed = JSON.parse(raw) as Partial<CommandSuggestionPanelLayout & { isUserCustom?: boolean }>;
+    const isUserCustom = parsed.isUserCustom === true;
+    const layout = normalizeCommandSuggestionPanelLayout({
       left: Number(parsed.left ?? defaultCommandSuggestionPanelLayout.left),
       bottom: Number(parsed.bottom ?? defaultCommandSuggestionPanelLayout.bottom),
       width: Number(parsed.width ?? defaultCommandSuggestionPanelLayout.width),
       height: Number(parsed.height ?? defaultCommandSuggestionPanelLayout.height)
     });
+    return { layout, isUserCustom };
   } catch {
-    return defaultCommandSuggestionPanelLayout;
+    return { layout: defaultCommandSuggestionPanelLayout, isUserCustom: false };
   }
 }
 const PASSWORD_PLACEHOLDER = "***";
@@ -4648,20 +4650,35 @@ function TerminalWorkspace({
 }
 
 function getTerminalCursorPosition(): { left: number; top: number; bottom: number } | null {
-  const cursorEl = document.querySelector(".xterm-cursor, .terminal .xterm-cursor") as HTMLElement | null;
-  if (cursorEl) {
-    const rect = cursorEl.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0 && rect.top > 0) {
+  // 1. 查找当前活动的 xterm DOM 光标元素
+  const cursorElements = document.querySelectorAll(".xterm-cursor, .xterm-screen .xterm-cursor, .terminal .xterm-cursor");
+  for (let i = 0; i < cursorElements.length; i++) {
+    const el = cursorElements[i] as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0 && rect.top > 0 && rect.left > 0) {
       return { left: rect.left, top: rect.top, bottom: rect.bottom };
     }
   }
-  const textareaEl = document.querySelector("textarea.xterm-helper-textarea") as HTMLElement | null;
-  if (textareaEl) {
-    const rect = textareaEl.getBoundingClientRect();
+
+  // 2. 查找 xterm-helper-textarea (IME输入框位置即为光标位置)
+  const textareas = document.querySelectorAll("textarea.xterm-helper-textarea");
+  for (let i = 0; i < textareas.length; i++) {
+    const el = textareas[i] as HTMLElement;
+    const rect = el.getBoundingClientRect();
     if (rect.top > 0 && rect.left > 0) {
       return { left: rect.left, top: rect.top, bottom: rect.bottom + 18 };
     }
   }
+
+  // 3. 备选方案：获取终端活动容器内区域
+  const activeTerminalScreen = document.querySelector(".terminal.xterm, .xterm-screen, .terminal");
+  if (activeTerminalScreen) {
+    const rect = activeTerminalScreen.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0 && rect.top > 0) {
+      return { left: rect.left + 70, top: rect.top + 30, bottom: rect.top + 50 };
+    }
+  }
+
   return null;
 }
 
@@ -4673,10 +4690,9 @@ interface CommandSuggestionResizeEdges {
 }
 
 function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
-  const [hasCustomPosition, setHasCustomPosition] = useState<boolean>(() => {
-    return Boolean(window.localStorage.getItem(storageKeys.commandSuggestionPanel));
-  });
-  const [layout, setLayout] = useState<CommandSuggestionPanelLayout>(() => loadStoredCommandSuggestionPanelLayout());
+  const [storedData] = useState(() => loadStoredCommandSuggestionPanelLayout());
+  const [hasCustomPosition, setHasCustomPosition] = useState<boolean>(storedData.isUserCustom);
+  const [layout, setLayout] = useState<CommandSuggestionPanelLayout>(storedData.layout);
   const [cursorPos, setCursorPos] = useState<{ left: number; top: number } | null>(null);
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
@@ -4712,16 +4728,22 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
     }
 
     updateCursorCoords();
-    const timer = window.setTimeout(updateCursorCoords, 30);
-    return () => window.clearTimeout(timer);
-  }, [hasCustomPosition, layout.width, layout.height, view.suggestions]);
+    const timer = window.setTimeout(updateCursorCoords, 20);
+    const interval = window.setInterval(updateCursorCoords, 100);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, [hasCustomPosition, layout.width, layout.height, view.suggestions, view.activeIndex]);
 
-  function updateLayout(next: CommandSuggestionPanelLayout, isManualDrag: boolean = true) {
+  function updateLayout(next: CommandSuggestionPanelLayout, isManualDrag: boolean = false) {
     const normalized = normalizeCommandSuggestionPanelLayout(next);
     setLayout(normalized);
     if (isManualDrag) {
       setHasCustomPosition(true);
-      window.localStorage.setItem(storageKeys.commandSuggestionPanel, JSON.stringify(normalized));
+      window.localStorage.setItem(storageKeys.commandSuggestionPanel, JSON.stringify({ ...normalized, isUserCustom: true }));
+    } else {
+      window.localStorage.setItem(storageKeys.commandSuggestionPanel, JSON.stringify({ ...normalized, isUserCustom: hasCustomPosition }));
     }
   }
 
