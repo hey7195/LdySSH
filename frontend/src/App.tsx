@@ -7,6 +7,7 @@ import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { Terminal as XTerm } from "@xterm/xterm";
 import {
   Activity,
+  ArrowDown,
   AlertTriangle,
   Bot,
   Check,
@@ -5338,6 +5339,7 @@ function TerminalSurface({
   const [selectedText, setSelectedText] = useState("");
   const [terminalMenu, setTerminalMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
   const [showTicker, setShowTicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResult, setSearchResult] = useState({ resultIndex: -1, resultCount: 0 });
@@ -5934,6 +5936,16 @@ function TerminalSurface({
     terminal.open(container);
     fitAddon.fit();
     terminal.focus();
+    if (typeof (terminal as any).onScroll === "function") {
+      (terminal as any).onScroll(() => {
+        try {
+          const buf = terminal.buffer?.active;
+          if (buf) {
+            setIsScrolledUp(buf.viewportY < buf.baseY);
+          }
+        } catch {}
+      });
+    }
 
     // 智能终端超链接与 IP 端口识别器 (Smart Terminal Link Provider)
     if (typeof (terminal as any).registerLinkProvider === "function") {
@@ -6125,6 +6137,16 @@ function TerminalSurface({
     term.loadAddon(fitAddon);
     term.open(container);
     fitAddon.fit();
+    if (typeof (term as any).onScroll === "function") {
+      (term as any).onScroll(() => {
+        try {
+          const buf = term.buffer?.active;
+          if (buf) {
+            setIsScrolledUp(buf.viewportY < buf.baseY);
+          }
+        } catch {}
+      });
+    }
 
     // 智能终端超链接与 IP 端口识别器
     if (typeof (term as any).registerLinkProvider === "function") {
@@ -6521,6 +6543,24 @@ function TerminalSurface({
           )}
         </div>
       )}
+      {/* 终端向上回滚时的浮动「跳至最新输出」按钮 */}
+      {isScrolledUp && (
+        <button
+          type="button"
+          onClick={() => {
+            const activeTerm = focusedPane === "secondary" && secondaryTerminalRef.current ? secondaryTerminalRef.current : terminalRef.current;
+            activeTerm?.scrollToBottom();
+            setIsScrolledUp(false);
+            activeTerm?.focus();
+          }}
+          className="absolute right-6 bottom-4 z-30 flex items-center gap-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-1.5 text-xs font-extrabold shadow-xl shadow-emerald-950/60 border border-emerald-400/40 transition-all animate-in fade-in slide-in-from-bottom-2 duration-150 cursor-pointer"
+          title="点击瞬间跳至终端最新输出底部"
+        >
+          <ArrowDown className="h-3.5 w-3.5" />
+          <span>跳至最新输出 ⬇</span>
+        </button>
+      )}
+
       {/* 终端浮动快捷工具 (查找) */}
       <button
         aria-label="查找终端输出"
