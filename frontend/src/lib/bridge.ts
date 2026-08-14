@@ -139,6 +139,29 @@ export const nativeBridge = {
       extraArgs
     );
   },
+  getAdbDevices(scrcpyDir = "") {
+    return callNative<{
+      success: boolean;
+      devices: Array<{
+        serial: string;
+        state: string;
+        model?: string;
+        product?: string;
+        device?: string;
+        transport_id?: string;
+      }>;
+      rawOutput?: string;
+      error?: string;
+    }>("get_adb_devices", { success: false, devices: [] }, scrcpyDir);
+  },
+  adbConnect(scrcpyDir: string, target: string) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_connect",
+      { success: false },
+      scrcpyDir,
+      target
+    );
+  },
   showSaveFileDialog(defaultName: string) {
     return callNative<{ filePath?: string }>("show_save_file_dialog", {}, defaultName);
   },

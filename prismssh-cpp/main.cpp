@@ -1839,6 +1839,117 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
+        else if (action == "get_adb_devices") {
+            std::string dirUtf8 = args.empty() ? "" : args[0].get<std::string>();
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+            while (!scrcpyDir.empty() && (scrcpyDir.front() == L' ' || scrcpyDir.front() == L'"')) {
+                scrcpyDir.erase(scrcpyDir.begin());
+            }
+
+            std::wstring adbPath;
+            if (!scrcpyDir.empty()) {
+                if (scrcpyDir.size() >= 10 && _wcsicmp(scrcpyDir.c_str() + scrcpyDir.size() - 10, L"scrcpy.exe") == 0) {
+                    size_t lastSlash = scrcpyDir.find_last_of(L"\\/");
+                    if (lastSlash != std::wstring::npos) {
+                        adbPath = scrcpyDir.substr(0, lastSlash) + L"\\adb.exe";
+                    } else {
+                        adbPath = L"adb.exe";
+                    }
+                } else {
+                    adbPath = scrcpyDir + L"\\adb.exe";
+                }
+            } else {
+                adbPath = L"adb.exe";
+            }
+
+            std::wstring cmd = L"\"" + adbPath + L"\" devices -l";
+            std::wstring workDir = scrcpyDir;
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, workDir, "", 8000);
+
+            // If failed with directory adb, fallback to PATH adb
+            if (!run.success && adbPath != L"adb.exe") {
+                cmd = L"adb devices -l";
+                run = RunHiddenProcessCapture(cmd, L"", "", 8000);
+            }
+
+            nlohmann::json retObj;
+            std::vector<nlohmann::json> devices;
+            std::string out = run.output;
+
+            if (run.success) {
+                std::istringstream stream(out);
+                std::string line;
+                while (std::getline(stream, line)) {
+                    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) {
+                        line.pop_back();
+                    }
+                    if (line.empty() || line.find("List of devices") != std::string::npos || line.find("* daemon") != std::string::npos) {
+                        continue;
+                    }
+
+                    // Format: serial state [key:val ...]
+                    std::istringstream lineStream(line);
+                    std::string serial, state;
+                    if (lineStream >> serial >> state) {
+                        nlohmann::json dev;
+                        dev["serial"] = serial;
+                        dev["state"] = state;
+                        std::string extra;
+                        while (lineStream >> extra) {
+                            size_t colon = extra.find(':');
+                            if (colon != std::string::npos) {
+                                std::string key = extra.substr(0, colon);
+                                std::string val = extra.substr(colon + 1);
+                                dev[key] = val;
+                            }
+                        }
+                        devices.push_back(dev);
+                    }
+                }
+                retObj["success"] = true;
+                retObj["devices"] = devices;
+                retObj["rawOutput"] = out;
+            } else {
+                retObj["success"] = false;
+                retObj["error"] = run.error.empty() ? "执行 adb devices 失败，请检查 ADB 工具路径" : run.error;
+                retObj["devices"] = nlohmann::json::array();
+                retObj["rawOutput"] = run.error;
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_connect") {
+            std::string dirUtf8 = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::string targetUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring target = Utf8ToUtf16(targetUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\" connect " + target;
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 10000);
+            if (!run.success && adbPath != L"adb.exe") {
+                cmd = L"adb connect " + target;
+                run = RunHiddenProcessCapture(cmd, L"", "", 10000);
+            }
+
+            nlohmann::json retObj;
+            retObj["success"] = run.success;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "show_save_file_dialog") {
             std::string defaultNameUtf8 = args.empty() ? "" : args[0].get<std::string>();
             std::wstring wDefaultName = Utf8ToUtf16(defaultNameUtf8);
