@@ -76,13 +76,13 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
   const [expirationDate, setExpirationDate] = useState(() => getFutureDate(7));
   const [allowIp, setAllowIp] = useState(() => localStorage.getItem("ldyssh_adb_allow_ip") || "");
   const [apiEndpoint, setApiEndpoint] = useState(
-    () => localStorage.getItem("ldyssh_adb_endpoint") || "http://weixin_robot.ldyunos.com:8085/start_adb"
+    () => localStorage.getItem("ldyssh_adb_endpoint") || ""
   );
   const [authToken, setAuthToken] = useState(
-    () => localStorage.getItem("ldyssh_adb_token") || "b7c2d9a1e4f86c3d0a9b5e7f2c1d8a46"
+    () => localStorage.getItem("ldyssh_adb_token") || ""
   );
   const [scrcpyDir, setScrcpyDir] = useState(
-    () => localStorage.getItem("ldyssh_scrcpy_path") || "D:\\tools\\scrcpy-win64-v4.1"
+    () => localStorage.getItem("ldyssh_scrcpy_path") || ""
   );
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -532,6 +532,7 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                     <label className="text-[11px] font-medium text-[var(--app-muted)]">API 接口地址 (URL)</label>
                     <input
                       type="text"
+                      placeholder="例如: http://api.yourdomain.com/start_adb"
                       value={apiEndpoint}
                       onChange={(e) => setApiEndpoint(e.target.value)}
                       className="w-full h-8 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2.5 text-xs font-mono text-[var(--app-text)] focus:border-emerald-500 focus:outline-none"
@@ -542,6 +543,7 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                     <label className="text-[11px] font-medium text-[var(--app-muted)]">Bearer Token 鉴权令牌</label>
                     <input
                       type="text"
+                      placeholder="输入 API Bearer Token 鉴权令牌"
                       value={authToken}
                       onChange={(e) => setAuthToken(e.target.value)}
                       className="w-full h-8 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2.5 text-xs font-mono text-[var(--app-text)] focus:border-emerald-500 focus:outline-none"
