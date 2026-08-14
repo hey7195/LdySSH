@@ -144,6 +144,9 @@ export const nativeBridge = {
       content
     );
   },
+  isAdmin() {
+    return callNative<{ success: boolean; isAdmin?: boolean }>("is_admin", { success: false, isAdmin: false });
+  },
   getWebFavorites() {
     return callNative<WebFavorite[]>("get_web_favorites", []);
   },

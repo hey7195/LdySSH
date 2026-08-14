@@ -1860,6 +1860,20 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = "null";
         }
+        else if (action == "is_admin") {
+            BOOL isAdmin = FALSE;
+            PSID adminGroup = NULL;
+            SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
+            if (AllocateAndInitializeSid(&ntAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &adminGroup)) {
+                CheckTokenMembership(NULL, adminGroup, &isAdmin);
+                FreeSid(adminGroup);
+            }
+            nlohmann::json retObj;
+            retObj["isAdmin"] = (isAdmin == TRUE);
+            retObj["success"] = true;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "create_session") {
             std::string sessionId = "ssh_" + std::to_string(GetTickCount64()) + "_" + std::to_string(rand() % 1000);
             response["status"] = "success";

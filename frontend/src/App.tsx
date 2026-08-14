@@ -910,6 +910,7 @@ function createSessionContext(activeSession?: SessionTab): AiContextChip | null 
 export function App() {
   const [activeTool, setActiveTool] = useState<Tool>("ssh");
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [splitMode, setSplitMode] = useState<"none" | "horizontal" | "vertical">("none");
   const [adbForwardModalOpen, setAdbForwardModalOpen] = useState(false);
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
@@ -1343,6 +1344,11 @@ export function App() {
     void refreshConnections();
     void refreshCommandLibrary();
     void refreshWebFavorites();
+    void nativeBridge.isAdmin().then((res) => {
+      if (res && res.isAdmin) {
+        setIsAdmin(true);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -2330,6 +2336,7 @@ export function App() {
               onAiConfigChange={setAiConfig}
               splitMode={splitMode}
               onToggleSplit={toggleSplit}
+              isAdmin={isAdmin}
               onOpenAdbForward={() => setAdbForwardModalOpen(true)}
               onOpenRemoteEditor={openRemoteEditor}
               onOpenSearch={(path) => { setSftpSearchPath(path); setSftpSearchOpen(true); }}
@@ -3635,7 +3642,8 @@ function TerminalWorkspace({
   onAddFolder,
   onSaveCommand,
   onRenameTab,
-  onOpenAdbForward
+  onOpenAdbForward,
+  isAdmin
 }: {
   visible: boolean;
   sessions: SessionTab[];
@@ -3686,6 +3694,7 @@ function TerminalWorkspace({
   onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
   onRenameTab?: (sessionId: string, newTitle: string) => void;
   onOpenAdbForward?: () => void;
+  isAdmin?: boolean;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -3796,6 +3805,17 @@ function TerminalWorkspace({
             <Smartphone className="h-3.5 w-3.5 text-sky-400" />
             <span>ADB 转发</span>
           </button>
+
+          {/* 管理员身份指示徽章 */}
+          {isAdmin && (
+            <div
+              className="flex h-7.5 items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-2.5 text-xs font-extrabold text-emerald-400 select-none shadow-2xs shrink-0 mb-0.5"
+              title="当前软件以 Windows 最高管理员权限 (Administrator) 运行，所有打开的终端与命令天然具备管理员特权"
+            >
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              <span>管理员</span>
+            </div>
+          )}
 
           <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0 mb-1.5" />
 
