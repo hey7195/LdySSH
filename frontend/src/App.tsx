@@ -2840,6 +2840,49 @@ function WindowControls() {
   );
 }
 
+function parseQuickConnectString(input: string): SavedConnection | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  let user = "root";
+  let host = "";
+  let port = 22;
+
+  let cleaned = trimmed.replace(/^ssh\s+/i, "");
+  const pMatch = cleaned.match(/-p\s+(\d+)/i);
+  if (pMatch) {
+    port = parseInt(pMatch[1], 10) || 22;
+    cleaned = cleaned.replace(/-p\s+\d+/i, "").trim();
+  }
+
+  if (cleaned.includes("@")) {
+    const parts = cleaned.split("@");
+    user = parts[0].trim() || "root";
+    cleaned = parts.slice(1).join("@").trim();
+  }
+
+  if (cleaned.includes(":")) {
+    const colonParts = cleaned.split(":");
+    host = colonParts[0].trim();
+    const parsedPort = parseInt(colonParts[1], 10);
+    if (!isNaN(parsedPort) && parsedPort > 0) {
+      port = parsedPort;
+    }
+  } else {
+    host = cleaned;
+  }
+
+  if (!host) return null;
+
+  return {
+    name: `${user}@${host}${port !== 22 ? `:${port}` : ""}`,
+    hostname: host,
+    port,
+    username: user,
+    folder: "快速直连",
+    tags: ["快速直连"]
+  };
+}
+
 function HostSidebar({
   query,
   activeTool,
@@ -2897,6 +2940,15 @@ function HostSidebar({
 }) {
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [showTagMenu, setShowTagMenu] = useState(false);
+  const [quickConnectStr, setQuickConnectStr] = useState("");
+  const [quickHistory, setQuickHistory] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("ldyssh_quick_connect_history");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [groupContextMenu, setGroupContextMenu] = useState<{
     x: number;
     y: number;
@@ -2919,6 +2971,22 @@ function HostSidebar({
     void nativeBridge.clipboardCopy(ip);
     setCopiedIp(true);
     setTimeout(() => setCopiedIp(false), 2000);
+  }
+
+  function handleQuickConnect(targetStr?: string) {
+    const raw = (targetStr || quickConnectStr).trim();
+    if (!raw) return;
+    const conn = parseQuickConnectString(raw);
+    if (!conn) return;
+
+    const nextHist = [raw, ...quickHistory.filter((item) => item !== raw)].slice(0, 6);
+    setQuickHistory(nextHist);
+    try {
+      localStorage.setItem("ldyssh_quick_connect_history", JSON.stringify(nextHist));
+    } catch {}
+
+    setQuickConnectStr("");
+    onConnect(conn);
   }
 
   function toggleFolder(folderName: string) {
@@ -2973,6 +3041,63 @@ function HostSidebar({
             <Plus className="h-3.5 w-3.5" />
             <span>新建 SSH 连接</span>
           </button>
+
+          {/* Row 1.5: ⚡ 快速直连输入栏 */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleQuickConnect();
+            }}
+            className="flex items-center gap-1.5"
+          >
+            <div className="relative flex-1">
+              <Zap className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-amber-500" />
+              <Input
+                className="pl-6 pr-2 h-7 text-xs font-mono rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-amber-500/60 transition-colors"
+                value={quickConnectStr}
+                placeholder="直连: [user@]ip[:port]"
+                onChange={(e) => setQuickConnectStr(e.target.value)}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!quickConnectStr.trim()}
+              title="立即发起快速直连 (Enter)"
+              className="h-7 px-2 rounded-lg bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-slate-950 text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              <span>直连</span>
+              <Play className="h-2.5 w-2.5 fill-current" />
+            </button>
+          </form>
+
+          {/* 快速直连历史标签 */}
+          {quickHistory.length > 0 && !query && (
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pt-0.5 text-[10px]">
+              <span className="text-[10px] text-[var(--app-muted)] font-bold shrink-0">历史:</span>
+              {quickHistory.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => handleQuickConnect(item)}
+                  className="rounded-md bg-[var(--fill-1)] hover:bg-amber-500/15 text-[var(--app-text)] hover:text-amber-400 border border-[var(--app-line)] hover:border-amber-500/30 px-1.5 py-0.5 font-mono text-[10px] font-medium shrink-0 transition-colors cursor-pointer"
+                  title={`点击立即直连: ${item}`}
+                >
+                  {item}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickHistory([]);
+                  localStorage.removeItem("ldyssh_quick_connect_history");
+                }}
+                className="text-[10px] text-[var(--app-muted)] hover:text-rose-400 px-1 shrink-0 cursor-pointer"
+                title="清空快速直连历史"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Row 2: 独立全宽搜索框 */}
           <div className="relative w-full">
@@ -4576,6 +4701,19 @@ function TerminalWorkspace({
           <span className="font-mono text-[10px] text-[var(--app-muted)] bg-[var(--fill-1)] border border-[var(--app-line)] px-1.5 py-0.2 rounded shadow-2xs shrink-0 hidden md:inline-flex items-center gap-1">
             <span>📐 132 × 38</span>
           </span>
+
+          {/* SSH 断线重连醒目标识与快捷重连按钮 */}
+          {activeSession?.kind === "ssh" && !activeSession.connected && activeSession.connectParams && (
+            <button
+              type="button"
+              onClick={() => onReconnect(activeSession.id)}
+              className="flex items-center gap-1 font-mono text-[10px] text-rose-300 hover:text-white bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/40 px-2 py-0.5 rounded shadow-2xs shrink-0 cursor-pointer transition-colors font-extrabold"
+              title="SSH 连接已断开，点击立即尝试重新连接"
+            >
+              <RefreshCw className="h-2.5 w-2.5" />
+              <span>已断开 (点击重连 ↺)</span>
+            </button>
+          )}
 
           {activeSession?.error && (
             <span className="truncate text-rose-500 font-bold text-[11px]">
