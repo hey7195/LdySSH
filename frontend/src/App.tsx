@@ -2027,121 +2027,131 @@ export function App() {
       className="app-root flex h-screen w-screen flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)] select-none"
       onContextMenu={(event) => event.preventDefault()}
     >
-      {/* 顶部全功能鼠标抓取拖拽 Header：微光磨砂玻璃高质感沉浸 Header */}
-      <header className="pywebview-drag-region flex h-10 shrink-0 items-center justify-between px-4 bg-[var(--app-bg)]/90 backdrop-blur-md border-b border-[var(--app-line)]/60 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] select-none">
-        <div className="no-drag flex items-center gap-2.5">
-          <div className="relative flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white font-black text-xs shadow-md shadow-emerald-500/20 ring-1 ring-white/20">
+      {/* 顶部全功能鼠标抓取拖拽 Header：超凡黑曜石 Command Center 沉浸顶部栏 */}
+      <header className="pywebview-drag-region flex h-11 shrink-0 items-center justify-between px-4 bg-[var(--app-bg)]/95 backdrop-blur-xl border-b border-[var(--app-line)] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] select-none">
+        <div className="no-drag flex items-center gap-3">
+          <div className="relative flex h-7 w-7 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-600 text-white font-black text-xs shadow-lg shadow-emerald-500/25 ring-1 ring-white/20">
             L
           </div>
           <div className="flex items-baseline gap-1.5">
             <span className="text-xs font-black tracking-tight text-[var(--app-text)] font-sans">LdySSH</span>
-            <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.2 font-mono text-[9px] font-extrabold text-emerald-400">
+            <span className="rounded-md bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.2 font-mono text-[9px] font-extrabold text-emerald-400 shadow-2xs">
               PRO v1.0
             </span>
           </div>
         </div>
 
-        <div className="no-drag flex items-center gap-1.5 px-2 overflow-x-auto scrollbar-none max-w-full">
+        <div className="no-drag flex items-center gap-2 px-2 overflow-x-auto scrollbar-none max-w-full">
+          {/* Raycast / Linear 风格快捷罗盘搜索栏 */}
           <button
             onClick={() => setIsCommandPaletteOpen(true)}
             title="全局指令罗盘与搜索 (Ctrl+K)"
-            className="flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
+            className="flex items-center gap-2 rounded-xl bg-[var(--fill-1)] hover:bg-[var(--fill-2)] border border-[var(--app-line)] hover:border-emerald-500/40 px-3 py-1.5 text-xs text-[var(--app-text)] transition-all cursor-pointer shadow-2xs shrink-0 group"
           >
-            <Search className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden xl:inline">Ctrl+K 罗盘</span>
-          </button>
-          <button
-            onClick={() => setCommandBroadcastingEnabled(!commandBroadcastingEnabled)}
-            title={commandBroadcastingEnabled ? "关闭命令广播模式" : "开启命令广播模式"}
-            className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-extrabold transition-all cursor-pointer shadow-2xs border shrink-0 ${
-              commandBroadcastingEnabled
-                ? "bg-rose-600 text-white border-rose-400/50 shadow-lg shadow-rose-600/30 animate-pulse"
-                : "bg-[var(--fill-1)] text-[var(--app-muted)] border-[var(--app-line)]/50 hover:bg-[var(--fill-2)] hover:text-[var(--app-text)]"
-            }`}
-          >
-            <Radio className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden xl:inline">{commandBroadcastingEnabled ? "📢 命令广播已开启" : "广播关闭"}</span>
+            <Search className="h-3.5 w-3.5 text-[var(--app-muted)] group-hover:text-emerald-400 transition-colors" />
+            <span className="hidden sm:inline font-semibold text-xs text-[var(--text-secondary)]">快速指令与罗盘</span>
+            <kbd className="ml-1 text-[10px] font-mono bg-[var(--fill-2)] border border-[var(--app-line)] px-1.5 py-0.5 rounded-md text-[var(--app-muted)] shadow-2xs">
+              Ctrl K
+            </kbd>
           </button>
 
+          {/* SSH 活动会话高级控制组 (分段式毛玻璃集成栏) */}
           {activeSession?.kind === "ssh" && activeSession.connected && (
-            <>
+            <div className="flex items-center gap-0.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-0.5 shadow-2xs shrink-0">
               <button
                 onClick={() => setPortForwardingOpen(true)}
                 title="SSH 端口转发与加密隧道管理"
-                className="flex items-center gap-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 px-2.5 py-1 text-xs font-bold text-cyan-400 hover:bg-cyan-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-cyan-400 transition-all cursor-pointer shrink-0"
               >
-                <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" />
+                <ArrowRightLeft className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
                 <span className="hidden xl:inline">端口转发</span>
               </button>
 
               <button
                 onClick={() => setDiagnosticsOpen(true)}
                 title="服务器健康排查与一键诊断"
-                className="flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-emerald-400 transition-all cursor-pointer shrink-0"
               >
-                <Stethoscope className="h-3.5 w-3.5 shrink-0" />
+                <Stethoscope className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                 <span className="hidden xl:inline">健康诊断</span>
               </button>
 
               <button
                 onClick={() => setKernelToolboxOpen(true)}
                 title="运维与内核开发常用工具箱 (dmesg, perf, strace, insmod)"
-                className="flex items-center gap-1 rounded-full bg-purple-500/10 border border-purple-500/30 px-2.5 py-1 text-xs font-bold text-purple-400 hover:bg-purple-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-purple-400 transition-all cursor-pointer shrink-0"
               >
-                <Wrench className="h-3.5 w-3.5 shrink-0" />
+                <Wrench className="h-3.5 w-3.5 text-purple-400 shrink-0" />
                 <span className="hidden xl:inline">运维内核</span>
               </button>
 
               <button
                 onClick={() => setCodeDiffEditorOpen(true)}
                 title="SFTP 深度远程代码编辑器 & File Diff 对比器"
-                className="flex items-center gap-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 px-2.5 py-1 text-xs font-bold text-indigo-400 hover:bg-indigo-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-indigo-400 transition-all cursor-pointer shrink-0"
               >
-                <FileCode className="h-3.5 w-3.5 shrink-0" />
+                <FileCode className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
                 <span className="hidden xl:inline">代码编辑</span>
               </button>
 
               <button
                 onClick={() => setSessionLoggerOpen(true)}
                 title="终端会话 ANSI 日志录制与导出"
-                className="flex items-center gap-1 rounded-full bg-rose-500/10 border border-rose-500/30 px-2.5 py-1 text-xs font-bold text-rose-400 hover:bg-rose-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-rose-400 transition-all cursor-pointer shrink-0"
               >
-                <Disc className={`h-3.5 w-3.5 shrink-0 ${isRecordingSession ? "animate-spin text-rose-500" : ""}`} />
+                <Disc className={`h-3.5 w-3.5 shrink-0 ${isRecordingSession ? "animate-spin text-rose-500" : "text-rose-400"}`} />
                 <span className="hidden xl:inline">{isRecordingSession ? "录制中" : "日志录制"}</span>
               </button>
-            </>
+            </div>
           )}
 
-          <button
-            onClick={() => setCloudSyncModalOpen(true)}
-            title="WebDAV / Gist 云端跨设备同步"
-            className="flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/30 px-2.5 py-1 text-xs font-bold text-blue-400 hover:bg-blue-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
-          >
-            <Cloud className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden xl:inline">云同步</span>
-          </button>
+          {/* 全局工具与控制组 */}
+          <div className="flex items-center gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-0.5 shadow-2xs shrink-0">
+            <button
+              onClick={() => setCommandBroadcastingEnabled(!commandBroadcastingEnabled)}
+              title={commandBroadcastingEnabled ? "关闭命令广播模式" : "开启命令广播模式"}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-extrabold transition-all cursor-pointer shrink-0",
+                commandBroadcastingEnabled
+                  ? "bg-rose-600 text-white shadow-md shadow-rose-600/30 animate-pulse"
+                  : "text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+              )}
+            >
+              <Radio className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden xl:inline">{commandBroadcastingEnabled ? "广播开启" : "广播"}</span>
+            </button>
 
-          <button
-            onClick={() => {
-              if (masterPassword) {
-                setIsAppLocked(true);
-              } else {
-                setMasterPasswordModalOpen(true);
-              }
-            }}
-            title={masterPassword ? "锁屏防护" : "设置锁屏主密码"}
-            className="flex items-center gap-1 rounded-full bg-purple-500/10 border border-purple-500/30 px-2.5 py-1 text-xs font-bold text-purple-400 hover:bg-purple-500/20 transition-all cursor-pointer shadow-2xs shrink-0"
-          >
-            <Lock className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden xl:inline">{masterPassword ? "锁屏" : "主密码"}</span>
-          </button>
+            <button
+              onClick={() => setCloudSyncModalOpen(true)}
+              title="WebDAV / Gist 云端跨设备同步"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-blue-400 transition-all cursor-pointer shrink-0"
+            >
+              <Cloud className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+              <span className="hidden xl:inline">云同步</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (masterPassword) {
+                  setIsAppLocked(true);
+                } else {
+                  setMasterPasswordModalOpen(true);
+                }
+              }}
+              title={masterPassword ? "锁屏防护" : "设置锁屏主密码"}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-amber-400 transition-all cursor-pointer shrink-0"
+            >
+              <Lock className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+              <span className="hidden xl:inline">{masterPassword ? "锁屏" : "主密码"}</span>
+            </button>
+          </div>
         </div>
         <div className="flex-1 h-full pywebview-drag-region" />
         <WindowControls />
       </header>
 
-      {/* 主体工作区 (紧凑高密度布局，精简侧边栏宽度) */}
-      <div className="grid h-[calc(100vh-38px)] w-full grid-cols-[200px_1fr] overflow-hidden">
+      {/* 主体工作区 (紧凑高密度布局，精简侧边栏宽度 220px) */}
+      <div className="grid h-[calc(100vh-44px)] w-full grid-cols-[220px_1fr] overflow-hidden">
         <HostSidebar
           query={query}
           activeTool={activeTool}
@@ -2681,7 +2691,7 @@ function HostSidebar({
           <button
             onClick={onOpenDialog}
             title="新建主机连接"
-            className="flex w-full h-8.5 items-center justify-center gap-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+            className="flex w-full h-9 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold shadow-md shadow-emerald-500/20 border border-emerald-400/20 transition-all cursor-pointer whitespace-nowrap active:scale-[0.98]"
           >
             <Plus className="h-4 w-4" />
             <span>新建 SSH 连接</span>
@@ -2691,7 +2701,7 @@ function HostSidebar({
           <div className="relative w-full">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
             <Input
-              className="pl-7 pr-7 h-8 text-xs rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-emerald-500"
+              className="pl-8 pr-7 h-8.5 text-xs rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-emerald-500/50 transition-colors"
               value={query}
               placeholder="搜索主机 / IP / 标签..."
               onChange={(event) => onQueryChange(event.target.value)}
@@ -2708,13 +2718,15 @@ function HostSidebar({
           </div>
 
           {/* Row 3: 4-按钮子工具栏 (均等分布，防止横向挤压) */}
-          <div className="grid grid-cols-4 gap-1 w-full pt-0.5">
+          <div className="grid grid-cols-4 gap-1.5 w-full pt-0.5">
             <button
               onClick={() => setShowTagMenu((prev) => !prev)}
               title="按标签筛选主机"
               className={cn(
-                "flex h-7.5 items-center justify-center gap-1 rounded-lg border border-[var(--app-line)] text-[11px] font-extrabold transition-colors cursor-pointer w-full",
-                activeTagFilter ? "bg-indigo-600 border-indigo-600 text-white shadow-2xs" : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-[var(--app-text)]"
+                "flex h-7.5 items-center justify-center gap-1 rounded-xl border text-[11px] font-bold transition-all cursor-pointer w-full shadow-2xs",
+                activeTagFilter
+                  ? "bg-indigo-600 border-indigo-500 text-white shadow-xs"
+                  : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)]"
               )}
             >
               <Filter className="h-3.5 w-3.5 shrink-0" />
@@ -2723,7 +2735,7 @@ function HostSidebar({
             <button
               onClick={onOpenKeyManager}
               title="密钥库管理"
-              className="flex h-7.5 items-center justify-center gap-1 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-extrabold text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-indigo-500 transition-colors cursor-pointer w-full"
+              className="flex h-7.5 items-center justify-center gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-bold text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-indigo-400 transition-all cursor-pointer w-full shadow-2xs"
             >
               <KeyRound className="h-3.5 w-3.5 shrink-0" />
               <span>密钥</span>
@@ -2731,7 +2743,7 @@ function HostSidebar({
             <button
               onClick={onOpenPresets}
               title="常用连接预设模板管理"
-              className="flex h-7.5 items-center justify-center gap-1 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-extrabold text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-purple-500 transition-colors cursor-pointer w-full"
+              className="flex h-7.5 items-center justify-center gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-bold text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-purple-400 transition-all cursor-pointer w-full shadow-2xs"
             >
               <Sliders className="h-3.5 w-3.5 shrink-0" />
               <span>预设</span>
@@ -2739,7 +2751,7 @@ function HostSidebar({
             <button
               onClick={onRefresh}
               title="刷新主机列表"
-              className="flex h-7.5 items-center justify-center gap-1 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-extrabold text-[var(--app-muted)] hover:bg-[var(--raised-bg)] hover:text-[var(--app-text)] transition-colors cursor-pointer w-full"
+              className="flex h-7.5 items-center justify-center gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-bold text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] transition-all cursor-pointer w-full shadow-2xs"
             >
               <RefreshCw className="h-3.5 w-3.5 shrink-0" />
               <span>刷新</span>
@@ -2752,7 +2764,7 @@ function HostSidebar({
               <button
                 onClick={() => { onActiveTagFilterChange?.(""); setShowTagMenu(false); }}
                 className={cn(
-                  "rounded-full px-2 py-0.5 font-bold cursor-pointer transition-colors shrink-0",
+                  "rounded-lg px-2 py-0.5 font-bold cursor-pointer transition-colors shrink-0",
                   !activeTagFilter ? "bg-slate-900 text-white" : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)]"
                 )}
               >
@@ -2760,14 +2772,14 @@ function HostSidebar({
               </button>
               {presetTags.map((tag) => {
                 const active = activeTagFilter === tag;
-                const colorInfo = HOST_TAG_COLORS[tag] || { bg: "bg-indigo-500/15", text: "text-indigo-600", border: "border-indigo-300" };
+                const colorInfo = HOST_TAG_COLORS[tag] || { bg: "bg-indigo-500/15", text: "text-indigo-400", border: "border-indigo-500/30" };
                 return (
                   <button
                     key={tag}
                     onClick={() => { onActiveTagFilterChange?.(active ? "" : tag); }}
                     className={cn(
-                      "rounded-full px-2 py-0.5 font-extrabold border transition-all cursor-pointer shrink-0",
-                      active ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs" : `${colorInfo.bg} ${colorInfo.text} ${colorInfo.border}`
+                      "rounded-lg px-2 py-0.5 font-extrabold border transition-all cursor-pointer shrink-0",
+                      active ? "bg-indigo-600 text-white border-indigo-500 shadow-2xs" : `${colorInfo.bg} ${colorInfo.text} ${colorInfo.border}`
                     )}
                   >
                     #{tag}
@@ -2778,42 +2790,28 @@ function HostSidebar({
           )}
         </div>
 
-        {/* 核心功能导航菜单 */}
-        <div className="p-2 space-y-1 border-b border-[var(--app-line)]">
+        {/* 核心功能导航菜单 (精致的 Linear/Raycast 现代侧边栏项目) */}
+        <div className="p-2 space-y-0.5 border-b border-[var(--app-line)]">
           {tools.map((tool) => {
             const Icon = tool.icon;
             const active = activeTool === tool.id;
-            const iconColorClass = {
-              ssh: "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60",
-              local: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60",
-              cmd: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60",
-              monitor: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60",
-              serial: "text-amber-500 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60",
-              ebpf: "text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-950/60",
-              cluster: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60",
-              git: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60",
-              browser: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60",
-              settings: "text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800"
-            }[tool.id] || "text-slate-600 bg-slate-100";
 
             return (
               <button
                 key={tool.id}
                 title={tool.title || tool.label}
                 className={cn(
-                  "flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
+                  "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs transition-all duration-150 cursor-pointer select-none",
                   active
-                    ? "bg-emerald-600 text-white shadow-sm shadow-emerald-500/20 font-extrabold"
-                    : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
+                    ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-xs font-extrabold"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)] font-semibold border border-transparent"
                 )}
                 onClick={() => onActiveToolChange?.(tool.id as any)}
               >
-                <span className={cn("flex h-6 w-6 items-center justify-center rounded-full shrink-0 transition-colors", active ? "bg-white/20 text-white" : iconColorClass)}>
-                  <Icon className="h-3.5 w-3.5" />
-                </span>
+                <Icon className={cn("h-4 w-4 shrink-0 transition-colors", active ? "text-emerald-400" : "text-[var(--app-muted)]")} />
                 <span className="truncate">{tool.label}</span>
                 {tool.id === "local" && sessions.length > 0 && (
-                  <span className="ml-auto rounded-full bg-emerald-500 text-white px-2 py-0.5 text-[9px] font-mono font-bold shadow-2xs">
+                  <span className="ml-auto rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.2 text-[9px] font-mono font-bold shadow-2xs">
                     {sessions.length}
                   </span>
                 )}
@@ -3659,32 +3657,32 @@ function TerminalWorkspace({
   }
 
   return (
-    <div className="grid h-full grid-rows-[42px_minmax(0,1fr)_32px] bg-[var(--app-bg)]">
-      <div className="flex items-center justify-between border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] pl-3 pr-3 h-10.5 select-none relative">
-        <div className="flex h-full min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+    <div className="grid h-full grid-rows-[40px_minmax(0,1fr)_32px] bg-[var(--app-bg)]">
+      <div className="flex items-center justify-between border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] pl-2.5 pr-2.5 h-10 select-none relative">
+        <div className="flex h-full min-w-0 flex-1 items-end gap-1.5 overflow-x-auto pb-0.5">
           {/* 回到主页控制 */}
           <button
-            className="flex h-8 items-center gap-1.5 rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs font-extrabold text-[var(--app-text)] hover:bg-indigo-50 hover:text-indigo-600 transition-colors shadow-2xs cursor-pointer shrink-0"
+            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-2.5 text-xs font-bold text-[var(--app-text)] hover:text-indigo-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
             onClick={onReturnHome}
             title="回到桌面"
           >
-            <Home className="h-3.5 w-3.5 text-indigo-600" />
+            <Home className="h-3.5 w-3.5 text-indigo-400" />
             <span>主页</span>
           </button>
 
           {/* 新建终端按钮 */}
           <button
-            className="flex h-8 items-center gap-1.5 rounded-full border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 px-3 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer shrink-0"
+            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 text-xs font-bold text-emerald-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
             onClick={onCreateLocal}
             title="新建本地终端"
           >
-            <Plus className="h-3.5 w-3.5 text-emerald-600" />
+            <Plus className="h-3.5 w-3.5 text-emerald-400" />
             <span>新建终端</span>
           </button>
 
-          <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0" />
+          <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0 mb-1.5" />
 
-          {/* 动态 SSH/Local 标签页 */}
+          {/* 动态 SSH/Local 现代 IDE 标签页 */}
           {sessions.map((session, index) => {
             const isActive = session.id === activeSessionId;
             const status = getSessionTabStatus(session);
@@ -3693,7 +3691,7 @@ function TerminalWorkspace({
               <div
                 key={session.id}
                 className={cn(
-                  "group relative flex h-8 min-w-[120px] max-w-56 cursor-pointer items-center justify-between gap-2 rounded-full border px-3 text-xs font-extrabold transition-all select-none shrink-0",
+                  "group relative flex h-8 min-w-[130px] max-w-64 cursor-pointer items-center justify-between gap-2 rounded-t-xl border px-3 text-xs font-extrabold transition-all select-none shrink-0",
                   isActive
                     ? "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-500/25"
                     : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"
@@ -3715,7 +3713,7 @@ function TerminalWorkspace({
                 </button>
                 <button
                   className={cn(
-                    "flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer",
+                    "flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-md transition-colors cursor-pointer",
                     isActive ? "text-white/80 hover:bg-white/20 hover:text-white" : "text-[var(--app-muted)] hover:bg-rose-50 hover:text-rose-600"
                   )}
                   onClick={(event) => {
@@ -3734,19 +3732,19 @@ function TerminalWorkspace({
         <div className="relative shrink-0">
           <button
             className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-emerald-50 hover:text-emerald-700 transition-colors shadow-2xs cursor-pointer",
-              topMenuOpen && "bg-emerald-50 text-emerald-700 border-emerald-300"
+              "flex h-7.5 w-7.5 items-center justify-center rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[var(--app-text)] transition-all shadow-2xs cursor-pointer",
+              topMenuOpen && "bg-emerald-500/15 text-emerald-400 border-emerald-500/40"
             )}
             onClick={() => setTopMenuOpen(!topMenuOpen)}
             title="工作区与侧边栏控制菜单"
           >
-            <Menu className="h-4 w-4" />
+            <Menu className="h-3.5 w-3.5" />
           </button>
 
           {topMenuOpen && (
             <div
               role="menu"
-              className="absolute right-0 top-9.5 z-50 w-48 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1.5 text-xs font-bold text-[var(--app-text)] shadow-xl animate-in fade-in zoom-in-95 duration-150 select-none"
+              className="absolute right-0 top-9.5 z-50 w-52 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)]/95 backdrop-blur-xl p-1.5 text-xs font-bold text-[var(--app-text)] shadow-2xl animate-in fade-in zoom-in-95 duration-150 select-none"
               onMouseLeave={() => setTopMenuOpen(false)}
             >
               <button
@@ -3757,7 +3755,7 @@ function TerminalWorkspace({
                   setTopMenuOpen(false);
                 }}
               >
-                {rightSidebarCollapsed ? <Eye className="h-3.5 w-3.5 text-emerald-600" /> : <EyeOff className="h-3.5 w-3.5 text-slate-500" />}
+                {rightSidebarCollapsed ? <Eye className="h-3.5 w-3.5 text-emerald-400" /> : <EyeOff className="h-3.5 w-3.5 text-[var(--app-muted)]" />}
                 <span>{rightSidebarCollapsed ? "展开右侧侧边栏" : "折叠右侧侧边栏"}</span>
               </button>
 
