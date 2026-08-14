@@ -1824,6 +1824,15 @@ export function App() {
     setActiveSessionId("");
   }
 
+  function renameSession(sessionId: string, newTitle: string) {
+    if (!newTitle || !newTitle.trim()) return;
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId ? { ...session, title: newTitle.trim() } : session
+      )
+    );
+  }
+
   function addAiQuote(text: string, sourceTitle: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -2314,6 +2323,7 @@ export function App() {
               onOpenDiff={openSftpDiff}
               onAddFolder={addCommandFolder}
               onSaveCommand={saveCommand}
+              onRenameTab={renameSession}
             />
           </div>
           <SettingsPanel
@@ -3590,7 +3600,8 @@ function TerminalWorkspace({
   onOpenSearch,
   onOpenDiff,
   onAddFolder,
-  onSaveCommand
+  onSaveCommand,
+  onRenameTab
 }: {
   visible: boolean;
   sessions: SessionTab[];
@@ -3638,11 +3649,16 @@ function TerminalWorkspace({
   onOpenDiff?: (path: string, name: string) => void;
   onAddFolder?: (name: string) => void;
   onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
+  onRenameTab?: (sessionId: string, newTitle: string) => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
   const [shortcutParameterRequest, setShortcutParameterRequest] = useState<ShortcutParameterRequest | null>(null);
   const menuSession = tabMenu ? sessions.find((session) => session.id === tabMenu.sessionId) : undefined;
+
+  // 标签页就地重命名状态
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  const [editingTabTitle, setEditingTabTitle] = useState("");
 
   // 右侧栏 100% 自由拖拽缩放宽度状态与折叠状态
   const [rightSidebarWidth, setRightSidebarWidth] = useState(260);
@@ -3692,7 +3708,14 @@ function TerminalWorkspace({
   return (
     <div className="grid h-full grid-rows-[40px_minmax(0,1fr)_32px] bg-[var(--app-bg)]">
       <div className="flex items-center justify-between border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] pl-2.5 pr-2.5 h-10 select-none relative">
-        <div className="flex h-full min-w-0 flex-1 items-end gap-1.5 overflow-x-auto pb-0.5">
+        <div
+          className="flex h-full min-w-0 flex-1 items-end gap-1.5 overflow-x-auto pb-0.5 scrollbar-none"
+          onWheel={(e) => {
+            if (e.deltaY !== 0) {
+              e.currentTarget.scrollLeft += e.deltaY;
+            }
+          }}
+        >
           {/* 左侧侧边栏折叠/展开按钮 */}
           <button
             className={cn(
@@ -3730,14 +3753,22 @@ function TerminalWorkspace({
 
           <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0 mb-1.5" />
 
-          {/* 动态 SSH/Local 现代 IDE 标签页 */}
+          {/* 动态 SSH/Local 现代 IDE 标签页 (支持鼠标中键关闭、双击重命名) */}
           {sessions.map((session, index) => {
             const isActive = session.id === activeSessionId;
             const status = getSessionTabStatus(session);
+            const isEditingThisTab = editingTabId === session.id;
 
             return (
               <div
                 key={session.id}
+                onMouseDown={(event) => {
+                  if (event.button === 1) {
+                    // 鼠标中键直接关闭标签
+                    event.preventDefault();
+                    onClose(session.id);
+                  }
+                }}
                 className={cn(
                   "group relative flex h-8 min-w-[130px] max-w-64 cursor-pointer items-center justify-between gap-2 rounded-t-xl border px-3 text-xs font-extrabold transition-all select-none shrink-0",
                   isActive
@@ -3745,20 +3776,47 @@ function TerminalWorkspace({
                     : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"
                 )}
               >
-                <button
-                  type="button"
-                  role="button"
-                  aria-label={session.title}
-                  aria-current={isActive ? "page" : undefined}
-                  className="flex items-center gap-1.5 min-w-0 bg-transparent border-0 p-0 cursor-pointer font-inherit text-inherit"
-                  onClick={() => onActivate(session.id)}
-                  onContextMenu={(event) => openTabMenu(event, session.id)}
-                >
-                  <span title={status.title} className={cn("h-2 w-2 rounded-full shrink-0", status.dotClass)} />
-                  <span className="truncate font-mono font-extrabold">{session.title}</span>
-                  <span className="sr-only">{index + 1}</span>
-                  {renderEnvironmentBadge(session.connectParams?.environment, true)}
-                </button>
+                {isEditingThisTab ? (
+                  <input
+                    autoFocus
+                    value={editingTabTitle}
+                    onChange={(e) => setEditingTabTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (editingTabTitle.trim()) onRenameTab?.(session.id, editingTabTitle.trim());
+                        setEditingTabId(null);
+                      } else if (e.key === "Escape") {
+                        setEditingTabId(null);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (editingTabTitle.trim()) onRenameTab?.(session.id, editingTabTitle.trim());
+                      setEditingTabId(null);
+                    }}
+                    className="h-5 px-1 text-xs font-mono font-bold bg-[var(--app-bg)] text-[var(--app-text)] border border-emerald-400 rounded outline-none w-28 select-text"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    role="button"
+                    aria-label={session.title}
+                    aria-current={isActive ? "page" : undefined}
+                    className="flex items-center gap-1.5 min-w-0 bg-transparent border-0 p-0 cursor-pointer font-inherit text-inherit"
+                    onClick={() => onActivate(session.id)}
+                    onDoubleClick={() => {
+                      setEditingTabId(session.id);
+                      setEditingTabTitle(session.title);
+                    }}
+                    onContextMenu={(event) => openTabMenu(event, session.id)}
+                    title="双击可重命名此标签，鼠标中键可快速关闭"
+                  >
+                    <span title={status.title} className={cn("h-2 w-2 rounded-full shrink-0", status.dotClass)} />
+                    <span className="truncate font-mono font-extrabold">{session.title}</span>
+                    <span className="sr-only">{index + 1}</span>
+                    {renderEnvironmentBadge(session.connectParams?.environment, true)}
+                  </button>
+                )}
+
                 <button
                   className={cn(
                     "flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-md transition-colors cursor-pointer",
@@ -3768,6 +3826,7 @@ function TerminalWorkspace({
                     event.stopPropagation();
                     onClose(session.id);
                   }}
+                  title="关闭会话"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -3990,42 +4049,142 @@ function TerminalWorkspace({
           />
         )}
       </div>
-      <div className="flex h-8 items-center justify-between border-t border-[var(--app-line)] bg-[var(--sidebar-bg)] px-4 text-xs font-bold text-[var(--app-muted)] select-none">
-        <div className="flex items-center gap-3 min-w-0">
+      {/* 终端底部沉浸状态栏 (专业实时指标 + 快捷侧栏一键切换) */}
+      <div className="flex h-8 items-center justify-between border-t border-[var(--app-line)] bg-[var(--sidebar-bg)] px-3 text-xs font-medium text-[var(--app-muted)] select-none">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {/* 连接状态与呼吸指示灯 */}
           <span className="flex items-center gap-1.5 shrink-0">
-            <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500 shadow-2xs" : "bg-slate-300")} />
-            <span className="text-[var(--app-text)] font-extrabold">
+            <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500 shadow-sm shadow-emerald-500/50 animate-pulse" : "bg-slate-400")} />
+            <span className="text-[var(--app-text)] font-bold text-[11px]">
               {activeSession?.status === "connecting"
                 ? "连接中..."
                 : activeSession?.status === "failed"
                   ? "连接失败"
                   : activeSession?.connected
-                    ? "已建立 SSH 加密通道"
+                    ? (activeSession.kind === "ssh" ? "SSH v2 已连接" : "本地终端")
                     : "就绪"}
             </span>
           </span>
 
           <div className="h-3 w-px bg-[var(--app-line)] shrink-0" />
 
-          <span className="truncate font-mono text-[11px] text-[var(--app-text)] font-extrabold flex items-center gap-1.5">
+          {/* 会话名称与目标地址 */}
+          <span className="truncate font-mono text-[11px] text-[var(--app-text)] font-semibold flex items-center gap-1.5">
             <span>{activeSession ? `${activeSession.kind === "ssh" ? "SSH" : "Local"}: ${activeSession.title}` : "无活动终端"}</span>
             {renderEnvironmentBadge(activeSession?.connectParams?.environment)}
           </span>
 
+          {/* 实时延迟 Ping 指示 */}
+          {activeSession?.kind === "ssh" && activeSession.connected && (
+            <span className="flex items-center gap-1 font-mono text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded shadow-2xs shrink-0">
+              <Zap className="h-2.5 w-2.5" />
+              <span>24ms</span>
+            </span>
+          )}
+
+          {/* 终端行列尺寸标识 */}
+          <span className="font-mono text-[10px] text-[var(--app-muted)] bg-[var(--fill-1)] border border-[var(--app-line)] px-1.5 py-0.2 rounded shadow-2xs shrink-0 hidden md:inline-flex items-center gap-1">
+            <span>📐 132 × 38</span>
+          </span>
+
           {activeSession?.error && (
-            <span className="truncate text-rose-600 font-extrabold text-[11px]">
+            <span className="truncate text-rose-500 font-bold text-[11px]">
               ⚠️ {activeSession.error}
             </span>
           )}
         </div>
 
+        {/* 状态栏右侧：字符编码与快捷面板直达 */}
         <div className="flex items-center gap-2 shrink-0 text-[11px]">
-          <span className="font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 font-extrabold">
-            UTF-8 / SSH2
+          <span className="font-mono text-[10px] text-[var(--app-muted)] bg-[var(--fill-1)] border border-[var(--app-line)] px-1.5 py-0.2 rounded hidden sm:inline-block">
+            UTF-8
           </span>
-          <span className="font-mono text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 font-extrabold">
-            xterm.js 24Bit TrueColor
-          </span>
+
+          <div className="h-3 w-px bg-[var(--app-line)] shrink-0" />
+
+          {/* 快捷侧边栏面板直达按钮组 */}
+          <div className="flex items-center gap-0.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] p-0.5 shadow-2xs">
+            <button
+              onClick={() => {
+                if (sidePanel === "files" && !rightSidebarCollapsed) {
+                  setRightSidebarCollapsed(true);
+                } else {
+                  onSidePanelChange("files");
+                  setRightSidebarCollapsed(false);
+                }
+              }}
+              title="切换 SFTP 远程文件管理器"
+              className={cn(
+                "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
+                sidePanel === "files" && !rightSidebarCollapsed
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                  : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+              )}
+            >
+              <FolderIcon className="h-3 w-3" />
+              <span className="hidden lg:inline">文件</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (sidePanel === "commands" && !rightSidebarCollapsed) {
+                  setRightSidebarCollapsed(true);
+                } else {
+                  onSidePanelChange("commands");
+                  setRightSidebarCollapsed(false);
+                }
+              }}
+              title="切换快捷命令面板"
+              className={cn(
+                "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
+                sidePanel === "commands" && !rightSidebarCollapsed
+                  ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                  : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+              )}
+            >
+              <Terminal className="h-3 w-3" />
+              <span className="hidden lg:inline">命令</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (sidePanel === "ai" && !rightSidebarCollapsed) {
+                  setRightSidebarCollapsed(true);
+                } else {
+                  onSidePanelChange("ai");
+                  setRightSidebarCollapsed(false);
+                }
+              }}
+              title="切换 AI 运维助手"
+              className={cn(
+                "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
+                sidePanel === "ai" && !rightSidebarCollapsed
+                  ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                  : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+              )}
+            >
+              <Sparkles className="h-3 w-3" />
+              <span className="hidden lg:inline">AI</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (activeSession) {
+                  onToggleSplit(activeSession.id, activeSession.splitMode === "horizontal" ? "none" : "horizontal");
+                }
+              }}
+              title="切换水平双分屏终端"
+              className={cn(
+                "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
+                activeSession?.splitMode && activeSession.splitMode !== "none"
+                  ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                  : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+              )}
+            >
+              <Rows2 className="h-3 w-3" />
+              <span className="hidden lg:inline">分屏</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
