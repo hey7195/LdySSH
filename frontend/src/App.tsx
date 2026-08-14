@@ -2909,6 +2909,17 @@ function HostSidebar({
     connection: SavedConnection;
   } | null>(null);
   const [moveSubmenuOpen, setMoveSubmenuOpen] = useState(false);
+  const [copiedIp, setCopiedIp] = useState(false);
+
+  const activeSession = useMemo(() => sessions.find((s) => s.id === activeSessionId), [sessions, activeSessionId]);
+  const activeHostIp = activeSession?.connectParams?.hostname || (activeSession?.kind === "ssh" ? activeSession.title : "");
+
+  function handleCopyIp(ip: string) {
+    if (!ip) return;
+    void nativeBridge.clipboardCopy(ip);
+    setCopiedIp(true);
+    setTimeout(() => setCopiedIp(false), 2000);
+  }
 
   function toggleFolder(folderName: string) {
     setCollapsedFolders((prev) => ({ ...prev, [folderName]: !prev[folderName] }));
@@ -3087,6 +3098,48 @@ function HostSidebar({
         </div>
 
         <div className="flex-1 overflow-y-auto">
+          {/* FinalShell 风格：同步状态与 IP 一键复制栏 */}
+          {activeSession && (
+            <div className="mx-2.5 my-2 p-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 shadow-2xs">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 font-bold text-[var(--app-text)]">
+                  同步状态
+                  <span
+                    className={cn(
+                      "inline-block h-2 w-2 rounded-full",
+                      activeSession.connected
+                        ? "bg-emerald-500 shadow-xs shadow-emerald-500/50 animate-pulse"
+                        : "bg-slate-400"
+                    )}
+                  />
+                </span>
+                <span className="text-[10px] font-mono text-emerald-500 font-bold">
+                  {activeSession.connected ? (activeSession.kind === "ssh" ? "已连接" : "Local") : "连接中..."}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-xs font-mono">
+                <div className="flex items-center gap-1.5 truncate min-w-0 pr-1">
+                  <span className="text-[var(--app-muted)] font-extrabold shrink-0">IP</span>
+                  <span
+                    className="text-[var(--app-text)] font-extrabold truncate select-all cursor-pointer hover:text-emerald-400 transition-colors"
+                    title={`点击复制: ${activeHostIp || "127.0.0.1"}`}
+                    onClick={() => handleCopyIp(activeHostIp || "127.0.0.1")}
+                  >
+                    {activeHostIp || "127.0.0.1"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopyIp(activeHostIp || "127.0.0.1")}
+                  className="rounded px-2 py-0.5 text-[11px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 cursor-pointer transition-colors shrink-0"
+                  title="一键复制 IP 地址"
+                >
+                  {copiedIp ? "已复制 ✔" : "复制"}
+                </button>
+              </div>
+            </div>
+          )}
+
           <SidebarSection
             title="最近主机"
             count={filteredConnections.length}
@@ -3307,6 +3360,17 @@ function HostSidebar({
             >
               <Play className="h-3.5 w-3.5" />
               连接此主机
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+              onClick={() => {
+                const conn = hostContextMenu.connection;
+                setHostContextMenu(null);
+                void nativeBridge.clipboardCopy(conn.hostname || "");
+              }}
+            >
+              <Copy className="h-3.5 w-3.5 text-sky-400" />
+              <span>复制主机 IP ({hostContextMenu.connection.hostname})</span>
             </button>
 
             {/* 移动到分组 */}
@@ -4367,6 +4431,19 @@ function TerminalWorkspace({
               <X className="h-3.5 w-3.5 text-amber-500" />
               断开
             </button>
+            {menuSession.connectParams?.hostname && (
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] text-sky-400 font-bold transition-colors cursor-pointer"
+                onClick={() => {
+                  void nativeBridge.clipboardCopy(menuSession.connectParams!.hostname);
+                  setTabMenu(null);
+                }}
+              >
+                <Copy className="h-3.5 w-3.5 text-sky-400" />
+                <span>复制主机 IP ({menuSession.connectParams.hostname})</span>
+              </button>
+            )}
             <div className="my-1 border-t border-[var(--app-line)]" />
             <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onClose)}>
               <X className="h-3.5 w-3.5 text-rose-500" />
@@ -4477,6 +4554,22 @@ function TerminalWorkspace({
               <Zap className="h-2.5 w-2.5" />
               <span>24ms</span>
             </span>
+          )}
+
+          {/* 主机 IP 一键复制芯片 */}
+          {activeSession?.connectParams?.hostname && (
+            <button
+              type="button"
+              onClick={() => {
+                void nativeBridge.clipboardCopy(activeSession.connectParams!.hostname);
+              }}
+              className="flex items-center gap-1 font-mono text-[10px] text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/25 px-1.5 py-0.2 rounded shadow-2xs shrink-0 cursor-pointer transition-colors"
+              title={`点击复制 IP: ${activeSession.connectParams.hostname}`}
+            >
+              <span className="text-[var(--app-muted)] font-bold">IP:</span>
+              <span className="font-extrabold">{activeSession.connectParams.hostname}</span>
+              <Copy className="h-2.5 w-2.5 text-sky-400 ml-0.5" />
+            </button>
           )}
 
           {/* 终端行列尺寸标识 */}
@@ -8093,6 +8186,8 @@ function MonitorStatusBlock({ result }: { result?: NativeResult }) {
 function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
   const [loading, setLoading] = useState(false);
   const [snapshots, setSnapshots] = useState<Record<string, NativeResult>>({});
+  const [copiedIp, setCopiedIp] = useState(false);
+  const hostIp = activeSession?.connectParams?.hostname || (activeSession?.kind === "ssh" ? activeSession.title : "");
 
   async function refresh() {
     if (!activeSession) return;
@@ -8134,9 +8229,27 @@ function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-extrabold tracking-tight text-[var(--app-text)]">系统硬件与资源监控</h1>
-              <span className="rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 px-3 py-0.5 font-mono text-xs font-extrabold">
-                {activeSession ? activeSession.title : "未连接"}
+              <span className="rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 px-3 py-0.5 font-mono text-xs font-extrabold flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>{activeSession ? activeSession.title : "未连接"}</span>
               </span>
+              {hostIp && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void nativeBridge.clipboardCopy(hostIp);
+                    setCopiedIp(true);
+                    setTimeout(() => setCopiedIp(false), 2000);
+                  }}
+                  className="rounded-full bg-[var(--fill-1)] hover:bg-emerald-500/15 text-[var(--app-text)] hover:text-emerald-400 border border-[var(--app-line)] hover:border-emerald-500/30 px-3 py-0.5 font-mono text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                  title={`点击复制 IP: ${hostIp}`}
+                >
+                  <span className="text-[var(--app-muted)] font-bold">IP:</span>
+                  <span>{hostIp}</span>
+                  <Copy className="h-3 w-3 text-sky-400" />
+                  {copiedIp && <span className="text-[10px] text-emerald-400 font-extrabold">已复制 ✔</span>}
+                </button>
+              )}
             </div>
             <p className="mt-1.5 text-xs font-medium text-[var(--text-secondary)]">实时推算当前 SSH 实例的 CPU 负载、物理内存、磁盘 IO、网卡速率与进程树。</p>
           </div>
