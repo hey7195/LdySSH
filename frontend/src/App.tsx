@@ -3889,6 +3889,48 @@ function TerminalWorkspace({
                 <span>{rightSidebarCollapsed ? "展开右侧侧边栏" : "折叠右侧侧边栏"}</span>
               </button>
 
+              {/* 分屏模式选项 */}
+              {splitMode !== "none" ? (
+                <button
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-cyan-400 hover:bg-cyan-500/15 transition-colors cursor-pointer font-bold"
+                  onClick={() => {
+                    if (activeSessionId) onToggleSplit(activeSessionId, "none");
+                    setTopMenuOpen(false);
+                  }}
+                >
+                  <Minimize2 className="h-3.5 w-3.5" />
+                  <span>退出分屏 (还原全屏)</span>
+                </button>
+              ) : (
+                <>
+                  <button
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] text-emerald-400 transition-colors cursor-pointer font-bold disabled:opacity-40"
+                    disabled={!activeSessionId}
+                    onClick={() => {
+                      if (activeSessionId) onToggleSplit(activeSessionId, "horizontal");
+                      setTopMenuOpen(false);
+                    }}
+                  >
+                    <Columns2 className="h-3.5 w-3.5" />
+                    <span>左右并排分屏</span>
+                  </button>
+                  <button
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] text-sky-400 transition-colors cursor-pointer font-bold disabled:opacity-40"
+                    disabled={!activeSessionId}
+                    onClick={() => {
+                      if (activeSessionId) onToggleSplit(activeSessionId, "vertical");
+                      setTopMenuOpen(false);
+                    }}
+                  >
+                    <Rows2 className="h-3.5 w-3.5" />
+                    <span>上下水平分屏</span>
+                  </button>
+                </>
+              )}
+
               <div className="my-1 border-t border-[var(--app-line)]" />
 
               <button
@@ -3963,12 +4005,54 @@ function TerminalWorkspace({
         {menuSession && tabMenu && (
           <div
             role="menu"
-            className="fixed z-50 w-40 rounded-xl border border-[var(--app-line)] bg-[var(--raised-bg)]/95 backdrop-blur-xl p-1 text-xs font-semibold text-[var(--app-text)] shadow-2xl animate-in zoom-in-95 duration-100"
+            className="fixed z-50 w-44 rounded-xl border border-[var(--app-line)] bg-[var(--raised-bg)]/95 backdrop-blur-xl p-1 text-xs font-semibold text-[var(--app-text)] shadow-2xl animate-in zoom-in-95 duration-100"
             style={{ left: tabMenu.x, top: tabMenu.y }}
             onMouseLeave={() => setTabMenu(null)}
           >
+            {/* 左右分屏 / 上下分屏 / 退出分屏 */}
+            {splitMode !== "none" ? (
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-cyan-400 hover:bg-cyan-500/15 transition-colors cursor-pointer font-bold"
+                onClick={() => {
+                  onToggleSplit(menuSession.id, "none");
+                  setTabMenu(null);
+                }}
+              >
+                <Minimize2 className="h-3.5 w-3.5" />
+                退出分屏 (还原全屏)
+              </button>
+            ) : (
+              <>
+                <button
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] text-emerald-400 transition-colors cursor-pointer font-bold"
+                  onClick={() => {
+                    onToggleSplit(menuSession.id, "horizontal");
+                    setTabMenu(null);
+                  }}
+                >
+                  <Columns2 className="h-3.5 w-3.5" />
+                  左右并排分屏
+                </button>
+                <button
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] text-sky-400 transition-colors cursor-pointer font-bold"
+                  onClick={() => {
+                    onToggleSplit(menuSession.id, "vertical");
+                    setTabMenu(null);
+                  }}
+                >
+                  <Rows2 className="h-3.5 w-3.5" />
+                  上下水平分屏
+                </button>
+              </>
+            )}
+
+            <div className="my-1 border-t border-[var(--app-line)]" />
+
             <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onDuplicate)}>
-              <Plus className="h-3.5 w-3.5 text-emerald-500" />
+              <Plus className="h-3.5 w-3.5 text-blue-500" />
               复制标签
             </button>
             <button
@@ -3977,7 +4061,7 @@ function TerminalWorkspace({
               disabled={menuSession.kind !== "ssh" || !menuSession.connectParams}
               onClick={() => runTabAction(onReconnect)}
             >
-              <RefreshCw className="h-3.5 w-3.5 text-sky-500" />
+              <RefreshCw className="h-3.5 w-3.5 text-emerald-500" />
               重连
             </button>
             <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onDisconnect)}>
