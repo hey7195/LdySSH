@@ -70,6 +70,9 @@ import {
   GitBranch,
   Network,
   Play,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelLeft,
   X
 } from "lucide-react";
 import { RemoteFileEditorModal } from "./components/modals/RemoteFileEditorModal";
@@ -958,6 +961,17 @@ export function App() {
       localStorage.setItem("ldyssh.customGroups", JSON.stringify(customGroups));
     } catch {}
   }, [customGroups]);
+
+  useEffect(() => {
+    function handleKeyDown(e: globalThis.KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        setSidebarHidden((prev) => !prev);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   function createNewGroupPrompt() {
     const name = window.prompt("请输入新主机分组名称：", "");
@@ -2030,6 +2044,14 @@ export function App() {
       {/* 顶部全功能鼠标抓取拖拽 Header：极简专业 Command Center 顶部栏 */}
       <header className="pywebview-drag-region flex h-10 shrink-0 items-center justify-between px-3.5 bg-[var(--app-bg)] border-b border-[var(--app-line)] select-none">
         <div className="no-drag flex items-center gap-2">
+          {/* 左侧侧边栏折叠快捷按钮 */}
+          <button
+            onClick={() => setSidebarHidden((prev) => !prev)}
+            title={sidebarHidden ? "展开侧边栏 (Ctrl+B)" : "折叠/隐藏侧边栏 (Ctrl+B)"}
+            className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--fill-1)] hover:bg-[var(--fill-2)] border border-[var(--app-line)] text-[var(--app-muted)] hover:text-emerald-400 transition-colors cursor-pointer"
+          >
+            {sidebarHidden ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+          </button>
           <div className="flex h-5.5 w-5.5 items-center justify-center rounded-md bg-[var(--fill-3)] border border-[var(--app-line)] text-emerald-500 font-mono text-[11px] font-bold shadow-2xs">
             &gt;_
           </div>
@@ -2150,39 +2172,44 @@ export function App() {
         <WindowControls />
       </header>
 
-      {/* 主体工作区 (紧凑高密度布局，精简侧边栏宽度 220px) */}
-      <div className="grid h-[calc(100vh-44px)] w-full grid-cols-[220px_1fr] overflow-hidden">
-        <HostSidebar
-          query={query}
-          activeTool={activeTool}
-          savedConnections={savedConnections}
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          onQueryChange={setQuery}
-          onActiveToolChange={(tool) => {
-            setActiveTool(tool);
-            if (tool === "ssh") setSidebarHidden(false);
-          }}
-          onOpenDialog={openNewConnectionDialog}
-          onRefresh={refreshConnections}
-          onConnect={connectHost}
-          onEditConnection={openEditConnectionDialog}
-          onDeleteConnection={requestDeleteSavedConnection}
-          onCreateLocal={openLocalSession}
-          onActivateSession={activateSession}
-          commandSuggestionView={activeTool === "local" ? commandSuggestionView : null}
-          onOpenKeyManager={() => setKeyManagerOpen(true)}
-          onOpenSshCopyId={(conn: SavedConnection) => setCopyIdTarget(conn)}
-          onConnectAllInFolder={connectAllInFolder}
-          onOpenPresets={() => setPresetModalOpen(true)}
-          activeTagFilter={activeTagFilter}
-          onActiveTagFilterChange={setActiveTagFilter}
-          customGroups={customGroups}
-          onCreateGroup={createNewGroupPrompt}
-          onRenameGroup={renameGroup}
-          onDeleteGroup={deleteGroup}
-          onMoveHostToGroup={moveHostToGroup}
-        />
+      {/* 主体工作区 (支持一键平滑隐藏/展开左侧边栏，支持 Ctrl+B) */}
+      <div className={cn(
+        "grid h-[calc(100vh-40px)] w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-in-out",
+        sidebarHidden ? "grid-cols-[0px_1fr]" : "grid-cols-[220px_1fr]"
+      )}>
+        <div className={cn("overflow-hidden h-full min-w-0 transition-all duration-200", sidebarHidden ? "w-0 opacity-0 pointer-events-none" : "w-[220px] opacity-100")}>
+          <HostSidebar
+            query={query}
+            activeTool={activeTool}
+            savedConnections={savedConnections}
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            onQueryChange={setQuery}
+            onActiveToolChange={(tool) => {
+              setActiveTool(tool);
+              if (tool === "ssh") setSidebarHidden(false);
+            }}
+            onOpenDialog={openNewConnectionDialog}
+            onRefresh={refreshConnections}
+            onConnect={connectHost}
+            onEditConnection={openEditConnectionDialog}
+            onDeleteConnection={requestDeleteSavedConnection}
+            onCreateLocal={openLocalSession}
+            onActivateSession={activateSession}
+            commandSuggestionView={activeTool === "local" ? commandSuggestionView : null}
+            onOpenKeyManager={() => setKeyManagerOpen(true)}
+            onOpenSshCopyId={(conn: SavedConnection) => setCopyIdTarget(conn)}
+            onConnectAllInFolder={connectAllInFolder}
+            onOpenPresets={() => setPresetModalOpen(true)}
+            activeTagFilter={activeTagFilter}
+            onActiveTagFilterChange={setActiveTagFilter}
+            customGroups={customGroups}
+            onCreateGroup={createNewGroupPrompt}
+            onRenameGroup={renameGroup}
+            onDeleteGroup={deleteGroup}
+            onMoveHostToGroup={moveHostToGroup}
+          />
+        </div>
         <main className="min-w-0 overflow-hidden">
           {activeTool === "ssh" && (
             <Workbench
@@ -2260,6 +2287,8 @@ export function App() {
               aiQuotes={aiQuotes}
               aiConfig={aiConfig}
               terminalHistory={activeSession ? terminalHistories[activeSession.id] || "" : ""}
+              sidebarHidden={sidebarHidden}
+              onToggleSidebar={() => setSidebarHidden((prev) => !prev)}
               onActivate={setActiveSessionId}
               onClose={closeTab}
               onDuplicate={duplicateSession}
@@ -3537,6 +3566,8 @@ function TerminalWorkspace({
   aiQuotes,
   aiConfig,
   terminalHistory,
+  sidebarHidden,
+  onToggleSidebar,
   onActivate,
   onClose,
   onDuplicate,
@@ -3582,6 +3613,8 @@ function TerminalWorkspace({
   aiQuotes: AiQuote[];
   aiConfig: AiConfig;
   terminalHistory: string;
+  sidebarHidden?: boolean;
+  onToggleSidebar?: () => void;
   onActivate: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
   onDuplicate: (sessionId: string) => void;
@@ -3660,6 +3693,21 @@ function TerminalWorkspace({
     <div className="grid h-full grid-rows-[40px_minmax(0,1fr)_32px] bg-[var(--app-bg)]">
       <div className="flex items-center justify-between border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] pl-2.5 pr-2.5 h-10 select-none relative">
         <div className="flex h-full min-w-0 flex-1 items-end gap-1.5 overflow-x-auto pb-0.5">
+          {/* 左侧侧边栏折叠/展开按钮 */}
+          <button
+            className={cn(
+              "flex h-7.5 items-center gap-1.5 rounded-xl border px-2 text-xs font-bold transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5",
+              sidebarHidden
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/25 shadow-xs"
+                : "border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[var(--app-text)] hover:text-emerald-400"
+            )}
+            onClick={onToggleSidebar}
+            title={sidebarHidden ? "展开左侧主机栏 (Ctrl+B)" : "折叠/隐藏左侧主机栏 (Ctrl+B)"}
+          >
+            {sidebarHidden ? <PanelLeftOpen className="h-3.5 w-3.5 text-emerald-400" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">{sidebarHidden ? "展开侧栏" : "折叠侧栏"}</span>
+          </button>
+
           {/* 回到主页控制 */}
           <button
             className="flex h-7.5 items-center gap-1.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-2.5 text-xs font-bold text-[var(--app-text)] hover:text-indigo-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
@@ -3747,6 +3795,18 @@ function TerminalWorkspace({
               className="absolute right-0 top-9.5 z-50 w-52 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)]/95 backdrop-blur-xl p-1.5 text-xs font-bold text-[var(--app-text)] shadow-2xl animate-in fade-in zoom-in-95 duration-150 select-none"
               onMouseLeave={() => setTopMenuOpen(false)}
             >
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer"
+                onClick={() => {
+                  onToggleSidebar?.();
+                  setTopMenuOpen(false);
+                }}
+              >
+                {sidebarHidden ? <PanelLeftOpen className="h-3.5 w-3.5 text-emerald-400" /> : <PanelLeftClose className="h-3.5 w-3.5 text-[var(--app-muted)]" />}
+                <span>{sidebarHidden ? "展开左侧主机栏" : "折叠左侧主机栏"}</span>
+              </button>
+
               <button
                 role="menuitem"
                 className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer"
