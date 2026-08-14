@@ -1950,6 +1950,113 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
+        else if (action == "adb_install_apk") {
+            std::string dirUtf8 = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+            std::string apkPathUtf8 = args.size() > 2 ? args[2].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+            std::wstring apkPath = Utf8ToUtf16(apkPathUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\"";
+            if (!serial.empty()) {
+                cmd += L" -s \"" + serial + L"\"";
+            }
+            cmd += L" install -r \"" + apkPath + L"\"";
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 120000);
+            if (!run.success && adbPath != L"adb.exe") {
+                cmd = L"adb";
+                if (!serial.empty()) {
+                    cmd += L" -s \"" + serial + L"\"";
+                }
+                cmd += L" install -r \"" + apkPath + L"\"";
+                run = RunHiddenProcessCapture(cmd, L"", "", 120000);
+            }
+
+            nlohmann::json retObj;
+            bool isSuccess = run.success && (run.output.find("Success") != std::string::npos);
+            retObj["success"] = isSuccess;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error.empty() ? (isSuccess ? "" : ("安装异常: " + run.output)) : run.error;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_screencap") {
+            std::string dirUtf8 = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            wchar_t tempPath[MAX_PATH];
+            GetTempPathW(MAX_PATH, tempPath);
+            std::wstring screenFile = std::wstring(tempPath) + L"ldyssh_screen_" + std::to_wstring(GetTickCount64()) + L".png";
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            
+            std::wstring cmd = L"cmd.exe /c \"\"" + adbPath + L"\"";
+            if (!serial.empty()) {
+                cmd += L" -s \"" + serial + L"\"";
+            }
+            cmd += L" exec-out screencap -p > \"" + screenFile + L"\"\"";
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 15000);
+
+            nlohmann::json retObj;
+            if (GetFileAttributesW(screenFile.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                std::string rawBytes = ReadFileToUtf8(screenFile);
+                if (rawBytes.size() > 100) {
+                    retObj["success"] = true;
+                    retObj["filePath"] = Utf16ToUtf8(screenFile);
+                    retObj["base64"] = Base64Encode(rawBytes);
+                } else {
+                    retObj["success"] = false;
+                    retObj["error"] = "截屏数据异常，请确认设备已正常在线";
+                }
+            } else {
+                retObj["success"] = false;
+                retObj["error"] = run.error.empty() ? "截屏失败" : run.error;
+            }
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_reboot") {
+            std::string dirUtf8 = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\"";
+            if (!serial.empty()) {
+                cmd += L" -s \"" + serial + L"\"";
+            }
+            cmd += L" reboot";
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 10000);
+            nlohmann::json retObj;
+            retObj["success"] = run.success;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "show_save_file_dialog") {
             std::string defaultNameUtf8 = args.empty() ? "" : args[0].get<std::string>();
             std::wstring wDefaultName = Utf8ToUtf16(defaultNameUtf8);

@@ -17,7 +17,8 @@ import {
   CheckCircle2,
   Calendar,
   Cast,
-  FolderOpen
+  FolderOpen,
+  Terminal
 } from "lucide-react";
 import { nativeBridge } from "../../lib/bridge";
 
@@ -37,6 +38,7 @@ interface AdbForwardModalProps {
   sessionTitle?: string;
   onExecuteCommand?: (cmd: string) => void;
   onSaveCommand?: (name: string, command: string) => void;
+  onOpenAdbShell?: (serial: string, scrcpyDir: string) => void;
 }
 
 function normalizeDate(dStr: string): string {
@@ -59,7 +61,8 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
   onClose,
   sessionTitle = "活动终端",
   onExecuteCommand,
-  onSaveCommand
+  onSaveCommand,
+  onOpenAdbShell
 }) => {
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem("ldyssh_adb_user");
@@ -628,14 +631,37 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
               </div>
 
               {/* Quick Actions */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                 <button
                   type="button"
                   onClick={handleExecuteInTerminal}
                   className="flex items-center justify-center gap-1.5 h-8.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                  title="在当前已有终端直接发送 adb connect 指令"
                 >
                   <Zap className="h-3.5 w-3.5" />
-                  <span>{executed ? "已发送至终端！" : `在当前终端执行 (${sessionTitle})`}</span>
+                  <span>{executed ? "已发送连接！" : `连接终端`}</span>
+                </button>
+
+                {/* 一键直达 ADB Shell 终端 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    let serial = "";
+                    if (result?.command) {
+                      const match = result.command.match(/adb\s+connect\s+([\w\.\:\-]+)/i);
+                      if (match && match[1]) serial = match[1].trim();
+                    }
+                    if (!serial) serial = deviceId.trim();
+                    if (onOpenAdbShell) {
+                      onOpenAdbShell(serial, scrcpyDir);
+                      onClose();
+                    }
+                  }}
+                  className="flex items-center justify-center gap-1.5 h-8.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-500/20 transition-all cursor-pointer"
+                  title="自动创建独立终端并执行 adb shell 进入安卓容器命令行"
+                >
+                  <Terminal className="h-3.5 w-3.5" />
+                  <span>进入 Shell</span>
                 </button>
 
                 {/* 一键拉起 Scrcpy 投屏 */}
@@ -647,7 +673,7 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                   title={`调用 ${scrcpyDir} 下的 scrcpy.exe 拉起独立投屏操作窗口`}
                 >
                   <Cast className="h-3.5 w-3.5" />
-                  <span>{scrcpyLoading ? "正在拉起投屏..." : "一键唤起 Scrcpy 投屏"}</span>
+                  <span>{scrcpyLoading ? "拉起中..." : "Scrcpy 投屏"}</span>
                 </button>
               </div>
 

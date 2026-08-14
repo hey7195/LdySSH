@@ -16,7 +16,15 @@ import {
   RefreshCw,
   Cpu,
   Radio,
-  Sparkles
+  Terminal,
+  PackagePlus,
+  Camera,
+  RotateCw,
+  Sparkles,
+  Layers,
+  Check,
+  Copy,
+  Download
 } from "lucide-react";
 import { nativeBridge } from "../../lib/bridge";
 
@@ -33,12 +41,14 @@ interface ScrcpyModalProps {
   isOpen: boolean;
   onClose: () => void;
   defaultSerial?: string;
+  onOpenAdbShell?: (serial: string, scrcpyDir: string) => void;
 }
 
 export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
   isOpen,
   onClose,
-  defaultSerial = ""
+  defaultSerial = "",
+  onOpenAdbShell
 }) => {
   const [scrcpyDir, setScrcpyDir] = useState(
     () => localStorage.getItem("ldyssh_scrcpy_path") || "D:\\tools\\scrcpy-win64-v4.1"
@@ -68,8 +78,10 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [screenshotPreview, setScreenshotPreview] = useState<{ base64: string; path?: string } | null>(null);
 
   const [history, setHistory] = useState<string[]>(() => {
     try {
@@ -87,7 +99,6 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
       const res = await nativeBridge.getAdbDevices(pathToCheck.trim());
       if (res && res.devices) {
         setDevices(res.devices);
-        // 如果当前未填 serial 且存在在线设备，自动选中第一个在线设备
         if (!serial.trim() && res.devices.length > 0) {
           const firstOnline = res.devices.find((d) => d.state === "device") || res.devices[0];
           setSerial(firstOnline.serial);
@@ -112,6 +123,7 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
     if (isOpen) {
       setError(null);
       setSuccessMsg(null);
+      setScreenshotPreview(null);
       void fetchAdbDevices();
     }
   }, [isOpen, fetchAdbDevices]);
@@ -140,17 +152,7 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
     }
   }
 
-  async function handleLaunch(e?: React.FormEvent) {
-    if (e) e.preventDefault();
-    if (!scrcpyDir.trim()) {
-      setError("请填写或选择 Scrcpy 所在目录路径！");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setSuccessMsg(null);
-
+  function getScrcpyFlags(): string[] {
     const flags: string[] = [];
     if (alwaysOnTop) flags.push("--always-on-top");
     if (turnScreenOff) flags.push("--turn-screen-off");
@@ -158,9 +160,25 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
     if (maxSize.trim()) flags.push(`--max-size ${maxSize.trim()}`);
     if (bitRate.trim()) flags.push(`--bit-rate ${bitRate.trim()}`);
     if (customArgs.trim()) flags.push(customArgs.trim());
+    return flags;
+  }
+
+  async function handleLaunch(e?: React.FormEvent, customTarget?: string) {
+    if (e) e.preventDefault();
+    if (!scrcpyDir.trim()) {
+      setError("请填写或选择 Scrcpy 所在目录路径！");
+      return;
+    }
+
+    const targetSerial = (customTarget || serial).trim();
+
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    const flags = getScrcpyFlags();
 
     try {
-      const targetSerial = serial.trim();
       const res = await nativeBridge.launchScrcpy(scrcpyDir.trim(), targetSerial, flags.join(" "));
       if (res && res.success) {
         const cmdDisplay = res.command || `scrcpy ${targetSerial ? `-s ${targetSerial}` : ""}`;
@@ -181,9 +199,129 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
     }
   }
 
+  async function handleLaunchAll() {
+    const onlineDevices = devices.filter((d) => d.state === "device");
+    if (onlineDevices.length === 0) {
+      setError("当前没有在线状态的设备可供并发投屏！");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    const flags = getScrcpyFlags();
+    let launched = 0;
+
+    for (const dev of onlineDevices) {
+      try {
+        const res = await nativeBridge.launchScrcpy(scrcpyDir.trim(), dev.serial, flags.join(" "));
+        if (res && res.success) launched++;
+      } catch {
+        // Continue
+      }
+    }
+
+    setLoading(false);
+    setSuccessMsg(`✓ 成功并发拉起 ${launched}/${onlineDevices.length} 台设备的独立投屏窗口！`);
+  }
+
+  async function handleOpenShell(targetSerial: string) {
+    if (!targetSerial.trim()) {
+      setError("目标设备序列号为空！");
+      return;
+    }
+    if (onOpenAdbShell) {
+      onOpenAdbShell(targetSerial.trim(), scrcpyDir.trim());
+      onClose();
+    } else {
+      setSuccessMsg(`已准备打开 ADB Shell 终端: adb -s ${targetSerial} shell`);
+    }
+  }
+
+  async function handleInstallApk(targetSerial: string) {
+    if (!targetSerial.trim()) {
+      setError("目标设备序列号为空！");
+      return;
+    }
+    try {
+      const res = await nativeBridge.showOpenFileDialog("选择要安装的 APK 安装包");
+      if (res && res.filePath) {
+        if (!res.filePath.toLowerCase().endsWith(".apk")) {
+          setError("请选择有效的 .apk 安装包文件！");
+          return;
+        }
+        setActionInProgress(`正在向 [${targetSerial}] 安装 APK: ${res.filePath.split(/[\\/]/).pop()}...`);
+        setError(null);
+        setSuccessMsg(null);
+
+        const installRes = await nativeBridge.installApk(scrcpyDir.trim(), targetSerial, res.filePath);
+        if (installRes && installRes.success) {
+          setSuccessMsg(`✓ APK 安装成功！\n目标: ${targetSerial}\n文件: ${res.filePath}`);
+        } else {
+          throw new Error(installRes?.error || "APK 安装失败，请确认设备未锁屏并开启 USB 安装权限");
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || "安装 APK 异常");
+    } finally {
+      setActionInProgress(null);
+    }
+  }
+
+  async function handleScreencap(targetSerial: string) {
+    if (!targetSerial.trim()) {
+      setError("目标设备序列号为空！");
+      return;
+    }
+    setActionInProgress(`正在捕获 [${targetSerial}] 屏幕画面...`);
+    setError(null);
+    setSuccessMsg(null);
+    setScreenshotPreview(null);
+
+    try {
+      const capRes = await nativeBridge.screencapAdb(scrcpyDir.trim(), targetSerial);
+      if (capRes && capRes.success && capRes.base64) {
+        setScreenshotPreview({ base64: capRes.base64, path: capRes.filePath });
+        setSuccessMsg(`✓ 截屏成功！已生成高清快照`);
+      } else {
+        throw new Error(capRes?.error || "截屏失败，请检查设备是否在线");
+      }
+    } catch (err: any) {
+      setError(err.message || "设备截屏失败");
+    } finally {
+      setActionInProgress(null);
+    }
+  }
+
+  async function handleReboot(targetSerial: string) {
+    if (!targetSerial.trim()) return;
+    if (!window.confirm(`确定要重启设备/安卓容器 [${targetSerial}] 吗？`)) return;
+
+    setActionInProgress(`正在重启设备 [${targetSerial}]...`);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await nativeBridge.rebootAdb(scrcpyDir.trim(), targetSerial);
+      if (res && res.success) {
+        setSuccessMsg(`✓ 已发送重启指令至设备 [${targetSerial}]！`);
+        setTimeout(() => void fetchAdbDevices(), 3000);
+      } else {
+        throw new Error(res?.error || "重启失败");
+      }
+    } catch (err: any) {
+      setError(err.message || "发送重启命令失败");
+    } finally {
+      setActionInProgress(null);
+    }
+  }
+
+  const onlineCount = devices.filter((d) => d.state === "device").length;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in select-none">
-      <div className="flex h-[88vh] max-h-[820px] w-full max-w-2xl flex-col rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)] text-[var(--app-text)] shadow-2xl overflow-hidden">
+      <div className="flex h-[90vh] max-h-[860px] w-full max-w-2xl flex-col rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)] text-[var(--app-text)] shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] px-6 py-3.5">
           <div className="flex items-center gap-3">
@@ -192,12 +330,12 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
             </span>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-extrabold text-sm text-[var(--app-text)]">Scrcpy 极速安卓投屏与控制</h3>
+                <h3 className="font-extrabold text-sm text-[var(--app-text)]">ADB 超级运维中心 & Scrcpy 投屏</h3>
                 <span className="rounded-full bg-purple-500/20 px-2 py-0.2 font-mono text-[10px] font-bold text-purple-400 border border-purple-500/30">
-                  自动发现 ADB 设备
+                  一站式容器管理
                 </span>
               </div>
-              <p className="text-[11px] text-[var(--app-muted)] font-medium">配置 Scrcpy 工具链目录，一键极速调起独立高清操作窗口</p>
+              <p className="text-[11px] text-[var(--app-muted)] font-medium">直达 Shell 终端、一键并发投屏、拖拽安装 APK 与截图诊断</p>
             </div>
           </div>
 
@@ -218,9 +356,9 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
               <label className="flex items-center justify-between text-xs font-bold text-[var(--app-text)]">
                 <span className="flex items-center gap-1.5">
                   <FolderOpen className="h-3.5 w-3.5 text-purple-400" />
-                  <span>Scrcpy 所在目录 (包含 scrcpy.exe 与 adb.exe)</span>
+                  <span>Scrcpy & ADB 所在目录</span>
                 </span>
-                <span className="text-[10px] text-[var(--app-muted)] font-normal">支持直接输入或浏览选取</span>
+                <span className="text-[10px] text-[var(--app-muted)] font-normal">包含 scrcpy.exe 与 adb.exe</span>
               </label>
 
               <div className="flex items-center gap-2">
@@ -250,32 +388,43 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
             </div>
 
             {/* ADB Devices Auto Scan & Selection Section */}
-            <div className="space-y-2 rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] p-3.5">
+            <div className="space-y-2.5 rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] p-3.5">
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-[var(--app-text)]">
                   <Smartphone className="h-3.5 w-3.5 text-sky-400" />
-                  <span>已连接 ADB 设备列表 (点击直接选择)</span>
-                  {devices.length > 0 && (
-                    <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.2 font-mono text-[9px] font-bold text-emerald-400 border border-emerald-500/30">
-                      {devices.length} 台在线
-                    </span>
-                  )}
+                  <span>已连接 ADB 设备 ({devices.length} 台)</span>
                 </label>
-                <button
-                  type="button"
-                  onClick={() => fetchAdbDevices()}
-                  disabled={loadingDevices}
-                  className="flex items-center gap-1 text-[11px] font-bold text-purple-400 hover:text-purple-300 transition-colors cursor-pointer disabled:opacity-50"
-                  title="刷新当前 ADB 已识别设备"
-                >
-                  <RefreshCw className={`h-3 w-3 ${loadingDevices ? "animate-spin" : ""}`} />
-                  <span>{loadingDevices ? "正在扫描设备..." : "刷新设备"}</span>
-                </button>
+
+                <div className="flex items-center gap-2">
+                  {onlineCount > 1 && (
+                    <button
+                      type="button"
+                      onClick={handleLaunchAll}
+                      disabled={loading}
+                      className="flex items-center gap-1 text-[11px] font-bold text-amber-400 hover:text-amber-300 transition-colors cursor-pointer bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg"
+                      title="一键同时拉起所有在线设备的 Scrcpy 投屏窗口"
+                    >
+                      <Layers className="h-3 w-3" />
+                      <span>全选并发投屏 ({onlineCount})</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => fetchAdbDevices()}
+                    disabled={loadingDevices}
+                    className="flex items-center gap-1 text-[11px] font-bold text-purple-400 hover:text-purple-300 transition-colors cursor-pointer disabled:opacity-50"
+                    title="刷新当前 ADB 已识别设备"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${loadingDevices ? "animate-spin" : ""}`} />
+                    <span>{loadingDevices ? "扫描中..." : "刷新设备"}</span>
+                  </button>
+                </div>
               </div>
 
               {/* Devices Card Grid */}
               {devices.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <div className="grid grid-cols-1 gap-2 pt-1">
                   {devices.map((dev, idx) => {
                     const isSelected = serial.trim() === dev.serial.trim();
                     const isOnline = dev.state === "device";
@@ -284,45 +433,101 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
                       <div
                         key={idx}
                         onClick={() => setSerial(dev.serial)}
-                        className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition-all cursor-pointer ${
+                        className={`p-3 rounded-xl border transition-all cursor-pointer ${
                           isSelected
                             ? "border-purple-500 bg-purple-500/15 shadow-sm shadow-purple-500/20 ring-1 ring-purple-500/50"
                             : "border-[var(--app-line)] bg-[var(--app-bg)] hover:border-purple-500/40 hover:bg-[var(--fill-2)]"
                         }`}
                       >
-                        <div className="mt-0.5">
-                          {isSelected ? (
-                            <Radio className="h-4 w-4 text-purple-400 fill-purple-400/20" />
-                          ) : (
-                            <div className="h-4 w-4 rounded-full border border-[var(--app-line)] bg-[var(--fill-1)]" />
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="font-mono text-xs font-bold text-[var(--app-text)] truncate">
-                              {dev.serial}
-                            </span>
-                            <span
-                              className={`px-1.5 py-0.2 rounded font-mono text-[9px] font-bold border shrink-0 ${
-                                isOnline
-                                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                                  : "bg-amber-500/15 text-amber-400 border-amber-500/30"
-                              }`}
-                            >
-                              {isOnline ? "● 在线" : `● ${dev.state}`}
-                            </span>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            {isSelected ? (
+                              <Radio className="h-4 w-4 text-purple-400 fill-purple-400/20 shrink-0" />
+                            ) : (
+                              <div className="h-4 w-4 rounded-full border border-[var(--app-line)] bg-[var(--fill-1)] shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <span className="font-mono text-xs font-extrabold text-[var(--app-text)] truncate block">
+                                {dev.serial}
+                              </span>
+                              {(dev.model || dev.product || dev.device) && (
+                                <div className="flex items-center gap-1 text-[10px] text-[var(--app-muted)] font-mono truncate">
+                                  <Cpu className="h-2.5 w-2.5 text-purple-400 shrink-0" />
+                                  <span className="truncate">
+                                    {[dev.model, dev.product, dev.device].filter(Boolean).join(" / ")}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
                           </div>
 
-                          {(dev.model || dev.product || dev.device) && (
-                            <div className="flex items-center gap-1.5 text-[10px] text-[var(--app-muted)] font-mono truncate">
-                              <Cpu className="h-2.5 w-2.5 text-purple-400 shrink-0" />
-                              <span className="truncate">
-                                {[dev.model, dev.product, dev.device].filter(Boolean).join(" / ")}
-                              </span>
-                            </div>
-                          )}
+                          <span
+                            className={`px-2 py-0.5 rounded-lg font-mono text-[9px] font-bold border shrink-0 ${
+                              isOnline
+                                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                            }`}
+                          >
+                            {isOnline ? "● 在线" : `● ${dev.state}`}
+                          </span>
                         </div>
+
+                        {/* Quick Device Actions Strip */}
+                        {isOnline && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-2.5 mt-2 border-t border-[var(--app-line)]/60">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleOpenShell(dev.serial);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 font-bold text-[10px] transition-colors border border-indigo-500/30 cursor-pointer"
+                              title="在当前工作区打开终端标签并直达 root/adb shell"
+                            >
+                              <Terminal className="h-3 w-3 text-indigo-400" />
+                              <span>进入 Shell</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleInstallApk(dev.serial);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 font-bold text-[10px] transition-colors border border-teal-500/30 cursor-pointer"
+                              title="选择 APK 文件并一键安装到该设备"
+                            >
+                              <PackagePlus className="h-3 w-3 text-teal-400" />
+                              <span>安装 APK</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleScreencap(dev.serial);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 font-bold text-[10px] transition-colors border border-sky-500/30 cursor-pointer"
+                              title="截取设备当前画面"
+                            >
+                              <Camera className="h-3 w-3 text-sky-400" />
+                              <span>一键截屏</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleReboot(dev.serial);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 font-bold text-[10px] transition-colors border border-rose-500/30 cursor-pointer"
+                              title="重启 Android 系统或容器"
+                            >
+                              <RotateCw className="h-3 w-3 text-rose-400" />
+                              <span>重启设备</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -331,8 +536,8 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
                 <div className="p-3 rounded-xl border border-dashed border-[var(--app-line)] bg-[var(--app-bg)]/50 text-center space-y-1">
                   <p className="text-xs text-[var(--app-muted)] font-medium">
                     {loadingDevices
-                      ? "正在查询 adb devices..."
-                      : "未检测到已通过 ADB 连接的设备（可手动在下方填入目标 IP:Port 或 Serial，也可先在【ADB 转发】中直连）"}
+                      ? "正在扫描 adb devices..."
+                      : "未检测到在线设备（可在下方直接输入目标 IP:Port 或在【ADB 转发】中开启直连）"}
                   </p>
                 </div>
               )}
@@ -340,12 +545,12 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
               {/* Manual Serial or IP:Port Input */}
               <div className="pt-2 space-y-1">
                 <label className="text-[11px] font-medium text-[var(--app-muted)] flex items-center justify-between">
-                  <span>目标设备 Serial 或 IP:Port (-s 参数，支持手动微调)</span>
-                  <span className="text-[10px] text-[var(--app-muted)]">留空则默认投屏唯一已连接的设备</span>
+                  <span>目标设备 Serial 或 IP:Port (-s 参数)</span>
+                  <span className="text-[10px] text-[var(--app-muted)]">支持手动输入微调</span>
                 </label>
                 <input
                   type="text"
-                  placeholder="例如: 222.246.152.131:63031 或 192.168.75.129:1201 或留空"
+                  placeholder="例如: 222.246.152.131:63031 或 192.168.75.129:1201"
                   value={serial}
                   onChange={(e) => setSerial(e.target.value)}
                   className="w-full h-8.5 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-purple-500 focus:outline-none transition-colors"
@@ -452,7 +657,7 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
             {/* Launch Button */}
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !!actionInProgress}
               className="flex w-full h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-purple-500/25 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
@@ -468,6 +673,38 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
               )}
             </button>
           </form>
+
+          {/* Action In Progress Banner */}
+          {actionInProgress && (
+            <div className="flex items-center gap-2.5 rounded-xl border border-sky-500/40 bg-sky-500/10 p-3 text-xs text-sky-300 animate-in fade-in font-medium">
+              <RefreshCw className="h-4 w-4 animate-spin shrink-0 text-sky-400" />
+              <span>{actionInProgress}</span>
+            </div>
+          )}
+
+          {/* Screenshot Preview */}
+          {screenshotPreview && (
+            <div className="rounded-2xl border border-sky-500/40 bg-zinc-950/90 p-3 space-y-2 animate-in zoom-in-95">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
+                  <Camera className="h-3.5 w-3.5 text-sky-400" />
+                  <span>屏幕快照预览</span>
+                </span>
+                {screenshotPreview.path && (
+                  <span className="text-[10px] font-mono text-[var(--app-muted)] truncate max-w-xs">
+                    {screenshotPreview.path}
+                  </span>
+                )}
+              </div>
+              <div className="flex justify-center bg-black/50 p-2 rounded-xl">
+                <img
+                  src={`data:image/png;base64,${screenshotPreview.base64}`}
+                  alt="ADB Screenshot"
+                  className="max-h-56 rounded-lg object-contain border border-[var(--app-line)]"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Success Message */}
           {successMsg && (

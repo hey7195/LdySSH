@@ -1503,6 +1503,36 @@ export function App() {
     setActiveTool("local");
   }
 
+  async function openAdbShellSession(serial: string, scrcpyDir: string) {
+    const sessionId = await nativeBridge.createLocalSession();
+    if (!sessionId) return;
+    const tabTitle = serial ? `ADB [${serial}]` : "ADB Shell";
+    const tab: SessionTab = {
+      id: sessionId,
+      title: tabTitle,
+      kind: "local",
+      connected: true,
+      status: "connected"
+    };
+    setSessions((current) => [...current, tab]);
+    setActiveSessionId(sessionId);
+    setActiveTool("local");
+
+    setTimeout(() => {
+      let adbExe = "adb.exe";
+      if (scrcpyDir && scrcpyDir.trim()) {
+        let cleaned = scrcpyDir.trim();
+        while (cleaned.endsWith("\\") || cleaned.endsWith("/")) {
+          cleaned = cleaned.slice(0, -1);
+        }
+        adbExe = `"${cleaned}\\adb.exe"`;
+      }
+      const targetArg = serial && serial.trim() ? ` -s "${serial.trim()}"` : "";
+      const cmd = `${adbExe}${targetArg} shell\n`;
+      void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(cmd)));
+    }, 400);
+  }
+
   function activateSession(sessionId: string) {
     setActiveSessionId(sessionId);
     setActiveTool("local");
@@ -2583,11 +2613,13 @@ export function App() {
             });
           }
         }}
+        onOpenAdbShell={openAdbShellSession}
       />
       <ScrcpyModal
         isOpen={scrcpyModalOpen}
         onClose={() => setScrcpyModalOpen(false)}
         defaultSerial={scrcpyTargetSerial}
+        onOpenAdbShell={openAdbShellSession}
       />
       <ServerDiagnosticsModal
         isOpen={diagnosticsOpen}
@@ -4754,6 +4786,58 @@ function TerminalSurface({
   const terminalLayoutRestoreFrameRef = useRef<number | null>(null);
   const terminalLayoutRestoreTimersRef = useRef<number[]>([]);
 
+  // 自由可拖拽分屏比例状态 (15% ~ 85%)
+  const [splitRatio, setSplitRatio] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("ldyssh_split_ratio");
+      return saved ? Math.min(85, Math.max(15, Number(saved))) : 50;
+    } catch {
+      return 50;
+    }
+  });
+  const [isDraggingSplitter, setIsDraggingSplitter] = useState(false);
+  const splitWrapperRef = useRef<HTMLDivElement | null>(null);
+
+  const handleSplitterPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+    setIsDraggingSplitter(true);
+  };
+
+  const handleSplitterPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingSplitter || !splitWrapperRef.current) return;
+    const rect = splitWrapperRef.current.getBoundingClientRect();
+    let ratio = 50;
+    if (splitMode === "vertical") {
+      ratio = ((e.clientY - rect.top) / rect.height) * 100;
+    } else {
+      ratio = ((e.clientX - rect.left) / rect.width) * 100;
+    }
+    const clamped = Math.min(85, Math.max(15, ratio));
+    setSplitRatio(clamped);
+    localStorage.setItem("ldyssh_split_ratio", String(Math.round(clamped)));
+    try {
+      fitRef.current?.fit();
+      secondaryFitRef.current?.fit();
+    } catch {}
+  };
+
+  const handleSplitterPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDraggingSplitter) {
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {}
+      setIsDraggingSplitter(false);
+      try {
+        fitRef.current?.fit();
+        secondaryFitRef.current?.fit();
+      } catch {}
+    }
+  };
+
   commandFoldersRef.current = commandFolders;
   commandSuggestionsEnabledRef.current = commandSuggestionsEnabled;
   dangerousCommandGuardEnabledRef.current = dangerousCommandGuardEnabled;
@@ -5574,19 +5658,23 @@ function TerminalSurface({
       {!isSplit || !primarySession ? (
         <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
       ) : (
-        <div className={cn(
-          "grid h-full w-full gap-1.5 p-1 min-h-0 overflow-hidden",
-          splitMode === "vertical" ? "grid-rows-2" : "grid-cols-2"
-        )}>
+        <div
+          ref={splitWrapperRef}
+          className={cn(
+            "flex h-full w-full p-1 min-h-0 overflow-hidden select-none",
+            splitMode === "vertical" ? "flex-col" : "flex-row"
+          )}
+        >
           {/* 主分屏 (Active / Primary) */}
           <div
+            style={splitMode === "vertical" ? { height: `${splitRatio}%` } : { width: `${splitRatio}%` }}
             onPointerDown={(e) => {
               e.stopPropagation();
               setFocusedPane("primary");
               terminalRef.current?.focus();
             }}
             className={cn(
-              "relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-xl border transition-all cursor-text",
+              "relative flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl border transition-all cursor-text shrink-0",
               focusedPane === "primary"
                 ? "border-emerald-500/80 shadow-md ring-1 ring-emerald-500/30"
                 : "border-[var(--app-line)] opacity-85 hover:opacity-100"
@@ -5602,9 +5690,14 @@ function TerminalSurface({
                 <Terminal className="h-3 w-3 text-emerald-400 shrink-0" />
                 <span className="truncate">{primarySession.title}</span>
                 {focusedPane === "primary" ? (
-                  <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动输入中</span>
+                  <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动主屏</span>
                 ) : (
                   <span className="text-[9px] bg-[var(--fill-2)] text-[var(--app-muted)] px-1 py-0.2 rounded font-mono">点击激活</span>
+                )}
+                {useAppStore.getState().commandBroadcastingEnabled && (
+                  <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded font-mono animate-pulse">
+                    📡 广播发起源
+                  </span>
                 )}
               </div>
               <div className="flex items-center gap-1">
@@ -5624,16 +5717,41 @@ function TerminalSurface({
             <div ref={containerRef} className="flex-1 min-h-0 min-w-0 overflow-hidden relative" />
           </div>
 
+          {/* 可自由拖拽调节分屏比例的交互手柄 (Draggable Splitter Bar) */}
+          <div
+            onPointerDown={handleSplitterPointerDown}
+            onPointerMove={handleSplitterPointerMove}
+            onPointerUp={handleSplitterPointerUp}
+            className={cn(
+              "group relative flex items-center justify-center select-none z-10 transition-colors shrink-0",
+              splitMode === "vertical"
+                ? "h-2 w-full cursor-row-resize hover:h-2.5 my-0.5"
+                : "w-2 h-full cursor-col-resize hover:w-2.5 mx-0.5"
+            )}
+            title="按住鼠标拖拽自由调整分屏比例"
+          >
+            <div
+              className={cn(
+                "rounded-full bg-[var(--app-line)] group-hover:bg-purple-500 transition-all",
+                splitMode === "vertical"
+                  ? "w-16 h-1 group-hover:w-24"
+                  : "h-16 w-1 group-hover:h-24",
+                isDraggingSplitter && "bg-purple-500 shadow-md shadow-purple-500/50 " + (splitMode === "vertical" ? "w-full h-1" : "h-full w-1")
+              )}
+            />
+          </div>
+
           {/* 副分屏 (Secondary) */}
           {secondarySession && (
             <div
+              style={splitMode === "vertical" ? { height: `${100 - splitRatio}%` } : { width: `${100 - splitRatio}%` }}
               onPointerDown={(e) => {
                 e.stopPropagation();
                 setFocusedPane("secondary");
                 secondaryTerminalRef.current?.focus();
               }}
               className={cn(
-                "relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-xl border transition-all cursor-text",
+                "relative flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl border transition-all cursor-text shrink-0",
                 focusedPane === "secondary"
                   ? "border-emerald-500/80 shadow-md ring-1 ring-emerald-500/30"
                   : "border-[var(--app-line)] opacity-85 hover:opacity-100"
@@ -5649,9 +5767,14 @@ function TerminalSurface({
                   <Terminal className="h-3 w-3 text-blue-400 shrink-0" />
                   <span className="truncate">{secondarySession.title}</span>
                   {focusedPane === "secondary" ? (
-                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动输入中</span>
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动副屏</span>
                   ) : (
-                    <span className="text-[9px] bg-[var(--fill-2)] text-[var(--app-muted)] px-1 py-0.2 rounded font-mono">点击激活</span>
+                    <span className="text-[9px] bg-[var(--fill-2)] text-[var(--app-muted)] px-1 py-0.2 rounded font-mono">副屏就绪</span>
+                  )}
+                  {useAppStore.getState().commandBroadcastingEnabled && (
+                    <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded font-mono animate-pulse">
+                      📡 同步广播接收中
+                    </span>
                   )}
                 </div>
                 <div className="flex items-center gap-1">

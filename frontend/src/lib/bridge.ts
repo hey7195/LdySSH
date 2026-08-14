@@ -162,6 +162,31 @@ export const nativeBridge = {
       target
     );
   },
+  installApk(scrcpyDir: string, serial: string, apkPath: string) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_install_apk",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial,
+      apkPath
+    );
+  },
+  screencapAdb(scrcpyDir: string, serial: string) {
+    return callNative<{ success: boolean; filePath?: string; base64?: string; error?: string }>(
+      "adb_screencap",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial
+    );
+  },
+  rebootAdb(scrcpyDir: string, serial: string) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_reboot",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial
+    );
+  },
   showSaveFileDialog(defaultName: string) {
     return callNative<{ filePath?: string }>("show_save_file_dialog", {}, defaultName);
   },
