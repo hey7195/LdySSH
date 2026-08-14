@@ -5606,6 +5606,14 @@ function TerminalSurface({
   function openTerminalMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
     const selection = terminalRef.current?.getSelection() || selectedText;
+    const appearance = getTerminalAppearance(terminalAppearance);
+
+    if (appearance.rightClickPaste) {
+      if (activeSession) {
+        void pasteTerminalClipboard(activeSession.id);
+      }
+      return;
+    }
     setTerminalMenu({ x: event.clientX, y: event.clientY, selection });
   }
 
@@ -5766,11 +5774,7 @@ function TerminalSurface({
       const selected = terminal.getSelection();
       setSelectedText(selected.trim());
       if (selected && appearance.copyOnSelect !== false) {
-        try {
-          void navigator.clipboard.writeText(selected);
-        } catch {
-          // Ignore
-        }
+        void nativeBridge.clipboardCopy(selected);
       }
     });
     const searchResultDisposable = searchAddon.onDidChangeResults((event) => {
