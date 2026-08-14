@@ -59,8 +59,15 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
   onExecuteCommand,
   onSaveCommand
 }) => {
-  const [user, setUser] = useState(() => localStorage.getItem("ldyssh_adb_user") || "");
-  const [deviceId, setDeviceId] = useState(() => localStorage.getItem("ldyssh_adb_deviceid") || "");
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem("ldyssh_adb_user");
+    if (saved === "xq" || saved === "hy") {
+      localStorage.removeItem("ldyssh_adb_user");
+      return "";
+    }
+    return saved || "";
+  });
+  const [deviceId, setDeviceId] = useState("");
   const [expirationDate, setExpirationDate] = useState(() => getFutureDate(7));
   const [allowIp, setAllowIp] = useState(() => localStorage.getItem("ldyssh_adb_allow_ip") || "");
   const [apiEndpoint, setApiEndpoint] = useState(
@@ -89,17 +96,23 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
   });
 
   useEffect(() => {
-    if (user) localStorage.setItem("ldyssh_adb_user", user);
-    if (deviceId) localStorage.setItem("ldyssh_adb_deviceid", deviceId);
+    if (user && user !== "xq" && user !== "hy") {
+      localStorage.setItem("ldyssh_adb_user", user);
+    }
     if (allowIp) localStorage.setItem("ldyssh_adb_allow_ip", allowIp);
     if (apiEndpoint) localStorage.setItem("ldyssh_adb_endpoint", apiEndpoint);
     if (authToken) localStorage.setItem("ldyssh_adb_token", authToken);
-  }, [user, deviceId, allowIp, apiEndpoint, authToken]);
+  }, [user, allowIp, apiEndpoint, authToken]);
 
-  // 打开弹窗时，如果 IP 为空则自动获取本机公网 IP
+  // 打开弹窗时，重置设备ID为空并自动获取本机公网 IP
   useEffect(() => {
-    if (isOpen && !allowIp) {
-      void fetchPublicIp();
+    if (isOpen) {
+      setDeviceId("");
+      setError(null);
+      setResult(null);
+      if (!allowIp) {
+        void fetchPublicIp();
+      }
     }
   }, [isOpen]);
 
