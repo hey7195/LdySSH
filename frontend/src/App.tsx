@@ -2027,16 +2027,16 @@ export function App() {
       className="app-root flex h-screen w-screen flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)] select-none"
       onContextMenu={(event) => event.preventDefault()}
     >
-      {/* 顶部全功能鼠标抓取拖拽 Header：超凡黑曜石 Command Center 沉浸顶部栏 */}
-      <header className="pywebview-drag-region flex h-11 shrink-0 items-center justify-between px-4 bg-[var(--app-bg)]/95 backdrop-blur-xl border-b border-[var(--app-line)] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] select-none">
-        <div className="no-drag flex items-center gap-3">
-          <div className="relative flex h-7 w-7 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-600 text-white font-black text-xs shadow-lg shadow-emerald-500/25 ring-1 ring-white/20">
-            L
+      {/* 顶部全功能鼠标抓取拖拽 Header：极简专业 Command Center 顶部栏 */}
+      <header className="pywebview-drag-region flex h-10 shrink-0 items-center justify-between px-3.5 bg-[var(--app-bg)] border-b border-[var(--app-line)] select-none">
+        <div className="no-drag flex items-center gap-2">
+          <div className="flex h-5.5 w-5.5 items-center justify-center rounded-md bg-[var(--fill-3)] border border-[var(--app-line)] text-emerald-500 font-mono text-[11px] font-bold shadow-2xs">
+            &gt;_
           </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-xs font-black tracking-tight text-[var(--app-text)] font-sans">LdySSH</span>
-            <span className="rounded-md bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.2 font-mono text-[9px] font-extrabold text-emerald-400 shadow-2xs">
-              PRO v1.0
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold tracking-tight text-[var(--app-text)] font-sans">LdySSH</span>
+            <span className="rounded bg-[var(--fill-2)] border border-[var(--app-line)] px-1 py-0.2 font-mono text-[9px] font-semibold text-[var(--app-muted)]">
+              PRO
             </span>
           </div>
         </div>
@@ -2686,14 +2686,14 @@ function HostSidebar({
       }}
     >
       <div className="flex h-full flex-col">
-        <div className="px-3 pb-2.5 pt-3 border-b border-[var(--app-line)] space-y-2">
+        <div className="p-2.5 border-b border-[var(--app-line)] space-y-2">
           {/* Row 1: 全宽新建连接按钮 */}
           <button
             onClick={onOpenDialog}
             title="新建主机连接"
-            className="flex w-full h-9 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold shadow-md shadow-emerald-500/20 border border-emerald-400/20 transition-all cursor-pointer whitespace-nowrap active:scale-[0.98]"
+            className="flex w-full h-8 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white text-xs font-bold shadow-xs transition-all cursor-pointer whitespace-nowrap"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5" />
             <span>新建 SSH 连接</span>
           </button>
 
@@ -2701,7 +2701,7 @@ function HostSidebar({
           <div className="relative w-full">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
             <Input
-              className="pl-8 pr-7 h-8.5 text-xs rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-emerald-500/50 transition-colors"
+              className="pl-7 pr-7 h-7.5 text-xs rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-emerald-500/60 transition-colors"
               value={query}
               placeholder="搜索主机 / IP / 标签..."
               onChange={(event) => onQueryChange(event.target.value)}
@@ -2717,44 +2717,44 @@ function HostSidebar({
             )}
           </div>
 
-          {/* Row 3: 4-按钮子工具栏 (均等分布，防止横向挤压) */}
-          <div className="grid grid-cols-4 gap-1.5 w-full pt-0.5">
+          {/* Row 3: 2x2 均等网格工具栏 (彻底解决挤压与文字竖排折行问题) */}
+          <div className="grid grid-cols-2 gap-1.5 w-full">
             <button
               onClick={() => setShowTagMenu((prev) => !prev)}
               title="按标签筛选主机"
               className={cn(
-                "flex h-7.5 items-center justify-center gap-1 rounded-xl border text-[11px] font-bold transition-all cursor-pointer w-full shadow-2xs",
+                "flex h-7 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-medium transition-all cursor-pointer w-full whitespace-nowrap shadow-2xs px-2",
                 activeTagFilter
                   ? "bg-indigo-600 border-indigo-500 text-white shadow-xs"
-                  : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)]"
+                  : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--text-secondary)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)]"
               )}
             >
-              <Filter className="h-3.5 w-3.5 shrink-0" />
-              <span>筛选</span>
+              <Filter className="h-3 w-3 shrink-0" />
+              <span>标签筛选</span>
             </button>
             <button
               onClick={onOpenKeyManager}
               title="密钥库管理"
-              className="flex h-7.5 items-center justify-center gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-bold text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-indigo-400 transition-all cursor-pointer w-full shadow-2xs"
+              className="flex h-7 items-center justify-center gap-1.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--fill-2)] hover:text-indigo-400 transition-all cursor-pointer w-full whitespace-nowrap shadow-2xs px-2"
             >
-              <KeyRound className="h-3.5 w-3.5 shrink-0" />
-              <span>密钥</span>
+              <KeyRound className="h-3 w-3 shrink-0" />
+              <span>密钥管理</span>
             </button>
             <button
               onClick={onOpenPresets}
               title="常用连接预设模板管理"
-              className="flex h-7.5 items-center justify-center gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-bold text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-purple-400 transition-all cursor-pointer w-full shadow-2xs"
+              className="flex h-7 items-center justify-center gap-1.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--fill-2)] hover:text-purple-400 transition-all cursor-pointer w-full whitespace-nowrap shadow-2xs px-2"
             >
-              <Sliders className="h-3.5 w-3.5 shrink-0" />
-              <span>预设</span>
+              <Sliders className="h-3 w-3 shrink-0" />
+              <span>连接预设</span>
             </button>
             <button
               onClick={onRefresh}
               title="刷新主机列表"
-              className="flex h-7.5 items-center justify-center gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-bold text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] transition-all cursor-pointer w-full shadow-2xs"
+              className="flex h-7 items-center justify-center gap-1.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] transition-all cursor-pointer w-full whitespace-nowrap shadow-2xs px-2"
             >
-              <RefreshCw className="h-3.5 w-3.5 shrink-0" />
-              <span>刷新</span>
+              <RefreshCw className="h-3 w-3 shrink-0" />
+              <span>刷新列表</span>
             </button>
           </div>
 
