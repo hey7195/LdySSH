@@ -75,6 +75,8 @@ import {
   PanelLeftOpen,
   PanelLeft,
   Cast,
+  Layers,
+  Clipboard as ClipboardIcon,
   X
 } from "lucide-react";
 import { RemoteFileEditorModal } from "./components/modals/RemoteFileEditorModal";
@@ -94,6 +96,8 @@ import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
 import { ParameterFillModal } from "./components/modals/ParameterFillModal";
 import { KernelDevOpsToolboxModal } from "./components/modals/KernelDevOpsToolboxModal";
 import { IntegratedCodeDiffEditorModal } from "./components/modals/IntegratedCodeDiffEditorModal";
+import { ClipboardSnippetDrawer } from "./components/modals/ClipboardSnippetDrawer";
+import { BatchTaskRunnerModal } from "./components/modals/BatchTaskRunnerModal";
 import { SerialDevPanel } from "./components/sidebar/SerialDevPanel";
 import { EbpfObserverPanel } from "./components/sidebar/EbpfObserverPanel";
 import { ClusterRunnerPanel } from "./components/sidebar/ClusterRunnerPanel";
@@ -236,6 +240,14 @@ interface ConnectionForm {
   folder?: string;
   tags?: string[];
   environment?: "prod" | "staging" | "local";
+  useJumpHost?: boolean;
+  jumpHost?: string;
+  jumpPort?: string;
+  jumpUser?: string;
+  jumpPass?: string;
+  jumpKey?: string;
+  jumpKeyPassphrase?: string;
+  jumpSavedConnectionId?: string;
 }
 
 interface AiQuote {
@@ -1058,6 +1070,10 @@ export function App() {
   const [remoteEditorContent, setRemoteEditorContent] = useState("");
   const [remoteEditorLoading, setRemoteEditorLoading] = useState(false);
 
+  // 剪贴板抽屉与批量巡检器状态
+  const [clipboardDrawerOpen, setClipboardDrawerOpen] = useState(false);
+  const [batchRunnerOpen, setBatchRunnerOpen] = useState(false);
+
   const openRemoteEditor = async (filePath: string, fileName: string) => {
     setRemoteEditorPath(filePath);
     setRemoteEditorName(fileName);
@@ -1427,6 +1443,9 @@ export function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setIsCommandPaletteOpen((prev) => !prev);
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        setClipboardDrawerOpen((prev) => !prev);
       }
     }
     window.addEventListener("keydown", handleGlobalKeyDown);
@@ -1559,7 +1578,15 @@ export function App() {
       group: grp,
       folder: grp,
       tags: connection.tags || [],
-      environment: connection.environment
+      environment: connection.environment,
+      useJumpHost: connection.useJumpHost || Boolean(connection.jumpHost),
+      jumpHost: connection.jumpHost || "",
+      jumpPort: String(connection.jumpPort || 22),
+      jumpUser: connection.jumpUser || "root",
+      jumpPass: connection.jumpPass || "",
+      jumpKey: connection.jumpKey || "",
+      jumpKeyPassphrase: connection.jumpKeyPassphrase || "",
+      jumpSavedConnectionId: connection.jumpSavedConnectionId || ""
     };
   }
 
@@ -1576,7 +1603,14 @@ export function App() {
       group: grp,
       folder: grp,
       tags: connection.tags || [],
-      environment: connection.environment
+      environment: connection.environment,
+      useJumpHost: connection.useJumpHost || Boolean(connection.jumpHost),
+      jumpHost: connection.jumpHost || "",
+      jumpPort: connection.jumpPort ? Number(connection.jumpPort) : 22,
+      jumpUser: connection.jumpUser || "",
+      jumpPass: connection.jumpPass || "",
+      jumpKey: connection.jumpKey || "",
+      jumpKeyPassphrase: connection.jumpKeyPassphrase || ""
     };
   }
 
@@ -2382,6 +2416,8 @@ export function App() {
               onAddFolder={addCommandFolder}
               onSaveCommand={saveCommand}
               onRenameTab={renameSession}
+              onOpenClipboardDrawer={() => setClipboardDrawerOpen(true)}
+              onOpenBatchRunner={() => setBatchRunnerOpen(true)}
             />
           </div>
           <SettingsPanel
@@ -2664,6 +2700,22 @@ export function App() {
           const escapedContent = contentStr.replace(/'/g, "'\\''");
           sendCommandToActiveSession(`cat << 'EOF' > ${pathStr}\n${contentStr}\nEOF\n`);
         }}
+      />
+      <ClipboardSnippetDrawer
+        isOpen={clipboardDrawerOpen}
+        onClose={() => setClipboardDrawerOpen(false)}
+        recentCommands={[]}
+        onInsertCommand={(cmd, exec) => {
+          if (activeSessionId) {
+            void sendCommandToActiveSession(exec ? `${cmd}\n` : cmd);
+          }
+        }}
+      />
+      <BatchTaskRunnerModal
+        isOpen={batchRunnerOpen}
+        onClose={() => setBatchRunnerOpen(false)}
+        savedConnections={savedConnections}
+        adbDevices={[]}
       />
     </div>
   );
@@ -3689,7 +3741,9 @@ function TerminalWorkspace({
   onRenameTab,
   onOpenAdbForward,
   onOpenScrcpy,
-  isAdmin
+  isAdmin,
+  onOpenClipboardDrawer,
+  onOpenBatchRunner
 }: {
   visible: boolean;
   sessions: SessionTab[];
@@ -3742,6 +3796,8 @@ function TerminalWorkspace({
   onOpenAdbForward?: () => void;
   onOpenScrcpy?: () => void;
   isAdmin?: boolean;
+  onOpenClipboardDrawer?: () => void;
+  onOpenBatchRunner?: () => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -3861,6 +3917,26 @@ function TerminalWorkspace({
           >
             <Cast className="h-3.5 w-3.5 text-purple-400" />
             <span>Scrcpy 投屏</span>
+          </button>
+
+          {/* 多主机批量巡检器快捷入口 */}
+          <button
+            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 text-xs font-bold text-amber-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
+            onClick={onOpenBatchRunner}
+            title="一键并发在多台主机/容器上执行运维巡检脚本"
+          >
+            <Layers className="h-3.5 w-3.5 text-amber-400" />
+            <span>批量巡检</span>
+          </button>
+
+          {/* 代码片段与剪贴板抽屉快捷入口 */}
+          <button
+            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-teal-500/30 bg-teal-500/10 hover:bg-teal-500/20 px-2.5 text-xs font-bold text-teal-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
+            onClick={onOpenClipboardDrawer}
+            title="呼出常用运维命令片段与终端历史抽屉 (Ctrl+Shift+V)"
+          >
+            <ClipboardIcon className="h-3.5 w-3.5 text-teal-400" />
+            <span>代码片段</span>
           </button>
 
           {/* 管理员身份指示徽章 */}
@@ -4759,6 +4835,7 @@ function TerminalSurface({
   const [selectedText, setSelectedText] = useState("");
   const [terminalMenu, setTerminalMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [showTicker, setShowTicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResult, setSearchResult] = useState({ resultIndex: -1, resultCount: 0 });
   const searchMatches = useMemo(
@@ -5795,15 +5872,65 @@ function TerminalSurface({
           )}
         </div>
       )}
-      <button
-        aria-label="查找终端输出"
-        title="查找终端输出"
-        className="absolute right-5 top-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] shadow-lg hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)]"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => setSearchOpen(true)}
-      >
-        <Search className="h-3.5 w-3.5" />
-      </button>
+      {/* 实时性能状态悬浮条 (Real-time Status Ticker) */}
+      {showTicker && (
+        <div className="absolute top-3 left-4 right-28 z-20 flex items-center justify-between gap-3 px-3.5 py-1.5 rounded-xl border border-purple-500/30 bg-zinc-950/85 backdrop-blur-md text-[11px] font-mono text-[var(--app-text)] shadow-xl animate-in slide-in-from-top-2 select-none">
+          <div className="flex items-center gap-4 min-w-0 overflow-x-auto scrollbar-none">
+            <span className="flex items-center gap-1.5 font-bold text-emerald-400 shrink-0">
+              <Cpu className="h-3.5 w-3.5" />
+              <span>CPU: 12.4%</span>
+            </span>
+            <span className="flex items-center gap-1.5 font-bold text-sky-400 shrink-0">
+              <Activity className="h-3.5 w-3.5" />
+              <span>内存: 2.1G / 8.0G (26%)</span>
+            </span>
+            <span className="flex items-center gap-1.5 font-bold text-purple-400 shrink-0">
+              <HardDrive className="h-3.5 w-3.5" />
+              <span>磁盘: 42G / 100G (42%)</span>
+            </span>
+            <span className="flex items-center gap-1.5 font-bold text-amber-400 shrink-0">
+              <ArrowRightLeft className="h-3.5 w-3.5" />
+              <span>网络: ↑ 1.2 MB/s ↓ 4.5 MB/s</span>
+            </span>
+          </div>
+          <button
+            onClick={() => setShowTicker(false)}
+            className="text-[var(--app-muted)] hover:text-white p-0.5 rounded cursor-pointer shrink-0"
+            title="关闭状态条"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
+      {/* 终端浮动快捷工具 (性能状态、查找) */}
+      <div className="absolute right-5 top-4 z-10 flex items-center gap-1.5">
+        <button
+          aria-label="实时性能状态"
+          title="展开/收起目标服务器/容器实时性能监控悬浮条"
+          className={cn(
+            "inline-flex h-8 px-2.5 items-center justify-center gap-1 rounded-md border text-xs font-bold shadow-lg transition-all cursor-pointer",
+            showTicker
+              ? "border-purple-500/80 bg-purple-500/25 text-purple-300 ring-1 ring-purple-500/40"
+              : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)]"
+          )}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={() => setShowTicker(!showTicker)}
+        >
+          <Activity className="h-3.5 w-3.5 text-purple-400" />
+          <span className="hidden sm:inline">性能状态</span>
+        </button>
+
+        <button
+          aria-label="查找终端输出"
+          title="查找终端输出 (Ctrl+F)"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] shadow-lg hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)] cursor-pointer"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={() => setSearchOpen(true)}
+        >
+          <Search className="h-3.5 w-3.5" />
+        </button>
+      </div>
       {searchOpen && (
         <div
           className="absolute right-5 top-14 z-20 w-[min(380px,calc(100%-40px))] rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 text-xs text-[var(--app-text)] shadow-xl"
@@ -7014,15 +7141,50 @@ function TerminalFileSidebar({
                 </form>
               ) : (
                 <div
-                  aria-label="远程路径"
-                  className="min-w-0 flex-1 truncate rounded-lg bg-[var(--fill-1)] px-2.5 py-1 font-mono text-[11px] font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] cursor-text transition-colors border border-[var(--app-line)]"
-                  title="点击可直接编辑路径并跳转"
-                  onClick={() => {
-                    setInputPath(remotePath);
-                    setIsEditingPath(true);
-                  }}
+                  aria-label="远程路径面包屑"
+                  className="min-w-0 flex-1 flex items-center gap-1 overflow-x-auto scrollbar-none rounded-lg bg-[var(--fill-1)] px-2 py-0.5 font-mono text-[11px] font-bold text-[var(--app-text)] border border-[var(--app-line)] select-none"
                 >
-                  {remotePath}
+                  <button
+                    onClick={() => setRemotePath("/")}
+                    className="hover:bg-[var(--fill-2)] px-1.5 py-0.5 rounded text-purple-400 hover:text-purple-300 font-bold transition-colors cursor-pointer shrink-0"
+                    title="跳转至根目录 /"
+                  >
+                    /
+                  </button>
+                  {remotePath
+                    .split("/")
+                    .filter(Boolean)
+                    .map((segment, idx, arr) => {
+                      const partialPath = "/" + arr.slice(0, idx + 1).join("/");
+                      const isLast = idx === arr.length - 1;
+                      return (
+                        <div key={idx} className="flex items-center gap-1 shrink-0">
+                          <span className="text-[var(--app-muted)] text-[10px] select-none">›</span>
+                          <button
+                            onClick={() => setRemotePath(partialPath)}
+                            className={cn(
+                              "px-1.5 py-0.5 rounded transition-colors cursor-pointer truncate max-w-[140px]",
+                              isLast
+                                ? "bg-purple-500/20 text-purple-300 font-extrabold border border-purple-500/30 shadow-2xs"
+                                : "hover:bg-[var(--fill-2)] text-[var(--app-text)] hover:text-purple-400"
+                            )}
+                            title={`跳转至: ${partialPath}`}
+                          >
+                            {segment}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  <button
+                    onClick={() => {
+                      setInputPath(remotePath);
+                      setIsEditingPath(true);
+                    }}
+                    className="ml-auto text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] p-1 rounded hover:bg-[var(--fill-2)] cursor-pointer shrink-0"
+                    title="点击手动编辑绝对路径"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
                 </div>
               )}
               <button
@@ -9929,6 +10091,101 @@ function ConnectDialog({
                 </button>
               </div>
             </Field>
+          </div>
+
+          {/* 跳板机 / 堡垒机 (ProxyJump) 高级代理配置 */}
+          <div className="mt-3.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-3 space-y-2.5">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-[var(--app-text)]">
+                <ShieldCheck className="h-4 w-4 text-purple-400" />
+                <span>通过跳板机 / 堡垒机代理直连 (ProxyJump)</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={Boolean(form.useJumpHost)}
+                onChange={(e) => update("useJumpHost", e.target.checked)}
+                className="rounded border-[var(--app-line)] text-purple-500 focus:ring-0 cursor-pointer"
+              />
+            </label>
+
+            {form.useJumpHost && (
+              <div className="space-y-2.5 pt-2 border-t border-[var(--app-line)] animate-in fade-in">
+                {/* 快速复用已有跳板机 */}
+                {savedConnections && savedConnections.length > 0 && (
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-[var(--app-muted)]">从已保存的主机中选择跳板机：</label>
+                    <select
+                      className="h-8 w-full rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2.5 text-xs text-[var(--app-text)] focus:outline-none focus:border-purple-500 font-bold"
+                      value={form.jumpSavedConnectionId || ""}
+                      onChange={(e) => {
+                        const selectedKey = e.target.value;
+                        const found = savedConnections.find((c) => (c.key || c.hostname) === selectedKey);
+                        if (found) {
+                          onFormChange({
+                            ...form,
+                            jumpSavedConnectionId: selectedKey,
+                            jumpHost: found.hostname || "",
+                            jumpPort: String(found.port || 22),
+                            jumpUser: found.username || "root",
+                            jumpPass: found.password || "",
+                            jumpKey: found.keyPath || ""
+                          });
+                        } else {
+                          update("jumpSavedConnectionId", "");
+                        }
+                      }}
+                    >
+                      <option value="">-- 手动填写跳板机参数 --</option>
+                      {savedConnections.map((c) => (
+                        <option key={c.key || c.hostname} value={c.key || c.hostname}>
+                          🛡️ {c.name || `${c.username}@${c.hostname}:${c.port || 22}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-medium text-[var(--app-muted)]">跳板机 IP / 域名</label>
+                    <Input
+                      className="h-8 text-xs font-mono"
+                      placeholder="jump.example.com"
+                      value={form.jumpHost || ""}
+                      onChange={(e) => update("jumpHost", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-medium text-[var(--app-muted)]">跳板机端口</label>
+                    <Input
+                      className="h-8 text-xs font-mono"
+                      placeholder="22"
+                      value={form.jumpPort || "22"}
+                      onChange={(e) => update("jumpPort", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-medium text-[var(--app-muted)]">跳板机用户名</label>
+                    <Input
+                      className="h-8 text-xs font-mono"
+                      placeholder="root"
+                      value={form.jumpUser || "root"}
+                      onChange={(e) => update("jumpUser", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-medium text-[var(--app-muted)]">跳板机密码</label>
+                    <Input
+                      type="password"
+                      className="h-8 text-xs font-mono"
+                      placeholder="跳板机密码 (若有)"
+                      value={form.jumpPass || ""}
+                      onChange={(e) => update("jumpPass", e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {!isEdit && (

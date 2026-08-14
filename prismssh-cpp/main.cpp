@@ -2057,6 +2057,58 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
+        else if (action == "adb_tcpip") {
+            std::string dirUtf8 = args.empty() ? "" : args[0].get<std::string>();
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+            int port = args.size() > 2 ? args[2].get<int>() : 5555;
+            if (port <= 0) port = 5555;
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\"";
+            if (!serial.empty()) {
+                cmd += L" -s \"" + serial + L"\"";
+            }
+            cmd += L" tcpip " + std::to_wstring(port);
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 10000);
+            nlohmann::json retObj;
+            retObj["success"] = run.success;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_pair") {
+            std::string dirUtf8 = args.empty() ? "" : args[0].get<std::string>();
+            std::string ipPortUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+            std::string pairCodeUtf8 = args.size() > 2 ? args[2].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring ipPort = Utf8ToUtf16(ipPortUtf8);
+            std::wstring pairCode = Utf8ToUtf16(pairCodeUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\" pair \"" + ipPort + L"\" \"" + pairCode + L"\"";
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 15000);
+            nlohmann::json retObj;
+            retObj["success"] = run.success;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "show_save_file_dialog") {
             std::string defaultNameUtf8 = args.empty() ? "" : args[0].get<std::string>();
             std::wstring wDefaultName = Utf8ToUtf16(defaultNameUtf8);

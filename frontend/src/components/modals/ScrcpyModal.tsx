@@ -24,7 +24,10 @@ import {
   Layers,
   Check,
   Copy,
-  Download
+  Download,
+  Wifi,
+  Link2,
+  HelpCircle
 } from "lucide-react";
 import { nativeBridge } from "../../lib/bridge";
 
@@ -76,6 +79,12 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
     () => localStorage.getItem("ldyssh_scrcpy_custom_args") || ""
   );
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showWirelessPair, setShowWirelessPair] = useState(false);
+
+  // Wireless pair states
+  const [pairIpPort, setPairIpPort] = useState("");
+  const [pairCode, setPairCode] = useState("");
+  const [connectIpPort, setConnectIpPort] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
@@ -317,11 +326,63 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
     }
   }
 
+  async function handleSwitchWireless(targetSerial: string) {
+    if (!targetSerial.trim()) return;
+    setActionInProgress(`正在将设备 [${targetSerial}] 切换至无线 TCP/IP 模式 (Port 5555)...`);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await nativeBridge.adbTcpip(scrcpyDir.trim(), targetSerial, 5555);
+      if (res && res.success) {
+        setSuccessMsg(`✓ 成功开启无线 TCP/IP 监听 (5555)！\n您现在可以拔掉 USB 数据线，直接在上方输入设备的局域网 IP (例如 192.168.x.x:5555) 进行无线投屏与调试。`);
+      } else {
+        throw new Error(res?.error || "切换无线模式失败");
+      }
+    } catch (err: any) {
+      setError(err.message || "切换无线模式异常");
+    } finally {
+      setActionInProgress(null);
+    }
+  }
+
+  async function handleAdbPairConnect() {
+    if (!pairIpPort.trim() || !pairCode.trim()) {
+      setError("请填写配对 IP:端口 以及 6 位配对码！");
+      return;
+    }
+    setActionInProgress(`正在向 [${pairIpPort}] 执行无线配对...`);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const pairRes = await nativeBridge.adbPair(scrcpyDir.trim(), pairIpPort.trim(), pairCode.trim());
+      if (pairRes && pairRes.success) {
+        setSuccessMsg(`✓ 无线配对成功！正在连接目标设备...`);
+        const targetToConnect = connectIpPort.trim() || pairIpPort.trim();
+        const connRes = await nativeBridge.adbConnect(scrcpyDir.trim(), targetToConnect);
+        if (connRes && connRes.success) {
+          setSuccessMsg(`✓ 配对并连接成功！设备 [${targetToConnect}] 已上线！`);
+          setSerial(targetToConnect);
+          void fetchAdbDevices();
+        } else {
+          setSuccessMsg(`✓ 配对成功！但自动连接提示: ${connRes?.error || "请手动输入连接端口"}`);
+        }
+      } else {
+        throw new Error(pairRes?.error || "配对失败，请检查配对码是否已在手机上过期");
+      }
+    } catch (err: any) {
+      setError(err.message || "无线配对异常");
+    } finally {
+      setActionInProgress(null);
+    }
+  }
+
   const onlineCount = devices.filter((d) => d.state === "device").length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in select-none">
-      <div className="flex h-[90vh] max-h-[860px] w-full max-w-2xl flex-col rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)] text-[var(--app-text)] shadow-2xl overflow-hidden">
+      <div className="flex h-[92vh] max-h-[900px] w-full max-w-2xl flex-col rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)] text-[var(--app-text)] shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] px-6 py-3.5">
           <div className="flex items-center gap-3">
@@ -335,7 +396,7 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
                   一站式容器管理
                 </span>
               </div>
-              <p className="text-[11px] text-[var(--app-muted)] font-medium">直达 Shell 终端、一键并发投屏、拖拽安装 APK 与截图诊断</p>
+              <p className="text-[11px] text-[var(--app-muted)] font-medium">直达 Shell 终端、无线配对、一键并发投屏、拖拽安装 APK 与截图诊断</p>
             </div>
           </div>
 
@@ -492,6 +553,19 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                void handleSwitchWireless(dev.serial);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-bold text-[10px] transition-colors border border-emerald-500/30 cursor-pointer"
+                              title="执行 adb tcpip 5555 切换为无线调试模式，拔掉 USB 即可无线投屏"
+                            >
+                              <Wifi className="h-3 w-3 text-emerald-400" />
+                              <span>切换无线 (5555)</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 void handleInstallApk(dev.serial);
                               }}
                               className="flex items-center gap-1 px-2 py-1 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 font-bold text-[10px] transition-colors border border-teal-500/30 cursor-pointer"
@@ -556,6 +630,73 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
                   className="w-full h-8.5 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-purple-500 focus:outline-none transition-colors"
                 />
               </div>
+            </div>
+
+            {/* Android 11+ Wireless Pair & Connect Accordion */}
+            <div className="rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-3 space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowWirelessPair(!showWirelessPair)}
+                className="flex w-full items-center justify-between text-xs font-bold text-[var(--app-muted)] hover:text-[var(--app-text)] transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-1.5">
+                  <Wifi className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>Android 11+ 无线配对码向导 (adb pair & connect)</span>
+                </div>
+                <span className="text-[10px] text-[var(--app-muted)]">{showWirelessPair ? "收起 ▲" : "展开 ▼"}</span>
+              </button>
+
+              {showWirelessPair && (
+                <div className="space-y-3 pt-2 border-t border-[var(--app-line)] animate-in fade-in duration-150">
+                  <p className="text-[11px] text-[var(--app-muted)]">
+                    进入手机【开发者选项】➔【无线调试】➔【使用配对码配对设备】，填写弹窗中显示的 IP、端口及 6 位配对码：
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-[var(--app-muted)]">配对 IP 和端口 (例如 192.168.1.50:37891)</label>
+                      <input
+                        type="text"
+                        placeholder="192.168.x.x:37891"
+                        value={pairIpPort}
+                        onChange={(e) => setPairIpPort(e.target.value)}
+                        className="w-full h-8 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2.5 text-xs font-mono text-[var(--app-text)] focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-[var(--app-muted)]">6 位配对码 (Pairing Code)</label>
+                      <input
+                        type="text"
+                        placeholder="例如: 123456"
+                        value={pairCode}
+                        onChange={(e) => setPairCode(e.target.value)}
+                        className="w-full h-8 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2.5 text-xs font-mono text-[var(--app-text)] focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-[var(--app-muted)]">无线调试主端口 (可选，若与配对端口不同，如 192.168.1.50:5555)</label>
+                    <input
+                      type="text"
+                      placeholder="留空则默认使用上方 IP 进行直连"
+                      value={connectIpPort}
+                      onChange={(e) => setConnectIpPort(e.target.value)}
+                      className="w-full h-8 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2.5 text-xs font-mono text-[var(--app-text)] focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAdbPairConnect}
+                    className="flex w-full h-8.5 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition-all cursor-pointer"
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    <span>执行无线配对并连接 (adb pair + connect)</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Quick Feature Toggles */}

@@ -187,6 +187,24 @@ export const nativeBridge = {
       serial
     );
   },
+  adbTcpip(scrcpyDir: string, serial: string, port = 5555) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_tcpip",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial,
+      port
+    );
+  },
+  adbPair(scrcpyDir: string, ipPort: string, pairCode: string) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_pair",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      ipPort,
+      pairCode
+    );
+  },
   showSaveFileDialog(defaultName: string) {
     return callNative<{ filePath?: string }>("show_save_file_dialog", {}, defaultName);
   },
@@ -288,6 +306,14 @@ export interface SavedConnection {
   tags?: string[];
   keyPath?: string;
   environment?: "prod" | "staging" | "local";
+  useJumpHost?: boolean;
+  jumpHost?: string;
+  jumpPort?: number;
+  jumpUser?: string;
+  jumpPass?: string;
+  jumpKey?: string;
+  jumpKeyPassphrase?: string;
+  jumpSavedConnectionId?: string;
 }
 
 export interface SshKeyPair {
@@ -424,6 +450,13 @@ export interface ConnectParams {
   tags?: string[];
   preservePassword?: boolean;
   environment?: "prod" | "staging" | "local";
+  useJumpHost?: boolean;
+  jumpHost?: string;
+  jumpPort?: number;
+  jumpUser?: string;
+  jumpPass?: string;
+  jumpKey?: string;
+  jumpKeyPassphrase?: string;
 }
 
 export interface NativeResult {
