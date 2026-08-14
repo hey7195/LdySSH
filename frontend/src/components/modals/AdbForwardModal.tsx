@@ -59,8 +59,8 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
   onExecuteCommand,
   onSaveCommand
 }) => {
-  const [user, setUser] = useState(() => localStorage.getItem("ldyssh_adb_user") || "xq");
-  const [deviceId, setDeviceId] = useState(() => localStorage.getItem("ldyssh_adb_deviceid") || "6275855");
+  const [user, setUser] = useState(() => localStorage.getItem("ldyssh_adb_user") || "");
+  const [deviceId, setDeviceId] = useState(() => localStorage.getItem("ldyssh_adb_deviceid") || "");
   const [expirationDate, setExpirationDate] = useState(() => getFutureDate(7));
   const [allowIp, setAllowIp] = useState(() => localStorage.getItem("ldyssh_adb_allow_ip") || "");
   const [apiEndpoint, setApiEndpoint] = useState(
@@ -327,7 +327,7 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="例如: xq"
+                  placeholder="例如: hy、xq 或个人昵称"
                   value={user}
                   onChange={(e) => setUser(e.target.value)}
                   className="w-full h-9 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-emerald-500 focus:outline-none transition-colors"
@@ -342,7 +342,7 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="例如: 6275855"
+                  placeholder="例如: 6120778 或 6275855"
                   value={deviceId}
                   onChange={(e) => setDeviceId(e.target.value)}
                   className="w-full h-9 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-emerald-500 focus:outline-none transition-colors"
