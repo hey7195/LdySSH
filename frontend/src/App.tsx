@@ -6829,7 +6829,7 @@ function decodeTerminalOutput(base64: string, decoderRef: React.MutableRefObject
 }
 
 function normalizePasteText(text: string) {
-  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return text.replace(/\r\n/g, "\r").replace(/\n/g, "\r");
 }
 
 function stripTerminalGeneratedReplies(data: string) {

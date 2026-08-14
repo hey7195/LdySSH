@@ -208,7 +208,7 @@ beforeEach(() => {
       resize_terminal: vi.fn().mockResolvedValue({ success: true }),
       send_input_base64: vi.fn().mockResolvedValue({ success: true }),
       clipboard_copy: vi.fn().mockResolvedValue({ success: true }),
-      clipboard_paste: vi.fn().mockResolvedValue({ success: true, text: "echo LDSSH_PASTE_OK\n" }),
+      clipboard_paste: vi.fn().mockResolvedValue({ success: true, text: "echo LDSSH_PASTE_OK\r" }),
       disconnect: vi.fn().mockResolvedValue({ success: true }),
       get_system_info: vi.fn().mockResolvedValue({ success: true, info: {} }),
       get_system_stats: vi.fn().mockResolvedValue({ success: true, stats: {} }),
@@ -1951,7 +1951,7 @@ describe("command library", () => {
     await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled());
     const lastCall = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.at(-1);
     expect(lastCall?.[0]).toBe("local-1");
-    expect(atob(lastCall?.[1] as string)).toBe("echo LDSSH_PASTE_OK\n");
+    expect(atob(lastCall?.[1] as string)).toBe("echo LDSSH_PASTE_OK\r");
   });
 
   test("normalizes CRLF clipboard text before pasting into terminal editors", async () => {
@@ -1969,7 +1969,7 @@ describe("command library", () => {
 
     await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled());
     const lastCall = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.at(-1);
-    expect(atob(lastCall?.[1] as string)).toBe("7bcbeb36256c4e5988fe259d472dbef6\n3d007a341f134098b122d1617f50ab14\n");
+    expect(atob(lastCall?.[1] as string)).toBe("7bcbeb36256c4e5988fe259d472dbef6\r3d007a341f134098b122d1617f50ab14\r");
   });
 
   test("copies terminal selection on Ctrl+C and does not send SIGINT", async () => {
