@@ -4774,6 +4774,27 @@ function TerminalWorkspace({
               <span>🌐 端口监听</span>
             </button>
             <button
+              onClick={() => onSendCommand("df -hT -x tmpfs -x devtmpfs\n")}
+              title="查看物理分区挂载点与磁盘剩余空间 (df -h)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 transition-colors cursor-pointer"
+            >
+              <span>💾 磁盘空间</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("free -h -w\n")}
+              title="查看物理内存与 Swap 交换分区占用 (free -h)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 transition-colors cursor-pointer"
+            >
+              <span>🧠 内存占用</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("docker ps -a 2>/dev/null || echo '未安装 Docker'\n")}
+              title="查看 Docker 容器运行状态 (docker ps)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 transition-colors cursor-pointer"
+            >
+              <span>🐳 容器状态</span>
+            </button>
+            <button
               onClick={() => onSendCommand("sudo !!\n")}
               title="以管理员特权重新执行上一条命令 (sudo !!)"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 transition-colors cursor-pointer"
@@ -4793,6 +4814,27 @@ function TerminalWorkspace({
 
           {/* 快捷侧边栏面板直达按钮组 */}
           <div className="flex items-center gap-0.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] p-0.5 shadow-2xs">
+            <button
+              onClick={() => {
+                if (sidePanel === "toolbox" && !rightSidebarCollapsed) {
+                  setRightSidebarCollapsed(true);
+                } else {
+                  onSidePanelChange("toolbox");
+                  setRightSidebarCollapsed(false);
+                }
+              }}
+              title="切换常用运维一键工具箱"
+              className={cn(
+                "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
+                sidePanel === "toolbox" && !rightSidebarCollapsed
+                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                  : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+              )}
+            >
+              <Wrench className="h-3 w-3" />
+              <span className="hidden lg:inline">工具箱</span>
+            </button>
+
             <button
               onClick={() => {
                 if (sidePanel === "files" && !rightSidebarCollapsed) {
@@ -8293,9 +8335,24 @@ function TerminalFileSidebar({
                     key={`${entry.type}-${entry.name}`}
                     className={cn(
                       "grid w-full min-w-0 grid-cols-[18px_minmax(0,1fr)_64px_82px] items-center gap-2 px-3 py-2 text-left text-xs transition-colors",
-                      entry.type === "directory" ? "hover:bg-[var(--fill-1)] cursor-pointer" : "hover:bg-[var(--fill-1)]/60 cursor-default"
+                      entry.type === "directory" ? "hover:bg-[var(--fill-1)] cursor-pointer" : "hover:bg-[var(--fill-1)]/60 cursor-pointer"
                     )}
-                    onClick={() => openDirectory(entry)}
+                    title={entry.type === "directory" ? `点击进入目录: ${entry.name}` : `双击在在线编辑器中打开/预览: ${entry.name}`}
+                    onClick={() => {
+                      if (entry.type === "directory") {
+                        openDirectory(entry);
+                      }
+                    }}
+                    onDoubleClick={() => {
+                      if (entry.type !== "directory") {
+                        const targetPath = joinRemotePath(remotePath, entry.name);
+                        if (onOpenRemoteEditor) {
+                          onOpenRemoteEditor(targetPath, entry.name);
+                        } else {
+                          setPreviewFile({ path: targetPath, name: entry.name });
+                        }
+                      }
+                    }}
                     onContextMenu={(event) => openFileMenu(event, entry)}
                   >
                     {entry.type === "directory" ? (
