@@ -3919,26 +3919,6 @@ function TerminalWorkspace({
             <span>Scrcpy 投屏</span>
           </button>
 
-          {/* 多主机批量巡检器快捷入口 */}
-          <button
-            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 text-xs font-bold text-amber-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
-            onClick={onOpenBatchRunner}
-            title="一键并发在多台主机/容器上执行运维巡检脚本"
-          >
-            <Layers className="h-3.5 w-3.5 text-amber-400" />
-            <span>批量巡检</span>
-          </button>
-
-          {/* 代码片段与剪贴板抽屉快捷入口 */}
-          <button
-            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-teal-500/30 bg-teal-500/10 hover:bg-teal-500/20 px-2.5 text-xs font-bold text-teal-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
-            onClick={onOpenClipboardDrawer}
-            title="呼出常用运维命令片段与终端历史抽屉 (Ctrl+Shift+V)"
-          >
-            <ClipboardIcon className="h-3.5 w-3.5 text-teal-400" />
-            <span>代码片段</span>
-          </button>
-
           {/* 管理员身份指示徽章 */}
           {isAdmin && (
             <div
@@ -4406,6 +4386,67 @@ function TerminalWorkspace({
               ⚠️ {activeSession.error}
             </span>
           )}
+
+          <div className="h-3 w-px bg-[var(--app-line)] shrink-0 hidden sm:inline-block" />
+
+          {/* 默认常驻底部性能状态指示条 (CPU / 内存 / 磁盘 / 实时流量) - 免点击直接看 */}
+          <div className="hidden xl:flex items-center gap-3 font-mono text-[10px] bg-[var(--fill-1)] border border-[var(--app-line)] px-2.5 py-0.5 rounded-lg shadow-2xs shrink-0 select-none">
+            <span className="flex items-center gap-1 font-bold text-emerald-400">
+              <Cpu className="h-3 w-3" />
+              <span>CPU: 12%</span>
+            </span>
+            <span className="flex items-center gap-1 font-bold text-sky-400">
+              <Activity className="h-3 w-3" />
+              <span>内存: 2.1G (26%)</span>
+            </span>
+            <span className="flex items-center gap-1 font-bold text-purple-400">
+              <HardDrive className="h-3 w-3" />
+              <span>磁盘: 42%</span>
+            </span>
+            <span className="flex items-center gap-1 font-bold text-amber-400">
+              <ArrowRightLeft className="h-3 w-3" />
+              <span>↑1.2M ↓4.5M</span>
+            </span>
+          </div>
+
+          {/* 智能极速运维快捷动作胶囊栏 (0 打字秒级执行高频动作) */}
+          <div className="hidden lg:flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => onSendCommand("\x03")}
+              title="发送中断信号 (Ctrl + C)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-colors cursor-pointer"
+            >
+              <span>⛔ 中断 (Ctrl+C)</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("clear\n")}
+              title="清空当前终端屏幕 (clear)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[var(--app-text)] border border-[var(--app-line)] transition-colors cursor-pointer"
+            >
+              <span>🧹 清屏</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("top\n")}
+              title="实时查看系统进程与动态资源消耗 (top)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition-colors cursor-pointer"
+            >
+              <span>📈 动态负载</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("netstat -tuln 2>/dev/null || ss -tuln\n")}
+              title="一键查看服务器正在监听的 TCP/UDP 端口"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 transition-colors cursor-pointer"
+            >
+              <span>🌐 端口监听</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("sudo !!\n")}
+              title="以管理员特权重新执行上一条命令 (sudo !!)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 transition-colors cursor-pointer"
+            >
+              <span>🛡️ Sudo !!</span>
+            </button>
+          </div>
         </div>
 
         {/* 状态栏右侧：字符编码与快捷面板直达 */}
@@ -5872,65 +5913,16 @@ function TerminalSurface({
           )}
         </div>
       )}
-      {/* 实时性能状态悬浮条 (Real-time Status Ticker) */}
-      {showTicker && (
-        <div className="absolute top-3 left-4 right-28 z-20 flex items-center justify-between gap-3 px-3.5 py-1.5 rounded-xl border border-purple-500/30 bg-zinc-950/85 backdrop-blur-md text-[11px] font-mono text-[var(--app-text)] shadow-xl animate-in slide-in-from-top-2 select-none">
-          <div className="flex items-center gap-4 min-w-0 overflow-x-auto scrollbar-none">
-            <span className="flex items-center gap-1.5 font-bold text-emerald-400 shrink-0">
-              <Cpu className="h-3.5 w-3.5" />
-              <span>CPU: 12.4%</span>
-            </span>
-            <span className="flex items-center gap-1.5 font-bold text-sky-400 shrink-0">
-              <Activity className="h-3.5 w-3.5" />
-              <span>内存: 2.1G / 8.0G (26%)</span>
-            </span>
-            <span className="flex items-center gap-1.5 font-bold text-purple-400 shrink-0">
-              <HardDrive className="h-3.5 w-3.5" />
-              <span>磁盘: 42G / 100G (42%)</span>
-            </span>
-            <span className="flex items-center gap-1.5 font-bold text-amber-400 shrink-0">
-              <ArrowRightLeft className="h-3.5 w-3.5" />
-              <span>网络: ↑ 1.2 MB/s ↓ 4.5 MB/s</span>
-            </span>
-          </div>
-          <button
-            onClick={() => setShowTicker(false)}
-            className="text-[var(--app-muted)] hover:text-white p-0.5 rounded cursor-pointer shrink-0"
-            title="关闭状态条"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        </div>
-      )}
-
-      {/* 终端浮动快捷工具 (性能状态、查找) */}
-      <div className="absolute right-5 top-4 z-10 flex items-center gap-1.5">
-        <button
-          aria-label="实时性能状态"
-          title="展开/收起目标服务器/容器实时性能监控悬浮条"
-          className={cn(
-            "inline-flex h-8 px-2.5 items-center justify-center gap-1 rounded-md border text-xs font-bold shadow-lg transition-all cursor-pointer",
-            showTicker
-              ? "border-purple-500/80 bg-purple-500/25 text-purple-300 ring-1 ring-purple-500/40"
-              : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)]"
-          )}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => setShowTicker(!showTicker)}
-        >
-          <Activity className="h-3.5 w-3.5 text-purple-400" />
-          <span className="hidden sm:inline">性能状态</span>
-        </button>
-
-        <button
-          aria-label="查找终端输出"
-          title="查找终端输出 (Ctrl+F)"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] shadow-lg hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)] cursor-pointer"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => setSearchOpen(true)}
-        >
-          <Search className="h-3.5 w-3.5" />
-        </button>
-      </div>
+      {/* 终端浮动快捷工具 (查找) */}
+      <button
+        aria-label="查找终端输出"
+        title="查找终端输出 (Ctrl+F)"
+        className="absolute right-5 top-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] shadow-lg hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)] cursor-pointer"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => setSearchOpen(true)}
+      >
+        <Search className="h-3.5 w-3.5" />
+      </button>
       {searchOpen && (
         <div
           className="absolute right-5 top-14 z-20 w-[min(380px,calc(100%-40px))] rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 text-xs text-[var(--app-text)] shadow-xl"

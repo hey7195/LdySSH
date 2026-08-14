@@ -27,7 +27,12 @@ import {
   Download,
   Wifi,
   Link2,
-  HelpCircle
+  HelpCircle,
+  Home,
+  ArrowLeft,
+  Square,
+  Power,
+  Volume1
 } from "lucide-react";
 import { nativeBridge } from "../../lib/bridge";
 
@@ -346,6 +351,27 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
     }
   }
 
+  async function handleSendKeyEvent(targetSerial: string, keyCode: string, keyName: string) {
+    if (!targetSerial.trim()) {
+      setError("目标设备序列号为空！请先选择在线设备或输入 Serial");
+      return;
+    }
+    setActionInProgress(`正在向 [${targetSerial}] 发送硬件按键: ${keyName}...`);
+    setError(null);
+    try {
+      const res = await nativeBridge.adbKeyevent(scrcpyDir.trim(), targetSerial.trim(), keyCode);
+      if (res && res.success) {
+        setSuccessMsg(`✓ 成功向设备发送硬件动作: ${keyName}`);
+      } else {
+        throw new Error(res?.error || "发送按键失败");
+      }
+    } catch (err: any) {
+      setError(err.message || "发送硬件按键异常");
+    } finally {
+      setActionInProgress(null);
+    }
+  }
+
   async function handleAdbPairConnect() {
     if (!pairIpPort.trim() || !pairCode.trim()) {
       setError("请填写配对 IP:端口 以及 6 位配对码！");
@@ -629,6 +655,64 @@ export const ScrcpyModal: React.FC<ScrcpyModalProps> = ({
                   onChange={(e) => setSerial(e.target.value)}
                   className="w-full h-8.5 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-purple-500 focus:outline-none transition-colors"
                 />
+              </div>
+
+              {/* Android 极速硬件动作快捷按键栏 */}
+              <div className="pt-1.5 flex items-center justify-between gap-1 overflow-x-auto scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => void handleSendKeyEvent(serial || devices[0]?.serial || "", "3", "Home 主页")}
+                  className="flex-1 flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[10px] font-bold text-[var(--app-text)] border border-[var(--app-line)] transition-colors cursor-pointer shrink-0"
+                  title="模拟点击 Home 主页键 (Keycode 3)"
+                >
+                  <Home className="h-3 w-3 text-indigo-400" />
+                  <span>主页</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSendKeyEvent(serial || devices[0]?.serial || "", "4", "Back 返回")}
+                  className="flex-1 flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[10px] font-bold text-[var(--app-text)] border border-[var(--app-line)] transition-colors cursor-pointer shrink-0"
+                  title="模拟点击 Back 返回键 (Keycode 4)"
+                >
+                  <ArrowLeft className="h-3 w-3 text-sky-400" />
+                  <span>返回</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSendKeyEvent(serial || devices[0]?.serial || "", "187", "Recent 多任务")}
+                  className="flex-1 flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[10px] font-bold text-[var(--app-text)] border border-[var(--app-line)] transition-colors cursor-pointer shrink-0"
+                  title="模拟点击 Recent 多任务键 (Keycode 187)"
+                >
+                  <Square className="h-3 w-3 text-purple-400" />
+                  <span>多任务</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSendKeyEvent(serial || devices[0]?.serial || "", "26", "Power 电源/熄屏")}
+                  className="flex-1 flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[10px] font-bold text-[var(--app-text)] border border-[var(--app-line)] transition-colors cursor-pointer shrink-0"
+                  title="模拟点击 Power 电源/锁屏/亮屏键 (Keycode 26)"
+                >
+                  <Power className="h-3 w-3 text-rose-400" />
+                  <span>电源</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSendKeyEvent(serial || devices[0]?.serial || "", "24", "Volume+ 音量加")}
+                  className="flex-1 flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[10px] font-bold text-[var(--app-text)] border border-[var(--app-line)] transition-colors cursor-pointer shrink-0"
+                  title="模拟点击音量+ (Keycode 24)"
+                >
+                  <Volume2 className="h-3 w-3 text-emerald-400" />
+                  <span>音量+</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSendKeyEvent(serial || devices[0]?.serial || "", "25", "Volume- 音量减")}
+                  className="flex-1 flex items-center justify-center gap-1 py-1 px-1.5 rounded-lg bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[10px] font-bold text-[var(--app-text)] border border-[var(--app-line)] transition-colors cursor-pointer shrink-0"
+                  title="模拟点击音量- (Keycode 25)"
+                >
+                  <Volume1 className="h-3 w-3 text-emerald-400" />
+                  <span>音量-</span>
+                </button>
               </div>
             </div>
 

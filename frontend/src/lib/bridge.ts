@@ -205,6 +205,23 @@ export const nativeBridge = {
       pairCode
     );
   },
+  adbKeyevent(scrcpyDir: string, serial: string, keyCode: string) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_keyevent",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial,
+      keyCode
+    );
+  },
+  runAdbCommand(scrcpyDir: string, args: string[]) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "run_adb_command",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      args
+    );
+  },
   showSaveFileDialog(defaultName: string) {
     return callNative<{ filePath?: string }>("show_save_file_dialog", {}, defaultName);
   },
