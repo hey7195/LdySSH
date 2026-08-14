@@ -25,4 +25,6 @@ prismssh-cpp/x64/Release/tools/
 design-preview.html
 *.zip
 *.tar.gz
+*.srs
+*.log
 LdySSH_Portable_v1.0.0/
