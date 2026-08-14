@@ -5,7 +5,6 @@ import {
   Play,
   Copy,
   Check,
-  Terminal,
   Clock,
   User,
   Globe,
@@ -15,8 +14,10 @@ import {
   BookmarkPlus,
   History,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Calendar
 } from "lucide-react";
+import { nativeBridge } from "../../lib/bridge";
 
 export interface AdbForwardResult {
   rawText: string;
@@ -36,6 +37,12 @@ interface AdbForwardModalProps {
   onSaveCommand?: (name: string, command: string) => void;
 }
 
+function normalizeDate(dStr: string): string {
+  if (!dStr) return "";
+  const cleaned = dStr.trim().replace(/\//g, "-").replace(/\./g, "-");
+  return cleaned;
+}
+
 function getFutureDate(days = 7): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -52,8 +59,8 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
   onExecuteCommand,
   onSaveCommand
 }) => {
-  const [user, setUser] = useState(() => localStorage.getItem("ldyssh_adb_user") || "hy");
-  const [deviceId, setDeviceId] = useState(() => localStorage.getItem("ldyssh_adb_deviceid") || "6120778");
+  const [user, setUser] = useState(() => localStorage.getItem("ldyssh_adb_user") || "xq");
+  const [deviceId, setDeviceId] = useState(() => localStorage.getItem("ldyssh_adb_deviceid") || "6275855");
   const [expirationDate, setExpirationDate] = useState(() => getFutureDate(7));
   const [allowIp, setAllowIp] = useState(() => localStorage.getItem("ldyssh_adb_allow_ip") || "");
   const [apiEndpoint, setApiEndpoint] = useState(
@@ -94,13 +101,33 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
   async function fetchPublicIp() {
     setLoadingIp(true);
     try {
+      // 优先通过原生后端请求获取外网 IP
+      const nativeRes = await nativeBridge.hermesHttpRequest({
+        method: "GET",
+        url: "https://api.ipify.org?format=json"
+      });
+      if (nativeRes.success && nativeRes.body) {
+        try {
+          const data = JSON.parse(nativeRes.body);
+          if (data.ip) {
+            setAllowIp(data.ip);
+            return;
+          }
+        } catch {
+          if (nativeRes.body.trim()) {
+            setAllowIp(nativeRes.body.trim());
+            return;
+          }
+        }
+      }
+
+      // 浏览器 fetch 备选
       const res = await fetch("https://api.ipify.org?format=json", { signal: AbortSignal.timeout(5000) });
       const data = await res.json();
       if (data.ip) {
         setAllowIp(data.ip);
       }
     } catch {
-      // Fallback
       try {
         const res2 = await fetch("https://ifconfig.me/ip", { signal: AbortSignal.timeout(5000) });
         const ip = (await res2.text()).trim();
@@ -166,35 +193,60 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
     setSaved(false);
     setExecuted(false);
 
+    const formattedExpDate = normalizeDate(expirationDate) || getFutureDate(7);
+
     try {
-      const url = new URL(apiEndpoint);
+      const url = new URL(apiEndpoint.trim());
       url.searchParams.set("user", user.trim());
       url.searchParams.set("deviceid", deviceId.trim());
-      url.searchParams.set("Expiration_Date", expirationDate.trim());
+      url.searchParams.set("Expiration_Date", formattedExpDate);
       if (allowIp.trim()) {
         url.searchParams.set("allow_ip", allowIp.trim());
       }
 
-      // 30 秒超时
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      let text = "";
 
-      const response = await fetch(url.toString(), {
+      // 1. 优先通过 C++ 原生请求发送 (完全避开浏览器 CORS 限制与 Mixed Content 限制)
+      const nativeRes = await nativeBridge.hermesHttpRequest({
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${authToken.trim()}`
-        },
-        signal: controller.signal
+        url: url.toString(),
+        token: authToken.trim()
       });
 
-      clearTimeout(timeoutId);
+      if (nativeRes && nativeRes.success && nativeRes.body) {
+        text = nativeRes.body;
+      } else if (nativeRes && nativeRes.status && nativeRes.status >= 200 && nativeRes.status < 400 && nativeRes.body) {
+        text = nativeRes.body;
+      } else if (nativeRes && nativeRes.error && !nativeRes.error.includes("unavailable")) {
+        // 如果后端有详细返回信息
+        if (nativeRes.body) {
+          text = nativeRes.body;
+        } else {
+          throw new Error(nativeRes.error);
+        }
+      } else {
+        // 2. 备选方案：前端直接 fetch 发送
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      if (!response.ok) {
-        throw new Error(`服务器响应失败 (${response.status} ${response.statusText})`);
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${authToken.trim()}`
+          },
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`服务器响应异常: ${response.status} ${response.statusText}`);
+        }
+
+        text = await response.text();
       }
 
-      const text = await response.text();
-      const parsed = parseResponseText(text, deviceId.trim(), user.trim(), expirationDate.trim());
+      const parsed = parseResponseText(text, deviceId.trim(), user.trim(), formattedExpDate);
       setResult(parsed);
 
       // 保存到本地历史记录
@@ -205,7 +257,7 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
       if (err.name === "AbortError") {
         setError("请求超时 (30秒)，请检查远程端口转发服务器网络连通性。");
       } else {
-        setError(err.message || "请求开启 ADB 转发失败");
+        setError(err.message || "请求开启 ADB 转发失败，请检查网络或配置");
       }
     } finally {
       setLoading(false);
@@ -275,7 +327,7 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="例如: hy"
+                  placeholder="例如: xq"
                   value={user}
                   onChange={(e) => setUser(e.target.value)}
                   className="w-full h-9 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-emerald-500 focus:outline-none transition-colors"
@@ -290,7 +342,7 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="例如: 6120778"
+                  placeholder="例如: 6275855"
                   value={deviceId}
                   onChange={(e) => setDeviceId(e.target.value)}
                   className="w-full h-9 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-emerald-500 focus:outline-none transition-colors"
@@ -303,13 +355,13 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-[var(--app-text)]">
                   <Clock className="h-3.5 w-3.5 text-amber-400" />
-                  <span>失效日期 (Expiration_Date)</span>
+                  <span>失效日期 (Expiration_Date: YYYY-MM-DD)</span>
                   <span className="text-[10px] text-[var(--app-muted)] font-normal">（默认自动计算今日起 +7 天）</span>
                 </label>
                 <div className="flex items-center gap-1">
                   {[3, 7, 14, 30].map((days) => {
                     const presetDate = getFutureDate(days);
-                    const isSelected = expirationDate === presetDate;
+                    const isSelected = normalizeDate(expirationDate) === presetDate;
                     return (
                       <button
                         key={days}
@@ -327,13 +379,30 @@ export const AdbForwardModal: React.FC<AdbForwardModalProps> = ({
                   })}
                 </div>
               </div>
-              <input
-                type="date"
-                required
-                value={expirationDate}
-                onChange={(e) => setExpirationDate(e.target.value)}
-                className="w-full h-9 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-emerald-500 focus:outline-none transition-colors"
-              />
+
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    required
+                    placeholder="格式: 2026-08-21"
+                    value={expirationDate}
+                    onChange={(e) => setExpirationDate(e.target.value)}
+                    className="w-full h-9 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3 text-xs font-mono font-bold text-[var(--app-text)] focus:border-emerald-500 focus:outline-none transition-colors"
+                  />
+                </div>
+                <div className="relative shrink-0">
+                  <input
+                    type="date"
+                    value={normalizeDate(expirationDate)}
+                    onChange={(e) => {
+                      if (e.target.value) setExpirationDate(e.target.value);
+                    }}
+                    className="h-9 px-2 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-xs text-[var(--app-text)] cursor-pointer focus:border-emerald-500 focus:outline-none font-mono"
+                    title="选择日历日期"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Allow IP */}
