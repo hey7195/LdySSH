@@ -5436,15 +5436,20 @@ function TerminalSurface({
   async function pasteTerminalClipboard(sessionId: string) {
     const result = await nativeBridge.clipboardPaste();
     if (result.success && result.text) {
-      const b64Data = bytesToBase64(new TextEncoder().encode(normalizePasteText(result.text)));
-      if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
-        sessions.forEach((s) => {
-          if (s.connected || s.status === "connected") {
-            void nativeBridge.sendInputBase64(s.id, b64Data);
-          }
-        });
+      const activeTerm = focusedPane === "secondary" ? secondaryTerminalRef.current : terminalRef.current;
+      if (activeTerm && typeof (activeTerm as any).paste === "function") {
+        (activeTerm as any).paste(result.text);
       } else {
-        await nativeBridge.sendInputBase64(sessionId, b64Data);
+        const b64Data = bytesToBase64(new TextEncoder().encode(normalizePasteText(result.text)));
+        if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
+          sessions.forEach((s) => {
+            if (s.connected || s.status === "connected") {
+              void nativeBridge.sendInputBase64(s.id, b64Data);
+            }
+          });
+        } else {
+          await nativeBridge.sendInputBase64(sessionId, b64Data);
+        }
       }
     }
   }

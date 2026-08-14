@@ -92,6 +92,9 @@ vi.mock("@xterm/xterm", () => ({
     focus() {
       terminalMock.focusCalls += 1;
     }
+    paste(text: string) {
+      terminalMock.dataHandler?.(text);
+    }
     refresh() {
       terminalMock.refreshCalls += 1;
     }
@@ -1969,7 +1972,7 @@ describe("command library", () => {
 
     await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled());
     const lastCall = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.at(-1);
-    expect(atob(lastCall?.[1] as string)).toBe("7bcbeb36256c4e5988fe259d472dbef6\r3d007a341f134098b122d1617f50ab14\r");
+    expect(atob(lastCall?.[1] as string)).toBe("7bcbeb36256c4e5988fe259d472dbef6\r\n3d007a341f134098b122d1617f50ab14\r\n");
   });
 
   test("copies terminal selection on Ctrl+C and does not send SIGINT", async () => {
