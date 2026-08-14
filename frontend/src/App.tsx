@@ -5362,16 +5362,20 @@ function TerminalSurface({
 
     function handleGlobalKeyDown(event: globalThis.KeyboardEvent) {
       if (!visibleRef.current || !activeSession?.id) return;
-      const tag = (event.target as HTMLElement)?.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea") return;
+      const target = event.target as HTMLElement;
+      const tag = target?.tagName?.toLowerCase();
+      const isXtermHelper = target?.classList?.contains("xterm-helper-textarea");
+      if ((tag === "input" || tag === "textarea") && !isXtermHelper) return;
 
       const isCtrlOrMeta = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
 
       if ((isCtrlOrMeta && !event.shiftKey && key === "v") || (event.shiftKey && key === "insert")) {
         event.preventDefault();
-        void pasteTerminalClipboard(activeSession.id);
-        terminalRef.current?.focus();
+        event.stopPropagation();
+        const targetSessionId = focusedPane === "secondary" && secondarySession?.id ? secondarySession.id : activeSession.id;
+        void pasteTerminalClipboard(targetSessionId);
+        focusTerminal();
       }
     }
 
@@ -5383,7 +5387,7 @@ function TerminalSurface({
       window.removeEventListener("keydown", handleGlobalKeyDown);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [activeSession?.id]);
+  }, [activeSession?.id, focusedPane, secondarySession?.id]);
 
   useEffect(() => {
     rawCommandModeRef.current = false;
@@ -5434,23 +5438,36 @@ function TerminalSurface({
   }, [searchOpen, searchQuery, activeSession?.id]);
 
   async function pasteTerminalClipboard(sessionId: string) {
-    const result = await nativeBridge.clipboardPaste();
-    if (result.success && result.text) {
-      const activeTerm = focusedPane === "secondary" ? secondaryTerminalRef.current : terminalRef.current;
-      if (activeTerm && typeof (activeTerm as any).paste === "function") {
-        (activeTerm as any).paste(result.text);
-      } else {
-        const b64Data = bytesToBase64(new TextEncoder().encode(normalizePasteText(result.text)));
-        if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
-          sessions.forEach((s) => {
-            if (s.connected || s.status === "connected") {
-              void nativeBridge.sendInputBase64(s.id, b64Data);
-            }
-          });
-        } else {
-          await nativeBridge.sendInputBase64(sessionId, b64Data);
-        }
+    let text = "";
+    try {
+      const result = await nativeBridge.clipboardPaste();
+      if (result.success && result.text) {
+        text = result.text;
       }
+    } catch {
+      // fallback
+    }
+    if (!text && navigator.clipboard?.readText) {
+      try {
+        text = await navigator.clipboard.readText();
+      } catch {
+        // ignore
+      }
+    }
+    if (!text) return;
+
+    // Convert CRLF / LF into Carriage Return (\r) so multi-line commands execute sequentially
+    const normalized = text.replace(/\r\n/g, "\r").replace(/\n/g, "\r");
+    const b64Data = bytesToBase64(new TextEncoder().encode(normalized));
+
+    if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
+      sessions.forEach((s) => {
+        if (s.connected || s.status === "connected") {
+          void nativeBridge.sendInputBase64(s.id, b64Data);
+        }
+      });
+    } else {
+      await nativeBridge.sendInputBase64(sessionId, b64Data);
     }
   }
 
