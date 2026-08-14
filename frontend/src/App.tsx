@@ -5344,17 +5344,43 @@ function TerminalSurface({
     if (!activeSession) return;
 
     function restoreTerminalRender() {
-      rebuildTerminalRenderer();
+      if (!visibleRef.current) return;
+      suppressFocusInputResidue();
+      fitRef.current?.fit();
+      secondaryFitRef.current?.fit();
+      focusTerminal();
+      terminalRef.current?.refresh(0, (terminalRef.current.rows || 1) - 1);
+      secondaryTerminalRef.current?.refresh(0, (secondaryTerminalRef.current.rows || 1) - 1);
+      scheduleTerminalLayoutRestore();
     }
 
     function handleVisibilityChange() {
-      if (!document.hidden) restoreTerminalRender();
+      if (!document.hidden) {
+        restoreTerminalRender();
+      }
+    }
+
+    function handleGlobalKeyDown(event: globalThis.KeyboardEvent) {
+      if (!visibleRef.current || !activeSession?.id) return;
+      const tag = (event.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea") return;
+
+      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+
+      if ((isCtrlOrMeta && !event.shiftKey && key === "v") || (event.shiftKey && key === "insert")) {
+        event.preventDefault();
+        void pasteTerminalClipboard(activeSession.id);
+        terminalRef.current?.focus();
+      }
     }
 
     window.addEventListener("focus", restoreTerminalRender);
+    window.addEventListener("keydown", handleGlobalKeyDown);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.removeEventListener("focus", restoreTerminalRender);
+      window.removeEventListener("keydown", handleGlobalKeyDown);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [activeSession?.id]);

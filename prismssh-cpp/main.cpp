@@ -3507,6 +3507,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         break;
 
+    case WM_SETFOCUS:
+    case WM_ACTIVATE:
+        if (webviewController != nullptr && (message == WM_SETFOCUS || LOWORD(wParam) != WA_INACTIVE)) {
+            webviewController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        }
+        break;
+
     case WM_POST_WEB_MESSAGE: {
         std::wstring* pStr = (std::wstring*)lParam;
         if (pStr) {

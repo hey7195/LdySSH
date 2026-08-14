@@ -1039,15 +1039,14 @@ describe("command library", () => {
     fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     await waitFor(() => expect(terminalMock.dataHandler).toBeTypeOf("function"));
 
-    const instancesBeforeFocus = terminalMock.instances.length;
+    const fitCallsBeforeFocus = terminalMock.fitCalls;
+    const focusCallsBeforeFocus = terminalMock.focusCalls;
     window.dispatchEvent(new Event("focus"));
 
-    await waitFor(() => expect(terminalMock.instances.length).toBeGreaterThan(instancesBeforeFocus));
-    const fitCallsAfterRebuild = terminalMock.fitCalls;
-    const focusCallsAfterRebuild = terminalMock.focusCalls;
-    await new Promise((resolve) => window.setTimeout(resolve, 120));
-    expect(terminalMock.fitCalls).toBeGreaterThan(fitCallsAfterRebuild);
-    expect(terminalMock.focusCalls).toBeGreaterThan(focusCallsAfterRebuild);
+    await waitFor(() => {
+      expect(terminalMock.fitCalls).toBeGreaterThan(fitCallsBeforeFocus);
+      expect(terminalMock.focusCalls).toBeGreaterThan(focusCallsBeforeFocus);
+    });
     expect(window.pywebview?.api?.create_local_session).toHaveBeenCalledTimes(1);
   });
 
