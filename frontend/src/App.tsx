@@ -4525,6 +4525,7 @@ function TerminalSurface({
   const secondaryTerminalRef = useRef<XTerm | null>(null);
   const secondaryFitRef = useRef<FitAddon | null>(null);
   const secondaryDecoderRef = useRef<TextDecoder | null>(null);
+  const [focusedPane, setFocusedPane] = useState<"primary" | "secondary">("primary");
   const isSplit = Boolean(splitMode && splitMode !== "none" && sessions && sessions.length >= 2);
   const primarySession = activeSession || sessions?.[0];
   const secondarySession = isSplit ? (sessions?.find((s) => s.id !== primarySession?.id) || sessions?.[1]) : undefined;
@@ -4586,12 +4587,17 @@ function TerminalSurface({
 
   function focusTerminal() {
     if (!visibleRef.current) return;
-    terminalRef.current?.focus();
+    if (focusedPane === "secondary" && secondaryTerminalRef.current) {
+      secondaryTerminalRef.current.focus();
+    } else {
+      terminalRef.current?.focus();
+    }
   }
 
   function refitAndFocusTerminal() {
     if (!visibleRef.current) return;
     fitRef.current?.fit();
+    secondaryFitRef.current?.fit();
     const terminal = terminalRef.current;
     if (terminal) {
       if (terminal.cols < 20 || terminal.rows < 5) {
@@ -4602,6 +4608,7 @@ function TerminalSurface({
       }
     }
     terminalRef.current?.refresh(0, terminalRef.current.rows - 1);
+    secondaryTerminalRef.current?.refresh(0, (secondaryTerminalRef.current.rows || 1) - 1);
     focusTerminal();
   }
 
@@ -5146,6 +5153,29 @@ function TerminalSurface({
     term.loadAddon(fitAddon);
     term.open(container);
     fitAddon.fit();
+    term.attachCustomKeyEventHandler((event) => {
+      const key = event.key.toLowerCase();
+      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+      if (event.type === "keydown" && isCtrlOrMeta && !event.shiftKey && key === "c") {
+        const selection = term.getSelection();
+        if (selection) {
+          event.preventDefault();
+          void nativeBridge.clipboardCopy(selection);
+          term.clearSelection();
+          return false;
+        }
+        return true;
+      }
+      if (event.type === "keydown" && ((isCtrlOrMeta && key === "v") || (event.shiftKey && key === "insert"))) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) {
+          void pasteTerminalClipboard(secondarySession.id);
+        }
+        return false;
+      }
+      return true;
+    });
     term.writeln(`\x1b[36m${secondarySession.title}\x1b[0m`);
     term.writeln("");
 
@@ -5340,8 +5370,12 @@ function TerminalSurface({
       data-terminal-theme={terminalTheme}
       style={terminalStyle}
       tabIndex={0}
-      onPointerDown={focusTerminal}
-      onMouseEnter={refitAndFocusTerminal}
+      onPointerDown={() => {
+        if (!isSplit) focusTerminal();
+      }}
+      onMouseEnter={() => {
+        if (!isSplit) refitAndFocusTerminal();
+      }}
       onKeyDown={handleTerminalKeyDown}
       onContextMenu={openTerminalMenu}
     >
@@ -5352,17 +5386,41 @@ function TerminalSurface({
           "grid h-full w-full gap-1.5 p-1 min-h-0 overflow-hidden",
           splitMode === "vertical" ? "grid-rows-2" : "grid-cols-2"
         )}>
-          {/* 主分屏 (Active) */}
-          <div className="relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-xl border border-emerald-500/80 shadow-md ring-1 ring-emerald-500/30">
-            <div className="flex items-center justify-between border-b border-emerald-500/30 bg-emerald-950/40 px-3 py-1 text-[11px] font-mono select-none text-emerald-300 font-bold">
+          {/* 主分屏 (Active / Primary) */}
+          <div
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setFocusedPane("primary");
+              terminalRef.current?.focus();
+            }}
+            className={cn(
+              "relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-xl border transition-all cursor-text",
+              focusedPane === "primary"
+                ? "border-emerald-500/80 shadow-md ring-1 ring-emerald-500/30"
+                : "border-[var(--app-line)] opacity-85 hover:opacity-100"
+            )}
+          >
+            <div className={cn(
+              "flex items-center justify-between border-b px-3 py-1 text-[11px] font-mono select-none font-bold",
+              focusedPane === "primary"
+                ? "border-emerald-500/30 bg-emerald-950/40 text-emerald-300"
+                : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)]"
+            )}>
               <div className="flex items-center gap-1.5 min-w-0">
                 <Terminal className="h-3 w-3 text-emerald-400 shrink-0" />
                 <span className="truncate">{primarySession.title}</span>
-                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动中</span>
+                {focusedPane === "primary" ? (
+                  <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动输入中</span>
+                ) : (
+                  <span className="text-[9px] bg-[var(--fill-2)] text-[var(--app-muted)] px-1 py-0.2 rounded font-mono">点击激活</span>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => onToggleSplit?.(primarySession.id, "none")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSplit?.(primarySession.id, "none");
+                  }}
                   title="退出分屏 (全屏)"
                   className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
                 >
@@ -5377,14 +5435,32 @@ function TerminalSurface({
           {/* 副分屏 (Secondary) */}
           {secondarySession && (
             <div
-              onClick={() => onActivate?.(secondarySession.id)}
-              className="relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-xl border border-[var(--app-line)] hover:border-zinc-500 opacity-90 hover:opacity-100 transition-all cursor-pointer"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                setFocusedPane("secondary");
+                secondaryTerminalRef.current?.focus();
+              }}
+              className={cn(
+                "relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-xl border transition-all cursor-text",
+                focusedPane === "secondary"
+                  ? "border-emerald-500/80 shadow-md ring-1 ring-emerald-500/30"
+                  : "border-[var(--app-line)] opacity-85 hover:opacity-100"
+              )}
             >
-              <div className="flex items-center justify-between border-b border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-1 text-[11px] font-mono select-none text-[var(--app-muted)] font-bold">
+              <div className={cn(
+                "flex items-center justify-between border-b px-3 py-1 text-[11px] font-mono select-none font-bold",
+                focusedPane === "secondary"
+                  ? "border-emerald-500/30 bg-emerald-950/40 text-emerald-300"
+                  : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)]"
+              )}>
                 <div className="flex items-center gap-1.5 min-w-0">
                   <Terminal className="h-3 w-3 text-blue-400 shrink-0" />
                   <span className="truncate">{secondarySession.title}</span>
-                  <span className="text-[9px] bg-[var(--fill-2)] text-[var(--app-muted)] px-1 py-0.2 rounded font-mono">副屏 (点击激活输入)</span>
+                  {focusedPane === "secondary" ? (
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动输入中</span>
+                  ) : (
+                    <span className="text-[9px] bg-[var(--fill-2)] text-[var(--app-muted)] px-1 py-0.2 rounded font-mono">点击激活</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   <button
