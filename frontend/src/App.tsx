@@ -154,7 +154,7 @@ import {
 } from "./lib/terminalSettings";
 
 type Tool = "ssh" | "cmd" | "monitor" | "serial" | "ebpf" | "cluster" | "git" | "local" | "browser" | "settings";
-type TerminalSidePanel = "commands" | "files" | "ai";
+type TerminalSidePanel = "commands" | "toolbox" | "files" | "ai";
 type AiTool = "codex" | "hermes";
 type AiNoiseMode = "minimal" | "standard" | "debug";
 type AiContextSource = "terminal_selection" | "session_metadata";
@@ -6601,6 +6601,55 @@ function TerminalSurface({
             <span>全选 (Ctrl+A)</span>
           </button>
 
+          <button
+            role="menuitem"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] text-emerald-400 font-bold"
+            onClick={() => {
+              setTerminalMenu(null);
+              if (!terminalRef.current) return;
+              const buffer = terminalRef.current.buffer.active;
+              const lines: string[] = [];
+              for (let i = 0; i < buffer.length; i++) {
+                const line = buffer.getLine(i);
+                if (line) lines.push(line.translateToString(true));
+              }
+              const fullText = lines.join("\n").trim();
+              if (fullText) {
+                void nativeBridge.clipboardCopy(fullText);
+              }
+            }}
+          >
+            <Copy className="h-3.5 w-3.5 text-emerald-400" />
+            <span>复制全部终端输出</span>
+          </button>
+
+          <button
+            role="menuitem"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] text-sky-400 font-bold"
+            onClick={() => {
+              setTerminalMenu(null);
+              if (!terminalRef.current) return;
+              const buffer = terminalRef.current.buffer.active;
+              const lines: string[] = [];
+              for (let i = 0; i < buffer.length; i++) {
+                const line = buffer.getLine(i);
+                if (line) lines.push(line.translateToString(true));
+              }
+              const fullText = lines.join("\n").trim();
+              if (!fullText) return;
+              const blob = new Blob([fullText], { type: "text/plain;charset=utf-8" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `terminal_${activeSession?.title || "session"}_${new Date().toISOString().slice(0, 10)}.log`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            <Download className="h-3.5 w-3.5 text-sky-400" />
+            <span>导出终端日志 (.log)</span>
+          </button>
+
           <div className="h-px bg-[var(--app-line)] my-1" />
 
           {terminalMenu.selection && (
@@ -7358,6 +7407,302 @@ function formatFileSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+interface DevOpsScriptItem {
+  id: string;
+  name: string;
+  desc: string;
+  category: "all" | "system" | "network" | "disk" | "docker" | "security";
+  command: string;
+}
+
+const DEVOPS_TOOLBOX_ITEMS: Array<DevOpsScriptItem & { category: Exclude<DevOpsScriptItem["category"], "all"> }> = [
+  // 系统信息与体检
+  {
+    id: "sys_summary",
+    name: "系统内核与发行版",
+    desc: "查看 Linux 发行版、内核版本及当前运行时间",
+    category: "system",
+    command: "uname -a && (cat /etc/os-release 2>/dev/null || cat /etc/redhat-release) | head -n 6 && uptime"
+  },
+  {
+    id: "cpu_info",
+    name: "CPU 规格与核心",
+    desc: "提取 CPU 型号、主频、核心数与架构体系",
+    category: "system",
+    command: "lscpu | grep -E 'Model name|Socket|Thread|NUMA|CPU\\(s\\):|CPU MHz|Architecture'"
+  },
+  {
+    id: "mem_detail",
+    name: "物理内存详表",
+    desc: "查看实际物理内存、交换分区与缓存占用情况",
+    category: "system",
+    command: "free -h -w && head -n 10 /proc/meminfo"
+  },
+  {
+    id: "sys_uptime",
+    name: "负载与活跃用户",
+    desc: "查看 1/5/15 分钟负载及当前登录的终端用户",
+    category: "system",
+    command: "w"
+  },
+
+  // 网络与端口
+  {
+    id: "net_ports",
+    name: "所有监听端口",
+    desc: "排查正在监听的 TCP/UDP 端口及对应进程 PID",
+    category: "network",
+    command: "netstat -tulnp 2>/dev/null || ss -tulnp"
+  },
+  {
+    id: "public_ip",
+    name: "公网出口与归属",
+    desc: "获取服务器对外通信的公网 IP 和地理位置",
+    category: "network",
+    command: "curl -s https://ipinfo.io || curl -s https://ifconfig.me"
+  },
+  {
+    id: "ping_check",
+    name: "网络连通性探测",
+    desc: "测试与公共 DNS (223.5.5.5) 的连通延迟与丢包率",
+    category: "network",
+    command: "ping -c 4 223.5.5.5"
+  },
+  {
+    id: "firewall_status",
+    name: "防火墙规则状态",
+    desc: "检查 UFW 或 iptables 活跃规则与放行端口",
+    category: "network",
+    command: "ufw status 2>/dev/null || iptables -L -n -v --line-numbers | head -n 30"
+  },
+
+  // 磁盘与清理
+  {
+    id: "disk_mounts",
+    name: "磁盘分区与占用",
+    desc: "以易读单位展示所有物理分区挂载点与剩余空间",
+    category: "disk",
+    command: "df -hT -x tmpfs -x devtmpfs -x squashfs"
+  },
+  {
+    id: "top_files",
+    name: "当前目录 Top 10 大文件",
+    desc: "扫描当前目录下占用空间最大的前 10 个文件或子文件夹",
+    category: "disk",
+    command: "du -ah . 2>/dev/null | sort -rh | head -n 10"
+  },
+  {
+    id: "clean_logs",
+    name: "清理 systemd 日志",
+    desc: "保留最近 2 天系统日志，释放 /var/log/journal 空间",
+    category: "disk",
+    command: "journalctl --vacuum-time=2d"
+  },
+  {
+    id: "clean_packages",
+    name: "清理软件包缓存",
+    desc: "清理 APT / YUM 安装包缓存及孤儿无用依赖",
+    category: "disk",
+    command: "(which apt && apt clean && apt autoremove -y) || (which yum && yum clean all) || (which dnf && dnf clean all)"
+  },
+
+  // Docker 容器
+  {
+    id: "docker_ps",
+    name: "容器运行状态清单",
+    desc: "表格化展示所有容器 ID、名称、状态与映射端口",
+    category: "docker",
+    command: "docker ps -a --format 'table {{.ID}}\\t{{.Names}}\\t{{.Status}}\\t{{.Ports}}'"
+  },
+  {
+    id: "docker_stats",
+    name: "容器实时资源开销",
+    desc: "快速获取各容器当前的 CPU、内存、网络 IO 统计快照",
+    category: "docker",
+    command: "docker stats --no-stream"
+  },
+  {
+    id: "docker_images",
+    name: "本地镜像列表",
+    desc: "查看本地存储的 Docker 镜像与体积大小",
+    category: "docker",
+    command: "docker images"
+  },
+  {
+    id: "docker_prune",
+    name: "清理未使用的 Docker 镜像/网络",
+    desc: "清理停止的容器、悬空虚悬镜像与无用网络",
+    category: "docker",
+    command: "docker system prune -f"
+  },
+
+  // 安全与进程
+  {
+    id: "top_mem_proc",
+    name: "内存消耗 Top 10 进程",
+    desc: "按物理内存使用率降序展示前 10 个最耗内存进程",
+    category: "security",
+    command: "ps aux --sort=-%mem | head -n 11"
+  },
+  {
+    id: "top_cpu_proc",
+    name: "CPU 占用 Top 10 进程",
+    desc: "按 CPU 使用率降序展示前 10 个最耗算力进程",
+    category: "security",
+    command: "ps aux --sort=-%cpu | head -n 11"
+  },
+  {
+    id: "last_logins",
+    name: "最近成功登录审计",
+    desc: "查看最近 15 次用户 SSH 登录成功记录与来源 IP",
+    category: "security",
+    command: "last -n 15"
+  },
+  {
+    id: "failed_logins",
+    name: "爆破防护 / 登录失败审计",
+    desc: "排查可能的 SSH 暴力破解尝试与失败 IP",
+    category: "security",
+    command: "lastb -n 15 2>/dev/null || grep 'Failed password' /var/log/auth.log 2>/dev/null | tail -n 15 || echo '未检测到失败日志或权限不足'"
+  }
+];
+
+function DevOpsToolboxPanel({
+  activeSession,
+  onSendCommand
+}: {
+  activeSession?: SessionTab;
+  onSendCommand: (command: string) => void;
+  onAddAiQuote?: (text: string, sourceTitle: string) => void;
+}) {
+  const [selectedCategory, setSelectedCategory] = useState<DevOpsScriptItem["category"]>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [executedId, setExecutedId] = useState<string | null>(null);
+
+  const categories: Array<{ id: DevOpsScriptItem["category"]; label: string; icon: string }> = [
+    { id: "all", label: "全部", icon: "⚡" },
+    { id: "system", label: "系统体检", icon: "📊" },
+    { id: "network", label: "网络端口", icon: "🌐" },
+    { id: "disk", label: "磁盘清理", icon: "🧹" },
+    { id: "docker", label: "Docker", icon: "🐳" },
+    { id: "security", label: "安全审计", icon: "🛡️" }
+  ];
+
+  const filteredItems = useMemo(() => {
+    return DEVOPS_TOOLBOX_ITEMS.filter((item) => {
+      const matchCat = selectedCategory === "all" || item.category === selectedCategory;
+      const matchQuery =
+        !searchQuery.trim() ||
+        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.desc.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.command.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchCat && matchQuery;
+    });
+  }, [selectedCategory, searchQuery]);
+
+  function handleExecute(item: DevOpsScriptItem) {
+    onSendCommand(`${item.command}\r`);
+    setExecutedId(item.id);
+    setTimeout(() => setExecutedId(null), 1800);
+  }
+
+  function handleCopy(item: DevOpsScriptItem) {
+    void nativeBridge.clipboardCopy(item.command);
+    setCopiedId(item.id);
+    setTimeout(() => setCopiedId(null), 1800);
+  }
+
+  return (
+    <div className="flex h-full flex-col min-h-0 bg-[var(--app-bg)]">
+      {/* 顶部搜索与说明 */}
+      <div className="p-3 border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 font-bold text-xs text-[var(--app-text)]">
+            <Wrench className="h-3.5 w-3.5 text-amber-500" />
+            <span>常用运维一键工具箱</span>
+          </div>
+          <span className="text-[10px] text-[var(--app-muted)] font-mono font-bold">
+            {activeSession ? activeSession.title : "未连接"}
+          </span>
+        </div>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--app-muted)]" />
+          <Input
+            className="pl-7 pr-2 h-7 text-xs rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-amber-500/60 transition-colors font-medium"
+            value={searchQuery}
+            placeholder="搜索脚本 / 指令 / 功能..."
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        {/* 分类切换 Chips */}
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pt-0.5">
+          {categories.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCategory(cat.id)}
+              className={cn(
+                "rounded-md px-2 py-0.5 text-[10px] font-bold transition-all shrink-0 cursor-pointer select-none",
+                selectedCategory === cat.id
+                  ? "bg-amber-500 text-slate-950 shadow-2xs"
+                  : "bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)] border border-[var(--app-line)]"
+              )}
+            >
+              <span>{cat.icon}</span>
+              <span className="ml-1">{cat.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 列表项 */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-2">
+        {filteredItems.map((item) => (
+          <div
+            key={item.id}
+            className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 shadow-2xs space-y-1.5 hover:border-amber-500/30 transition-all group"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="font-bold text-xs text-[var(--app-text)] truncate">{item.name}</div>
+                <div className="text-[11px] text-[var(--app-muted)] mt-0.5 leading-tight">{item.desc}</div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleCopy(item)}
+                  className="h-6 px-1.5 rounded-md bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[var(--app-muted)] hover:text-[var(--app-text)] border border-[var(--app-line)] text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1"
+                  title="复制此脚本指令"
+                >
+                  <Copy className="h-2.5 w-2.5" />
+                  <span>{copiedId === item.id ? "已复制 ✔" : "复制"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExecute(item)}
+                  className="h-6 px-2 rounded-md bg-amber-500 hover:bg-amber-400 active:scale-[0.96] text-slate-950 text-[10px] font-extrabold shadow-2xs transition-all cursor-pointer flex items-center gap-1"
+                  title="在当前终端执行此命令"
+                >
+                  <Play className="h-2.5 w-2.5 fill-current" />
+                  <span>{executedId === item.id ? "已发送 ⚡" : "执行"}</span>
+                </button>
+              </div>
+            </div>
+            <div className="rounded-lg bg-[var(--fill-1)] px-2 py-1 font-mono text-[10px] text-[var(--app-muted)] truncate border border-[var(--app-line)] select-all group-hover:text-[var(--app-text)] transition-colors">
+              $ {item.command}
+            </div>
+          </div>
+        ))}
+        {filteredItems.length === 0 && (
+          <div className="py-8 text-center text-xs text-[var(--app-muted)] font-bold">
+            未找到匹配的运维工具
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TerminalRightSidebar({
   activePanel,
   activeSession,
@@ -7401,6 +7746,7 @@ function TerminalRightSidebar({
 }) {
   const panels: Array<{ id: TerminalSidePanel; label: string; icon: React.ReactNode }> = [
     { id: "commands", label: "命令", icon: <Command className="h-3.5 w-3.5" /> },
+    { id: "toolbox", label: "工具箱", icon: <Wrench className="h-3.5 w-3.5" /> },
     { id: "files", label: "文件", icon: <FolderOpen className="h-3.5 w-3.5" /> },
     { id: "ai", label: "AI", icon: <Bot className="h-3.5 w-3.5" /> }
   ];
@@ -7423,6 +7769,7 @@ function TerminalRightSidebar({
           const active = activePanel === panel.id;
           const iconColorClass = {
             commands: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60",
+            toolbox: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60",
             files: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60",
             ai: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60"
           }[panel.id];
@@ -7433,7 +7780,7 @@ function TerminalRightSidebar({
               role="tab"
               aria-selected={active}
               className={cn(
-                "inline-flex h-8.5 flex-1 items-center justify-center gap-2 rounded-full text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
+                "inline-flex h-8.5 flex-1 items-center justify-center gap-1.5 rounded-full text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
                 active
                   ? "bg-slate-900 text-white shadow-sm shadow-slate-900/15"
                   : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
@@ -7459,6 +7806,13 @@ function TerminalRightSidebar({
             onSendCommand={onSendCommand}
             onAddFolder={onAddFolder}
             onSaveCommand={onSaveCommand}
+          />
+        )}
+        {activePanel === "toolbox" && (
+          <DevOpsToolboxPanel
+            activeSession={activeSession}
+            onSendCommand={onSendCommand}
+            onAddAiQuote={onAddAiQuote}
           />
         )}
         {activePanel === "files" && (
