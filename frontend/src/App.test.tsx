@@ -1970,9 +1970,11 @@ describe("command library", () => {
 
     terminalMock.keyHandler?.(new KeyboardEvent("keydown", { key: "v", ctrlKey: true }));
 
-    await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalled());
-    const lastCall = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.at(-1);
-    expect(atob(lastCall?.[1] as string)).toBe("7bcbeb36256c4e5988fe259d472dbef6\r3d007a341f134098b122d1617f50ab14\r");
+    await waitFor(() => {
+      const calls = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls;
+      const sent = calls.map((c) => atob(c[1] as string)).join("");
+      expect(sent).toBe("7bcbeb36256c4e5988fe259d472dbef6\r3d007a341f134098b122d1617f50ab14\r");
+    });
   });
 
   test("copies terminal selection on Ctrl+C and does not send SIGINT", async () => {

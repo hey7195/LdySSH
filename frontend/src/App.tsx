@@ -5456,18 +5456,42 @@ function TerminalSurface({
     }
     if (!text) return;
 
-    // Convert CRLF / LF into Carriage Return (\r) so multi-line commands execute sequentially
-    const normalized = text.replace(/\r\n/g, "\r").replace(/\n/g, "\r");
-    const b64Data = bytesToBase64(new TextEncoder().encode(normalized));
+    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const rawLines = normalized.split("\n");
 
-    if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
-      sessions.forEach((s) => {
-        if (s.connected || s.status === "connected") {
-          void nativeBridge.sendInputBase64(s.id, b64Data);
-        }
-      });
-    } else {
-      await nativeBridge.sendInputBase64(sessionId, b64Data);
+    const sendData = async (data: string) => {
+      const b64Data = bytesToBase64(new TextEncoder().encode(data));
+      if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
+        sessions.forEach((s) => {
+          if (s.connected || s.status === "connected") {
+            void nativeBridge.sendInputBase64(s.id, b64Data);
+          }
+        });
+      } else {
+        await nativeBridge.sendInputBase64(sessionId, b64Data);
+      }
+    };
+
+    if (rawLines.length <= 1) {
+      await sendData(rawLines[0] || "");
+      return;
+    }
+
+    // For multiline paste, send line-by-line with carriage return and paced delay
+    // so sub-processes (like android-lxc / docker / sudo) don't swallow queued stdin bytes
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+      if (i === rawLines.length - 1 && line === "") {
+        break;
+      }
+      const isLast = i === rawLines.length - 1;
+      const toSend = isLast ? line : `${line}\r`;
+      if (toSend) {
+        await sendData(toSend);
+      }
+      if (!isLast) {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
     }
   }
 
