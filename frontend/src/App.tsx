@@ -1419,11 +1419,20 @@ export function App() {
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
   }, []);
 
-  function toggleSplit(sessionId: string, mode: "none" | "horizontal" | "vertical") {
+  async function toggleSplit(sessionId: string, mode: "none" | "horizontal" | "vertical") {
+    const session = sessions.find((s) => s.id === sessionId);
+    if (mode !== "none" && sessions.length <= 1 && session) {
+      if (session.kind === "local") {
+        await openLocalSession();
+      } else if (session.connectParams) {
+        await connectHost(session.connectParams);
+      }
+    }
     setSessions((current) =>
-      current.map((session) =>
-        session.id === sessionId ? { ...session, splitMode: mode } : session
-      )
+      current.map((s) => ({
+        ...s,
+        splitMode: s.id === sessionId ? mode : mode === "none" ? "none" : s.splitMode
+      }))
     );
   }
 
@@ -4024,6 +4033,8 @@ function TerminalWorkspace({
           onCreateLocal={onCreateLocal}
           onRequestDangerousCommandConfirmation={onRequestDangerousCommandConfirmation}
           onOutput={onTerminalOutput}
+          onActivate={onActivate}
+          onToggleSplit={onToggleSplit}
         />
         {visible && !rightSidebarCollapsed && (
           <TerminalRightSidebar
@@ -4467,7 +4478,9 @@ function TerminalSurface({
   onAddAiQuote,
   onCreateLocal,
   onRequestDangerousCommandConfirmation,
-  onOutput
+  onOutput,
+  onActivate,
+  onToggleSplit
 }: {
   visible: boolean;
   sessions?: SessionTab[];
@@ -4492,6 +4505,8 @@ function TerminalSurface({
   onCreateLocal?: () => void;
   onRequestDangerousCommandConfirmation?: (command: string, info: DangerousCommandInfo, onConfirm: () => void) => void;
   onOutput: (sessionId: string, text: string) => void;
+  onActivate?: (sessionId: string) => void;
+  onToggleSplit?: (sessionId: string, mode: "none" | "horizontal" | "vertical") => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
@@ -4499,6 +4514,14 @@ function TerminalSurface({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const decoderRef = useRef<TextDecoder | null>(null);
   const pushDecodersRef = useRef<Record<string, TextDecoder>>({});
+
+  // 副分屏终端引用与状态
+  const secondaryContainerRef = useRef<HTMLDivElement | null>(null);
+  const secondaryTerminalRef = useRef<XTerm | null>(null);
+  const secondaryFitRef = useRef<FitAddon | null>(null);
+  const secondaryDecoderRef = useRef<TextDecoder | null>(null);
+  const isSplit = Boolean(activeSession?.splitMode && activeSession.splitMode !== "none" && sessions && sessions.length >= 2);
+  const secondarySession = isSplit ? sessions?.find((s) => s.id !== activeSession?.id) : undefined;
   const activeIdRef = useRef("");
   const visibleRef = useRef(visible);
   const lastValidTerminalSizeRef = useRef({ cols: 80, rows: 24 });
@@ -5089,6 +5112,76 @@ function TerminalSurface({
     };
   }, [activeSession?.id, highlightRules, terminalTheme, terminalAppearance, terminalBackgroundImage, terminalRenderEpoch]);
 
+  // 副分屏终端实例与生命周期挂载
+  useEffect(() => {
+    const container = secondaryContainerRef.current;
+    if (!container || !isSplit || !secondarySession) return;
+
+    secondaryTerminalRef.current?.dispose();
+    container.replaceChildren();
+    const appearance = getTerminalAppearance(terminalAppearance);
+    const terminalThemeOptions = getTerminalColors(terminalTheme, appearance, Boolean(terminalBackgroundImage));
+    const term = new XTerm({
+      allowProposedApi: true,
+      customGlyphs: true,
+      cursorBlink: appearance.cursorBlink ?? true,
+      cursorStyle: appearance.cursorStyle ?? "block",
+      fontFamily: appearance.fontFamily,
+      fontSize: appearance.fontSize,
+      lineHeight: 1.25,
+      rightClickSelectsWord: true,
+      scrollOnUserInput: true,
+      scrollback: 5000,
+      theme: terminalBackgroundImage
+        ? { ...terminalThemeOptions, background: "rgba(0, 0, 0, 0)" }
+        : terminalThemeOptions
+    });
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(container);
+    fitAddon.fit();
+    term.writeln(`\x1b[36m${secondarySession.title}\x1b[0m`);
+    term.writeln("");
+
+    secondaryDecoderRef.current = new TextDecoder("utf-8");
+    term.onData((data) => {
+      const input = stripTerminalGeneratedReplies(data);
+      if (!input) return;
+      const b64Data = bytesToBase64(new TextEncoder().encode(input));
+      void nativeBridge.sendInputBase64(secondarySession.id, b64Data);
+    });
+
+    secondaryTerminalRef.current = term;
+    secondaryFitRef.current = fitAddon;
+
+    const resize = () => {
+      if (!visibleRef.current) return;
+      fitAddon.fit();
+      if (term.cols >= 20 && term.rows >= 5) {
+        void nativeBridge.resizeTerminal(secondarySession.id, term.cols, term.rows);
+      }
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(container);
+    resize();
+
+    const interval = window.setInterval(async () => {
+      const result = await nativeBridge.getOutput(secondarySession.id);
+      if (result.output) {
+        const output = decodeTerminalOutput(result.output, secondaryDecoderRef);
+        term.write(applyHighlightRules(output, highlightRules));
+        onOutput(secondarySession.id, output);
+      }
+    }, 160);
+
+    return () => {
+      window.clearInterval(interval);
+      observer.disconnect();
+      term.dispose();
+      secondaryTerminalRef.current = null;
+    };
+  }, [secondarySession?.id, isSplit, highlightRules, terminalTheme, terminalAppearance, terminalBackgroundImage]);
+
   useEffect(() => {
     if (focusRequest > 0) focusTerminal();
   }, [focusRequest]);
@@ -5102,12 +5195,14 @@ function TerminalSurface({
       if (sessionId === activeIdRef.current) {
         maybeLeaveRawCommandMode(output);
         terminalRef.current?.write(applyHighlightRules(output, highlightRules));
+      } else if (secondarySession && sessionId === secondarySession.id) {
+        secondaryTerminalRef.current?.write(applyHighlightRules(output, highlightRules));
       }
     };
     return () => {
       window.handlePushOutput = undefined;
     };
-  }, [highlightRules]);
+  }, [highlightRules, secondarySession?.id]);
 
   function moveSearchMatch(direction: 1 | -1) {
     runTerminalSearch(direction);
@@ -5244,7 +5339,65 @@ function TerminalSurface({
       onKeyDown={handleTerminalKeyDown}
       onContextMenu={openTerminalMenu}
     >
-      <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
+      {!isSplit || !activeSession ? (
+        <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
+      ) : (
+        <div className={cn(
+          "grid h-full w-full gap-1.5 p-1 min-h-0 overflow-hidden",
+          activeSession.splitMode === "vertical" ? "grid-rows-2" : "grid-cols-2"
+        )}>
+          {/* 主分屏 (Active) */}
+          <div className="relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-xl border border-emerald-500/80 shadow-md ring-1 ring-emerald-500/30">
+            <div className="flex items-center justify-between border-b border-emerald-500/30 bg-emerald-950/40 px-3 py-1 text-[11px] font-mono select-none text-emerald-300 font-bold">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Terminal className="h-3 w-3 text-emerald-400 shrink-0" />
+                <span className="truncate">{activeSession.title}</span>
+                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动中</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onToggleSplit?.(activeSession.id, "none")}
+                  title="退出分屏 (全屏)"
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                >
+                  <Minimize2 className="h-2.5 w-2.5" />
+                  <span>还原全屏</span>
+                </button>
+              </div>
+            </div>
+            <div ref={containerRef} className="flex-1 min-h-0 min-w-0 overflow-hidden relative" />
+          </div>
+
+          {/* 副分屏 (Secondary) */}
+          {secondarySession && (
+            <div
+              onClick={() => onActivate?.(secondarySession.id)}
+              className="relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-xl border border-[var(--app-line)] hover:border-zinc-500 opacity-90 hover:opacity-100 transition-all cursor-pointer"
+            >
+              <div className="flex items-center justify-between border-b border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-1 text-[11px] font-mono select-none text-[var(--app-muted)] font-bold">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Terminal className="h-3 w-3 text-blue-400 shrink-0" />
+                  <span className="truncate">{secondarySession.title}</span>
+                  <span className="text-[9px] bg-[var(--fill-2)] text-[var(--app-muted)] px-1 py-0.2 rounded font-mono">副屏 (点击激活输入)</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleSplit?.(activeSession.id, "none");
+                    }}
+                    title="关闭分屏"
+                    className="rounded p-0.5 text-[var(--app-muted)] hover:text-rose-500 transition-colors cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+              <div ref={secondaryContainerRef} className="flex-1 min-h-0 min-w-0 overflow-hidden relative" />
+            </div>
+          )}
+        </div>
+      )}
       <button
         aria-label="查找终端输出"
         title="查找终端输出"
