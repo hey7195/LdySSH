@@ -5148,95 +5148,11 @@ function TerminalWorkspace({
           </div>
         </div>
 
-        {/* 状态栏右侧：字符编码与快捷面板直达 */}
-        <div className="flex items-center gap-2 shrink-0 text-[11px] bg-[var(--sidebar-bg)] pl-2.5 z-10 border-l border-[var(--app-line)]/50">
-          <span className="font-mono text-[10px] text-[var(--app-muted)] bg-[var(--fill-1)] border border-[var(--app-line)] px-1.5 py-0.2 rounded hidden sm:inline-block">
+        {/* 状态栏右侧：字符编码 */}
+        <div className="flex items-center gap-2 shrink-0 text-[11px] bg-[var(--sidebar-bg)] pl-2.5 z-10">
+          <span className="font-mono text-[10px] text-[var(--app-muted)] bg-[var(--fill-1)] border border-[var(--app-line)] px-2 py-0.5 rounded shadow-2xs font-bold">
             UTF-8
           </span>
-
-          {/* 快捷侧边栏面板直达按钮组 */}
-          <div className="flex items-center gap-0.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] p-0.5 shadow-2xs">
-            <button
-              onClick={() => {
-                if (sidePanel === "files" && !rightSidebarCollapsed) {
-                  setRightSidebarCollapsed(true);
-                } else {
-                  onSidePanelChange("files");
-                  setRightSidebarCollapsed(false);
-                }
-              }}
-              title="切换 SFTP 远程文件管理器"
-              className={cn(
-                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
-                sidePanel === "files" && !rightSidebarCollapsed
-                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                  : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
-              )}
-            >
-              <FolderIcon className="h-3 w-3" />
-              <span className="hidden xl:inline">文件</span>
-            </button>
-
-            <button
-              onClick={() => {
-                if (sidePanel === "commands" && !rightSidebarCollapsed) {
-                  setRightSidebarCollapsed(true);
-                } else {
-                  onSidePanelChange("commands");
-                  setRightSidebarCollapsed(false);
-                }
-              }}
-              title="切换快捷命令面板"
-              className={cn(
-                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
-                sidePanel === "commands" && !rightSidebarCollapsed
-                  ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
-                  : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
-              )}
-            >
-              <Terminal className="h-3 w-3" />
-              <span className="hidden xl:inline">命令</span>
-            </button>
-
-            <button
-              onClick={() => {
-                if (sidePanel === "ai" && !rightSidebarCollapsed) {
-                  setRightSidebarCollapsed(true);
-                } else {
-                  onSidePanelChange("ai");
-                  setRightSidebarCollapsed(false);
-                }
-              }}
-              title="切换 AI 运维助手"
-              className={cn(
-                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
-                sidePanel === "ai" && !rightSidebarCollapsed
-                  ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                  : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
-              )}
-            >
-              <Sparkles className="h-3 w-3" />
-              <span className="hidden xl:inline">AI</span>
-            </button>
-
-            <button
-              onClick={() => {
-                if (activeSession) {
-                  onToggleSplit(activeSession.id, activeSession.splitMode === "horizontal" ? "none" : "horizontal");
-                }
-              }}
-              title="切换水平双分屏终端"
-              className={cn(
-                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
-                activeSession?.splitMode && activeSession.splitMode !== "none"
-                  ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
-                  : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
-              )}
-            >
-              <Rows2 className="h-3 w-3" />
-              <span className="hidden xl:inline">分屏</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>
