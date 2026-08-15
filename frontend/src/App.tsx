@@ -8175,24 +8175,124 @@ function TerminalFileSidebar({
     }, 250);
   }
 
+  async function uploadSingleFile(filePath: string, fileName: string, fileContent?: string, fileSize?: number) {
+    if (!activeSession?.id || !canBrowseRemote) return;
+    const targetRemotePath = joinRemotePath(remotePath, fileName);
+    const uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    const totalSize = fileSize || (fileContent ? fileContent.length : 0);
+
+    const newTask: TransferTask = {
+      id: uploadId,
+      name: fileName,
+      type: "upload",
+      localPath: filePath || "",
+      remotePath: targetRemotePath,
+      size: totalSize,
+      progress: 0,
+      status: "transferring",
+      speed: "计算中..."
+    };
+    setTransferTasks((prev) => [newTask, ...prev.filter((t) => t.id !== uploadId)]);
+
+    let startRes;
+    if (filePath) {
+      startRes = await nativeBridge.startUploadWithProgress(
+        activeSession.id,
+        filePath,
+        targetRemotePath,
+        uploadId
+      );
+    } else {
+      const b64 = bytesToBase64(new TextEncoder().encode(fileContent || ""));
+      startRes = await nativeBridge.startUploadContentWithProgress(
+        activeSession.id,
+        b64,
+        targetRemotePath,
+        uploadId
+      );
+    }
+
+    if (!startRes.success) {
+      let directRes;
+      if (filePath) {
+        directRes = await nativeBridge.uploadFile(activeSession.id, filePath, targetRemotePath);
+      } else {
+        directRes = await nativeBridge.uploadFileContent(activeSession.id, fileContent || "", targetRemotePath);
+      }
+      if (!directRes.success) {
+        setTransferTasks((prev) =>
+          prev.map((t) => (t.id === uploadId ? { ...t, status: "error", error: directRes.error || "上传失败" } : t))
+        );
+        setUploadStatus(`❌ ${fileName} 上传失败：${directRes.error || "未知错误"}`);
+      } else {
+        setTransferTasks((prev) =>
+          prev.map((t) => (t.id === uploadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
+        );
+        setUploadStatus(`✅ ${fileName} 上传成功！`);
+        setReloadToken((t) => t + 1);
+      }
+      return;
+    }
+
+    let lastBytes = 0;
+    let lastTime = Date.now();
+    const pollTimer = window.setInterval(async () => {
+      if (!activeSession?.id) {
+        window.clearInterval(pollTimer);
+        return;
+      }
+      try {
+        const prog = await nativeBridge.getUploadProgress(activeSession.id, uploadId);
+        if (prog.success) {
+          const now = Date.now();
+          const dt = (now - lastTime) / 1000;
+          const currentBytes = prog.transferred || 0;
+          let speedStr = "";
+          if (dt >= 0.4) {
+            const speedBytesPerSec = Math.max(0, (currentBytes - lastBytes) / dt);
+            speedStr = formatTransferSpeed(speedBytesPerSec);
+            lastBytes = currentBytes;
+            lastTime = now;
+          }
+
+          const fileTotal = prog.total || totalSize;
+          const pct = prog.percentage !== undefined ? prog.percentage : fileTotal > 0 ? Math.min(100, Math.round((currentBytes / fileTotal) * 100)) : 0;
+
+          if (prog.status === "completed" || prog.completed) {
+            window.clearInterval(pollTimer);
+            setTransferTasks((prev) =>
+              prev.map((t) => (t.id === uploadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
+            );
+            setUploadStatus(`✅ 上传完成: ${fileName} (${formatBytes(currentBytes || fileTotal)})`);
+            setReloadToken((t) => t + 1);
+          } else if (prog.status === "error" || prog.error) {
+            window.clearInterval(pollTimer);
+            setTransferTasks((prev) =>
+              prev.map((t) => (t.id === uploadId ? { ...t, status: "error", error: prog.error || "上传出错" } : t))
+            );
+          } else if (prog.status === "cancelled") {
+            window.clearInterval(pollTimer);
+            setTransferTasks((prev) =>
+              prev.map((t) => (t.id === uploadId ? { ...t, status: "error", error: "已取消" } : t))
+            );
+          } else {
+            setTransferTasks((prev) =>
+              prev.map((t) => (t.id === uploadId ? { ...t, progress: pct, speed: speedStr || t.speed } : t))
+            );
+          }
+        }
+      } catch {
+        window.clearInterval(pollTimer);
+      }
+    }, 250);
+  }
+
   async function triggerManualUpload() {
     if (!activeSession?.id || !canBrowseRemote) return;
     const selected = await nativeBridge.showOpenFileDialog("选择要上传到远程服务器的文件");
     if (!selected.filePath) return;
     const fileName = selected.filePath.split(/[/\\]/).pop() || "uploaded_file";
-    const targetRemotePath = joinRemotePath(remotePath, fileName);
-    setUploadStatus(`正在上传 ${fileName}...`);
-    try {
-      const res = await nativeBridge.uploadFile(activeSession.id, selected.filePath, targetRemotePath);
-      if (res.success) {
-        setUploadStatus(`✅ ${fileName} 上传成功！`);
-        setReloadToken((t) => t + 1);
-      } else {
-        setUploadStatus(`❌ ${fileName} 上传失败：${res.error || "未知错误"}`);
-      }
-    } catch (err) {
-      setUploadStatus(`❌ 上传发生异常`);
-    }
+    await uploadSingleFile(selected.filePath, fileName);
   }
 
   async function createNewFile() {
@@ -8252,21 +8352,13 @@ function TerminalFileSidebar({
     for (let i = 0; i < fileArray.length; i++) {
       const file = fileArray[i];
       const localPath = (file as any).path;
-      const targetRemotePath = joinRemotePath(remotePath, file.name);
-      setUploadStatus(`正在上传 (${i + 1}/${fileArray.length}): ${file.name}...`);
-      try {
-        if (localPath) {
-          await nativeBridge.uploadFile(activeSession.id, localPath, targetRemotePath);
-        } else {
-          const content = await file.text();
-          await nativeBridge.uploadFileContent(activeSession.id, content, targetRemotePath);
-        }
-      } catch (err) {
-        console.error("Drop upload error:", err);
+      if (localPath) {
+        await uploadSingleFile(localPath, file.name, undefined, file.size);
+      } else {
+        const content = await file.text();
+        await uploadSingleFile("", file.name, content, file.size);
       }
     }
-    setUploadStatus(`✅ 已完成 ${fileArray.length} 个文件上传！`);
-    setReloadToken((t) => t + 1);
   }
 
   const emptyMessage = activeSession?.kind === "ssh"
@@ -8590,24 +8682,37 @@ function TerminalFileSidebar({
                   {transferTasks.map((task) => (
                     <div key={task.id} className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 text-xs shadow-2xs">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono font-bold text-[var(--app-text)] truncate max-w-[200px]" title={task.name}>
-                          {task.name}
-                        </span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {task.type === "upload" ? (
+                            <Upload className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                          ) : (
+                            <Download className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                          )}
+                          <span className="font-mono font-bold text-[var(--app-text)] truncate max-w-[180px]" title={task.name}>
+                            {task.name}
+                          </span>
+                        </div>
                         <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
                           {task.status === "transferring" && (
                             <>
                               {task.speed && <span className="text-sky-400 font-bold">{task.speed}</span>}
-                              <span className="text-emerald-400 font-black">{task.progress}%</span>
+                              <span className={cn("font-black", task.type === "upload" ? "text-blue-400" : "text-emerald-400")}>
+                                {task.progress}%
+                              </span>
                               <button
                                 type="button"
                                 onClick={async () => {
                                   if (activeSession?.id) {
-                                    await nativeBridge.cancelDownload(activeSession.id, task.id);
+                                    if (task.type === "upload") {
+                                      await nativeBridge.cancelUpload(activeSession.id, task.id);
+                                    } else {
+                                      await nativeBridge.cancelDownload(activeSession.id, task.id);
+                                    }
                                     setTransferTasks((prev) => prev.filter((t) => t.id !== task.id));
                                   }
                                 }}
                                 className="text-[10px] text-rose-400 hover:text-rose-300 font-bold ml-1 cursor-pointer"
-                                title="取消此下载"
+                                title={`取消此${task.type === "upload" ? "上传" : "下载"}`}
                               >
                                 ✕
                               </button>
@@ -8634,6 +8739,8 @@ function TerminalFileSidebar({
                               ? "bg-emerald-500"
                               : task.status === "error"
                               ? "bg-rose-500"
+                              : task.type === "upload"
+                              ? "bg-blue-400 bg-gradient-to-r from-blue-500 to-cyan-400 animate-pulse"
                               : "bg-emerald-400 bg-gradient-to-r from-emerald-500 to-teal-400 animate-pulse"
                           )}
                           style={{ width: `${task.progress}%` }}

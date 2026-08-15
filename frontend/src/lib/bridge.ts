@@ -129,6 +129,51 @@ export const nativeBridge = {
       remotePath
     );
   },
+  startUploadWithProgress(sessionId: string, localPath: string, remotePath: string, uploadId: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "upload_from_path_with_progress",
+      { success: false, error: "Bridge unavailable" },
+      sessionId,
+      localPath,
+      remotePath,
+      uploadId
+    );
+  },
+  startUploadContentWithProgress(sessionId: string, content: string, remotePath: string, uploadId: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "start_upload_with_progress",
+      { success: false, error: "Bridge unavailable" },
+      sessionId,
+      content,
+      remotePath,
+      uploadId
+    );
+  },
+  getUploadProgress(sessionId: string, uploadId: string) {
+    return callNative<{
+      success: boolean;
+      id?: string;
+      transferred?: number;
+      total?: number;
+      percentage?: number;
+      completed?: boolean;
+      status?: "uploading" | "completed" | "error" | "cancelled";
+      error?: string;
+    }>(
+      "get_upload_progress",
+      { success: false, error: "Bridge unavailable" },
+      sessionId,
+      uploadId
+    );
+  },
+  cancelUpload(sessionId: string, uploadId: string) {
+    return callNative<{ success: boolean }>(
+      "cancel_upload",
+      { success: false },
+      sessionId,
+      uploadId
+    );
+  },
   uploadFileContent(sessionId: string, content: string, remotePath: string) {
     return callNative<{ success: boolean; error?: string }>(
       "upload_file_content",
