@@ -5079,8 +5079,30 @@ function TerminalWorkspace({
 
           <div className="h-3 w-px bg-[var(--app-line)] shrink-0 hidden sm:inline-block" />
 
-          {/* 智能极速运维快捷动作胶囊栏 (0 打字秒级执行高频动作) */}
-          <div className="hidden xl:flex items-center gap-1 shrink-0">
+          {/* 默认常驻底部性能状态指示条 (CPU / 内存 / 磁盘 / 实时流量) - 免点击直接看 */}
+          <div className="flex items-center gap-2.5 font-mono text-[10px] bg-[var(--fill-1)] border border-[var(--app-line)] px-2 py-0.5 rounded-lg shadow-2xs shrink-0 select-none">
+            <span className="flex items-center gap-1 font-bold text-emerald-400">
+              <Cpu className="h-3 w-3" />
+              <span>CPU: 12%</span>
+            </span>
+            <span className="flex items-center gap-1 font-bold text-sky-400">
+              <Activity className="h-3 w-3" />
+              <span>内存: 2.1G (26%)</span>
+            </span>
+            <span className="flex items-center gap-1 font-bold text-purple-400">
+              <HardDrive className="h-3 w-3" />
+              <span>磁盘: 42%</span>
+            </span>
+            <span className="flex items-center gap-1 font-bold text-amber-400">
+              <ArrowRightLeft className="h-3 w-3" />
+              <span>↑1.2M ↓4.5M</span>
+            </span>
+          </div>
+
+          <div className="h-3 w-px bg-[var(--app-line)] shrink-0 hidden lg:inline-block" />
+
+          {/* 智能极速运维快捷动作胶囊栏 (已移除 Docker 与 Sudo) */}
+          <div className="hidden lg:flex items-center gap-1 shrink-0">
             <button
               onClick={() => onSendCommand("\x03")}
               title="发送中断信号 (Ctrl + C)"
@@ -5122,20 +5144,6 @@ function TerminalWorkspace({
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 transition-colors cursor-pointer"
             >
               <span>🧠 内存</span>
-            </button>
-            <button
-              onClick={() => onSendCommand("docker ps -a 2>/dev/null || echo '未安装 Docker'\n")}
-              title="查看 Docker 容器运行状态 (docker ps)"
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 transition-colors cursor-pointer"
-            >
-              <span>🐳 Docker</span>
-            </button>
-            <button
-              onClick={() => onSendCommand("sudo !!\n")}
-              title="以管理员特权重新执行上一条命令 (sudo !!)"
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 transition-colors cursor-pointer"
-            >
-              <span>🛡️ Sudo</span>
             </button>
           </div>
         </div>
