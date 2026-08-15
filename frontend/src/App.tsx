@@ -33,6 +33,8 @@ import {
   Grid2X2,
   Globe2,
   GripHorizontal,
+  GripVertical,
+  WrapText,
   HardDrive,
   Home,
   Image as ImageIcon,
@@ -927,6 +929,8 @@ function createSessionContext(activeSession?: SessionTab): AiContextChip | null 
 
 export function extractCwdFromTerminalOutput(text: string): string | null {
   if (!text) return null;
+
+  // 1. 解析 OSC 7 序列：\x1b]7;file://hostname/path\x07 或 \x1b\\
   const osc7Match = text.match(/\x1b\]7;file:\/\/[^\/]*(\/[^\x07\x1b]+)(?:\x07|\x1b\\)/);
   if (osc7Match && osc7Match[1]) {
     try {
@@ -936,14 +940,44 @@ export function extractCwdFromTerminalOutput(text: string): string | null {
     }
   }
 
-  const promptMatch = text.match(/(?:\[?[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::|\s+))([/~][a-zA-Z0-9_./-]*)[\]#$>]\s*$/m) ||
-                      text.match(/(?:\[?[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::|\s+))([/~][a-zA-Z0-9_./-]*)[\]#$>]/);
+  // 2. 解析 OSC 0 / OSC 2 窗口标题设置 (Debian / Ubuntu 默认 PS1 \e]0;user@host: path\a)
+  const osc0Match = text.match(/\x1b\][02];[^\x07\x1b]*:[ \t]*([/~][^\x07\x1b\r\n]*)(?:\x07|\x1b\\)/);
+  if (osc0Match && osc0Match[1]) {
+    const raw = osc0Match[1].trim();
+    if (raw.startsWith("/")) return raw;
+    if (raw === "~") return "/root";
+    if (raw.startsWith("~/")) return `/root/${raw.slice(2)}`;
+  }
+
+  // 3. 剥离所有 ANSI 终端控制字符，获取纯文本进行严密匹配
+  const clean = text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+
+  // 4. 解析全场景 Linux Shell 提示符 (Debian/Ubuntu/CentOS/Alpine/macOS/Busybox 等)
+  // 例 1: root@d206b0fcc266a2af:/data#
+  // 例 2: [root@centos-host /var/log]#
+  // 例 3: admin@debian:~/work$
+  const promptMatch =
+    clean.match(/(?:\[?[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::|\s+))([/~][a-zA-Z0-9_./-]*)[\]#$>]\s*$/m) ||
+    clean.match(/(?:\[?[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::|\s+))([/~][a-zA-Z0-9_./-]*)[\]#$>]/) ||
+    clean.match(/(?:^|\n|\r)\s*\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+([/~][a-zA-Z0-9_./-]*)\][#$>]/) ||
+    clean.match(/(?:^|\n|\r)[a-zA-Z0-9_.-]+:\s*([/~][a-zA-Z0-9_./-]*)[#$>]/);
+
   if (promptMatch && promptMatch[1]) {
     const rawPath = promptMatch[1].trim();
     if (rawPath.startsWith("/")) return rawPath;
     if (rawPath === "~") return "/root";
     if (rawPath.startsWith("~/")) return `/root/${rawPath.slice(2)}`;
   }
+
+  // 5. 解析终端中直接敲入的 cd 命令
+  const cdMatch = clean.match(/(?:^|\n|\r)\s*(?:sudo\s+)?cd\s+([/~][a-zA-Z0-9_./-]*)/);
+  if (cdMatch && cdMatch[1]) {
+    const raw = cdMatch[1].trim();
+    if (raw.startsWith("/")) return raw;
+    if (raw === "~") return "/root";
+    if (raw.startsWith("~/")) return `/root/${raw.slice(2)}`;
+  }
+
   return null;
 }
 
@@ -1020,6 +1054,20 @@ export function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // 当会话激活或终端历史更新时，自动提取最新 Shell 工作目录
+  useEffect(() => {
+    if (activeSessionId) {
+      const history = terminalHistories[activeSessionId] || "";
+      if (history) {
+        const tail = history.slice(-2000);
+        const detected = extractCwdFromTerminalOutput(tail);
+        if (detected) {
+          setTerminalCwds((prev) => (prev[activeSessionId] === detected ? prev : { ...prev, [activeSessionId]: detected }));
+        }
+      }
+    }
+  }, [activeSessionId, terminalHistories]);
 
   function createNewGroupPrompt() {
     const name = window.prompt("请输入新主机分组名称：", "");
@@ -1622,14 +1670,18 @@ export function App() {
 
   function appendTerminalHistory(sessionId: string, text: string) {
     if (!text) return;
-    setTerminalHistories((current) => ({
-      ...current,
-      [sessionId]: trimTerminalHistory(`${current[sessionId] || ""}${text}`)
-    }));
-    const detectedCwd = extractCwdFromTerminalOutput(text);
-    if (detectedCwd) {
-      setTerminalCwds((prev) => (prev[sessionId] === detectedCwd ? prev : { ...prev, [sessionId]: detectedCwd }));
-    }
+    setTerminalHistories((current) => {
+      const combined = trimTerminalHistory(`${current[sessionId] || ""}${text}`);
+      const tail = combined.slice(-1500);
+      const detectedCwd = extractCwdFromTerminalOutput(text) || extractCwdFromTerminalOutput(tail);
+      if (detectedCwd) {
+        setTerminalCwds((prev) => (prev[sessionId] === detectedCwd ? prev : { ...prev, [sessionId]: detectedCwd }));
+      }
+      return {
+        ...current,
+        [sessionId]: combined
+      };
+    });
   }
 
   function toConnectionForm(connection: SavedConnection): ConnectionForm {
@@ -4140,8 +4192,8 @@ function TerminalWorkspace({
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingTabTitle, setEditingTabTitle] = useState("");
 
-  // 右侧栏 100% 自由拖拽缩放宽度状态与折叠状态
-  const [rightSidebarWidth, setRightSidebarWidth] = useState(260);
+  // 右侧栏 100% 自由拖拽缩放宽度状态与折叠状态 (支持类似 FinalShell 任意拉宽)
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(420);
   const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
   const [topMenuOpen, setTopMenuOpen] = useState(false);
 
@@ -4152,7 +4204,8 @@ function TerminalWorkspace({
 
     const onPointerMove = (moveEvent: PointerEvent) => {
       const deltaX = startX - moveEvent.clientX; // 向左拖拽扩大右侧栏
-      const newWidth = Math.min(560, Math.max(140, startWidth + deltaX));
+      const maxAllowed = typeof window !== "undefined" ? Math.max(600, window.innerWidth - 240) : 1200;
+      const newWidth = Math.min(maxAllowed, Math.max(180, startWidth + deltaX));
       setRightSidebarWidth(newWidth);
     };
 
@@ -7564,13 +7617,15 @@ function TerminalRightSidebar({
       style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
       className="group/sidebar relative grid min-h-0 grid-rows-[44px_minmax(0,1fr)] overflow-hidden border-l border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none"
     >
-      {/* 自由拖拽调节宽度手柄 */}
+      {/* 自由拖拽调节宽度分割线 (类似 FinalShell 分割线，按住左右拉动调节终端与侧边栏宽度) */}
       <div
-        className="absolute -left-1.5 top-0 bottom-0 z-50 w-3 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/20 active:bg-emerald-500/40 transition-colors select-none"
+        className="absolute -left-2 top-0 bottom-0 z-50 w-4 cursor-col-resize flex items-center justify-center group/resizer hover:bg-emerald-500/10 active:bg-emerald-500/25 transition-colors select-none"
         onPointerDown={onResizeStart}
-        title="按住拖拽自由调节侧边栏宽度"
+        title={`按住左右拖拽调节侧边栏宽度 (当前宽度: ${width}px)`}
       >
-        <div className="h-10 w-1 rounded-full bg-slate-300 dark:bg-slate-700 group-hover/sidebar:bg-emerald-500 transition-colors shadow-2xs" />
+        <div className="h-16 w-1 rounded-full bg-slate-300 dark:bg-slate-700 group-hover/resizer:bg-emerald-500 group-hover/resizer:w-1.5 group-hover/resizer:scale-y-125 transition-all shadow-sm flex items-center justify-center">
+          <GripVertical className="h-3 w-3 text-slate-900 dark:text-slate-950 opacity-0 group-hover/resizer:opacity-100 transition-opacity" />
+        </div>
       </div>
       <div className="flex items-center gap-2 border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-3.5 py-1.5" role="tablist" aria-label="终端右侧工作栏">
         {panels.map((panel) => {
@@ -7673,11 +7728,12 @@ function TerminalFileSidebar({
   onOpenDiff?: (path: string, name: string) => void;
   onSendCommand?: (command: string) => void;
 }) {
-  const [remotePath, setRemotePath] = useState("/");
+  const [remotePath, setRemotePath] = useState(terminalCwd || "/");
   const [isEditingPath, setIsEditingPath] = useState(false);
-  const [inputPath, setInputPath] = useState("/");
+  const [inputPath, setInputPath] = useState(terminalCwd || "/");
   const [fileFilter, setFileFilter] = useState("");
   const [autoFollowTerminalCwd, setAutoFollowTerminalCwd] = useState(true);
+  const [wrapFileNames, setWrapFileNames] = useState(true);
   const [previewFile, setPreviewFile] = useState<{ path: string; name: string } | null>(null);
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -7695,6 +7751,7 @@ function TerminalFileSidebar({
   useEffect(() => {
     if (autoFollowTerminalCwd && terminalCwd && terminalCwd !== remotePath) {
       setRemotePath(terminalCwd);
+      setInputPath(terminalCwd);
     }
   }, [terminalCwd, autoFollowTerminalCwd]);
 
@@ -8236,6 +8293,20 @@ function TerminalFileSidebar({
                 <span>上传</span>
               </button>
               <button
+                type="button"
+                onClick={() => setWrapFileNames((w) => !w)}
+                className={cn(
+                  "inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border text-[11px] font-extrabold transition-colors shadow-2xs cursor-pointer",
+                  wrapFileNames
+                    ? "bg-purple-500/20 text-purple-400 border-purple-500/40"
+                    : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+                )}
+                title={wrapFileNames ? "当前为长文件名全称完整换行展示模式 (点击切换为单行截断)" : "切换为长文件名全称换行展示模式"}
+              >
+                <WrapText className="h-3.5 w-3.5" />
+                <span>{wrapFileNames ? "全称换行" : "单行显示"}</span>
+              </button>
+              <button
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
                 title="刷新远程文件"
                 onClick={() => setReloadToken((token) => token + 1)}
@@ -8255,7 +8326,7 @@ function TerminalFileSidebar({
                   }}
                   className={cn(
                     "flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-mono font-bold transition-all shrink-0 cursor-pointer select-none border",
-                    autoFollowTerminalCwd && remotePath === terminalCwd
+                    remotePath === terminalCwd
                       ? "bg-emerald-600 text-white border-emerald-500 shadow-2xs"
                       : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
                   )}
@@ -8442,10 +8513,10 @@ function TerminalFileSidebar({
                   <button
                     key={`${entry.type}-${entry.name}`}
                     className={cn(
-                      "grid w-full min-w-0 grid-cols-[18px_minmax(0,1fr)_64px_82px] items-center gap-2 px-3 py-2 text-left text-xs transition-colors",
+                      "grid w-full min-w-0 grid-cols-[18px_minmax(0,1fr)_56px_74px] items-start gap-2 px-3 py-2 text-left text-xs transition-colors",
                       entry.type === "directory" ? "hover:bg-[var(--fill-1)] cursor-pointer" : "hover:bg-[var(--fill-1)]/60 cursor-pointer"
                     )}
-                    title={entry.type === "directory" ? `点击进入目录: ${entry.name}` : `双击在在线编辑器中打开/预览: ${entry.name}`}
+                    title={entry.type === "directory" ? `进入目录: ${entry.name}` : `打开/预览: ${entry.name}`}
                     onClick={() => {
                       if (entry.type === "directory") {
                         openDirectory(entry);
@@ -8464,25 +8535,27 @@ function TerminalFileSidebar({
                     onContextMenu={(event) => openFileMenu(event, entry)}
                   >
                     {entry.type === "directory" ? (
-                      <FolderIcon aria-label="目录图标" className="h-4 w-4 text-amber-500 shrink-0" />
+                      <FolderIcon aria-label="目录图标" className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
                     ) : (entry.type as string) === "symlink" || (entry as any).linkTarget ? (
-                      <LinkIcon aria-label="软链接图标" className="h-4 w-4 text-cyan-400 shrink-0" />
+                      <LinkIcon aria-label="软链接图标" className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />
                     ) : (
-                      <FileIcon aria-label="文件图标" className="h-4 w-4 text-[var(--app-muted)] shrink-0" />
+                      <FileIcon aria-label="文件图标" className="h-4 w-4 text-[var(--app-muted)] shrink-0 mt-0.5" />
                     )}
                     <span className="min-w-0">
-                      <span className="flex items-center gap-1 min-w-0">
-                        <span className="truncate font-extrabold text-[var(--app-text)]">{entry.name}</span>
+                      <span className="flex items-center gap-1 min-w-0 flex-wrap">
+                        <span className={cn("font-extrabold text-[var(--app-text)] font-mono", wrapFileNames ? "break-all whitespace-normal" : "truncate")}>
+                          {entry.name}
+                        </span>
                         {(entry as any).linkTarget && (
-                          <span className="truncate font-mono text-[10px] text-cyan-400 font-bold">
+                          <span className={cn("font-mono text-[10px] text-cyan-400 font-bold", wrapFileNames ? "break-all whitespace-normal" : "truncate")}>
                             → {(entry as any).linkTarget}
                           </span>
                         )}
                       </span>
                       <span className="mt-0.5 block truncate text-[11px] font-semibold text-[var(--app-muted)]">{entry.date || " "}</span>
                     </span>
-                    <span className="text-[var(--app-muted)] font-semibold">{(entry.type as string) === "symlink" ? "软链接" : entry.type === "directory" ? "目录" : "文件"}</span>
-                    <span className="truncate text-right font-mono text-[11px] text-[var(--app-muted)] font-semibold">{formatRemoteFileSize(entry)}</span>
+                    <span className="text-[var(--app-muted)] font-semibold text-[11px] truncate mt-0.5">{(entry.type as string) === "symlink" ? "软链接" : entry.type === "directory" ? "目录" : "文件"}</span>
+                    <span className="truncate text-right font-mono text-[11px] text-[var(--app-muted)] font-semibold mt-0.5">{formatRemoteFileSize(entry)}</span>
                   </button>
                 ))}
               </div>
