@@ -994,6 +994,29 @@ export function extractCwdFromTerminalOutput(text: string): string | null {
   return null;
 }
 
+export interface PersistentTransferTask {
+  id: string;
+  name: string;
+  type: "upload" | "download";
+  localPath: string;
+  remotePath: string;
+  size: number;
+  progress: number;
+  status: "transferring" | "completed" | "error";
+  speed?: string;
+  error?: string;
+  sessionId: string;
+  startedAt: number;
+  lastBytes?: number;
+  lastTime?: number;
+}
+
+export function formatTransferSpeed(bytesPerSec: number) {
+  if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+}
+
 export function App() {
   const [activeTool, setActiveTool] = useState<Tool>("ssh");
   const [sidebarHidden, setSidebarHidden] = useState(false);
@@ -1041,6 +1064,190 @@ export function App() {
   const [keyManagerOpen, setKeyManagerOpen] = useState(false);
   const [copyIdTarget, setCopyIdTarget] = useState<SavedConnection | null>(null);
   const [activeTagFilter, setActiveTagFilter] = useState<string>("");
+  const [persistentTransferTasks, setPersistentTransferTasks] = useState<PersistentTransferTask[]>([]);
+
+  // 全局持续异步传输进度轮询 (无论切换到命令/AI还是换标签页，后台传输与进度绝不中断)
+  useEffect(() => {
+    const hasActive = persistentTransferTasks.some((t) => t.status === "transferring");
+    if (!hasActive) return;
+
+    const timer = window.setInterval(async () => {
+      const activeTasks = persistentTransferTasks.filter((t) => t.status === "transferring");
+      if (activeTasks.length === 0) return;
+
+      for (const task of activeTasks) {
+        try {
+          const prog =
+            task.type === "download"
+              ? await nativeBridge.getDownloadProgress(task.sessionId, task.id)
+              : await nativeBridge.getUploadProgress(task.sessionId, task.id);
+
+          if (prog.success) {
+            const now = Date.now();
+            const lastT = task.lastTime || task.startedAt;
+            const lastB = task.lastBytes || 0;
+            const dt = (now - lastT) / 1000;
+            const currentBytes = prog.transferred || (prog as any).downloaded || 0;
+            let speedStr = task.speed;
+            if (dt >= 0.4) {
+              const speedBps = Math.max(0, (currentBytes - lastB) / dt);
+              speedStr = formatTransferSpeed(speedBps);
+            }
+
+            const total = prog.total || task.size || 0;
+            const pct =
+              prog.percentage !== undefined
+                ? prog.percentage
+                : total > 0
+                ? Math.min(100, Math.round((currentBytes / total) * 100))
+                : 0;
+
+            if (prog.status === "completed" || prog.completed) {
+              setPersistentTransferTasks((prev) =>
+                prev.map((t) => (t.id === task.id ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
+              );
+            } else if (prog.status === "error" || prog.error) {
+              setPersistentTransferTasks((prev) =>
+                prev.map((t) => (t.id === task.id ? { ...t, status: "error", error: prog.error || "传输失败" } : t))
+              );
+            } else if (prog.status === "cancelled") {
+              setPersistentTransferTasks((prev) =>
+                prev.map((t) => (t.id === task.id ? { ...t, status: "error", error: "已取消" } : t))
+              );
+            } else {
+              setPersistentTransferTasks((prev) =>
+                prev.map((t) =>
+                  t.id === task.id
+                    ? { ...t, progress: pct, speed: speedStr, lastBytes: currentBytes, lastTime: now }
+                    : t
+                )
+              );
+            }
+          }
+        } catch {
+          // ignore transient poll error
+        }
+      }
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, [persistentTransferTasks]);
+
+  const startGlobalDownload = useCallback(async (sessionId: string, targetPath: string, fileName: string, fileSize: number) => {
+    const selected = await nativeBridge.showSaveFileDialog(fileName);
+    if (!selected.filePath) return;
+
+    const downloadId = "dl_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    const newTask: PersistentTransferTask = {
+      id: downloadId,
+      name: fileName,
+      type: "download",
+      localPath: selected.filePath,
+      remotePath: targetPath,
+      size: fileSize,
+      progress: 0,
+      status: "transferring",
+      speed: "计算中...",
+      sessionId,
+      startedAt: Date.now()
+    };
+
+    setPersistentTransferTasks((prev) => [newTask, ...prev.filter((t) => t.id !== downloadId)]);
+
+    const startRes = await nativeBridge.startDownloadWithProgress(
+      sessionId,
+      targetPath,
+      selected.filePath,
+      downloadId
+    );
+
+    if (!startRes.success) {
+      const directRes = await nativeBridge.downloadFile(sessionId, targetPath, selected.filePath);
+      if (!directRes.success) {
+        setPersistentTransferTasks((prev) =>
+          prev.map((t) => (t.id === downloadId ? { ...t, status: "error", error: directRes.error || "下载失败" } : t))
+        );
+      } else {
+        setPersistentTransferTasks((prev) =>
+          prev.map((t) => (t.id === downloadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
+        );
+      }
+    }
+  }, []);
+
+  const startGlobalUpload = useCallback(async (sessionId: string, remoteDir: string, filePath?: string, fileName?: string, fileContent?: string, fileSize?: number) => {
+    let actualFilePath = filePath;
+    let actualFileName = fileName;
+
+    if (!actualFilePath && !fileContent) {
+      const selected = await nativeBridge.showOpenFileDialog("选择要上传到远程服务器的文件");
+      if (!selected.filePath) return;
+      actualFilePath = selected.filePath;
+      actualFileName = selected.filePath.split(/[/\\]/).pop() || "uploaded_file";
+    }
+
+    const name = actualFileName || "uploaded_file";
+    const targetRemotePath = joinRemotePath(remoteDir, name);
+    const uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    const totalSize = fileSize || (fileContent ? fileContent.length : 0);
+
+    const newTask: PersistentTransferTask = {
+      id: uploadId,
+      name,
+      type: "upload",
+      localPath: actualFilePath || "",
+      remotePath: targetRemotePath,
+      size: totalSize,
+      progress: 0,
+      status: "transferring",
+      speed: "计算中...",
+      sessionId,
+      startedAt: Date.now()
+    };
+
+    setPersistentTransferTasks((prev) => [newTask, ...prev.filter((t) => t.id !== uploadId)]);
+
+    let startRes;
+    if (actualFilePath) {
+      startRes = await nativeBridge.startUploadWithProgress(sessionId, actualFilePath, targetRemotePath, uploadId);
+    } else {
+      const b64 = bytesToBase64(new TextEncoder().encode(fileContent || ""));
+      startRes = await nativeBridge.startUploadContentWithProgress(sessionId, b64, targetRemotePath, uploadId);
+    }
+
+    if (!startRes.success) {
+      let directRes;
+      if (actualFilePath) {
+        directRes = await nativeBridge.uploadFile(sessionId, actualFilePath, targetRemotePath);
+      } else {
+        directRes = await nativeBridge.uploadFileContent(sessionId, fileContent || "", targetRemotePath);
+      }
+      if (!directRes.success) {
+        setPersistentTransferTasks((prev) =>
+          prev.map((t) => (t.id === uploadId ? { ...t, status: "error", error: directRes.error || "上传失败" } : t))
+        );
+      } else {
+        setPersistentTransferTasks((prev) =>
+          prev.map((t) => (t.id === uploadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
+        );
+      }
+    }
+  }, []);
+
+  const cancelGlobalTransfer = useCallback(async (sessionId: string, taskId: string, type: "upload" | "download") => {
+    try {
+      if (type === "upload") {
+        await nativeBridge.cancelUpload(sessionId, taskId);
+      } else {
+        await nativeBridge.cancelDownload(sessionId, taskId);
+      }
+    } catch {}
+    setPersistentTransferTasks((prev) => prev.filter((t) => t.id !== taskId));
+  }, []);
+
+  const clearCompletedGlobalTransfers = useCallback(() => {
+    setPersistentTransferTasks((prev) => prev.filter((t) => t.status === "transferring"));
+  }, []);
 
   const [customGroups, setCustomGroups] = useState<string[]>(() => {
     try {
@@ -2562,6 +2769,11 @@ export function App() {
               onRenameTab={renameSession}
               onOpenClipboardDrawer={() => setClipboardDrawerOpen(true)}
               onOpenBatchRunner={() => setBatchRunnerOpen(true)}
+              transferTasks={persistentTransferTasks}
+              onStartDownload={startGlobalDownload}
+              onStartUpload={startGlobalUpload}
+              onCancelTransfer={cancelGlobalTransfer}
+              onClearCompletedTransfers={clearCompletedGlobalTransfers}
             />
           </div>
           <SettingsPanel
@@ -4139,7 +4351,12 @@ function TerminalWorkspace({
   onOpenScrcpy,
   isAdmin,
   onOpenClipboardDrawer,
-  onOpenBatchRunner
+  onOpenBatchRunner,
+  transferTasks = [],
+  onStartDownload,
+  onStartUpload,
+  onCancelTransfer,
+  onClearCompletedTransfers
 }: {
   visible: boolean;
   sessions: SessionTab[];
@@ -4195,6 +4412,11 @@ function TerminalWorkspace({
   isAdmin?: boolean;
   onOpenClipboardDrawer?: () => void;
   onOpenBatchRunner?: () => void;
+  transferTasks?: PersistentTransferTask[];
+  onStartDownload?: (sessionId: string, targetPath: string, fileName: string, fileSize: number) => Promise<void>;
+  onStartUpload?: (sessionId: string, remoteDir: string, filePath?: string, fileName?: string, fileContent?: string, fileSize?: number) => Promise<void>;
+  onCancelTransfer?: (sessionId: string, taskId: string, type: "upload" | "download") => Promise<void>;
+  onClearCompletedTransfers?: () => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
@@ -4752,6 +4974,11 @@ function TerminalWorkspace({
             onOpenDiff={onOpenDiff}
             onAddFolder={onAddFolder}
             onSaveCommand={onSaveCommand}
+            transferTasks={transferTasks}
+            onStartDownload={onStartDownload}
+            onStartUpload={onStartUpload}
+            onCancelTransfer={onCancelTransfer}
+            onClearCompletedTransfers={onClearCompletedTransfers}
           />
         )}
       </div>
@@ -7574,8 +7801,6 @@ function formatFileSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-
-
 function TerminalRightSidebar({
   activePanel,
   activeSession,
@@ -7596,7 +7821,12 @@ function TerminalRightSidebar({
   onOpenSearch,
   onOpenDiff,
   onAddFolder,
-  onSaveCommand
+  onSaveCommand,
+  transferTasks = [],
+  onStartDownload,
+  onStartUpload,
+  onCancelTransfer,
+  onClearCompletedTransfers
 }: {
   activePanel: TerminalSidePanel;
   activeSession?: SessionTab;
@@ -7618,7 +7848,14 @@ function TerminalRightSidebar({
   onOpenDiff?: (path: string, name: string) => void;
   onAddFolder?: (name: string) => void;
   onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
+  transferTasks?: PersistentTransferTask[];
+  onStartDownload?: (sessionId: string, targetPath: string, fileName: string, fileSize: number) => Promise<void>;
+  onStartUpload?: (sessionId: string, remoteDir: string, filePath?: string, fileName?: string, fileContent?: string, fileSize?: number) => Promise<void>;
+  onCancelTransfer?: (sessionId: string, taskId: string, type: "upload" | "download") => Promise<void>;
+  onClearCompletedTransfers?: () => void;
 }) {
+  const activeTransfersCount = transferTasks.filter((t) => t.status === "transferring").length;
+
   const panels: Array<{ id: TerminalSidePanel; label: string; icon: React.ReactNode }> = [
     { id: "commands", label: "命令", icon: <Command className="h-3.5 w-3.5" /> },
     { id: "files", label: "文件", icon: <FolderOpen className="h-3.5 w-3.5" /> },
@@ -7630,7 +7867,6 @@ function TerminalRightSidebar({
       style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
       className="group/sidebar relative grid min-h-0 grid-rows-[44px_minmax(0,1fr)] overflow-hidden border-l border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none"
     >
-      {/* 自由拖拽调节宽度分割线 (类似 FinalShell 分割线，按住左右拉动调节终端与侧边栏宽度) */}
       <div
         className="absolute -left-2 top-0 bottom-0 z-50 w-4 cursor-col-resize flex items-center justify-center group/resizer hover:bg-emerald-500/10 active:bg-emerald-500/25 transition-colors select-none"
         onPointerDown={onResizeStart}
@@ -7655,7 +7891,7 @@ function TerminalRightSidebar({
               role="tab"
               aria-selected={active}
               className={cn(
-                "inline-flex h-8.5 flex-1 items-center justify-center gap-1.5 rounded-full text-xs font-extrabold transition-all duration-200 cursor-pointer select-none",
+                "inline-flex h-8.5 flex-1 items-center justify-center gap-1.5 rounded-full text-xs font-extrabold transition-all duration-200 cursor-pointer select-none relative",
                 active
                   ? "bg-slate-900 text-white shadow-sm shadow-slate-900/15"
                   : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
@@ -7666,6 +7902,11 @@ function TerminalRightSidebar({
                 {panel.icon}
               </span>
               <span>{panel.label}</span>
+              {panel.id === "files" && activeTransfersCount > 0 && (
+                <span className="inline-flex items-center justify-center rounded-full bg-emerald-500 text-[10px] text-slate-950 font-black h-4 min-w-4 px-1 animate-pulse shadow-2xs">
+                  {activeTransfersCount}
+                </span>
+              )}
             </button>
           );
         })}
@@ -7687,6 +7928,11 @@ function TerminalRightSidebar({
           <TerminalFileSidebar
             activeSession={activeSession}
             terminalCwd={terminalCwd}
+            transferTasks={transferTasks}
+            onStartDownload={onStartDownload}
+            onStartUpload={onStartUpload}
+            onCancelTransfer={onCancelTransfer}
+            onClearCompletedTransfers={onClearCompletedTransfers}
             onAddAiQuote={(text, source) => onAddAiQuote?.(text, source)}
             onOpenRemoteEditor={onOpenRemoteEditor}
             onOpenSearch={onOpenSearch}
@@ -7718,15 +7964,14 @@ const QUICK_REMOTE_LOCATIONS = [
   { label: "数据", path: "/data" }
 ];
 
-function formatTransferSpeed(bytesPerSec: number) {
-  if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
-  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
-  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
-}
-
 function TerminalFileSidebar({
   activeSession,
   terminalCwd,
+  transferTasks = [],
+  onStartDownload,
+  onStartUpload,
+  onCancelTransfer,
+  onClearCompletedTransfers,
   onAddAiQuote,
   onOpenRemoteEditor,
   onOpenSearch,
@@ -7735,6 +7980,11 @@ function TerminalFileSidebar({
 }: {
   activeSession?: SessionTab;
   terminalCwd?: string;
+  transferTasks?: PersistentTransferTask[];
+  onStartDownload?: (sessionId: string, targetPath: string, fileName: string, fileSize: number) => Promise<void>;
+  onStartUpload?: (sessionId: string, remoteDir: string, filePath?: string, fileName?: string, fileContent?: string, fileSize?: number) => Promise<void>;
+  onCancelTransfer?: (sessionId: string, taskId: string, type: "upload" | "download") => Promise<void>;
+  onClearCompletedTransfers?: () => void;
   onAddAiQuote?: (text: string, sourceTitle: string) => void;
   onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
   onOpenSearch?: (path: string) => void;
@@ -7787,7 +8037,6 @@ function TerminalFileSidebar({
   const [uploadStatus, setUploadStatus] = useState("");
   const [permissionFile, setPermissionFile] = useState<{ path: string; name: string; isDirectory: boolean } | null>(null);
   const [isDualPane, setIsDualPane] = useState(false);
-  const [transferTasks, setTransferTasks] = useState<TransferTask[]>([]);
   const canBrowseRemote = activeSession?.kind === "ssh" && activeSession.connected;
 
   // 终端当前工作目录与 SFTP 目录实时跟随联动
@@ -7819,15 +8068,20 @@ function TerminalFileSidebar({
     nativeBridge
       .listDirectory(activeSession.id, remotePath)
       .then((result) => {
-        if (cancelled) return;
-        if (!result.success) {
-          setEntries([]);
-          setError(result.error || "读取远程目录失败。");
-          return;
+        if (!cancelled) {
+          if (Array.isArray(result)) {
+            setEntries(sortDirectoryEntries(result));
+            setError("");
+          } else if (result && result.success) {
+            setEntries(sortDirectoryEntries(result.files || []));
+            setError("");
+          } else {
+            setEntries([]);
+            setError(result?.error || "读取远程目录失败。");
+          }
         }
-        setEntries(sortDirectoryEntries(result.files));
       })
-      .catch((err: unknown) => {
+      .catch((err) => {
         if (!cancelled) {
           setEntries([]);
           setError(err instanceof Error ? err.message : "读取远程目录失败。");
@@ -7856,219 +8110,24 @@ function TerminalFileSidebar({
     if (!activeSession?.id) return;
     setFileMenu(null);
     const targetPath = joinRemotePath(remotePath, entry.name);
-    const selected = await nativeBridge.showSaveFileDialog(entry.name);
-    if (!selected.filePath) return;
-
-    const downloadId = "dl_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
     const totalSize = typeof entry.size === "number" ? entry.size : typeof (entry as any).raw_size === "number" ? (entry as any).raw_size : 0;
-
-    const newTask: TransferTask = {
-      id: downloadId,
-      name: entry.name,
-      type: "download",
-      localPath: selected.filePath,
-      remotePath: targetPath,
-      size: totalSize,
-      progress: 0,
-      status: "transferring",
-      speed: "计算中..."
-    };
-    setTransferTasks((prev) => [newTask, ...prev.filter((t) => t.id !== downloadId)]);
-
-    const startRes = await nativeBridge.startDownloadWithProgress(
-      activeSession.id,
-      targetPath,
-      selected.filePath,
-      downloadId
-    );
-
-    if (!startRes.success) {
-      // 若带进度接口失败则回退至标准直接下载
-      const directRes = await nativeBridge.downloadFile(activeSession.id, targetPath, selected.filePath);
-      if (!directRes.success) {
-        setTransferTasks((prev) =>
-          prev.map((t) => (t.id === downloadId ? { ...t, status: "error", error: directRes.error || "下载失败" } : t))
-        );
-        setError(directRes.error || "下载文件失败。");
-      } else {
-        setTransferTasks((prev) =>
-          prev.map((t) => (t.id === downloadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
-        );
-        setUploadStatus(`✅ 下载完成: ${entry.name}`);
-      }
-      return;
+    if (onStartDownload) {
+      await onStartDownload(activeSession.id, targetPath, entry.name, totalSize);
     }
-
-    let lastBytes = 0;
-    let lastTime = Date.now();
-    const pollTimer = window.setInterval(async () => {
-      if (!activeSession?.id) {
-        window.clearInterval(pollTimer);
-        return;
-      }
-      try {
-        const prog = await nativeBridge.getDownloadProgress(activeSession.id, downloadId);
-        if (prog.success) {
-          const now = Date.now();
-          const dt = (now - lastTime) / 1000;
-          const currentBytes = prog.transferred || prog.downloaded || 0;
-          let speedStr = "";
-          if (dt >= 0.4) {
-            const speedBytesPerSec = Math.max(0, (currentBytes - lastBytes) / dt);
-            speedStr = formatTransferSpeed(speedBytesPerSec);
-            lastBytes = currentBytes;
-            lastTime = now;
-          }
-
-          const fileTotal = prog.total || totalSize;
-          const pct = prog.percentage !== undefined ? prog.percentage : fileTotal > 0 ? Math.min(100, Math.round((currentBytes / fileTotal) * 100)) : 0;
-
-          if (prog.status === "completed" || prog.completed) {
-            window.clearInterval(pollTimer);
-            setTransferTasks((prev) =>
-              prev.map((t) => (t.id === downloadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
-            );
-            setUploadStatus(`✅ 下载完成: ${entry.name} (${formatBytes(currentBytes || fileTotal)})`);
-          } else if (prog.status === "error" || prog.error) {
-            window.clearInterval(pollTimer);
-            setTransferTasks((prev) =>
-              prev.map((t) => (t.id === downloadId ? { ...t, status: "error", error: prog.error || "下载出错" } : t))
-            );
-          } else if (prog.status === "cancelled") {
-            window.clearInterval(pollTimer);
-            setTransferTasks((prev) =>
-              prev.map((t) => (t.id === downloadId ? { ...t, status: "error", error: "已取消" } : t))
-            );
-          } else {
-            setTransferTasks((prev) =>
-              prev.map((t) => (t.id === downloadId ? { ...t, progress: pct, speed: speedStr || t.speed } : t))
-            );
-          }
-        }
-      } catch {
-        window.clearInterval(pollTimer);
-      }
-    }, 250);
   }
 
   async function uploadSingleFile(filePath: string, fileName: string, fileContent?: string, fileSize?: number) {
     if (!activeSession?.id || !canBrowseRemote) return;
-    const targetRemotePath = joinRemotePath(remotePath, fileName);
-    const uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
-    const totalSize = fileSize || (fileContent ? fileContent.length : 0);
-
-    const newTask: TransferTask = {
-      id: uploadId,
-      name: fileName,
-      type: "upload",
-      localPath: filePath || "",
-      remotePath: targetRemotePath,
-      size: totalSize,
-      progress: 0,
-      status: "transferring",
-      speed: "计算中..."
-    };
-    setTransferTasks((prev) => [newTask, ...prev.filter((t) => t.id !== uploadId)]);
-
-    let startRes;
-    if (filePath) {
-      startRes = await nativeBridge.startUploadWithProgress(
-        activeSession.id,
-        filePath,
-        targetRemotePath,
-        uploadId
-      );
-    } else {
-      const b64 = bytesToBase64(new TextEncoder().encode(fileContent || ""));
-      startRes = await nativeBridge.startUploadContentWithProgress(
-        activeSession.id,
-        b64,
-        targetRemotePath,
-        uploadId
-      );
+    if (onStartUpload) {
+      await onStartUpload(activeSession.id, remotePath, filePath, fileName, fileContent, fileSize);
     }
-
-    if (!startRes.success) {
-      let directRes;
-      if (filePath) {
-        directRes = await nativeBridge.uploadFile(activeSession.id, filePath, targetRemotePath);
-      } else {
-        directRes = await nativeBridge.uploadFileContent(activeSession.id, fileContent || "", targetRemotePath);
-      }
-      if (!directRes.success) {
-        setTransferTasks((prev) =>
-          prev.map((t) => (t.id === uploadId ? { ...t, status: "error", error: directRes.error || "上传失败" } : t))
-        );
-        setUploadStatus(`❌ ${fileName} 上传失败：${directRes.error || "未知错误"}`);
-      } else {
-        setTransferTasks((prev) =>
-          prev.map((t) => (t.id === uploadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
-        );
-        setUploadStatus(`✅ ${fileName} 上传成功！`);
-        setReloadToken((t) => t + 1);
-      }
-      return;
-    }
-
-    let lastBytes = 0;
-    let lastTime = Date.now();
-    const pollTimer = window.setInterval(async () => {
-      if (!activeSession?.id) {
-        window.clearInterval(pollTimer);
-        return;
-      }
-      try {
-        const prog = await nativeBridge.getUploadProgress(activeSession.id, uploadId);
-        if (prog.success) {
-          const now = Date.now();
-          const dt = (now - lastTime) / 1000;
-          const currentBytes = prog.transferred || 0;
-          let speedStr = "";
-          if (dt >= 0.4) {
-            const speedBytesPerSec = Math.max(0, (currentBytes - lastBytes) / dt);
-            speedStr = formatTransferSpeed(speedBytesPerSec);
-            lastBytes = currentBytes;
-            lastTime = now;
-          }
-
-          const fileTotal = prog.total || totalSize;
-          const pct = prog.percentage !== undefined ? prog.percentage : fileTotal > 0 ? Math.min(100, Math.round((currentBytes / fileTotal) * 100)) : 0;
-
-          if (prog.status === "completed" || prog.completed) {
-            window.clearInterval(pollTimer);
-            setTransferTasks((prev) =>
-              prev.map((t) => (t.id === uploadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
-            );
-            setUploadStatus(`✅ 上传完成: ${fileName} (${formatBytes(currentBytes || fileTotal)})`);
-            setReloadToken((t) => t + 1);
-          } else if (prog.status === "error" || prog.error) {
-            window.clearInterval(pollTimer);
-            setTransferTasks((prev) =>
-              prev.map((t) => (t.id === uploadId ? { ...t, status: "error", error: prog.error || "上传出错" } : t))
-            );
-          } else if (prog.status === "cancelled") {
-            window.clearInterval(pollTimer);
-            setTransferTasks((prev) =>
-              prev.map((t) => (t.id === uploadId ? { ...t, status: "error", error: "已取消" } : t))
-            );
-          } else {
-            setTransferTasks((prev) =>
-              prev.map((t) => (t.id === uploadId ? { ...t, progress: pct, speed: speedStr || t.speed } : t))
-            );
-          }
-        }
-      } catch {
-        window.clearInterval(pollTimer);
-      }
-    }, 250);
   }
 
   async function triggerManualUpload() {
     if (!activeSession?.id || !canBrowseRemote) return;
-    const selected = await nativeBridge.showOpenFileDialog("选择要上传到远程服务器的文件");
-    if (!selected.filePath) return;
-    const fileName = selected.filePath.split(/[/\\]/).pop() || "uploaded_file";
-    await uploadSingleFile(selected.filePath, fileName);
+    if (onStartUpload) {
+      await onStartUpload(activeSession.id, remotePath);
+    }
   }
 
   async function createNewFile() {
@@ -8461,7 +8520,7 @@ function TerminalFileSidebar({
                   </div>
                   <button
                     type="button"
-                    onClick={() => setTransferTasks((prev) => prev.filter((t) => t.status === "transferring"))}
+                    onClick={() => onClearCompletedTransfers?.()}
                     className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer"
                     title="清除已完成与已失败的任务"
                   >
@@ -8491,15 +8550,8 @@ function TerminalFileSidebar({
                               </span>
                               <button
                                 type="button"
-                                onClick={async () => {
-                                  if (activeSession?.id) {
-                                    if (task.type === "upload") {
-                                      await nativeBridge.cancelUpload(activeSession.id, task.id);
-                                    } else {
-                                      await nativeBridge.cancelDownload(activeSession.id, task.id);
-                                    }
-                                    setTransferTasks((prev) => prev.filter((t) => t.id !== task.id));
-                                  }
+                                onClick={() => {
+                                  onCancelTransfer?.(task.sessionId || activeSession?.id || "", task.id, task.type);
                                 }}
                                 className="text-[10px] text-rose-400 hover:text-rose-300 font-bold ml-1 cursor-pointer"
                                 title={`取消此${task.type === "upload" ? "上传" : "下载"}`}
