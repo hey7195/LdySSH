@@ -699,7 +699,7 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
         PrismLog("INFO", "Proxy handshake success to target " + connectHost + ":" + std::to_string(connectPort));
     }
 
-    int bufSize = 256 * 1024;
+    int bufSize = 4 * 1024 * 1024; // 4MB 高速千兆套接字缓冲
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (char*)&bufSize, sizeof(bufSize));
     setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (char*)&bufSize, sizeof(bufSize));
     BOOL noDelay = TRUE;

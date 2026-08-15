@@ -144,6 +144,7 @@ void UploadFromPathThread(std::shared_ptr<SSHSession> session, std::wstring loca
         return;
     }
     
+    setvbuf(fp, NULL, _IOFBF, 524288);
     _fseeki64(fp, 0, SEEK_END);
     long long totalBytes = _ftelli64(fp);
     _fseeki64(fp, 0, SEEK_SET);
@@ -169,12 +170,17 @@ void UploadFromPathThread(std::shared_ptr<SSHSession> session, std::wstring loca
                 return;
             }
         }
-        Sleep(2);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(session->sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
     
-    const int chunkSize = 131072; // 128KB 高速缓冲区
+    const int chunkSize = 262144; // 256KB 高速缓冲区
     std::vector<char> buffer(chunkSize);
     long long transferred = 0;
+    long long lastReported = 0;
     
     while (transferred < totalBytes) {
         if (globalProgressManager.IsCancelled(uploadId)) {
@@ -197,7 +203,11 @@ void UploadFromPathThread(std::shared_ptr<SSHSession> session, std::wstring loca
             }
             if (written < 0) {
                 if (written == LIBSSH2_ERROR_EAGAIN) {
-                    Sleep(2);
+                    fd_set fd;
+                    FD_ZERO(&fd);
+                    FD_SET(session->sock, &fd);
+                    timeval tv = { 0, 1000 };
+                    select(0, &fd, NULL, NULL, &tv);
                     continue;
                 }
                 while (true) {
@@ -207,7 +217,11 @@ void UploadFromPathThread(std::shared_ptr<SSHSession> session, std::wstring loca
                         c_rc = libssh2_sftp_close(handle);
                     }
                     if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-                    Sleep(2);
+                    fd_set fd;
+                    FD_ZERO(&fd);
+                    FD_SET(session->sock, &fd);
+                    timeval tv = { 0, 1000 };
+                    select(0, &fd, NULL, NULL, &tv);
                 }
                 fclose(fp);
                 globalProgressManager.SetProgress(uploadId, transferred, totalBytes, true, "Write failed");
@@ -217,7 +231,10 @@ void UploadFromPathThread(std::shared_ptr<SSHSession> session, std::wstring loca
         }
         
         transferred += toWrite;
-        globalProgressManager.SetProgress(uploadId, transferred, totalBytes);
+        if (transferred - lastReported >= 524288 || transferred == totalBytes) {
+            globalProgressManager.SetProgress(uploadId, transferred, totalBytes);
+            lastReported = transferred;
+        }
     }
     
     while (true) {
@@ -227,7 +244,11 @@ void UploadFromPathThread(std::shared_ptr<SSHSession> session, std::wstring loca
             c_rc = libssh2_sftp_close(handle);
         }
         if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-        Sleep(2);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(session->sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
     fclose(fp);
     
@@ -253,8 +274,20 @@ void DownloadThread(std::shared_ptr<SSHSession> session, std::string remotePath,
             std::lock_guard<std::mutex> lock(session->sshMutex);
             handle = libssh2_sftp_open(session->sftpSession, remotePath.c_str(), LIBSSH2_FXF_READ, 0);
             if (handle) {
-                if (libssh2_sftp_stat(session->sftpSession, remotePath.c_str(), &attrs) == 0) {
-                    totalBytes = (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE) ? attrs.filesize : 0;
+                while (true) {
+                    int st = libssh2_sftp_fstat(handle, &attrs);
+                    if (st == 0) {
+                        if (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE) {
+                            totalBytes = attrs.filesize;
+                        }
+                        break;
+                    }
+                    if (st != LIBSSH2_ERROR_EAGAIN) break;
+                    fd_set fd;
+                    FD_ZERO(&fd);
+                    FD_SET(session->sock, &fd);
+                    timeval tv = { 0, 500 };
+                    select(0, &fd, NULL, NULL, &tv);
                 }
                 break;
             }
@@ -264,7 +297,11 @@ void DownloadThread(std::shared_ptr<SSHSession> session, std::string remotePath,
                 return;
             }
         }
-        Sleep(2);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(session->sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
     
     globalProgressManager.SetProgress(downloadId, 0, totalBytes);
@@ -272,9 +309,10 @@ void DownloadThread(std::shared_ptr<SSHSession> session, std::string remotePath,
     std::string fileData;
     if (totalBytes > 0) fileData.reserve(totalBytes);
     
-    const int chunkSize = 131072;
+    const int chunkSize = 262144;
     std::vector<char> buffer(chunkSize);
     long long transferred = 0;
+    long long lastReported = 0;
     
     while (true) {
         if (globalProgressManager.IsCancelled(downloadId)) {
@@ -289,7 +327,11 @@ void DownloadThread(std::shared_ptr<SSHSession> session, std::string remotePath,
         
         if (readBytes < 0) {
             if (readBytes == LIBSSH2_ERROR_EAGAIN) {
-                Sleep(2);
+                fd_set fd;
+                FD_ZERO(&fd);
+                FD_SET(session->sock, &fd);
+                timeval tv = { 0, 1000 };
+                select(0, &fd, NULL, NULL, &tv);
                 continue;
             }
             while (true) {
@@ -299,7 +341,11 @@ void DownloadThread(std::shared_ptr<SSHSession> session, std::string remotePath,
                     c_rc = libssh2_sftp_close(handle);
                 }
                 if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-                Sleep(2);
+                fd_set fd;
+                FD_ZERO(&fd);
+                FD_SET(session->sock, &fd);
+                timeval tv = { 0, 1000 };
+                select(0, &fd, NULL, NULL, &tv);
             }
             globalProgressManager.SetProgress(downloadId, transferred, totalBytes, true, "Read failed");
             return;
@@ -308,7 +354,10 @@ void DownloadThread(std::shared_ptr<SSHSession> session, std::string remotePath,
         
         fileData.append(buffer.data(), readBytes);
         transferred += readBytes;
-        globalProgressManager.SetProgress(downloadId, transferred, totalBytes);
+        if (transferred - lastReported >= 524288 || transferred == totalBytes) {
+            globalProgressManager.SetProgress(downloadId, transferred, totalBytes);
+            lastReported = transferred;
+        }
     }
     
     while (true) {
@@ -318,7 +367,11 @@ void DownloadThread(std::shared_ptr<SSHSession> session, std::string remotePath,
             c_rc = libssh2_sftp_close(handle);
         }
         if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-        Sleep(2);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(session->sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
     
     if (globalProgressManager.IsCancelled(downloadId)) {
@@ -341,6 +394,7 @@ void DownloadToPathThread(std::shared_ptr<SSHSession> session, std::string remot
         globalProgressManager.SetProgress(downloadId, 0, 0, true, "Failed to open local file for writing");
         return;
     }
+    setvbuf(fp, NULL, _IOFBF, 524288);
     
     LIBSSH2_SFTP_HANDLE* handle = NULL;
     LIBSSH2_SFTP_ATTRIBUTES attrs;
@@ -350,8 +404,20 @@ void DownloadToPathThread(std::shared_ptr<SSHSession> session, std::string remot
             std::lock_guard<std::mutex> lock(session->sshMutex);
             handle = libssh2_sftp_open(session->sftpSession, remotePath.c_str(), LIBSSH2_FXF_READ, 0);
             if (handle) {
-                if (libssh2_sftp_stat(session->sftpSession, remotePath.c_str(), &attrs) == 0) {
-                    totalBytes = (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE) ? attrs.filesize : 0;
+                while (true) {
+                    int st = libssh2_sftp_fstat(handle, &attrs);
+                    if (st == 0) {
+                        if (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE) {
+                            totalBytes = attrs.filesize;
+                        }
+                        break;
+                    }
+                    if (st != LIBSSH2_ERROR_EAGAIN) break;
+                    fd_set fd;
+                    FD_ZERO(&fd);
+                    FD_SET(session->sock, &fd);
+                    timeval tv = { 0, 500 };
+                    select(0, &fd, NULL, NULL, &tv);
                 }
                 break;
             }
@@ -362,14 +428,19 @@ void DownloadToPathThread(std::shared_ptr<SSHSession> session, std::string remot
                 return;
             }
         }
-        Sleep(2);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(session->sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
     
     globalProgressManager.SetProgress(downloadId, 0, totalBytes);
     
-    const int chunkSize = 131072; // 128KB 高速数据块
+    const int chunkSize = 262144; // 256KB 高速数据块
     std::vector<char> buffer(chunkSize);
     long long transferred = 0;
+    long long lastReported = 0;
     
     while (true) {
         if (globalProgressManager.IsCancelled(downloadId)) {
@@ -384,7 +455,11 @@ void DownloadToPathThread(std::shared_ptr<SSHSession> session, std::string remot
         
         if (readBytes < 0) {
             if (readBytes == LIBSSH2_ERROR_EAGAIN) {
-                Sleep(2);
+                fd_set fd;
+                FD_ZERO(&fd);
+                FD_SET(session->sock, &fd);
+                timeval tv = { 0, 1000 };
+                select(0, &fd, NULL, NULL, &tv);
                 continue;
             }
             while (true) {
@@ -394,7 +469,11 @@ void DownloadToPathThread(std::shared_ptr<SSHSession> session, std::string remot
                     c_rc = libssh2_sftp_close(handle);
                 }
                 if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-                Sleep(2);
+                fd_set fd;
+                FD_ZERO(&fd);
+                FD_SET(session->sock, &fd);
+                timeval tv = { 0, 1000 };
+                select(0, &fd, NULL, NULL, &tv);
             }
             fclose(fp);
             globalProgressManager.SetProgress(downloadId, transferred, totalBytes, true, "Read failed");
@@ -404,7 +483,11 @@ void DownloadToPathThread(std::shared_ptr<SSHSession> session, std::string remot
         
         fwrite(buffer.data(), 1, readBytes, fp);
         transferred += readBytes;
-        globalProgressManager.SetProgress(downloadId, transferred, totalBytes);
+        
+        if (transferred - lastReported >= 524288 || transferred == totalBytes) {
+            globalProgressManager.SetProgress(downloadId, transferred, totalBytes);
+            lastReported = transferred;
+        }
     }
     
     while (true) {
@@ -414,7 +497,11 @@ void DownloadToPathThread(std::shared_ptr<SSHSession> session, std::string remot
             c_rc = libssh2_sftp_close(handle);
         }
         if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-        Sleep(2);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(session->sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
     fclose(fp);
     

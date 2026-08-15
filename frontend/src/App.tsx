@@ -1097,12 +1097,12 @@ export function App() {
               shouldUpdateLastTime = true;
             }
 
-            const total = prog.total || task.size || 0;
+            const total = (prog.total && prog.total > 0) ? prog.total : (task.size || 0);
             const pct =
-              prog.percentage !== undefined
-                ? prog.percentage
-                : total > 0
+              total > 0
                 ? Math.min(100, Math.round((currentBytes / total) * 100))
+                : prog.percentage !== undefined
+                ? prog.percentage
                 : 0;
 
             if (prog.status === "completed" || prog.completed || (total > 0 && currentBytes >= total)) {
