@@ -930,52 +930,65 @@ function createSessionContext(activeSession?: SessionTab): AiContextChip | null 
 export function extractCwdFromTerminalOutput(text: string): string | null {
   if (!text) return null;
 
-  // 1. 解析 OSC 7 序列：\x1b]7;file://hostname/path\x07 或 \x1b\\
-  const osc7Match = text.match(/\x1b\]7;file:\/\/[^\/]*(\/[^\x07\x1b]+)(?:\x07|\x1b\\)/);
-  if (osc7Match && osc7Match[1]) {
-    try {
-      return decodeURIComponent(osc7Match[1]);
-    } catch {
-      return osc7Match[1];
+  // 1. 解析 OSC 7 序列（提取最后一个）
+  const osc7Matches = [...text.matchAll(/\x1b\]7;file:\/\/[^\/]*(\/[^\x07\x1b]+)(?:\x07|\x1b\\)/g)];
+  if (osc7Matches.length > 0) {
+    const last = osc7Matches[osc7Matches.length - 1];
+    if (last && last[1]) {
+      try {
+        return decodeURIComponent(last[1]);
+      } catch {
+        return last[1];
+      }
     }
   }
 
-  // 2. 解析 OSC 0 / OSC 2 窗口标题设置 (Debian / Ubuntu 默认 PS1 \e]0;user@host: path\a)
-  const osc0Match = text.match(/\x1b\][02];[^\x07\x1b]*:[ \t]*([/~][^\x07\x1b\r\n]*)(?:\x07|\x1b\\)/);
-  if (osc0Match && osc0Match[1]) {
-    const raw = osc0Match[1].trim();
-    if (raw.startsWith("/")) return raw;
-    if (raw === "~") return "/root";
-    if (raw.startsWith("~/")) return `/root/${raw.slice(2)}`;
+  // 2. 解析 OSC 0 / OSC 2 窗口标题设置（提取最后一个）
+  const osc0Matches = [...text.matchAll(/\x1b\][02];[^\x07\x1b]*:[ \t]*([/~][^\x07\x1b\r\n]*)(?:\x07|\x1b\\)/g)];
+  if (osc0Matches.length > 0) {
+    const last = osc0Matches[osc0Matches.length - 1];
+    if (last && last[1]) {
+      const raw = last[1].trim();
+      if (raw.startsWith("/")) return raw;
+      if (raw === "~") return "/root";
+      if (raw.startsWith("~/")) return `/root/${raw.slice(2)}`;
+    }
   }
 
-  // 3. 剥离所有 ANSI 终端控制字符，获取纯文本进行严密匹配
+  // 3. 剥离所有 ANSI 终端控制字符，获取纯文本进行行级逆序扫描
   const clean = text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+  const lines = clean.split(/\r?\n/);
 
-  // 4. 解析全场景 Linux Shell 提示符 (Debian/Ubuntu/CentOS/Alpine/macOS/Busybox 等)
-  // 例 1: root@d206b0fcc266a2af:/data#
-  // 例 2: [root@centos-host /var/log]#
-  // 例 3: admin@debian:~/work$
-  const promptMatch =
-    clean.match(/(?:\[?[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::|\s+))([/~][a-zA-Z0-9_./-]*)[\]#$>]\s*$/m) ||
-    clean.match(/(?:\[?[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::|\s+))([/~][a-zA-Z0-9_./-]*)[\]#$>]/) ||
-    clean.match(/(?:^|\n|\r)\s*\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+([/~][a-zA-Z0-9_./-]*)\][#$>]/) ||
-    clean.match(/(?:^|\n|\r)[a-zA-Z0-9_.-]+:\s*([/~][a-zA-Z0-9_./-]*)[#$>]/);
+  // 从最后一行（最新屏幕输出）向前扫描，确保获取的是最新工作目录而不是初始目录！
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
 
-  if (promptMatch && promptMatch[1]) {
-    const rawPath = promptMatch[1].trim();
-    if (rawPath.startsWith("/")) return rawPath;
-    if (rawPath === "~") return "/root";
-    if (rawPath.startsWith("~/")) return `/root/${rawPath.slice(2)}`;
-  }
+    // A. 匹配全场景 Linux Shell 提示符
+    // 例 1: root@d206b0fcc266a2af:/data#
+    // 例 2: root@host:~#
+    // 例 3: [root@centos /var/log]#
+    // 例 4: ubuntu@ip-172-31-0-1:/etc$
+    const pMatch =
+      line.match(/(?:\[?[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::|\s+))([/~][a-zA-Z0-9_./-]*)[\]#$>]/) ||
+      line.match(/\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+([/~][a-zA-Z0-9_./-]*)\][#$>]/) ||
+      line.match(/^[a-zA-Z0-9_.-]+:\s*([/~][a-zA-Z0-9_./-]*)[#$>]/);
 
-  // 5. 解析终端中直接敲入的 cd 命令
-  const cdMatch = clean.match(/(?:^|\n|\r)\s*(?:sudo\s+)?cd\s+([/~][a-zA-Z0-9_./-]*)/);
-  if (cdMatch && cdMatch[1]) {
-    const raw = cdMatch[1].trim();
-    if (raw.startsWith("/")) return raw;
-    if (raw === "~") return "/root";
-    if (raw.startsWith("~/")) return `/root/${raw.slice(2)}`;
+    if (pMatch && pMatch[1]) {
+      const rawPath = pMatch[1].trim();
+      if (rawPath.startsWith("/")) return rawPath;
+      if (rawPath === "~") return "/root";
+      if (rawPath.startsWith("~/")) return `/root/${rawPath.slice(2)}`;
+    }
+
+    // B. 匹配 cd 命令，如 cd /data 或 cd /data/
+    const cdMatch = line.match(/(?:^|\s)(?:sudo\s+)?cd\s+([/~][a-zA-Z0-9_./-]*)/);
+    if (cdMatch && cdMatch[1]) {
+      const rawPath = cdMatch[1].trim().replace(/\/+$/, "") || "/";
+      if (rawPath.startsWith("/")) return rawPath;
+      if (rawPath === "~") return "/root";
+      if (rawPath.startsWith("~/")) return `/root/${rawPath.slice(2)}`;
+    }
   }
 
   return null;
@@ -7733,7 +7746,37 @@ function TerminalFileSidebar({
   const [inputPath, setInputPath] = useState(terminalCwd || "/");
   const [fileFilter, setFileFilter] = useState("");
   const [autoFollowTerminalCwd, setAutoFollowTerminalCwd] = useState(true);
-  const [wrapFileNames, setWrapFileNames] = useState(true);
+  const [wrapFileNames, setWrapFileNames] = useState(false);
+  const [colWidths, setColWidths] = useState({
+    name: 240,
+    size: 75,
+    type: 65,
+    date: 135,
+    permissions: 85
+  });
+
+  const startResizeCol = (colKey: keyof typeof colWidths, event: React.PointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startW = colWidths[colKey];
+
+    const onMove = (moveEv: PointerEvent) => {
+      const delta = moveEv.clientX - startX;
+      setColWidths((prev) => ({
+        ...prev,
+        [colKey]: Math.max(45, startW + delta)
+      }));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
   const [previewFile, setPreviewFile] = useState<{ path: string; name: string } | null>(null);
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -8506,58 +8549,173 @@ function TerminalFileSidebar({
             {!loading && error && <div className="px-3 py-8 text-center text-xs text-rose-600 font-extrabold">{error}</div>}
             {!loading && !error && entries.length === 0 && <div className="px-3 py-8 text-center text-xs text-[var(--app-muted)] font-extrabold">目录为空。</div>}
             {!loading && !error && entries.length > 0 && (
-              <div aria-label="远程文件列表" className="divide-y divide-[var(--app-line)]">
-                {entries
-                  .filter((entry) => !fileFilter.trim() || entry.name.toLowerCase().includes(fileFilter.trim().toLowerCase()))
-                  .map((entry) => (
-                  <button
-                    key={`${entry.type}-${entry.name}`}
-                    className={cn(
-                      "grid w-full min-w-0 grid-cols-[18px_minmax(0,1fr)_56px_74px] items-start gap-2 px-3 py-2 text-left text-xs transition-colors",
-                      entry.type === "directory" ? "hover:bg-[var(--fill-1)] cursor-pointer" : "hover:bg-[var(--fill-1)]/60 cursor-pointer"
-                    )}
-                    title={entry.type === "directory" ? `进入目录: ${entry.name}` : `打开/预览: ${entry.name}`}
-                    onClick={() => {
-                      if (entry.type === "directory") {
-                        openDirectory(entry);
-                      }
-                    }}
-                    onDoubleClick={() => {
-                      if (entry.type !== "directory") {
-                        const targetPath = joinRemotePath(remotePath, entry.name);
-                        if (onOpenRemoteEditor) {
-                          onOpenRemoteEditor(targetPath, entry.name);
-                        } else {
-                          setPreviewFile({ path: targetPath, name: entry.name });
-                        }
-                      }
-                    }}
-                    onContextMenu={(event) => openFileMenu(event, entry)}
-                  >
-                    {entry.type === "directory" ? (
-                      <FolderIcon aria-label="目录图标" className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-                    ) : (entry.type as string) === "symlink" || (entry as any).linkTarget ? (
-                      <LinkIcon aria-label="软链接图标" className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />
-                    ) : (
-                      <FileIcon aria-label="文件图标" className="h-4 w-4 text-[var(--app-muted)] shrink-0 mt-0.5" />
-                    )}
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-1 min-w-0 flex-wrap">
-                        <span className={cn("font-extrabold text-[var(--app-text)] font-mono", wrapFileNames ? "break-all whitespace-normal" : "truncate")}>
-                          {entry.name}
-                        </span>
-                        {(entry as any).linkTarget && (
-                          <span className={cn("font-mono text-[10px] text-cyan-400 font-bold", wrapFileNames ? "break-all whitespace-normal" : "truncate")}>
-                            → {(entry as any).linkTarget}
-                          </span>
+              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto select-none scrollbar-thin">
+                <div style={{ minWidth: `${colWidths.name + colWidths.size + colWidths.type + colWidths.date + colWidths.permissions + 30}px` }}>
+                  {/* FinalShell 风格表头（支持按住竖线左右任意拖拽调整列宽） */}
+                  <div className="flex items-center bg-[var(--fill-1)]/90 border-b border-[var(--app-line)] text-[11px] font-bold text-[var(--app-muted)] sticky top-0 z-10">
+                    {/* 文件名列头 */}
+                    <div
+                      style={{ width: `${colWidths.name}px`, minWidth: `${colWidths.name}px` }}
+                      className="relative flex items-center px-3 py-1.5 min-w-0"
+                    >
+                      <span className="truncate">文件名</span>
+                      {/* 可随意左右拖拽调整宽度的分割把手 */}
+                      <div
+                        onPointerDown={(e) => startResizeCol("name", e)}
+                        onDoubleClick={() => setColWidths((w) => ({ ...w, name: 450 }))}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/30 active:bg-emerald-500 transition-colors z-20 group/colresizer"
+                        title="按住左右拖拽调整「文件名」列宽 (双击自适应加宽)"
+                      >
+                        <div className="h-full w-px bg-[var(--app-line)] group-hover/colresizer:bg-emerald-500" />
+                      </div>
+                    </div>
+
+                    {/* 大小列头 */}
+                    <div
+                      style={{ width: `${colWidths.size}px`, minWidth: `${colWidths.size}px` }}
+                      className="relative flex items-center justify-end px-2 py-1.5 min-w-0"
+                    >
+                      <span className="truncate">大小</span>
+                      <div
+                        onPointerDown={(e) => startResizeCol("size", e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/30 active:bg-emerald-500 transition-colors z-20 group/colresizer"
+                        title="按住左右拖拽调整「大小」列宽"
+                      >
+                        <div className="h-full w-px bg-[var(--app-line)] group-hover/colresizer:bg-emerald-500" />
+                      </div>
+                    </div>
+
+                    {/* 类型列头 */}
+                    <div
+                      style={{ width: `${colWidths.type}px`, minWidth: `${colWidths.type}px` }}
+                      className="relative flex items-center px-2 py-1.5 min-w-0"
+                    >
+                      <span className="truncate">类型</span>
+                      <div
+                        onPointerDown={(e) => startResizeCol("type", e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/30 active:bg-emerald-500 transition-colors z-20 group/colresizer"
+                        title="按住左右拖拽调整「类型」列宽"
+                      >
+                        <div className="h-full w-px bg-[var(--app-line)] group-hover/colresizer:bg-emerald-500" />
+                      </div>
+                    </div>
+
+                    {/* 修改时间列头 */}
+                    <div
+                      style={{ width: `${colWidths.date}px`, minWidth: `${colWidths.date}px` }}
+                      className="relative flex items-center px-2 py-1.5 min-w-0"
+                    >
+                      <span className="truncate">修改时间</span>
+                      <div
+                        onPointerDown={(e) => startResizeCol("date", e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/30 active:bg-emerald-500 transition-colors z-20 group/colresizer"
+                        title="按住左右拖拽调整「修改时间」列宽"
+                      >
+                        <div className="h-full w-px bg-[var(--app-line)] group-hover/colresizer:bg-emerald-500" />
+                      </div>
+                    </div>
+
+                    {/* 权限列头 */}
+                    <div
+                      style={{ width: `${colWidths.permissions}px`, minWidth: `${colWidths.permissions}px` }}
+                      className="relative flex items-center px-2 py-1.5 min-w-0"
+                    >
+                      <span className="truncate">权限</span>
+                    </div>
+                  </div>
+
+                  {/* 文件行数据 */}
+                  <div aria-label="远程文件列表" className="divide-y divide-[var(--app-line)]/50">
+                    {entries
+                      .filter((entry) => !fileFilter.trim() || entry.name.toLowerCase().includes(fileFilter.trim().toLowerCase()))
+                      .map((entry) => (
+                      <button
+                        key={`${entry.type}-${entry.name}`}
+                        className={cn(
+                          "flex w-full items-center text-left text-xs transition-colors hover:bg-[var(--fill-1)]/80 cursor-pointer group/row py-1.5",
+                          entry.type === "directory" ? "font-semibold" : ""
                         )}
-                      </span>
-                      <span className="mt-0.5 block truncate text-[11px] font-semibold text-[var(--app-muted)]">{entry.date || " "}</span>
-                    </span>
-                    <span className="text-[var(--app-muted)] font-semibold text-[11px] truncate mt-0.5">{(entry.type as string) === "symlink" ? "软链接" : entry.type === "directory" ? "目录" : "文件"}</span>
-                    <span className="truncate text-right font-mono text-[11px] text-[var(--app-muted)] font-semibold mt-0.5">{formatRemoteFileSize(entry)}</span>
-                  </button>
-                ))}
+                        title={entry.type === "directory" ? `进入目录: ${entry.name}` : `双击打开/预览: ${entry.name}`}
+                        onClick={() => {
+                          if (entry.type === "directory") {
+                            openDirectory(entry);
+                          }
+                        }}
+                        onDoubleClick={() => {
+                          if (entry.type !== "directory") {
+                            const targetPath = joinRemotePath(remotePath, entry.name);
+                            if (onOpenRemoteEditor) {
+                              onOpenRemoteEditor(targetPath, entry.name);
+                            } else {
+                              setPreviewFile({ path: targetPath, name: entry.name });
+                            }
+                          }
+                        }}
+                        onContextMenu={(event) => openFileMenu(event, entry)}
+                      >
+                        {/* 文件名单元格 */}
+                        <div
+                          style={{ width: `${colWidths.name}px`, minWidth: `${colWidths.name}px` }}
+                          className="flex items-center gap-2 px-3 min-w-0"
+                        >
+                          {entry.type === "directory" ? (
+                            <FolderIcon aria-label="目录图标" className="h-4 w-4 text-amber-500 shrink-0" />
+                          ) : (entry.type as string) === "symlink" || (entry as any).linkTarget ? (
+                            <LinkIcon aria-label="软链接图标" className="h-4 w-4 text-cyan-400 shrink-0" />
+                          ) : (
+                            <FileIcon aria-label="文件图标" className="h-4 w-4 text-[var(--app-muted)] shrink-0" />
+                          )}
+                          <span
+                            className={cn(
+                              "font-mono text-xs font-bold text-[var(--app-text)]",
+                              wrapFileNames ? "break-all whitespace-normal" : "truncate"
+                            )}
+                            title={entry.name}
+                          >
+                            {entry.name}
+                            {(entry as any).linkTarget && (
+                              <span className="text-[10px] text-cyan-400 font-normal ml-1">
+                                → {(entry as any).linkTarget}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+
+                        {/* 大小单元格 */}
+                        <div
+                          style={{ width: `${colWidths.size}px`, minWidth: `${colWidths.size}px` }}
+                          className="text-right px-2 font-mono text-[11px] text-[var(--app-muted)] truncate"
+                        >
+                          {formatRemoteFileSize(entry)}
+                        </div>
+
+                        {/* 类型单元格 */}
+                        <div
+                          style={{ width: `${colWidths.type}px`, minWidth: `${colWidths.type}px` }}
+                          className="px-2 text-[11px] text-[var(--app-muted)] truncate"
+                        >
+                          {(entry.type as string) === "symlink" ? "软链接" : entry.type === "directory" ? "文件夹" : "文件"}
+                        </div>
+
+                        {/* 修改时间单元格 */}
+                        <div
+                          style={{ width: `${colWidths.date}px`, minWidth: `${colWidths.date}px` }}
+                          className="px-2 font-mono text-[11px] text-[var(--app-muted)] truncate"
+                        >
+                          {entry.date || "-"}
+                        </div>
+
+                        {/* 权限单元格 */}
+                        <div
+                          style={{ width: `${colWidths.permissions}px`, minWidth: `${colWidths.permissions}px` }}
+                          className="px-2 font-mono text-[11px] text-[var(--app-muted)] truncate"
+                        >
+                          {entry.permissions ? String(entry.permissions) : "-"}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
             {fileMenu && (

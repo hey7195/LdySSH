@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { App } from "./App";
+import { App, extractCwdFromTerminalOutput } from "./App";
 
 function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
@@ -2435,3 +2435,25 @@ describe("browser cards", () => {
     await waitFor(() => expect(window.pywebview?.api?.delete_web_favorite).toHaveBeenCalledWith("fav-delete"));
   });
 });
+
+describe("extractCwdFromTerminalOutput", () => {
+  test("extracts the latest directory when history contains initial and subsequent prompts", () => {
+    const history = "root@d206b0fcc266a2af:~# cd /data/\r\nroot@d206b0fcc266a2af:/data# ";
+    expect(extractCwdFromTerminalOutput(history)).toBe("/data");
+  });
+
+  test("extracts directory from ANSI color formatted Debian/Ubuntu prompt", () => {
+    const ansiPrompt = "\x1b[01;32mroot@d206b0fcc266a2af\x1b[00m:\x1b[01;34m/data\x1b[00m# ";
+    expect(extractCwdFromTerminalOutput(ansiPrompt)).toBe("/data");
+  });
+
+  test("extracts directory from OSC 7 and OSC 0 sequences", () => {
+    expect(extractCwdFromTerminalOutput("\x1b]7;file://myhost/var/log\x07")).toBe("/var/log");
+    expect(extractCwdFromTerminalOutput("\x1b]0;root@server: /etc/nginx\x07")).toBe("/etc/nginx");
+  });
+
+  test("extracts directory from CentOS prompt format", () => {
+    expect(extractCwdFromTerminalOutput("[root@centos-node /opt/app]# ")).toBe("/opt/app");
+  });
+});
+
