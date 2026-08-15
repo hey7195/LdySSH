@@ -84,6 +84,42 @@ export const nativeBridge = {
       localPath
     );
   },
+  startDownloadWithProgress(sessionId: string, remotePath: string, localPath: string, downloadId: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "start_direct_download_with_progress",
+      { success: false, error: "Bridge unavailable" },
+      sessionId,
+      remotePath,
+      localPath,
+      downloadId
+    );
+  },
+  getDownloadProgress(sessionId: string, downloadId: string) {
+    return callNative<{
+      success: boolean;
+      id?: string;
+      transferred?: number;
+      downloaded?: number;
+      total?: number;
+      percentage?: number;
+      completed?: boolean;
+      status?: "downloading" | "completed" | "error" | "cancelled";
+      error?: string;
+    }>(
+      "get_download_progress",
+      { success: false, error: "Bridge unavailable" },
+      sessionId,
+      downloadId
+    );
+  },
+  cancelDownload(sessionId: string, downloadId: string) {
+    return callNative<{ success: boolean }>(
+      "cancel_download",
+      { success: false },
+      sessionId,
+      downloadId
+    );
+  },
   uploadFile(sessionId: string, localPath: string, remotePath: string) {
     return callNative<{ success: boolean; error?: string }>(
       "upload_file",

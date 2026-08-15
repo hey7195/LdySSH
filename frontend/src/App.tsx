@@ -925,6 +925,28 @@ function createSessionContext(activeSession?: SessionTab): AiContextChip | null 
   };
 }
 
+export function extractCwdFromTerminalOutput(text: string): string | null {
+  if (!text) return null;
+  const osc7Match = text.match(/\x1b\]7;file:\/\/[^\/]*(\/[^\x07\x1b]+)(?:\x07|\x1b\\)/);
+  if (osc7Match && osc7Match[1]) {
+    try {
+      return decodeURIComponent(osc7Match[1]);
+    } catch {
+      return osc7Match[1];
+    }
+  }
+
+  const promptMatch = text.match(/(?:\[?[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::|\s+))([/~][a-zA-Z0-9_./-]*)[\]#$>]\s*$/m) ||
+                      text.match(/(?:\[?[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::|\s+))([/~][a-zA-Z0-9_./-]*)[\]#$>]/);
+  if (promptMatch && promptMatch[1]) {
+    const rawPath = promptMatch[1].trim();
+    if (rawPath.startsWith("/")) return rawPath;
+    if (rawPath === "~") return "/root";
+    if (rawPath.startsWith("~/")) return `/root/${rawPath.slice(2)}`;
+  }
+  return null;
+}
+
 export function App() {
   const [activeTool, setActiveTool] = useState<Tool>("ssh");
   const [sidebarHidden, setSidebarHidden] = useState(false);
@@ -961,6 +983,7 @@ export function App() {
   const [aiConfig, setAiConfig] = useState<AiConfig>(() => loadStoredAiConfig());
   const [terminalSidePanel, setTerminalSidePanel] = useState<TerminalSidePanel>("commands");
   const [terminalHistories, setTerminalHistories] = useState<Record<string, string>>({});
+  const [terminalCwds, setTerminalCwds] = useState<Record<string, string>>({});
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
   const [terminalCommandNotice, setTerminalCommandNotice] = useState<TerminalCommandNotice | null>(null);
   const [commandSuggestionView, setCommandSuggestionView] = useState<CommandSuggestionView | null>(null);
@@ -1603,6 +1626,10 @@ export function App() {
       ...current,
       [sessionId]: trimTerminalHistory(`${current[sessionId] || ""}${text}`)
     }));
+    const detectedCwd = extractCwdFromTerminalOutput(text);
+    if (detectedCwd) {
+      setTerminalCwds((prev) => (prev[sessionId] === detectedCwd ? prev : { ...prev, [sessionId]: detectedCwd }));
+    }
   }
 
   function toConnectionForm(connection: SavedConnection): ConnectionForm {
@@ -2155,6 +2182,15 @@ export function App() {
     } else {
       void nativeBridge.sendInputBase64(activeSession.id, b64Data);
     }
+    const cdMatch = command.match(/^\s*cd\s+([^\s;&|]+)/);
+    if (cdMatch && cdMatch[1] && activeSession?.id) {
+      const rawTarget = cdMatch[1].replace(/['"]/g, "").trim();
+      if (rawTarget.startsWith("/")) {
+        setTerminalCwds((prev) => ({ ...prev, [activeSession.id]: rawTarget }));
+      } else if (rawTarget === "~") {
+        setTerminalCwds((prev) => ({ ...prev, [activeSession.id]: "/root" }));
+      }
+    }
     setTerminalCommandNotice({ sessionId: activeSession.id, command });
     setTerminalFocusRequest((current) => current + 1);
     setActiveTool("local");
@@ -2423,6 +2459,7 @@ export function App() {
               aiQuotes={aiQuotes}
               aiConfig={aiConfig}
               terminalHistory={activeSession ? terminalHistories[activeSession.id] || "" : ""}
+              terminalCwd={activeSession ? terminalCwds[activeSession.id] : undefined}
               sidebarHidden={sidebarHidden}
               onToggleSidebar={() => setSidebarHidden((prev) => !prev)}
               onActivate={setActiveSessionId}
@@ -4005,6 +4042,7 @@ function TerminalWorkspace({
   aiQuotes,
   aiConfig,
   terminalHistory,
+  terminalCwd,
   sidebarHidden,
   onToggleSidebar,
   onActivate,
@@ -4059,6 +4097,7 @@ function TerminalWorkspace({
   aiQuotes: AiQuote[];
   aiConfig: AiConfig;
   terminalHistory: string;
+  terminalCwd?: string;
   sidebarHidden?: boolean;
   onToggleSidebar?: () => void;
   onActivate: (sessionId: string) => void;
@@ -4631,6 +4670,7 @@ function TerminalWorkspace({
             onResizeStart={startResizeRightSidebar}
             activePanel={sidePanel}
             activeSession={activeSession}
+            terminalCwd={terminalCwd}
             commandFolders={commandFolders}
             activeCommandFolderId={activeCommandFolderId}
             shortcutParameterRequest={shortcutParameterRequest}
@@ -7788,6 +7828,7 @@ function DevOpsToolboxPanel({
 function TerminalRightSidebar({
   activePanel,
   activeSession,
+  terminalCwd,
   commandFolders,
   activeCommandFolderId,
   shortcutParameterRequest,
@@ -7808,6 +7849,7 @@ function TerminalRightSidebar({
 }: {
   activePanel: TerminalSidePanel;
   activeSession?: SessionTab;
+  terminalCwd?: string;
   commandFolders: CommandFolder[];
   activeCommandFolderId: string;
   shortcutParameterRequest: ShortcutParameterRequest | null;
@@ -7900,6 +7942,7 @@ function TerminalRightSidebar({
         {activePanel === "files" && (
           <TerminalFileSidebar
             activeSession={activeSession}
+            terminalCwd={terminalCwd}
             onAddAiQuote={(text, source) => onAddAiQuote?.(text, source)}
             onOpenRemoteEditor={onOpenRemoteEditor}
             onOpenSearch={onOpenSearch}
@@ -7931,8 +7974,15 @@ const QUICK_REMOTE_LOCATIONS = [
   { label: "数据", path: "/data" }
 ];
 
+function formatTransferSpeed(bytesPerSec: number) {
+  if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+}
+
 function TerminalFileSidebar({
   activeSession,
+  terminalCwd,
   onAddAiQuote,
   onOpenRemoteEditor,
   onOpenSearch,
@@ -7940,6 +7990,7 @@ function TerminalFileSidebar({
   onSendCommand
 }: {
   activeSession?: SessionTab;
+  terminalCwd?: string;
   onAddAiQuote?: (text: string, sourceTitle: string) => void;
   onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
   onOpenSearch?: (path: string) => void;
@@ -7950,6 +8001,7 @@ function TerminalFileSidebar({
   const [isEditingPath, setIsEditingPath] = useState(false);
   const [inputPath, setInputPath] = useState("/");
   const [fileFilter, setFileFilter] = useState("");
+  const [autoFollowTerminalCwd, setAutoFollowTerminalCwd] = useState(true);
   const [previewFile, setPreviewFile] = useState<{ path: string; name: string } | null>(null);
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -7963,9 +8015,16 @@ function TerminalFileSidebar({
   const [transferTasks, setTransferTasks] = useState<TransferTask[]>([]);
   const canBrowseRemote = activeSession?.kind === "ssh" && activeSession.connected;
 
+  // 终端当前工作目录与 SFTP 目录实时跟随联动
   useEffect(() => {
-    setRemotePath("/");
-    setInputPath("/");
+    if (autoFollowTerminalCwd && terminalCwd && terminalCwd !== remotePath) {
+      setRemotePath(terminalCwd);
+    }
+  }, [terminalCwd, autoFollowTerminalCwd]);
+
+  useEffect(() => {
+    setRemotePath(terminalCwd || "/");
+    setInputPath(terminalCwd || "/");
     setFileFilter("");
   }, [activeSession?.id]);
 
@@ -8023,10 +8082,97 @@ function TerminalFileSidebar({
     const targetPath = joinRemotePath(remotePath, entry.name);
     const selected = await nativeBridge.showSaveFileDialog(entry.name);
     if (!selected.filePath) return;
-    const result = await nativeBridge.downloadFile(activeSession.id, targetPath, selected.filePath);
-    if (!result.success) {
-      setError(result.error || "下载文件失败。");
+
+    const downloadId = "dl_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    const totalSize = typeof entry.size === "number" ? entry.size : typeof (entry as any).raw_size === "number" ? (entry as any).raw_size : 0;
+
+    const newTask: TransferTask = {
+      id: downloadId,
+      name: entry.name,
+      type: "download",
+      localPath: selected.filePath,
+      remotePath: targetPath,
+      size: totalSize,
+      progress: 0,
+      status: "transferring",
+      speed: "计算中..."
+    };
+    setTransferTasks((prev) => [newTask, ...prev.filter((t) => t.id !== downloadId)]);
+
+    const startRes = await nativeBridge.startDownloadWithProgress(
+      activeSession.id,
+      targetPath,
+      selected.filePath,
+      downloadId
+    );
+
+    if (!startRes.success) {
+      // 若带进度接口失败则回退至标准直接下载
+      const directRes = await nativeBridge.downloadFile(activeSession.id, targetPath, selected.filePath);
+      if (!directRes.success) {
+        setTransferTasks((prev) =>
+          prev.map((t) => (t.id === downloadId ? { ...t, status: "error", error: directRes.error || "下载失败" } : t))
+        );
+        setError(directRes.error || "下载文件失败。");
+      } else {
+        setTransferTasks((prev) =>
+          prev.map((t) => (t.id === downloadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
+        );
+        setUploadStatus(`✅ 下载完成: ${entry.name}`);
+      }
+      return;
     }
+
+    let lastBytes = 0;
+    let lastTime = Date.now();
+    const pollTimer = window.setInterval(async () => {
+      if (!activeSession?.id) {
+        window.clearInterval(pollTimer);
+        return;
+      }
+      try {
+        const prog = await nativeBridge.getDownloadProgress(activeSession.id, downloadId);
+        if (prog.success) {
+          const now = Date.now();
+          const dt = (now - lastTime) / 1000;
+          const currentBytes = prog.transferred || prog.downloaded || 0;
+          let speedStr = "";
+          if (dt >= 0.4) {
+            const speedBytesPerSec = Math.max(0, (currentBytes - lastBytes) / dt);
+            speedStr = formatTransferSpeed(speedBytesPerSec);
+            lastBytes = currentBytes;
+            lastTime = now;
+          }
+
+          const fileTotal = prog.total || totalSize;
+          const pct = prog.percentage !== undefined ? prog.percentage : fileTotal > 0 ? Math.min(100, Math.round((currentBytes / fileTotal) * 100)) : 0;
+
+          if (prog.status === "completed" || prog.completed) {
+            window.clearInterval(pollTimer);
+            setTransferTasks((prev) =>
+              prev.map((t) => (t.id === downloadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
+            );
+            setUploadStatus(`✅ 下载完成: ${entry.name} (${formatBytes(currentBytes || fileTotal)})`);
+          } else if (prog.status === "error" || prog.error) {
+            window.clearInterval(pollTimer);
+            setTransferTasks((prev) =>
+              prev.map((t) => (t.id === downloadId ? { ...t, status: "error", error: prog.error || "下载出错" } : t))
+            );
+          } else if (prog.status === "cancelled") {
+            window.clearInterval(pollTimer);
+            setTransferTasks((prev) =>
+              prev.map((t) => (t.id === downloadId ? { ...t, status: "error", error: "已取消" } : t))
+            );
+          } else {
+            setTransferTasks((prev) =>
+              prev.map((t) => (t.id === downloadId ? { ...t, progress: pct, speed: speedStr || t.speed } : t))
+            );
+          }
+        }
+      } catch {
+        window.clearInterval(pollTimer);
+      }
+    }, 250);
   }
 
   async function triggerManualUpload() {
@@ -8332,6 +8478,25 @@ function TerminalFileSidebar({
             {/* 常用目录快速跳转 Chips 栏 */}
             <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none border-b border-[var(--app-line)] px-3 py-1.5 bg-[var(--sidebar-bg)]">
               <span className="text-[10px] font-extrabold text-[var(--app-muted)] shrink-0 select-none">常用跳转:</span>
+              {terminalCwd && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRemotePath(terminalCwd);
+                    setAutoFollowTerminalCwd(true);
+                  }}
+                  className={cn(
+                    "flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-mono font-bold transition-all shrink-0 cursor-pointer select-none border",
+                    autoFollowTerminalCwd && remotePath === terminalCwd
+                      ? "bg-emerald-600 text-white border-emerald-500 shadow-2xs"
+                      : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                  )}
+                  title={`终端当前目录: ${terminalCwd} (点击即刻跳转并开启自动跟随)`}
+                >
+                  <RotateCcw className="h-2.5 w-2.5" />
+                  <span>📍 终端: {terminalCwd}</span>
+                </button>
+              )}
               {QUICK_REMOTE_LOCATIONS.map((loc) => (
                 <button
                   key={loc.path}
@@ -8349,20 +8514,140 @@ function TerminalFileSidebar({
                 </button>
               ))}
             </div>
+
+            {/* 智能检索 / 绝对路径回车直达栏 */}
             <div className="flex items-center gap-2 border-b border-[var(--app-line)] px-3 py-1.5 bg-[var(--fill-1)]">
               <Search className="h-3.5 w-3.5 text-[var(--app-muted)] shrink-0" />
-              <input
-                className="w-full bg-transparent text-xs text-[var(--app-text)] placeholder:text-[var(--app-muted)] focus:outline-none font-medium"
-                placeholder="搜索当前目录文件..."
-                value={fileFilter}
-                onChange={(e) => setFileFilter(e.target.value)}
-              />
-              {fileFilter && (
-                <button className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer" onClick={() => setFileFilter("")}>
-                  ✕
-                </button>
-              )}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const val = fileFilter.trim();
+                  if (!val) return;
+                  if (val.startsWith("/") || val.startsWith("~") || val.includes("/")) {
+                    const target = val.startsWith("~") ? val.replace(/^~/, "/root") : val;
+                    setRemotePath(target);
+                    setFileFilter("");
+                  }
+                }}
+                className="flex-1 flex items-center gap-1.5 min-w-0"
+              >
+                <input
+                  className="w-full bg-transparent text-xs text-[var(--app-text)] placeholder:text-[var(--app-muted)] focus:outline-none font-medium"
+                  placeholder="输入路径回车跳转 (如 /data/debian12/images)，或检索文件名..."
+                  value={fileFilter}
+                  onChange={(e) => setFileFilter(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const val = fileFilter.trim();
+                      if (val.startsWith("/") || val.startsWith("~") || val.includes("/")) {
+                        e.preventDefault();
+                        const target = val.startsWith("~") ? val.replace(/^~/, "/root") : val;
+                        setRemotePath(target);
+                        setFileFilter("");
+                      }
+                    }
+                  }}
+                />
+                {(fileFilter.trim().startsWith("/") || fileFilter.trim().startsWith("~") || fileFilter.trim().includes("/")) && (
+                  <button
+                    type="submit"
+                    className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] shadow-2xs cursor-pointer shrink-0 transition-colors"
+                    title="立即跳转至该路径"
+                  >
+                    前往 ➔
+                  </button>
+                )}
+                {fileFilter && (
+                  <button
+                    type="button"
+                    className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer shrink-0"
+                    onClick={() => setFileFilter("")}
+                  >
+                    ✕
+                  </button>
+                )}
+              </form>
             </div>
+
+            {/* 实时传输任务与大文件下载进度条面板 (Transfer Queue & Realtime Progress Widget) */}
+            {transferTasks.length > 0 && (
+              <div className="border-b border-[var(--app-line)] bg-[var(--fill-1)] p-2.5">
+                <div className="flex items-center justify-between pb-1.5 border-b border-[var(--app-line)]/60">
+                  <div className="flex items-center gap-1.5 text-xs font-extrabold text-[var(--app-text)]">
+                    <Download className="h-3.5 w-3.5 text-emerald-500 animate-pulse" />
+                    <span>传输任务 ({transferTasks.filter(t => t.status === "transferring").length} 进行中)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTransferTasks((prev) => prev.filter((t) => t.status === "transferring"))}
+                    className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer"
+                    title="清除已完成与已失败的任务"
+                  >
+                    清空已结束
+                  </button>
+                </div>
+                <div className="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {transferTasks.map((task) => (
+                    <div key={task.id} className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 text-xs shadow-2xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono font-bold text-[var(--app-text)] truncate max-w-[200px]" title={task.name}>
+                          {task.name}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
+                          {task.status === "transferring" && (
+                            <>
+                              {task.speed && <span className="text-sky-400 font-bold">{task.speed}</span>}
+                              <span className="text-emerald-400 font-black">{task.progress}%</span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (activeSession?.id) {
+                                    await nativeBridge.cancelDownload(activeSession.id, task.id);
+                                    setTransferTasks((prev) => prev.filter((t) => t.id !== task.id));
+                                  }
+                                }}
+                                className="text-[10px] text-rose-400 hover:text-rose-300 font-bold ml-1 cursor-pointer"
+                                title="取消此下载"
+                              >
+                                ✕
+                              </button>
+                            </>
+                          )}
+                          {task.status === "completed" && (
+                            <span className="text-emerald-500 font-extrabold flex items-center gap-0.5">
+                              <CheckCircle2 className="h-3 w-3" /> 已完成
+                            </span>
+                          )}
+                          {task.status === "error" && (
+                            <span className="text-rose-500 font-extrabold" title={task.error}>
+                              ❌ {task.error || "失败"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {/* 进度条轨道 */}
+                      <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-[var(--app-line)]">
+                        <div
+                          className={cn(
+                            "h-full transition-all duration-200",
+                            task.status === "completed"
+                              ? "bg-emerald-500"
+                              : task.status === "error"
+                              ? "bg-rose-500"
+                              : "bg-emerald-400 bg-gradient-to-r from-emerald-500 to-teal-400 animate-pulse"
+                          )}
+                          style={{ width: `${task.progress}%` }}
+                        />
+                      </div>
+                      <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--app-muted)] font-mono">
+                        <span className="truncate max-w-[220px]" title={task.remotePath}>{task.remotePath}</span>
+                        {task.size > 0 && <span>{formatBytes(task.size)}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {loading && <div className="px-3 py-8 text-center text-xs text-[var(--app-muted)] font-extrabold">正在读取目录...</div>}
             {!loading && error && <div className="px-3 py-8 text-center text-xs text-rose-600 font-extrabold">{error}</div>}
             {!loading && !error && entries.length === 0 && <div className="px-3 py-8 text-center text-xs text-[var(--app-muted)] font-extrabold">目录为空。</div>}
