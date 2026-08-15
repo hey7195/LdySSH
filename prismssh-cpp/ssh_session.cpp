@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <winsock2.h>
@@ -2923,7 +2924,11 @@ bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& re
                 return false;
             }
         }
-        Sleep(5);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
 
     auto pipeline = std::make_shared<SftpPipeline>(8);
@@ -2931,24 +2936,26 @@ bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& re
     std::string readError = "";
     
     std::thread readerThread([localPath, pipeline, &readSuccess, &readError]() {
-        std::ifstream in(localPath.c_str(), std::ios::binary);
-        if (!in.is_open()) {
+        FILE* fp = _wfopen(localPath.c_str(), L"rb");
+        if (!fp) {
             readSuccess = false;
             readError = "Failed to open local file for reading";
             pipeline->Cancel();
             return;
         }
+        setvbuf(fp, NULL, _IOFBF, 524288);
         
-        char buffer[32768];
+        const int bufLen = 262144;
+        std::vector<char> buffer(bufLen);
         while (true) {
-            in.read(buffer, sizeof(buffer));
-            std::streamsize bytesRead = in.gcount();
-            if (bytesRead <= 0) break;
+            size_t bytesRead = fread(buffer.data(), 1, bufLen, fp);
+            if (bytesRead == 0) break;
             
             auto block = std::make_shared<SftpBlock>();
-            block->data.assign(buffer, buffer + bytesRead);
+            block->data.assign(buffer.data(), buffer.data() + bytesRead);
             if (!pipeline->Push(block)) break;
         }
+        fclose(fp);
         
         auto eofBlock = std::make_shared<SftpBlock>();
         eofBlock->is_eof = true;
@@ -2976,7 +2983,11 @@ bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& re
             }
             if (rc < 0) {
                 if (rc == LIBSSH2_ERROR_EAGAIN) {
-                    Sleep(5);
+                    fd_set fd;
+                    FD_ZERO(&fd);
+                    FD_SET(sock, &fd);
+                    timeval tv = { 0, 1000 };
+                    select(0, &fd, NULL, NULL, &tv);
                     continue;
                 }
                 lastError = "write failed";
@@ -3005,7 +3016,11 @@ bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& re
             c_rc = libssh2_sftp_close(handle);
         }
         if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-        Sleep(5);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
     
     return success;
@@ -3034,7 +3049,11 @@ bool SSHSession::DownloadFile(const std::string& remotePath, const std::wstring&
                 return false;
             }
         }
-        Sleep(5);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
 
     auto pipeline = std::make_shared<SftpPipeline>(8);
@@ -3042,40 +3061,46 @@ bool SSHSession::DownloadFile(const std::string& remotePath, const std::wstring&
     std::string writeError = "";
     
     std::thread writerThread([localPath, pipeline, &writeSuccess, &writeError]() {
-        std::ofstream out(localPath.c_str(), std::ios::binary);
-        if (!out.is_open()) {
+        FILE* fp = _wfopen(localPath.c_str(), L"wb");
+        if (!fp) {
             writeSuccess = false;
             writeError = "Failed to open local file for writing";
             pipeline->Cancel();
             return;
         }
+        setvbuf(fp, NULL, _IOFBF, 524288);
         
         while (true) {
             auto block = pipeline->Pop();
             if (!block || block->is_eof) break;
             
-            out.write(block->data.data(), block->data.size());
-            if (!out) {
+            size_t written = fwrite(block->data.data(), 1, block->data.size(), fp);
+            if (written != block->data.size()) {
                 writeSuccess = false;
                 writeError = "write to local file failed";
                 pipeline->Cancel();
                 break;
             }
         }
-        out.close();
+        fclose(fp);
     });
 
     bool success = true;
-    char buffer[32768];
+    const int bufLen = 262144;
+    std::vector<char> buffer(bufLen);
     while (true) {
         int rc = 0;
         {
             std::lock_guard<std::mutex> lock(sshMutex);
-            rc = libssh2_sftp_read(handle, buffer, sizeof(buffer));
+            rc = libssh2_sftp_read(handle, buffer.data(), bufLen);
         }
         if (rc < 0) {
             if (rc == LIBSSH2_ERROR_EAGAIN) {
-                Sleep(5);
+                fd_set fd;
+                FD_ZERO(&fd);
+                FD_SET(sock, &fd);
+                timeval tv = { 0, 1000 };
+                select(0, &fd, NULL, NULL, &tv);
                 continue;
             }
             lastError = "read failed";
@@ -3091,7 +3116,7 @@ bool SSHSession::DownloadFile(const std::string& remotePath, const std::wstring&
         }
         
         auto block = std::make_shared<SftpBlock>();
-        block->data.assign(buffer, buffer + rc);
+        block->data.assign(buffer.data(), buffer.data() + rc);
         if (!pipeline->Push(block)) break;
     }
 
@@ -3111,7 +3136,11 @@ bool SSHSession::DownloadFile(const std::string& remotePath, const std::wstring&
             c_rc = libssh2_sftp_close(handle);
         }
         if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-        Sleep(5);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
 
     if (!success) {

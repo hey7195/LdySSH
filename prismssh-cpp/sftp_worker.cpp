@@ -63,6 +63,7 @@ void CleanupEditMappings() {
 void UploadThread(std::shared_ptr<SSHSession> session, std::string fileData, std::string remotePath, std::string uploadId) {
     long long totalBytes = fileData.size();
     long long transferred = 0;
+    long long lastReported = 0;
     std::string sftpError;
     if (!session->EnsureSftpSession(sftpError)) {
         globalProgressManager.SetProgress(uploadId, 0, totalBytes, true, sftpError);
@@ -81,10 +82,14 @@ void UploadThread(std::shared_ptr<SSHSession> session, std::string fileData, std
                 return;
             }
         }
-        Sleep(5);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(session->sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
     
-    const int chunkSize = 32768; // 32KB
+    const int chunkSize = 262144; // 256KB 高速大块
     while (transferred < totalBytes) {
         if (globalProgressManager.IsCancelled(uploadId)) {
             break;
@@ -99,7 +104,11 @@ void UploadThread(std::shared_ptr<SSHSession> session, std::string fileData, std
         
         if (written < 0) {
             if (written == LIBSSH2_ERROR_EAGAIN) {
-                Sleep(5);
+                fd_set fd;
+                FD_ZERO(&fd);
+                FD_SET(session->sock, &fd);
+                timeval tv = { 0, 1000 };
+                select(0, &fd, NULL, NULL, &tv);
                 continue;
             }
             while (true) {
@@ -109,15 +118,21 @@ void UploadThread(std::shared_ptr<SSHSession> session, std::string fileData, std
                     c_rc = libssh2_sftp_close(handle);
                 }
                 if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-                Sleep(5);
+                fd_set fd;
+                FD_ZERO(&fd);
+                FD_SET(session->sock, &fd);
+                timeval tv = { 0, 1000 };
+                select(0, &fd, NULL, NULL, &tv);
             }
             globalProgressManager.SetProgress(uploadId, transferred, totalBytes, true, "Write failed");
             return;
         }
         
         transferred += written;
-        globalProgressManager.SetProgress(uploadId, transferred, totalBytes);
-        Sleep(1);
+        if (transferred - lastReported >= 524288 || transferred == totalBytes) {
+            globalProgressManager.SetProgress(uploadId, transferred, totalBytes);
+            lastReported = transferred;
+        }
     }
     
     while (true) {
@@ -127,7 +142,11 @@ void UploadThread(std::shared_ptr<SSHSession> session, std::string fileData, std
             c_rc = libssh2_sftp_close(handle);
         }
         if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-        Sleep(5);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(session->sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
     
     if (globalProgressManager.IsCancelled(uploadId)) {
