@@ -5005,8 +5005,8 @@ function TerminalWorkspace({
         )}
       </div>
       {/* 终端底部沉浸状态栏 (专业实时指标 + 快捷侧栏一键切换) */}
-      <div className="flex h-8 items-center justify-between border-t border-[var(--app-line)] bg-[var(--sidebar-bg)] px-3 text-xs font-medium text-[var(--app-muted)] select-none">
-        <div className="flex items-center gap-2.5 min-w-0">
+      <div className="flex h-8 items-center justify-between border-t border-[var(--app-line)] bg-[var(--sidebar-bg)] px-3 text-xs font-medium text-[var(--app-muted)] select-none overflow-hidden relative">
+        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto scrollbar-none pr-3">
           {/* 连接状态与呼吸指示灯 */}
           <span className="flex items-center gap-1.5 shrink-0">
             <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500 shadow-sm shadow-emerald-500/50 animate-pulse" : "bg-slate-400")} />
@@ -5024,7 +5024,7 @@ function TerminalWorkspace({
           <div className="h-3 w-px bg-[var(--app-line)] shrink-0" />
 
           {/* 会话名称与目标地址 */}
-          <span className="truncate font-mono text-[11px] text-[var(--app-text)] font-semibold flex items-center gap-1.5">
+          <span className="truncate font-mono text-[11px] text-[var(--app-text)] font-semibold flex items-center gap-1.5 shrink-0">
             <span>{activeSession ? `${activeSession.kind === "ssh" ? "SSH" : "Local"}: ${activeSession.title}` : "无活动终端"}</span>
             {renderEnvironmentBadge(activeSession?.connectParams?.environment)}
           </span>
@@ -5072,41 +5072,21 @@ function TerminalWorkspace({
           )}
 
           {activeSession?.error && (
-            <span className="truncate text-rose-500 font-bold text-[11px]">
+            <span className="truncate text-rose-500 font-bold text-[11px] shrink-0">
               ⚠️ {activeSession.error}
             </span>
           )}
 
           <div className="h-3 w-px bg-[var(--app-line)] shrink-0 hidden sm:inline-block" />
 
-          {/* 默认常驻底部性能状态指示条 (CPU / 内存 / 磁盘 / 实时流量) - 免点击直接看 */}
-          <div className="hidden xl:flex items-center gap-3 font-mono text-[10px] bg-[var(--fill-1)] border border-[var(--app-line)] px-2.5 py-0.5 rounded-lg shadow-2xs shrink-0 select-none">
-            <span className="flex items-center gap-1 font-bold text-emerald-400">
-              <Cpu className="h-3 w-3" />
-              <span>CPU: 12%</span>
-            </span>
-            <span className="flex items-center gap-1 font-bold text-sky-400">
-              <Activity className="h-3 w-3" />
-              <span>内存: 2.1G (26%)</span>
-            </span>
-            <span className="flex items-center gap-1 font-bold text-purple-400">
-              <HardDrive className="h-3 w-3" />
-              <span>磁盘: 42%</span>
-            </span>
-            <span className="flex items-center gap-1 font-bold text-amber-400">
-              <ArrowRightLeft className="h-3 w-3" />
-              <span>↑1.2M ↓4.5M</span>
-            </span>
-          </div>
-
           {/* 智能极速运维快捷动作胶囊栏 (0 打字秒级执行高频动作) */}
-          <div className="hidden lg:flex items-center gap-1 shrink-0">
+          <div className="hidden xl:flex items-center gap-1 shrink-0">
             <button
               onClick={() => onSendCommand("\x03")}
               title="发送中断信号 (Ctrl + C)"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-colors cursor-pointer"
             >
-              <span>⛔ 中断 (Ctrl+C)</span>
+              <span>⛔ 中断</span>
             </button>
             <button
               onClick={() => onSendCommand("clear\n")}
@@ -5127,46 +5107,44 @@ function TerminalWorkspace({
               title="一键查看服务器正在监听的 TCP/UDP 端口"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 transition-colors cursor-pointer"
             >
-              <span>🌐 端口监听</span>
+              <span>🌐 端口</span>
             </button>
             <button
               onClick={() => onSendCommand("df -hT -x tmpfs -x devtmpfs\n")}
               title="查看物理分区挂载点与磁盘剩余空间 (df -h)"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 transition-colors cursor-pointer"
             >
-              <span>💾 磁盘空间</span>
+              <span>💾 磁盘</span>
             </button>
             <button
               onClick={() => onSendCommand("free -h -w\n")}
               title="查看物理内存与 Swap 交换分区占用 (free -h)"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 transition-colors cursor-pointer"
             >
-              <span>🧠 内存占用</span>
+              <span>🧠 内存</span>
             </button>
             <button
               onClick={() => onSendCommand("docker ps -a 2>/dev/null || echo '未安装 Docker'\n")}
               title="查看 Docker 容器运行状态 (docker ps)"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 transition-colors cursor-pointer"
             >
-              <span>🐳 容器状态</span>
+              <span>🐳 Docker</span>
             </button>
             <button
               onClick={() => onSendCommand("sudo !!\n")}
               title="以管理员特权重新执行上一条命令 (sudo !!)"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 transition-colors cursor-pointer"
             >
-              <span>🛡️ Sudo !!</span>
+              <span>🛡️ Sudo</span>
             </button>
           </div>
         </div>
 
         {/* 状态栏右侧：字符编码与快捷面板直达 */}
-        <div className="flex items-center gap-2 shrink-0 text-[11px]">
+        <div className="flex items-center gap-2 shrink-0 text-[11px] bg-[var(--sidebar-bg)] pl-2.5 z-10 border-l border-[var(--app-line)]/50">
           <span className="font-mono text-[10px] text-[var(--app-muted)] bg-[var(--fill-1)] border border-[var(--app-line)] px-1.5 py-0.2 rounded hidden sm:inline-block">
             UTF-8
           </span>
-
-          <div className="h-3 w-px bg-[var(--app-line)] shrink-0" />
 
           {/* 快捷侧边栏面板直达按钮组 */}
           <div className="flex items-center gap-0.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] p-0.5 shadow-2xs">
@@ -5181,14 +5159,14 @@ function TerminalWorkspace({
               }}
               title="切换 SFTP 远程文件管理器"
               className={cn(
-                "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
+                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
                 sidePanel === "files" && !rightSidebarCollapsed
                   ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
                   : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
               )}
             >
               <FolderIcon className="h-3 w-3" />
-              <span className="hidden lg:inline">文件</span>
+              <span className="hidden xl:inline">文件</span>
             </button>
 
             <button
@@ -5202,14 +5180,14 @@ function TerminalWorkspace({
               }}
               title="切换快捷命令面板"
               className={cn(
-                "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
+                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
                 sidePanel === "commands" && !rightSidebarCollapsed
                   ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
                   : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
               )}
             >
               <Terminal className="h-3 w-3" />
-              <span className="hidden lg:inline">命令</span>
+              <span className="hidden xl:inline">命令</span>
             </button>
 
             <button
@@ -5223,14 +5201,14 @@ function TerminalWorkspace({
               }}
               title="切换 AI 运维助手"
               className={cn(
-                "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
+                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
                 sidePanel === "ai" && !rightSidebarCollapsed
                   ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
                   : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
               )}
             >
               <Sparkles className="h-3 w-3" />
-              <span className="hidden lg:inline">AI</span>
+              <span className="hidden xl:inline">AI</span>
             </button>
 
             <button
@@ -5241,14 +5219,14 @@ function TerminalWorkspace({
               }}
               title="切换水平双分屏终端"
               className={cn(
-                "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
+                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-bold transition-all cursor-pointer",
                 activeSession?.splitMode && activeSession.splitMode !== "none"
                   ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
                   : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
               )}
             >
               <Rows2 className="h-3 w-3" />
-              <span className="hidden lg:inline">分屏</span>
+              <span className="hidden xl:inline">分屏</span>
             </button>
           </div>
         </div>
