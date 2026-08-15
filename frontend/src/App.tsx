@@ -1066,7 +1066,7 @@ export function App() {
   const [activeTagFilter, setActiveTagFilter] = useState<string>("");
   const [persistentTransferTasks, setPersistentTransferTasks] = useState<PersistentTransferTask[]>([]);
 
-  // 全局持续异步传输进度轮询 (无论切换到命令/AI还是换标签页，后台传输与进度绝不中断)
+  // 全局持续异步传输进度轮询
   useEffect(() => {
     const hasActive = persistentTransferTasks.some((t) => t.status === "transferring");
     if (!hasActive) return;
@@ -1089,9 +1089,12 @@ export function App() {
             const dt = (now - lastT) / 1000;
             const currentBytes = prog.transferred || (prog as any).downloaded || 0;
             let speedStr = task.speed;
-            if (dt >= 0.4) {
+            let shouldUpdateLastTime = false;
+
+            if (dt >= 0.25) {
               const speedBps = Math.max(0, (currentBytes - lastB) / dt);
               speedStr = formatTransferSpeed(speedBps);
+              shouldUpdateLastTime = true;
             }
 
             const total = prog.total || task.size || 0;
@@ -1102,9 +1105,13 @@ export function App() {
                 ? Math.min(100, Math.round((currentBytes / total) * 100))
                 : 0;
 
-            if (prog.status === "completed" || prog.completed) {
+            if (prog.status === "completed" || prog.completed || (total > 0 && currentBytes >= total)) {
               setPersistentTransferTasks((prev) =>
-                prev.map((t) => (t.id === task.id ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
+                prev.map((t) =>
+                  t.id === task.id
+                    ? { ...t, progress: 100, status: "completed", speed: undefined, lastBytes: total || currentBytes }
+                    : t
+                )
               );
             } else if (prog.status === "error" || prog.error) {
               setPersistentTransferTasks((prev) =>
@@ -1118,7 +1125,13 @@ export function App() {
               setPersistentTransferTasks((prev) =>
                 prev.map((t) =>
                   t.id === task.id
-                    ? { ...t, progress: pct, speed: speedStr, lastBytes: currentBytes, lastTime: now }
+                    ? {
+                        ...t,
+                        progress: pct,
+                        speed: speedStr,
+                        lastBytes: currentBytes,
+                        lastTime: shouldUpdateLastTime ? now : lastT
+                      }
                     : t
                 )
               );
@@ -1147,7 +1160,6 @@ export function App() {
       size: fileSize,
       progress: 0,
       status: "transferring",
-      speed: "计算中...",
       sessionId,
       startedAt: Date.now()
     };
@@ -1169,7 +1181,7 @@ export function App() {
         );
       } else {
         setPersistentTransferTasks((prev) =>
-          prev.map((t) => (t.id === downloadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
+          prev.map((t) => (t.id === downloadId ? { ...t, progress: 100, status: "completed", speed: undefined, lastBytes: fileSize } : t))
         );
       }
     }
@@ -1178,41 +1190,51 @@ export function App() {
   const startGlobalUpload = useCallback(async (sessionId: string, remoteDir: string, filePath?: string, fileName?: string, fileContent?: string, fileSize?: number) => {
     let actualFilePath = filePath;
     let actualFileName = fileName;
-
     if (!actualFilePath && !fileContent) {
       const selected = await nativeBridge.showOpenFileDialog("选择要上传到远程服务器的文件");
       if (!selected.filePath) return;
       actualFilePath = selected.filePath;
-      actualFileName = selected.filePath.split(/[/\\]/).pop() || "uploaded_file";
+      actualFileName = actualFilePath.split(/[/\\]/).pop() || "uploaded_file";
     }
 
-    const name = actualFileName || "uploaded_file";
-    const targetRemotePath = joinRemotePath(remoteDir, name);
+    if (!actualFileName) {
+      actualFileName = "uploaded_file";
+    }
+
+    const targetRemotePath = joinRemotePath(remoteDir, actualFileName);
     const uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
     const totalSize = fileSize || (fileContent ? fileContent.length : 0);
 
     const newTask: PersistentTransferTask = {
       id: uploadId,
-      name,
+      name: actualFileName,
       type: "upload",
       localPath: actualFilePath || "",
       remotePath: targetRemotePath,
       size: totalSize,
       progress: 0,
       status: "transferring",
-      speed: "计算中...",
       sessionId,
       startedAt: Date.now()
     };
-
     setPersistentTransferTasks((prev) => [newTask, ...prev.filter((t) => t.id !== uploadId)]);
 
     let startRes;
     if (actualFilePath) {
-      startRes = await nativeBridge.startUploadWithProgress(sessionId, actualFilePath, targetRemotePath, uploadId);
+      startRes = await nativeBridge.startUploadWithProgress(
+        sessionId,
+        actualFilePath,
+        targetRemotePath,
+        uploadId
+      );
     } else {
       const b64 = bytesToBase64(new TextEncoder().encode(fileContent || ""));
-      startRes = await nativeBridge.startUploadContentWithProgress(sessionId, b64, targetRemotePath, uploadId);
+      startRes = await nativeBridge.startUploadContentWithProgress(
+        sessionId,
+        b64,
+        targetRemotePath,
+        uploadId
+      );
     }
 
     if (!startRes.success) {
@@ -8589,8 +8611,11 @@ function TerminalFileSidebar({
                         />
                       </div>
                       <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--app-muted)] font-mono">
-                        <span className="truncate max-w-[220px]" title={task.remotePath}>{task.remotePath}</span>
-                        {task.size > 0 && <span>{formatBytes(task.size)}</span>}
+                        <span className="truncate max-w-[180px]" title={task.remotePath}>{task.remotePath}</span>
+                        <span>
+                          {task.lastBytes && task.lastBytes > 0 ? `${formatBytes(task.lastBytes)} / ` : ""}
+                          {task.size > 0 ? formatBytes(task.size) : ""}
+                        </span>
                       </div>
                     </div>
                   ))}
