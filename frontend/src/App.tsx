@@ -3518,9 +3518,9 @@ function HostSidebar({
           <button
             onClick={onOpenDialog}
             title="新建主机连接"
-            className="flex w-full h-8 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white text-xs font-bold shadow-xs transition-all cursor-pointer whitespace-nowrap"
+            className="flex w-full h-8.5 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.98] text-white text-xs font-extrabold shadow-sm shadow-emerald-900/30 border border-emerald-400/30 transition-all cursor-pointer whitespace-nowrap tracking-wide"
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-4 w-4" />
             <span>新建 SSH 连接</span>
           </button>
 
@@ -3533,9 +3533,9 @@ function HostSidebar({
             className="flex items-center gap-1.5"
           >
             <div className="relative flex-1">
-              <Zap className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-amber-500" />
+              <Zap className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-amber-400" />
               <Input
-                className="pl-6 pr-2 h-7 text-xs font-mono rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-amber-500/60 transition-colors"
+                className="pl-7 pr-2 h-7.5 text-xs font-mono rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-amber-500/60 focus:bg-[var(--fill-2)] transition-all"
                 value={quickConnectStr}
                 placeholder="直连: [user@]ip[:port]"
                 onChange={(e) => setQuickConnectStr(e.target.value)}
@@ -3545,7 +3545,7 @@ function HostSidebar({
               type="submit"
               disabled={!quickConnectStr.trim()}
               title="立即发起快速直连 (Enter)"
-              className="h-7 px-2 rounded-lg bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-slate-950 text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+              className="h-7.5 px-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-slate-950 text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
             >
               <span>直连</span>
               <Play className="h-2.5 w-2.5 fill-current" />
@@ -3674,43 +3674,44 @@ function HostSidebar({
           )}
         </div>
 
-        {/* 核心功能导航菜单 (精致的 Linear/Raycast 现代侧边栏项目) */}
-        <div className="p-2 space-y-0.5 border-b border-[var(--app-line)]">
-          {tools.map((tool) => {
-            const Icon = tool.icon;
-            const active = activeTool === tool.id;
+        {/* 核心功能导航菜单 (Linear 胶囊微磁贴流，节省 60%+ 纵向空间) */}
+        <div className="p-2 border-b border-[var(--app-line)]">
+          <div className="grid grid-cols-2 gap-1.5">
+            {tools.map((tool) => {
+              const Icon = tool.icon;
+              const active = activeTool === tool.id;
 
-            return (
-              <button
-                key={tool.id}
-                title={tool.title || tool.label}
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs transition-all duration-150 cursor-pointer select-none",
-                  active
-                    ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-xs font-extrabold"
-                    : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)] font-semibold border border-transparent"
-                )}
-                onClick={() => onActiveToolChange?.(tool.id as any)}
-              >
-                <Icon className={cn("h-4 w-4 shrink-0 transition-colors", active ? "text-emerald-400" : "text-[var(--app-muted)]")} />
-                <span className="truncate">{tool.label}</span>
-                {tool.id === "local" && sessions.length > 0 && (
-                  <span className="ml-auto rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.2 text-[9px] font-mono font-bold shadow-2xs">
-                    {sessions.length}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+              return (
+                <button
+                  key={tool.id}
+                  title={tool.title || tool.label}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs transition-all duration-150 cursor-pointer select-none border min-w-0 tracking-tight",
+                    active
+                      ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/35 shadow-xs font-bold"
+                      : "border-[var(--app-line)]/60 bg-[var(--fill-1)] text-[var(--text-secondary)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] hover:border-[var(--app-line)] font-medium"
+                  )}
+                  onClick={() => onActiveToolChange?.(tool.id as any)}
+                >
+                  <Icon className={cn("h-3.5 w-3.5 shrink-0 transition-colors", active ? "text-emerald-400" : "text-[var(--app-muted)]")} />
+                  <span className="truncate text-[11px] font-bold">{tool.label}</span>
+                  {tool.id === "local" && sessions.length > 0 && (
+                    <span className="ml-auto rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1 py-0 text-[9px] font-mono font-bold shrink-0">
+                      {sessions.length}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {/* FinalShell 风格：同步状态与 IP 一键复制栏 */}
+          {/* FinalShell / Linear 风格：同步状态与 IP 一键复制栏 */}
           {activeSession && (
-            <div className="mx-2.5 my-2 p-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 shadow-2xs">
+            <div className="mx-2.5 my-2 p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 backdrop-blur-sm shadow-2xs">
               <div className="flex items-center justify-between text-xs">
-                <span className="flex items-center gap-1.5 font-bold text-[var(--app-text)]">
-                  同步状态
+                <span className="flex items-center gap-1.5 font-extrabold text-[var(--app-text)] tracking-tight">
                   <span
                     className={cn(
                       "inline-block h-2 w-2 rounded-full",
@@ -3719,14 +3720,15 @@ function HostSidebar({
                         : "bg-slate-400"
                     )}
                   />
+                  <span>同步状态</span>
                 </span>
-                <span className="text-[10px] font-mono text-emerald-500 font-bold">
+                <span className="text-[10px] font-mono text-emerald-400 font-bold">
                   {activeSession.connected ? (activeSession.kind === "ssh" ? "已连接" : "Local") : "连接中..."}
                 </span>
               </div>
               <div className="mt-2 flex items-center justify-between text-xs font-mono">
                 <div className="flex items-center gap-1.5 truncate min-w-0 pr-1">
-                  <span className="text-[var(--app-muted)] font-extrabold shrink-0">IP</span>
+                  <span className="text-[var(--app-muted)] font-extrabold shrink-0 text-[10px]">IP</span>
                   <span
                     className="text-[var(--app-text)] font-extrabold truncate select-all cursor-pointer hover:text-emerald-400 transition-colors"
                     title={`点击复制: ${activeHostIp || "127.0.0.1"}`}
@@ -3738,7 +3740,7 @@ function HostSidebar({
                 <button
                   type="button"
                   onClick={() => handleCopyIp(activeHostIp || "127.0.0.1")}
-                  className="rounded px-2 py-0.5 text-[11px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 cursor-pointer transition-colors shrink-0"
+                  className="rounded-md px-2 py-0.5 text-[10px] font-extrabold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 cursor-pointer transition-colors shrink-0"
                   title="一键复制 IP 地址"
                 >
                   {copiedIp ? "已复制 ✔" : "复制"}
