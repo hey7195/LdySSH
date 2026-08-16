@@ -2638,11 +2638,12 @@ export function App() {
       data-testid="app-root"
       data-theme={getThemeAttribute(theme)}
       className="app-root flex h-screen w-screen flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)] select-none"
-      style={theme === "aurora" && terminalBackgroundImage
+      style={terminalBackgroundImage
         ? {
             backgroundImage: `linear-gradient(rgba(6, 14, 26, ${clampNumber(terminalBackgroundOverlay, 0, 100) / 100}), rgba(6, 14, 26, ${clampNumber(terminalBackgroundOverlay, 0, 100) / 100})), url(${terminalBackgroundImage})`,
             backgroundSize: "cover",
-            backgroundPosition: "center"
+            backgroundPosition: "center",
+            backgroundAttachment: "fixed"
           }
         : undefined}
       onContextMenu={(event) => event.preventDefault()}
@@ -4645,8 +4646,8 @@ function TerminalWorkspace({
   }
 
   return (
-    <div className="grid h-full grid-rows-[40px_minmax(0,1fr)_32px] bg-[var(--app-bg)]">
-      <div className="flex items-center justify-between border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] pl-2.5 pr-2.5 h-10 select-none relative">
+    <div className={cn("grid h-full grid-rows-[40px_minmax(0,1fr)_32px]", terminalBackgroundImage ? "bg-transparent" : "bg-[var(--app-bg)]")}>
+      <div className={cn("flex items-center justify-between border-b border-[var(--app-line)] pl-2.5 pr-2.5 h-10 select-none relative", terminalBackgroundImage ? "bg-[var(--sidebar-bg)]/80 backdrop-blur-md" : "bg-[var(--sidebar-bg)]")}>
         <div
           className="flex h-full min-w-0 flex-1 items-end gap-1.5 overflow-x-auto pb-0.5 scrollbar-none"
           onWheel={(e) => {
@@ -5238,7 +5239,7 @@ function TerminalWorkspace({
         )}
       </div>
       {/* 终端底部沉浸状态栏 (专业实时指标 + 快捷侧栏一键切换) */}
-      <div className="flex h-8 items-center justify-between border-t border-[var(--app-line)] bg-[var(--sidebar-bg)] px-3 text-xs font-medium text-[var(--app-muted)] select-none overflow-hidden relative">
+      <div className={cn("flex h-8 items-center justify-between border-t border-[var(--app-line)] px-3 text-xs font-medium text-[var(--app-muted)] select-none overflow-hidden relative", terminalBackgroundImage ? "bg-[var(--sidebar-bg)]/80 backdrop-blur-md" : "bg-[var(--sidebar-bg)]")}>
         <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto scrollbar-none pr-3">
           {/* 连接状态与呼吸指示灯 */}
           <span className="flex items-center gap-1.5 shrink-0">
@@ -7442,14 +7443,14 @@ function TerminalCommandSidebar({
 
   return (
     <div
-      className="grid h-full min-h-0 w-full min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[var(--app-bg)] select-none"
+      className="grid h-full min-h-0 w-full min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-transparent select-none"
       onContextMenu={handleBlankContextMenu}
       onClick={() => {
         if (blankMenu) setBlankMenu(null);
         if (commandMenu) setCommandMenu(null);
       }}
     >
-      <div className="border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3">
+      <div className="border-b border-[var(--app-line)] bg-[var(--panel-bg)]/60 backdrop-blur-sm px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-extrabold text-[var(--app-text)] flex items-center gap-2">
@@ -8142,7 +8143,7 @@ function TerminalRightSidebar({
   return (
     <aside
       style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-      className="group/sidebar relative grid min-h-0 grid-rows-[44px_minmax(0,1fr)] overflow-hidden border-l border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none"
+      className="group/sidebar relative grid min-h-0 grid-rows-[44px_minmax(0,1fr)] overflow-hidden border-l border-[var(--app-line)] bg-[var(--sidebar-bg)]/80 backdrop-blur-md select-none"
     >
       <div
         className="absolute -left-2 top-0 bottom-0 z-50 w-4 cursor-col-resize flex items-center justify-center group/resizer hover:bg-emerald-500/10 active:bg-emerald-500/25 transition-colors select-none"
@@ -8153,7 +8154,7 @@ function TerminalRightSidebar({
           <GripVertical className="h-3 w-3 text-slate-900 dark:text-slate-950 opacity-0 group-hover/resizer:opacity-100 transition-opacity" />
         </div>
       </div>
-      <div className="flex items-center gap-2 border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-3.5 py-1.5" role="tablist" aria-label="终端右侧工作栏">
+      <div className="flex items-center gap-2 border-b border-[var(--app-line)] bg-[var(--sidebar-bg)]/60 backdrop-blur-sm px-3.5 py-1.5" role="tablist" aria-label="终端右侧工作栏">
         {panels.map((panel) => {
           const active = activePanel === panel.id;
           const iconColorClass = {
@@ -8477,7 +8478,7 @@ function TerminalFileSidebar({
 
   return (
     <div
-      className="flex flex-col h-full min-h-0 w-full bg-[var(--panel-bg)] relative overflow-hidden select-none"
+      className="flex flex-col h-full min-h-0 w-full bg-transparent relative overflow-hidden select-none"
       onDragOver={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -8507,7 +8508,7 @@ function TerminalFileSidebar({
       )}
 
       {/* 顶部路径导航与核心操作栏 */}
-      <div className="flex flex-col border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] shrink-0">
+      <div className="flex flex-col border-b border-[var(--app-line)] bg-[var(--sidebar-bg)]/80 backdrop-blur-sm shrink-0">
         <div className="flex min-w-0 items-center gap-1.5 px-3 py-2 border-b border-[var(--app-line)]/60">
           <button
             className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
@@ -8854,7 +8855,7 @@ function TerminalFileSidebar({
       )}
 
       {/* 核心文件列表区域 (100% 全高撑满底部) */}
-      <div className="flex-1 min-h-0 w-full overflow-hidden bg-[var(--panel-bg)] flex flex-col relative">
+      <div className="flex-1 min-h-0 w-full overflow-hidden bg-transparent flex flex-col relative">
         {canBrowseRemote ? (
           <>
             {loading && <div className="p-8 text-center text-xs text-[var(--app-muted)] font-extrabold">正在读取目录...</div>}
@@ -10602,8 +10603,8 @@ function AiWorkspacePanel({
   }
 
   return (
-    <div className="grid h-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-[var(--panel-bg)] border-l border-[var(--app-line)]">
-      <header className="border-b border-[var(--app-line)] px-4 py-3 bg-[var(--panel-bg)]">
+    <div className="grid h-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-transparent border-l border-[var(--app-line)]">
+      <header className="border-b border-[var(--app-line)] px-4 py-3 bg-[var(--panel-bg)]/60 backdrop-blur-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-extrabold text-[var(--app-text)]">AI 对话栏</h2>
