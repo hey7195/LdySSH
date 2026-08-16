@@ -175,10 +175,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                     }`}
                   >
                     <div className="flex items-center gap-1 h-3 w-10 rounded-full border border-black/10 overflow-hidden shadow-2xs">
-                      <div className={`h-full flex-1 ${t === "dark" ? "bg-zinc-950" : t === "nordic" ? "bg-slate-800" : "bg-white"}`} />
-                      <div className={`h-full w-2.5 ${t === "dark" ? "bg-emerald-500" : t === "nordic" ? "bg-sky-400" : "bg-emerald-600"}`} />
+                      <div className={`h-full flex-1 ${t === "dark" ? "bg-zinc-950" : t === "nordic" ? "bg-slate-800" : t === "graphite" ? "bg-[#0b0d10]" : t === "aurora" ? "bg-[#0d2137]" : "bg-white"}`} />
+                      <div className={`h-full w-2.5 ${t === "dark" ? "bg-emerald-500" : t === "nordic" ? "bg-sky-400" : t === "graphite" ? "bg-[#57d6c9]" : t === "aurora" ? "bg-[#6ee7d3]" : "bg-emerald-600"}`} />
                     </div>
-                    <span>{t === "dark" ? "夜间黑" : t === "nordic" ? "北欧灰" : "极简白"}</span>
+                    <span>{t === "dark" ? "夜间黑" : t === "nordic" ? "北欧灰" : t === "graphite" ? "石墨工作站" : t === "aurora" ? "极光玻璃" : "极简白"}</span>
                   </button>
                 ))}
               </div>

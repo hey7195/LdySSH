@@ -122,8 +122,10 @@ describe("terminal theme settings", () => {
   });
 
   test("normalizes theme mode to a root data attribute", () => {
-    expect(THEMES).toEqual(["dark", "nordic", "light"]);
+    expect(THEMES).toEqual(["dark", "nordic", "light", "graphite", "aurora"]);
     expect(getThemeAttribute("light")).toBe("light");
     expect(getThemeAttribute("dark")).toBe("dark");
+    expect(getThemeAttribute("graphite")).toBe("graphite");
+    expect(getThemeAttribute("aurora")).toBe("aurora");
   });
 });

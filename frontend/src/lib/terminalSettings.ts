@@ -4,7 +4,7 @@ import animeStarryNight from "../assets/wallpapers/anime_starry_night.jpg";
 import animeCozyRoom from "../assets/wallpapers/anime_cozy_room.jpg";
 import animeShrineSakura from "../assets/wallpapers/anime_shrine_sakura.jpg";
 
-export type ThemeMode = "light" | "dark" | "nordic";
+export type ThemeMode = "light" | "dark" | "nordic" | "graphite" | "aurora";
 export type TerminalThemeMode = "light" | "dark" | "nordic";
 
 export interface TerminalAppearance {
@@ -150,7 +150,7 @@ export interface HighlightRule {
   system?: boolean;
 }
 
-export const THEMES: ThemeMode[] = ["dark", "nordic", "light"];
+export const THEMES: ThemeMode[] = ["dark", "nordic", "light", "graphite", "aurora"];
 export const TERMINAL_THEMES: TerminalThemeMode[] = ["dark", "nordic", "light"];
 export const DEFAULT_THEME: ThemeMode = "dark";
 export const DEFAULT_TERMINAL_THEME: TerminalThemeMode = "dark";
@@ -492,6 +492,10 @@ export function getThemeInfo(mode: ThemeMode) {
       return { name: "极光石墨灰", icon: "❄️", tag: "冷调深灰" };
     case "light":
       return { name: "日间晶透白", icon: "☀️", tag: "晶透纯白" };
+    case "graphite":
+      return { name: "石墨工作站", icon: "🛠️", tag: "专业平面" };
+    case "aurora":
+      return { name: "极光玻璃", icon: "🌌", tag: "沉浸磨砂" };
   }
 }
 

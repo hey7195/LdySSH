@@ -727,7 +727,7 @@ const terminalSearchOptions: ISearchOptions = {
 
 function loadStoredTheme(): ThemeMode {
   const value = window.localStorage.getItem(storageKeys.theme);
-  if (value === "light" || value === "nordic" || value === "dark") {
+  if (value === "light" || value === "nordic" || value === "dark" || value === "graphite" || value === "aurora") {
     return value;
   }
   return DEFAULT_THEME;
@@ -2638,6 +2638,13 @@ export function App() {
       data-testid="app-root"
       data-theme={getThemeAttribute(theme)}
       className="app-root flex h-screen w-screen flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)] select-none"
+      style={theme === "aurora" && terminalBackgroundImage
+        ? {
+            backgroundImage: `linear-gradient(rgba(6, 14, 26, ${clampNumber(terminalBackgroundOverlay, 0, 100) / 100}), rgba(6, 14, 26, ${clampNumber(terminalBackgroundOverlay, 0, 100) / 100})), url(${terminalBackgroundImage})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center"
+          }
+        : undefined}
       onContextMenu={(event) => event.preventDefault()}
     >
       {/* 顶部全功能鼠标抓取拖拽 Header：极简专业 Command Center 顶部栏 */}

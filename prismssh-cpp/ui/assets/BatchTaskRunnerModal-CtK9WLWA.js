@@ -1,4 +1,4 @@
-import{r as i,j as e}from"./react-vendor-DrROGObh.js";import{n as L}from"./index-DT9oe6wu.js";import{M as B,X as I,Q as T,U as g,R as E,u as H,z as A,e as U,ab as z,aB as F}from"./icons-C519BDPr.js";import"./xterm-D4-UIvWF.js";import"./radix-ylEN3WZg.js";import"./vendor-BVU0Gcb7.js";import"./markdown-CdKhyDbt.js";const V=({isOpen:j,onClose:y,savedConnections:N=[],adbDevices:w=[]})=>{const[l,p]=i.useState([]),[h,k]=i.useState(`# 批量巡检与状态汇总脚本
+import{r as i,j as e}from"./react-vendor-DrROGObh.js";import{n as L}from"./index-R8Aw_xG0.js";import{M as B,X as I,Q as T,U as g,R as E,u as H,z as A,e as U,ab as z,aB as F}from"./icons-C519BDPr.js";import"./xterm-D4-UIvWF.js";import"./radix-ylEN3WZg.js";import"./vendor-BVU0Gcb7.js";import"./markdown-CdKhyDbt.js";const V=({isOpen:j,onClose:y,savedConnections:N=[],adbDevices:w=[]})=>{const[l,p]=i.useState([]),[h,k]=i.useState(`# 批量巡检与状态汇总脚本
 uname -a
 df -h / | grep -v Filesystem
 free -m | grep Mem
