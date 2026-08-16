@@ -2877,6 +2877,8 @@ export function App() {
               visible={activeTool === "local"}
               sessions={sessions}
               activeSessionId={activeSessionId}
+              terminalCwds={terminalCwds}
+              transferTaskCount={transferTasks.filter((task) => task.status !== "completed" && task.status !== "failed").length}
               terminalTheme={terminalTheme}
               terminalAppearance={terminalAppearance}
               terminalBackgroundImage={terminalBackgroundImage}
@@ -4465,6 +4467,8 @@ function TerminalWorkspace({
   visible,
   sessions,
   activeSessionId,
+  terminalCwds,
+  transferTaskCount = 0,
   terminalTheme,
   terminalAppearance,
   terminalBackgroundImage,
@@ -4525,6 +4529,8 @@ function TerminalWorkspace({
   visible: boolean;
   sessions: SessionTab[];
   activeSessionId: string;
+  terminalCwds?: Record<string, string>;
+  transferTaskCount?: number;
   terminalTheme: TerminalThemeMode;
   terminalAppearance: TerminalAppearance;
   terminalBackgroundImage: string;
@@ -4593,7 +4599,8 @@ function TerminalWorkspace({
 
   // 右侧栏 100% 自由拖拽缩放宽度状态与折叠状态 (支持类似 FinalShell 任意拉宽)
   const [rightSidebarWidth, setRightSidebarWidth] = useState(420);
-  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
+  const layoutMode = useAppStore((s) => s.layoutMode);
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => useAppStore.getState().layoutMode === "deck");
   const [topMenuOpen, setTopMenuOpen] = useState(false);
 
   const startResizeRightSidebar = useCallback((event: React.PointerEvent) => {
@@ -4716,8 +4723,8 @@ function TerminalWorkspace({
 
           <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0 mb-1.5" />
 
-          {/* 动态 SSH/Local 现代 IDE 标签页 (支持鼠标中键关闭、双击重命名) */}
-          {sessions.map((session, index) => {
+          {/* 动态 SSH/Local 现代 IDE 标签页 (支持鼠标中键关闭、双击重命名);deck 布局改由左侧会话栈承载 */}
+          {layoutMode === "classic" && sessions.map((session, index) => {
             const isActive = session.id === activeSessionId;
             const status = getSessionTabStatus(session);
             const isEditingThisTab = editingTabId === session.id;
@@ -5086,8 +5093,81 @@ function TerminalWorkspace({
       </div>
       <div
         className="grid min-h-0 relative"
-        style={{ gridTemplateColumns: visible && !rightSidebarCollapsed ? `minmax(0, 1fr) ${rightSidebarWidth}px` : "1fr" }}
+        style={{
+          gridTemplateColumns: `${layoutMode === "deck" ? "232px " : ""}${visible && !rightSidebarCollapsed ? `minmax(0, 1fr) ${rightSidebarWidth}px` : "1fr"}`
+        }}
       >
+        {/* 甲板布局:左侧垂直会话栈(状态/cwd/跳板链一目了然) */}
+        {layoutMode === "deck" && visible && (
+          <div className="flex min-h-0 flex-col border-r border-[var(--app-line)] bg-[var(--sidebar-bg)]">
+            <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--app-line)] px-3">
+              <span className="text-[11px] font-extrabold tracking-widest text-[var(--app-muted)]">会话 · {sessions.length}</span>
+              <button
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--app-line)] bg-[var(--fill-1)] text-sm leading-none text-[var(--app-text)] transition-colors hover:text-emerald-400 cursor-pointer"
+                title="新建连接 (返回主机列表)"
+                onClick={() => onReturnHome()}
+              >
+                +
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
+              {sessions.map((session) => {
+                const isActive = session.id === activeSessionId;
+                const status = getSessionTabStatus(session);
+                const jumpCount =
+                  session.connectParams?.jumpChain?.length ||
+                  (session.connectParams?.useJumpHost ? 1 : 0);
+                return (
+                  <div
+                    key={session.id}
+                    onClick={() => onActivate(session.id)}
+                    onContextMenu={(event) => openTabMenu(event, session.id)}
+                    onMouseDown={(event) => {
+                      if (event.button === 1) {
+                        event.preventDefault();
+                        onClose(session.id);
+                      }
+                    }}
+                    className={cn(
+                      "group cursor-pointer rounded-lg border p-2.5 select-none transition-all",
+                      isActive
+                        ? "border-[var(--accent)]/50 bg-[var(--accent-soft)] shadow-[inset_3px_0_0_var(--accent)]"
+                        : "border-[var(--app-line)] bg-[var(--panel-bg)] hover:bg-[var(--fill-2)]"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span title={status.title} className={cn("h-2 w-2 shrink-0 rounded-full", status.dotClass)} />
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs font-bold text-[var(--app-text)]">{session.title}</span>
+                      <button
+                        className="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--app-muted)] hover:text-rose-500 group-hover:flex cursor-pointer"
+                        title="关闭会话"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onClose(session.id);
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-4 font-mono text-[10px] text-[var(--app-muted)]">
+                      {jumpCount > 0 && (
+                        <span className="shrink-0 rounded border border-purple-500/25 bg-purple-500/15 px-1 py-px text-[9px] font-bold text-purple-400">
+                          跳板×{jumpCount}
+                        </span>
+                      )}
+                      {terminalCwds?.[session.id] && <span className="truncate">{terminalCwds[session.id]}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {transferTaskCount > 0 && (
+              <div className="shrink-0 border-t border-[var(--app-line)] px-3 py-2 font-mono text-[10px] text-[var(--app-muted)]">
+                传输中 {transferTaskCount} 个任务
+              </div>
+            )}
+          </div>
+        )}
         <TerminalSurface
           visible={visible}
           sessions={sessions}
@@ -5144,6 +5224,17 @@ function TerminalWorkspace({
             onCancelTransfer={onCancelTransfer}
             onClearCompletedTransfers={onClearCompletedTransfers}
           />
+        )}
+        {/* 甲板布局:右栏收起时的边缘展开把手 */}
+        {layoutMode === "deck" && visible && rightSidebarCollapsed && (
+          <button
+            className="absolute right-0 top-1/2 z-20 h-24 w-3.5 -translate-y-1/2 cursor-pointer rounded-l-lg border border-r-0 border-[var(--app-line)] bg-[var(--panel-bg)] text-[8px] tracking-widest text-[var(--app-muted)] transition-colors hover:text-emerald-400"
+            style={{ writingMode: "vertical-rl" }}
+            title="展开右侧工作栏"
+            onClick={() => setRightSidebarCollapsed(false)}
+          >
+            工作栏
+          </button>
         )}
       </div>
       {/* 终端底部沉浸状态栏 (专业实时指标 + 快捷侧栏一键切换) */}

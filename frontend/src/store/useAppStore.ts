@@ -18,6 +18,7 @@ import { type TransferTaskItem } from "../components/modals/TransferQueuePanel";
 
 const STORAGE_KEYS = {
   theme: "ldyssh.ui.theme",
+  layoutMode: "ldyssh.ui.layoutMode",
   terminalTheme: "ldyssh.terminal.theme",
   terminalEnglishFont: "ldyssh.terminal.englishFont",
   terminalChineseFont: "ldyssh.terminal.chineseFont",
@@ -50,8 +51,11 @@ function setStoredJSON<T>(key: string, value: T) {
   }
 }
 
+export type LayoutMode = "classic" | "deck";
+
 interface AppState {
   theme: ThemeMode;
+  layoutMode: LayoutMode;
   terminalTheme: TerminalThemeMode;
   terminalAppearance: TerminalAppearance;
   terminalBackgroundImage: string;
@@ -65,6 +69,7 @@ interface AppState {
   highlightRules: HighlightRule[];
 
   setTheme: (theme: ThemeMode) => void;
+  setLayoutMode: (mode: LayoutMode) => void;
   setTerminalTheme: (theme: TerminalThemeMode) => void;
   setTerminalAppearance: (appearance: TerminalAppearance) => void;
   setTerminalBackgroundImage: (image: string) => void;
@@ -89,6 +94,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   theme: (window.localStorage.getItem(STORAGE_KEYS.theme) as ThemeMode) || DEFAULT_THEME,
+  layoutMode: window.localStorage.getItem(STORAGE_KEYS.layoutMode) === "deck" ? "deck" : "classic",
   terminalTheme: (window.localStorage.getItem(STORAGE_KEYS.terminalTheme) as TerminalThemeMode) || DEFAULT_TERMINAL_THEME,
   terminalAppearance: {
     englishFont: window.localStorage.getItem(STORAGE_KEYS.terminalEnglishFont) || "JetBrainsMono.ttf",
@@ -119,6 +125,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     window.localStorage.setItem(STORAGE_KEYS.theme, theme);
     document.documentElement.setAttribute("data-theme", theme);
     set({ theme });
+  },
+  setLayoutMode: (mode) => {
+    window.localStorage.setItem(STORAGE_KEYS.layoutMode, mode);
+    set({ layoutMode: mode });
   },
   setTerminalTheme: (terminalTheme) => {
     window.localStorage.setItem(STORAGE_KEYS.terminalTheme, terminalTheme);

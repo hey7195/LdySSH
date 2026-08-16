@@ -15,7 +15,8 @@ import {
   Sun,
   Sparkles,
   Image as ImageIcon,
-  Upload
+  Upload,
+  LayoutGrid
 } from "lucide-react";
 import { useAppStore } from "../../store/useAppStore";
 import {
@@ -62,6 +63,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
   const store = useAppStore();
 
   const theme = props.theme ?? store.theme;
+  const layoutMode = store.layoutMode;
+  const setLayoutMode = store.setLayoutMode;
   const terminalTheme = props.terminalTheme ?? store.terminalTheme;
   const terminalAppearance = props.terminalAppearance ?? store.terminalAppearance;
   const terminalBackgroundImage = props.terminalBackgroundImage ?? store.terminalBackgroundImage;
@@ -179,6 +182,45 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                       <div className={`h-full w-2.5 ${t === "dark" ? "bg-emerald-500" : t === "nordic" ? "bg-sky-400" : t === "graphite" ? "bg-[#57d6c9]" : t === "aurora" ? "bg-[#6ee7d3]" : "bg-emerald-600"}`} />
                     </div>
                     <span>{t === "dark" ? "夜间黑" : t === "nordic" ? "北欧灰" : t === "graphite" ? "石墨工作站" : t === "aurora" ? "极光玻璃" : "极简白"}</span>
+                  </button>
+                ))}
+              </div>
+
+              <h3 className="text-sm font-bold text-[var(--app-text)] flex items-center gap-2 pt-2 border-t border-[var(--app-line)]">
+                <LayoutGrid className="h-4 w-4 text-sky-500" /> 界面布局模式
+              </h3>
+              <div className="grid grid-cols-2 gap-2.5">
+                {(["classic", "deck"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setLayoutMode(mode)}
+                    className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center text-xs transition-all cursor-pointer ${
+                      layoutMode === mode
+                        ? "border-emerald-500 bg-emerald-500/10 font-extrabold text-emerald-500 shadow-sm ring-1 ring-emerald-500/30"
+                        : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:border-[var(--app-line)] hover:text-[var(--app-text)]"
+                    }`}
+                  >
+                    <div className="flex h-6 w-10 gap-0.5">
+                      {mode === "classic" ? (
+                        <>
+                          <div className="flex flex-1 flex-col">
+                            <div className="h-1.5 w-full rounded-sm bg-[var(--fill-3)] mb-0.5" />
+                            <div className="flex-1 rounded-sm border border-[var(--app-line)]" />
+                          </div>
+                          <div className="w-2 rounded-sm border border-[var(--app-line)]" />
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex w-3 flex-col gap-0.5 rounded-sm border border-[var(--app-line)] p-0.5">
+                            <div className="h-1 w-full rounded-sm bg-emerald-500/70" />
+                            <div className="h-1 w-full rounded-sm bg-[var(--fill-3)]" />
+                            <div className="h-1 w-full rounded-sm bg-[var(--fill-3)]" />
+                          </div>
+                          <div className="flex-1 rounded-sm border border-[var(--app-line)]" />
+                        </>
+                      )}
+                    </div>
+                    <span>{mode === "classic" ? "经典 · 顶部标签页" : "甲板 · 左侧会话栈"}</span>
                   </button>
                 ))}
               </div>
