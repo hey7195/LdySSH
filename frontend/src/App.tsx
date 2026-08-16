@@ -4309,89 +4309,89 @@ function Workbench({
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {savedConnections.map((connection, index) => {
                 const liveStatus = getHostLiveStatus(connection, sessions);
                 const statusMeta = hostLiveStatusMeta[liveStatus];
                 return (
                   <div
                     key={`${connection.hostname}-${connection.username}-${index}`}
-                    className="group relative flex flex-col justify-between rounded-3xl border-2 border-[var(--app-line)] bg-[var(--panel-bg)] p-5.5 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-xl hover:border-emerald-500"
+                    className="group relative flex flex-col justify-between rounded-2xl border border-slate-700/80 bg-slate-900/85 hover:bg-slate-850 p-3.5 shadow-xs transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md hover:border-emerald-500/60 backdrop-blur-md"
                   >
                     <div>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3.5 min-w-0">
-                          <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-500/20">
-                            <Server className="h-6 w-6" />
+                      <div className="flex items-start justify-between gap-2.5">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="relative flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/30">
+                            <Server className="h-4.5 w-4.5" />
                             <span
                               className={cn(
-                                "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full ring-2 ring-[var(--panel-bg)]",
+                                "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-slate-900",
                                 statusMeta.dotClass
                               )}
                             />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="truncate text-base font-extrabold text-[var(--app-text)] tracking-tight">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="truncate text-xs font-black text-white tracking-tight" title={connection.name || connection.hostname}>
                                 {connection.name || connection.hostname}
                               </span>
                               {renderEnvironmentBadge(connection.environment)}
                             </div>
-                            <div className="mt-0.5 truncate font-mono text-xs font-extrabold text-indigo-600 dark:text-cyan-400">
+                            <div className="mt-0.5 truncate font-mono text-[11px] font-bold text-cyan-400">
                               {connection.username || "root"}@{connection.hostname}:{connection.port || 22}
                             </div>
                           </div>
                         </div>
-                        <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold shrink-0 border border-[var(--app-line)] shadow-2xs", statusMeta.textClass, "bg-[var(--fill-1)]")}>
+                        <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold shrink-0 border border-slate-700/60 shadow-2xs", statusMeta.textClass, "bg-slate-800/80")}>
                           <span className={cn("h-1.5 w-1.5 rounded-full", statusMeta.dotClass)} />
-                          {liveStatus === "connected" ? "🟢 12ms" : statusMeta.label}
+                          {liveStatus === "connected" ? "12ms" : statusMeta.label}
                         </span>
                       </div>
 
-                      {/* 标签栏 (全 Pill 胶囊) */}
-                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                      {/* 标签栏 (紧凑药丸) */}
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                         {connection.group && (
-                          <span className="rounded-full bg-[var(--fill-2)] border border-[var(--app-line)] px-3 py-1 text-xs font-bold text-[var(--app-text)]">
+                          <span className="rounded-md bg-slate-800 border border-slate-700/80 px-2 py-0.5 text-[10px] font-bold text-slate-200">
                             📁 {connection.group}
                           </span>
                         )}
                         {connection.keyPath ? (
-                          <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 px-3 py-1 text-xs font-bold border border-indigo-200 dark:border-indigo-800">
+                          <span className="rounded-md bg-indigo-500/15 text-indigo-300 px-2 py-0.5 text-[10px] font-bold border border-indigo-500/30">
                             🔑 密钥认证
                           </span>
                         ) : (
-                          <span className="rounded-full bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 px-3 py-1 text-xs font-bold border border-amber-200 dark:border-amber-800">
+                          <span className="rounded-md bg-amber-500/15 text-amber-300 px-2 py-0.5 text-[10px] font-bold border border-amber-500/30">
                             🔒 密码认证
                           </span>
                         )}
                       </div>
                     </div>
 
-                    {/* 操作按钮组 (图 1 极其漂亮的胶囊发起连接按键) */}
-                    <div className="mt-5 flex items-center justify-between border-t border-[var(--app-line)]/60 pt-3.5">
-                      <div className="flex items-center gap-1.5">
+                    {/* 操作按钮组 (紧凑胶囊按键) */}
+                    <div className="mt-3 flex items-center justify-between border-t border-slate-800 pt-2.5">
+                      <div className="flex items-center gap-1">
                         <button
                           aria-label={`编辑 ${connection.name || connection.hostname}`}
                           title="编辑主机参数"
-                          className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-muted)] transition-all hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-slate-800 hover:text-white cursor-pointer"
                           onClick={() => onEditConnection(connection)}
                         >
-                          <Pencil className="h-4 w-4" />
+                          <Pencil className="h-3.5 w-3.5" />
                         </button>
                         <button
                           aria-label={`删除 ${connection.name || connection.hostname}`}
                           title="删除该主机"
-                          className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-muted)] transition-all hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 cursor-pointer"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-rose-500/20 hover:text-rose-400 cursor-pointer"
                           onClick={() => onDeleteConnection(connection)}
                         >
-                          <X className="h-4 w-4" />
+                          <X className="h-3.5 w-3.5" />
                         </button>
                       </div>
 
                       <Button
-                        size={32}
+                        size={26}
                         aria-label={`连接 ${connection.name || connection.hostname}`}
-                        className="rounded-full px-5 h-9 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/20"
+                        className="rounded-xl px-3.5 h-7 font-black text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-sm"
                         onClick={() => onConnect(connection)}
                       >
                         发起连接 →
@@ -4404,32 +4404,32 @@ function Workbench({
           </div>
         )}
 
-        {/* 底部 2 大功能卡片 (晶透高对比白面板) */}
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 pt-2">
+        {/* 底部 2 大功能卡片 */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 pt-1">
           <div
-            className="flex items-center gap-4 rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5 shadow-sm hover:shadow-md transition-all cursor-pointer"
+            className="flex items-center gap-3.5 rounded-2xl border border-slate-700/80 bg-slate-900/85 p-4 shadow-sm hover:shadow-md transition-all cursor-pointer hover:border-emerald-500/50"
             onClick={onCreateLocal}
           >
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/60">
-              <Terminal className="h-6 w-6" />
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+              <Terminal className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-sm font-extrabold text-[var(--app-text)]">本地类 Linux 终端 (Local Shell)</div>
-              <div className="mt-0.5 text-xs text-[var(--text-secondary)] font-medium">基于随包内置 BusyBox 命令工具箱，即刻运行本地 bash 脚本</div>
+              <div className="text-xs font-black text-white">本地类 Linux 终端 (Local Shell)</div>
+              <div className="mt-0.5 text-[11px] text-slate-300 font-medium">基于随包内置 BusyBox 命令工具箱，即刻运行本地 bash 脚本</div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-3xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5 shadow-sm hover:shadow-md transition-all">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/60">
-                <CheckCircle2 className="h-6 w-6" />
+          <div className="flex items-center justify-between gap-3.5 rounded-2xl border border-slate-700/80 bg-slate-900/85 p-4 shadow-sm hover:shadow-md transition-all">
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <CheckCircle2 className="h-5 w-5" />
               </div>
               <div>
-                <div className="text-sm font-extrabold text-[var(--app-text)]">Base64 安全与原生管道</div>
-                <div className="mt-0.5 text-xs text-[var(--text-secondary)] font-medium">WinHTTP / WebView2 双向安全编解码架构就绪</div>
+                <div className="text-xs font-black text-white">Base64 安全与原生管道</div>
+                <div className="mt-0.5 text-[11px] text-slate-300 font-medium">WinHTTP / WebView2 双向安全编解码架构就绪</div>
               </div>
             </div>
-            <span className="rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 px-3 py-1 text-xs font-extrabold shrink-0">
+            <span className="rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 text-[10px] font-black shrink-0">
               Active
             </span>
           </div>
@@ -4460,23 +4460,23 @@ function Metric({
   }[variant];
 
   const iconMeta = {
-    indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800",
-    emerald: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
-    amber: "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 border-amber-200 dark:border-amber-800",
-    violet: "bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400 border-purple-200 dark:border-purple-800"
+    indigo: "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+    emerald: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+    amber: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    violet: "bg-purple-500/15 text-purple-400 border-purple-500/30"
   }[variant];
 
   return (
-    <div className={cn("flex items-center justify-between rounded-2xl border border-t-2 border-[var(--app-line)] bg-[var(--panel-bg)] p-4.5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-emerald-500", topBorderClass)}>
+    <div className={cn("flex items-center justify-between rounded-xl border border-t-2 border-slate-700/80 bg-slate-900/85 p-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-emerald-500/60 backdrop-blur-md", topBorderClass)}>
       <div>
-        <div className="text-xs font-extrabold text-[var(--app-muted)]">{label}</div>
-        <div className="mt-1.5 flex items-baseline gap-1">
-          <span className="font-mono text-2xl font-black tracking-tight text-[var(--app-text)]">{value}</span>
-          {unit && <span className="text-xs font-bold text-[var(--app-muted)]">{unit}</span>}
+        <div className="text-[11px] font-bold text-slate-400">{label}</div>
+        <div className="mt-1 flex items-baseline gap-1">
+          <span className="font-mono text-xl font-black tracking-tight text-white">{value}</span>
+          {unit && <span className="text-[10px] font-bold text-slate-400">{unit}</span>}
         </div>
       </div>
-      <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl border shadow-2xs", iconMeta)}>
-        <Icon className="h-5.5 w-5.5" />
+      <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg border shadow-2xs", iconMeta)}>
+        <Icon className="h-4.5 w-4.5" />
       </div>
     </div>
   );
