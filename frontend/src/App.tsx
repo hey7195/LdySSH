@@ -6925,7 +6925,10 @@ function TerminalSurface({
     "--terminal-text": terminalColors.foreground,
     backgroundColor: terminalColors.background,
     color: terminalColors.foreground,
-    backgroundImage: buildTerminalBackgroundImage(terminalBackgroundImage, terminalColors.background, backgroundOverlayAlpha)
+    backgroundImage: buildTerminalBackgroundImage(terminalBackgroundImage, terminalColors.background, backgroundOverlayAlpha),
+    backgroundAttachment: "fixed",
+    backgroundPosition: "center",
+    backgroundSize: "cover"
   } as CSSProperties;
 
   return (

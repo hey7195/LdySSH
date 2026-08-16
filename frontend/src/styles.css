@@ -487,6 +487,7 @@ select:focus:not(:focus-visible) {
   background-color: var(--terminal-bg);
   background-position: center;
   background-size: cover;
+  background-attachment: fixed;
   color: var(--terminal-text);
 }
 
