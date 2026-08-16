@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -92,16 +92,10 @@ import { ProcessManagerModal, type ProcessItem } from "./components/modals/Proce
 import { MasterPasswordModal } from "./components/modals/MasterPasswordModal";
 import { CloudSyncModal, type CloudSyncConfig } from "./components/modals/CloudSyncModal";
 import { PortForwardingModal, type TunnelRule } from "./components/modals/PortForwardingModal";
-import { AdbForwardModal } from "./components/modals/AdbForwardModal";
-import { ScrcpyModal } from "./components/modals/ScrcpyModal";
 import { ServerDiagnosticsModal, type DiagnosticCheckItem } from "./components/modals/ServerDiagnosticsModal";
 import { SessionLoggerModal } from "./components/modals/SessionLoggerModal";
 import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
 import { ParameterFillModal } from "./components/modals/ParameterFillModal";
-import { KernelDevOpsToolboxModal } from "./components/modals/KernelDevOpsToolboxModal";
-import { IntegratedCodeDiffEditorModal } from "./components/modals/IntegratedCodeDiffEditorModal";
-import { ClipboardSnippetDrawer } from "./components/modals/ClipboardSnippetDrawer";
-import { BatchTaskRunnerModal } from "./components/modals/BatchTaskRunnerModal";
 import { SerialDevPanel } from "./components/sidebar/SerialDevPanel";
 import { EbpfObserverPanel } from "./components/sidebar/EbpfObserverPanel";
 import { ClusterRunnerPanel } from "./components/sidebar/ClusterRunnerPanel";
@@ -125,9 +119,30 @@ import {
   type CommandSuggestionSources,
   type DangerousCommandInfo
 } from "./lib/commandSuggestions";
-import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { parseOpenSshConfig, exportToOpenSshConfig } from "./lib/sshConfigParser";
 import { cn } from "./lib/utils";
+
+// 重型弹窗/面板按需加载:首次打开才拉取对应 chunk,减小首屏体积
+// 渲染点保持不变,Suspense 内置在包装组件里
+function withLazySuspense(loader: () => Promise<{ default: ComponentType<Record<string, unknown>> }>) {
+  const LazyComponent = lazy(loader);
+  const Wrapped = function LazySuspenseWrapper(props: Record<string, unknown>) {
+    return (
+      <Suspense fallback={null}>
+        <LazyComponent {...props} />
+      </Suspense>
+    );
+  };
+  return Wrapped;
+}
+
+const AdbForwardModal = withLazySuspense(() => import("./components/modals/AdbForwardModal").then((m) => ({ default: m.AdbForwardModal as unknown as ComponentType<Record<string, unknown>> })));
+const ScrcpyModal = withLazySuspense(() => import("./components/modals/ScrcpyModal").then((m) => ({ default: m.ScrcpyModal as unknown as ComponentType<Record<string, unknown>> })));
+const KernelDevOpsToolboxModal = withLazySuspense(() => import("./components/modals/KernelDevOpsToolboxModal").then((m) => ({ default: m.KernelDevOpsToolboxModal as unknown as ComponentType<Record<string, unknown>> })));
+const IntegratedCodeDiffEditorModal = withLazySuspense(() => import("./components/modals/IntegratedCodeDiffEditorModal").then((m) => ({ default: m.IntegratedCodeDiffEditorModal as unknown as ComponentType<Record<string, unknown>> })));
+const ClipboardSnippetDrawer = withLazySuspense(() => import("./components/modals/ClipboardSnippetDrawer").then((m) => ({ default: m.ClipboardSnippetDrawer as unknown as ComponentType<Record<string, unknown>> })));
+const BatchTaskRunnerModal = withLazySuspense(() => import("./components/modals/BatchTaskRunnerModal").then((m) => ({ default: m.BatchTaskRunnerModal as unknown as ComponentType<Record<string, unknown>> })));
+const SettingsPanel = withLazySuspense(() => import("./components/settings/SettingsPanel").then((m) => ({ default: m.SettingsPanel as unknown as ComponentType<Record<string, unknown>> })));
 import {
   nativeBridge,
   type CodexJobResult,
@@ -2835,7 +2850,7 @@ export function App() {
           {activeTool === "cluster" && (
             <ClusterRunnerPanel
               savedConnections={savedConnections}
-              onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)}
+              onRunCommand={(cmdStr: string) => sendCommandToActiveSession(cmdStr)}
             />
           )}
           {activeTool === "git" && (
@@ -3133,12 +3148,12 @@ export function App() {
         isOpen={adbForwardModalOpen}
         onClose={() => setAdbForwardModalOpen(false)}
         sessionTitle={activeSession?.title || "活动终端"}
-        onExecuteCommand={(cmd) => {
+        onExecuteCommand={(cmd: string) => {
           if (activeSessionId) {
             void sendCommandToActiveSession(`${cmd}\n`);
           }
         }}
-        onSaveCommand={(name, cmd) => {
+        onSaveCommand={(name: string, cmd: string) => {
           if (commandFolders.length > 0) {
             saveCommand(commandFolders[0].id, {
               name,
@@ -3188,12 +3203,12 @@ export function App() {
       <KernelDevOpsToolboxModal
         isOpen={kernelToolboxOpen}
         onClose={() => setKernelToolboxOpen(false)}
-        onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)}
+        onRunCommand={(cmdStr: string) => sendCommandToActiveSession(cmdStr)}
       />
       <IntegratedCodeDiffEditorModal
         isOpen={codeDiffEditorOpen}
         onClose={() => setCodeDiffEditorOpen(false)}
-        onSaveToRemote={(pathStr, contentStr) => {
+        onSaveToRemote={(pathStr: string, contentStr: string) => {
           // Send via active session
           const escapedContent = contentStr.replace(/'/g, "'\\''");
           sendCommandToActiveSession(`cat << 'EOF' > ${pathStr}\n${contentStr}\nEOF\n`);
@@ -3203,7 +3218,7 @@ export function App() {
         isOpen={clipboardDrawerOpen}
         onClose={() => setClipboardDrawerOpen(false)}
         recentCommands={[]}
-        onInsertCommand={(cmd, exec) => {
+        onInsertCommand={(cmd: string, exec: boolean) => {
           if (activeSessionId) {
             void sendCommandToActiveSession(exec ? `${cmd}\n` : cmd);
           }
