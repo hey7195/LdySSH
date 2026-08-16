@@ -136,6 +136,7 @@ import {
   type ConnectParams,
   type DirectoryEntry,
   type FilePermissions,
+  type JumpHop,
   type NativeResult,
   type SavedConnection,
   type SshKeyPair,
@@ -253,6 +254,36 @@ interface ConnectionForm {
   jumpKey?: string;
   jumpKeyPassphrase?: string;
   jumpSavedConnectionId?: string;
+  jumpHops?: JumpHopForm[];
+  compression?: boolean;
+}
+
+interface JumpHopForm {
+  host: string;
+  port: string;
+  user: string;
+  pass: string;
+  key: string;
+  keyPassphrase: string;
+}
+
+function defaultJumpHop(): JumpHopForm {
+  return { host: "", port: "22", user: "root", pass: "", key: "", keyPassphrase: "" };
+}
+
+// 表单里的跳板链(兼容旧单跳字段),过滤空行
+function effectiveJumpHops(form: ConnectionForm): JumpHopForm[] {
+  const raw = form.jumpHops && form.jumpHops.length > 0
+    ? form.jumpHops
+    : [{
+        host: form.jumpHost || "",
+        port: form.jumpPort || "22",
+        user: form.jumpUser || "root",
+        pass: form.jumpPass || "",
+        key: form.jumpKey || "",
+        keyPassphrase: form.jumpKeyPassphrase || ""
+      }];
+  return raw.filter((hop) => hop.host.trim() !== "");
 }
 
 interface AiQuote {
@@ -1959,19 +1990,53 @@ export function App() {
       folder: grp,
       tags: connection.tags || [],
       environment: connection.environment,
-      useJumpHost: connection.useJumpHost || Boolean(connection.jumpHost),
+      useJumpHost: connection.useJumpHost || Boolean(connection.jumpHost) || Boolean(connection.jumpChain?.length),
       jumpHost: connection.jumpHost || "",
       jumpPort: String(connection.jumpPort || 22),
       jumpUser: connection.jumpUser || "root",
       jumpPass: connection.jumpPass || "",
       jumpKey: connection.jumpKey || "",
       jumpKeyPassphrase: connection.jumpKeyPassphrase || "",
-      jumpSavedConnectionId: connection.jumpSavedConnectionId || ""
+      jumpSavedConnectionId: connection.jumpSavedConnectionId || "",
+      jumpHops: connection.jumpChain?.length
+        ? connection.jumpChain.map((hop) => ({
+            host: hop.host || "",
+            port: String(hop.port || 22),
+            user: hop.user || "root",
+            pass: hop.pass || "",
+            key: hop.key || "",
+            keyPassphrase: hop.keyPassphrase || ""
+          }))
+        : connection.jumpHost
+          ? [{
+              host: connection.jumpHost,
+              port: String(connection.jumpPort || 22),
+              user: connection.jumpUser || "root",
+              pass: connection.jumpPass || "",
+              key: connection.jumpKey || "",
+              keyPassphrase: connection.jumpKeyPassphrase || ""
+            }]
+          : [defaultJumpHop()],
+      compression: Boolean(connection.compression)
     };
   }
 
   function toConnectParams(connection: SavedConnection): ConnectParams {
     const grp = connection.group || connection.folder || "未分组";
+    const hops: JumpHop[] = (connection.jumpChain?.length
+      ? connection.jumpChain
+      : connection.jumpHost
+        ? [{
+            host: connection.jumpHost,
+            port: connection.jumpPort || 22,
+            user: connection.jumpUser,
+            pass: connection.jumpPass,
+            key: connection.jumpKey,
+            keyPassphrase: connection.jumpKeyPassphrase
+          }]
+        : []
+    ).filter((hop) => hop.host);
+    const firstHop = hops[0];
     return {
       name: connection.name,
       hostname: connection.hostname || "",
@@ -1984,13 +2049,15 @@ export function App() {
       folder: grp,
       tags: connection.tags || [],
       environment: connection.environment,
-      useJumpHost: connection.useJumpHost || Boolean(connection.jumpHost),
-      jumpHost: connection.jumpHost || "",
-      jumpPort: connection.jumpPort ? Number(connection.jumpPort) : 22,
-      jumpUser: connection.jumpUser || "",
-      jumpPass: connection.jumpPass || "",
-      jumpKey: connection.jumpKey || "",
-      jumpKeyPassphrase: connection.jumpKeyPassphrase || ""
+      useJumpHost: connection.useJumpHost || hops.length > 0,
+      jumpHost: firstHop?.host || "",
+      jumpPort: firstHop?.port || 22,
+      jumpUser: firstHop?.user || "",
+      jumpPass: firstHop?.pass || "",
+      jumpKey: firstHop?.key || "",
+      jumpKeyPassphrase: firstHop?.keyPassphrase || "",
+      jumpChain: hops.length > 1 ? hops : undefined,
+      compression: connection.compression
     };
   }
 
@@ -2064,6 +2131,8 @@ export function App() {
     const existingConnection = savedConnections.find((connection) => savedConnectionKey(connection) === editingConnectionKey);
     const preservePassword = form.password === PASSWORD_PLACEHOLDER;
     const targetGroup = (form.folder || form.group || "未分组").trim() || "未分组";
+    const jumpHops = form.useJumpHost ? effectiveJumpHops(form) : [];
+    const firstHop = jumpHops[0];
     const params: ConnectParams = {
       name: form.name || `${form.username}@${form.hostname}`,
       hostname: form.hostname,
@@ -2076,7 +2145,25 @@ export function App() {
       group: targetGroup,
       folder: targetGroup,
       tags: form.tags,
-      environment: form.environment
+      environment: form.environment,
+      useJumpHost: jumpHops.length > 0,
+      jumpHost: firstHop?.host || "",
+      jumpPort: firstHop ? Number(firstHop.port || 22) : 22,
+      jumpUser: firstHop?.user || "",
+      jumpPass: firstHop?.pass || "",
+      jumpKey: firstHop?.key || "",
+      jumpKeyPassphrase: firstHop?.keyPassphrase || "",
+      jumpChain: jumpHops.length > 1
+        ? jumpHops.map((hop) => ({
+            host: hop.host,
+            port: Number(hop.port || 22),
+            user: hop.user,
+            pass: hop.pass,
+            key: hop.key,
+            keyPassphrase: hop.keyPassphrase
+          }))
+        : undefined,
+      compression: Boolean(form.compression)
     };
 
     if (!params.hostname || !params.username) {
@@ -2100,6 +2187,8 @@ export function App() {
     setConnectError("");
 
     const targetGroup = (form.folder || form.group || "未分组").trim() || "未分组";
+    const jumpHops = form.useJumpHost ? effectiveJumpHops(form) : [];
+    const firstHop = jumpHops[0];
     const params: ConnectParams = connection
       ? toConnectParams(connection)
       : {
@@ -2113,7 +2202,25 @@ export function App() {
           group: targetGroup,
           folder: targetGroup,
           tags: form.tags,
-          environment: form.environment
+          environment: form.environment,
+          useJumpHost: jumpHops.length > 0,
+          jumpHost: firstHop?.host || "",
+          jumpPort: firstHop ? Number(firstHop.port || 22) : 22,
+          jumpUser: firstHop?.user || "",
+          jumpPass: firstHop?.pass || "",
+          jumpKey: firstHop?.key || "",
+          jumpKeyPassphrase: firstHop?.keyPassphrase || "",
+          jumpChain: jumpHops.length > 1
+            ? jumpHops.map((hop) => ({
+                host: hop.host,
+                port: Number(hop.port || 22),
+                user: hop.user,
+                pass: hop.pass,
+                key: hop.key,
+                keyPassphrase: hop.keyPassphrase
+              }))
+            : undefined,
+          compression: Boolean(form.compression)
         };
 
     if (!params.hostname || !params.username) {
@@ -2243,15 +2350,8 @@ export function App() {
       return;
     }
     if (!session.connectParams) return;
-    await connectHost({
-      name: session.connectParams.name,
-      hostname: session.connectParams.hostname,
-      port: session.connectParams.port,
-      username: session.connectParams.username,
-      password: session.connectParams.password,
-      keyPath: session.connectParams.keyPath,
-      group: session.connectParams.group
-    });
+    // 复制会话保留完整连接参数(含跳板链/压缩),避免复连时丢失代理配置
+    await connectHost({ ...session.connectParams });
   }
 
   function closeTab(sessionId: string) {
@@ -11685,6 +11785,12 @@ function ConnectDialog({
     onFormChange({ ...form, [key]: value });
   }
 
+  function updateHop(index: number, key: keyof JumpHopForm, value: string) {
+    const hops = [...(form.jumpHops?.length ? form.jumpHops : [defaultJumpHop()])];
+    hops[index] = { ...hops[index], [key]: value };
+    update("jumpHops", hops);
+  }
+
   const isEdit = mode === "edit";
 
   return (
@@ -11842,14 +11948,19 @@ function ConnectDialog({
                         const selectedKey = e.target.value;
                         const found = savedConnections.find((c) => (c.key || c.hostname) === selectedKey);
                         if (found) {
+                          const hops = [...(form.jumpHops?.length ? form.jumpHops : [defaultJumpHop()])];
+                          hops[0] = {
+                            host: found.hostname || "",
+                            port: String(found.port || 22),
+                            user: found.username || "root",
+                            pass: found.password || "",
+                            key: found.keyPath || "",
+                            keyPassphrase: ""
+                          };
                           onFormChange({
                             ...form,
                             jumpSavedConnectionId: selectedKey,
-                            jumpHost: found.hostname || "",
-                            jumpPort: String(found.port || 22),
-                            jumpUser: found.username || "root",
-                            jumpPass: found.password || "",
-                            jumpKey: found.keyPath || ""
+                            jumpHops: hops
                           });
                         } else {
                           update("jumpSavedConnectionId", "");
@@ -11866,47 +11977,88 @@ function ConnectDialog({
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-medium text-[var(--app-muted)]">跳板机 IP / 域名</label>
-                    <Input
-                      className="h-8 text-xs font-mono"
-                      placeholder="jump.example.com"
-                      value={form.jumpHost || ""}
-                      onChange={(e) => update("jumpHost", e.target.value)}
-                    />
+                {(form.jumpHops?.length ? form.jumpHops : [defaultJumpHop()]).map((hop, hopIndex) => (
+                  <div key={hopIndex} className="space-y-2 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] p-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-[var(--app-muted)]">
+                        第 {hopIndex + 1} 跳{hopIndex === 0 ? " · 堡垒机入口" : ""}
+                      </label>
+                      {(form.jumpHops?.length || 1) > 1 && (
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-rose-400 hover:bg-rose-500/10"
+                          onClick={() => update("jumpHops", (form.jumpHops || []).filter((_, index) => index !== hopIndex))}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          删除此跳
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-medium text-[var(--app-muted)]">跳板机 IP / 域名</label>
+                        <Input
+                          className="h-8 text-xs font-mono"
+                          placeholder="jump.example.com"
+                          value={hop.host}
+                          onChange={(e) => updateHop(hopIndex, "host", e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-medium text-[var(--app-muted)]">端口</label>
+                        <Input
+                          className="h-8 text-xs font-mono"
+                          placeholder="22"
+                          value={hop.port}
+                          onChange={(e) => updateHop(hopIndex, "port", e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-medium text-[var(--app-muted)]">用户名</label>
+                        <Input
+                          className="h-8 text-xs font-mono"
+                          placeholder="root"
+                          value={hop.user}
+                          onChange={(e) => updateHop(hopIndex, "user", e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-medium text-[var(--app-muted)]">密码</label>
+                        <Input
+                          type="password"
+                          className="h-8 text-xs font-mono"
+                          placeholder="跳板机密码 (若有)"
+                          value={hop.pass}
+                          onChange={(e) => updateHop(hopIndex, "pass", e.target.value)}
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-medium text-[var(--app-muted)]">跳板机端口</label>
-                    <Input
-                      className="h-8 text-xs font-mono"
-                      placeholder="22"
-                      value={form.jumpPort || "22"}
-                      onChange={(e) => update("jumpPort", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-medium text-[var(--app-muted)]">跳板机用户名</label>
-                    <Input
-                      className="h-8 text-xs font-mono"
-                      placeholder="root"
-                      value={form.jumpUser || "root"}
-                      onChange={(e) => update("jumpUser", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-medium text-[var(--app-muted)]">跳板机密码</label>
-                    <Input
-                      type="password"
-                      className="h-8 text-xs font-mono"
-                      placeholder="跳板机密码 (若有)"
-                      value={form.jumpPass || ""}
-                      onChange={(e) => update("jumpPass", e.target.value)}
-                    />
-                  </div>
-                </div>
+                ))}
+
+                <button
+                  type="button"
+                  className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--app-line)] text-[11px] font-semibold text-[var(--app-muted)] hover:border-purple-400 hover:text-purple-400"
+                  onClick={() => update("jumpHops", [...(form.jumpHops?.length ? form.jumpHops : [defaultJumpHop()]), defaultJumpHop()])}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  添加下一跳（多级跳板 A → B → 目标）
+                </button>
               </div>
             )}
+
+            <label className="mt-2.5 flex items-center justify-between cursor-pointer">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-[var(--app-text)]">
+                <Zap className="h-4 w-4 text-amber-400" />
+                <span>启用 SSH 压缩（长链路 / 低带宽推荐）</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={Boolean(form.compression)}
+                onChange={(e) => update("compression", e.target.checked)}
+                className="rounded border-[var(--app-line)] text-amber-500 focus:ring-0 cursor-pointer"
+              />
+            </label>
           </div>
 
           {!isEdit && (

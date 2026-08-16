@@ -38,6 +38,7 @@ struct DynamicListenerArgs {
 
 struct JumpTunnelArgs {
     std::shared_ptr<JumpPoolEntry> pool;
+    LIBSSH2_SESSION* viaSession = NULL;   // 在哪一跳的 session 上开 direct-tcpip
     SOCKET listenSock;
     std::string targetHost;
     int targetPort;
@@ -161,13 +162,13 @@ static DWORD WINAPI JumpTunnelListenerThread(LPVOID param) {
         return 0;
     }
 
-    // 在共享跳板 session 上开通 direct-tcpip 通道:持锁 + 非阻塞 EAGAIN 重试
+    // 在指定跳的 session 上开通 direct-tcpip 通道:持锁 + 非阻塞 EAGAIN 重试
     LIBSSH2_CHANNEL* jumpChannel = NULL;
     while (args->pool->alive) {
         {
             std::lock_guard<std::mutex> lock(args->pool->ioMutex);
             jumpChannel = libssh2_channel_direct_tcpip_ex(
-                args->pool->session,
+                args->viaSession,
                 args->targetHost.c_str(),
                 args->targetPort,
                 "127.0.0.1",
@@ -176,7 +177,7 @@ static DWORD WINAPI JumpTunnelListenerThread(LPVOID param) {
             if (jumpChannel) {
                 break;
             }
-            if (libssh2_session_last_errno(args->pool->session) != LIBSSH2_ERROR_EAGAIN) {
+            if (libssh2_session_last_errno(args->viaSession) != LIBSSH2_ERROR_EAGAIN) {
                 break;
             }
         }
@@ -203,7 +204,7 @@ static DWORD WINAPI JumpTunnelListenerThread(LPVOID param) {
     return 0;
 }
 
-// 池条目保活线程:30 秒一次 keepalive,防止堡垒机/NAT 空闲断链
+// 池条目保活线程:30 秒一次对链上每一跳发 keepalive,防止堡垒机/NAT 空闲断链
 static DWORD WINAPI JumpPoolKeepaliveThread(LPVOID param) {
     std::shared_ptr<JumpPoolEntry>* holder = (std::shared_ptr<JumpPoolEntry>*)param;
     std::shared_ptr<JumpPoolEntry> entry = *holder;
@@ -221,18 +222,21 @@ static DWORD WINAPI JumpPoolKeepaliveThread(LPVOID param) {
         }
         lastSend = now;
         std::lock_guard<std::mutex> lock(entry->ioMutex);
-        if (!entry->alive || !entry->session) {
+        if (!entry->alive) {
             break;
         }
-        int secondsToNext = 0;
-        libssh2_keepalive_send(entry->session, &secondsToNext);
+        for (LIBSSH2_SESSION* hopSession : entry->hopSessions) {
+            if (!hopSession) continue;
+            int secondsToNext = 0;
+            libssh2_keepalive_send(hopSession, &secondsToNext);
+        }
     }
     return 0;
 }
 
 JumpConnectionPool globalJumpPool;
 
-// 引用归零或竞态弃用时的统一销毁:收 keepalive 线程、断 session、关 socket
+// 引用归零或竞态弃用时的统一销毁:收线程、断链上所有 session、关 socket
 static void DestroyJumpPoolEntry(const std::shared_ptr<JumpPoolEntry>& entry) {
     entry->alive = false;
     if (entry->hKeepaliveThread) {
@@ -240,110 +244,214 @@ static void DestroyJumpPoolEntry(const std::shared_ptr<JumpPoolEntry>& entry) {
         CloseHandle(entry->hKeepaliveThread);
         entry->hKeepaliveThread = NULL;
     }
-    if (entry->session) {
-        libssh2_session_disconnect(entry->session, "Jump Pool Shutdown");
-        libssh2_session_free(entry->session);
-        entry->session = NULL;
+
+    // 先关各跳传输 socket:FIN 会让桥接泵的 recv 返回 0,通道随之关闭
+    for (SOCKET s : entry->hopSocks) {
+        if (s != INVALID_SOCKET) closesocket(s);
     }
+    entry->hopSocks.clear();
     if (entry->sock != INVALID_SOCKET) {
         closesocket(entry->sock);
         entry->sock = INVALID_SOCKET;
     }
+
+    // 反向断开链上每一跳 session
+    for (auto it = entry->hopSessions.rbegin(); it != entry->hopSessions.rend(); ++it) {
+        if (*it) {
+            libssh2_session_disconnect(*it, "Jump Pool Shutdown");
+            libssh2_session_free(*it);
+        }
+    }
+    entry->hopSessions.clear();
+
+    // 收桥接线程与监听 socket
+    for (HANDLE h : entry->bridgeThreads) {
+        if (h) {
+            WaitForSingleObject(h, 500);
+            CloseHandle(h);
+        }
+    }
+    entry->bridgeThreads.clear();
+    for (SOCKET s : entry->bridgeListenSocks) {
+        if (s != INVALID_SOCKET) closesocket(s);
+    }
+    entry->bridgeListenSocks.clear();
 }
 
 std::string JumpConnectionPool::BuildKey(const JumpHostConfig& config) {
-    // 凭据只取指纹入键,不同密码/密钥自然落到不同池条目
-    std::string cred = config.jumpKey.empty()
-        ? ("pass:" + config.jumpPass)
-        : ("key:" + config.jumpKey + ":" + config.jumpKeyPassphrase);
-    return config.jumpHost + ":" + std::to_string(config.jumpPort) + ":" + config.jumpUser +
-        ":" + CalculateHmacSha256("ldyssh-jump-pool", cred);
+    // 逐跳取凭据指纹入键,链不同自然分池
+    std::string key;
+    for (const JumpHopConfig& hop : config.EffectiveHops()) {
+        std::string cred = hop.key.empty()
+            ? ("pass:" + hop.pass)
+            : ("key:" + hop.key + ":" + hop.keyPassphrase);
+        if (!key.empty()) key += "|";
+        key += hop.host + ":" + std::to_string(hop.port) + ":" + hop.user +
+            ":" + CalculateHmacSha256("ldyssh-jump-pool", cred);
+    }
+    return key;
+}
+
+// 在 transport socket 上完成握手与认证(创建期阻塞模式);失败时调用方负责回收 session
+static bool HandshakeAndAuthHop(LIBSSH2_SESSION* session, SOCKET transportSock, const JumpHopConfig& hop, const std::string& hopLabel, std::string& lastError) {
+    if (libssh2_session_handshake(session, transportSock) != 0) {
+        lastError = hopLabel + " SSH handshake failed";
+        return false;
+    }
+
+    int auth = -1;
+    if (!hop.key.empty()) {
+        std::string localKeyPath = Utf8ToLocalAnsi(hop.key);
+        auth = libssh2_userauth_publickey_fromfile(
+            session,
+            hop.user.c_str(),
+            NULL,
+            localKeyPath.c_str(),
+            hop.keyPassphrase.empty() ? NULL : hop.keyPassphrase.c_str()
+        );
+    } else {
+        auth = libssh2_userauth_password(session, hop.user.c_str(), hop.pass.c_str());
+    }
+
+    if (auth != 0) {
+        char* err_msg = NULL;
+        int err_len = 0;
+        libssh2_session_last_error(session, &err_msg, &err_len, 0);
+        lastError = hopLabel + " auth failed: " + (err_msg ? std::string(err_msg, err_len) : "unknown");
+        return false;
+    }
+    return true;
 }
 
 std::shared_ptr<JumpPoolEntry> JumpConnectionPool::Create(const JumpHostConfig& config, std::string& lastError) {
+    std::vector<JumpHopConfig> hops = config.EffectiveHops();
+    if (hops.empty()) {
+        lastError = "Jump host config is empty";
+        return nullptr;
+    }
+
     auto entry = std::make_shared<JumpPoolEntry>();
     entry->key = BuildKey(config);
 
-    // 1. 建立与堡垒机的第一跳 TCP 连接
-    entry->sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (entry->sock == INVALID_SOCKET) {
-        lastError = "Failed to create jump socket";
-        return nullptr;
-    }
+    // 逐跳建链:第一跳直连 TCP,后续每一跳经上一跳的 direct-tcpip 隧道本地桥接
+    for (size_t i = 0; i < hops.size(); ++i) {
+        const JumpHopConfig& hop = hops[i];
+        std::string hopLabel = "jump hop " + std::to_string(i + 1) + " (" + hop.host + ")";
 
-    struct addrinfo hints = { 0 }, *jumpAddrs = NULL;
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    std::string jumpPortStr = std::to_string(config.jumpPort);
-    if (getaddrinfo(config.jumpHost.c_str(), jumpPortStr.c_str(), &hints, &jumpAddrs) != 0) {
-        closesocket(entry->sock);
-        lastError = "getaddrinfo failed for jump host: " + config.jumpHost;
-        return nullptr;
-    }
+        SOCKET transportSock = INVALID_SOCKET;
+        LIBSSH2_SESSION* hopSession = NULL;
 
-    bool jumpConnected = false;
-    for (struct addrinfo* addr = jumpAddrs; addr != NULL; addr = addr->ai_next) {
-        if (connect(entry->sock, addr->ai_addr, (int)addr->ai_addrlen) == 0) {
-            jumpConnected = true;
-            break;
+        if (i == 0) {
+            // 第一跳:直连 TCP
+            transportSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (transportSock == INVALID_SOCKET) {
+                lastError = "Failed to create jump socket";
+                return nullptr;
+            }
+
+            struct addrinfo hints = { 0 }, *hopAddrs = NULL;
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            hints.ai_protocol = IPPROTO_TCP;
+            std::string hopPortStr = std::to_string(hop.port);
+            if (getaddrinfo(hop.host.c_str(), hopPortStr.c_str(), &hints, &hopAddrs) != 0) {
+                closesocket(transportSock);
+                lastError = "getaddrinfo failed for " + hopLabel;
+                DestroyJumpPoolEntry(entry);
+                return nullptr;
+            }
+
+            bool hopConnected = false;
+            for (struct addrinfo* addr = hopAddrs; addr != NULL; addr = addr->ai_next) {
+                if (connect(transportSock, addr->ai_addr, (int)addr->ai_addrlen) == 0) {
+                    hopConnected = true;
+                    break;
+                }
+            }
+            freeaddrinfo(hopAddrs);
+
+            if (!hopConnected) {
+                closesocket(transportSock);
+                lastError = "Failed to connect to " + hopLabel;
+                DestroyJumpPoolEntry(entry);
+                return nullptr;
+            }
+        } else {
+            // 中间跳:本地随机监听 -> 上一跳 session 上的 direct-tcpip 桥接 -> 本地连接承载该跳 SSH
+            SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            struct sockaddr_in listenAddr = { 0 };
+            listenAddr.sin_family = AF_INET;
+            listenAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+            listenAddr.sin_port = 0;
+
+            if (listenSock == INVALID_SOCKET ||
+                bind(listenSock, (struct sockaddr*)&listenAddr, sizeof(listenAddr)) != 0 ||
+                listen(listenSock, 1) != 0) {
+                if (listenSock != INVALID_SOCKET) closesocket(listenSock);
+                lastError = hopLabel + " local bridge bind failed";
+                DestroyJumpPoolEntry(entry);
+                return nullptr;
+            }
+
+            int addrLen = sizeof(listenAddr);
+            getsockname(listenSock, (struct sockaddr*)&listenAddr, &addrLen);
+            int bridgePort = ntohs(listenAddr.sin_port);
+
+            JumpTunnelArgs* targs = new JumpTunnelArgs();
+            targs->pool = entry;
+            targs->viaSession = entry->hopSessions.back();
+            targs->listenSock = listenSock;
+            targs->targetHost = hop.host;
+            targs->targetPort = hop.port;
+            HANDLE hBridge = CreateThread(NULL, 0, JumpTunnelListenerThread, targs, 0, NULL);
+            if (!hBridge) {
+                closesocket(listenSock);
+                delete targs;
+                lastError = "Failed to start bridge thread for " + hopLabel;
+                DestroyJumpPoolEntry(entry);
+                return nullptr;
+            }
+            entry->bridgeListenSocks.push_back(listenSock);
+            entry->bridgeThreads.push_back(hBridge);
+
+            transportSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            struct sockaddr_in bridgeConnect = { 0 };
+            bridgeConnect.sin_family = AF_INET;
+            bridgeConnect.sin_addr.s_addr = inet_addr("127.0.0.1");
+            bridgeConnect.sin_port = htons((u_short)bridgePort);
+            if (connect(transportSock, (struct sockaddr*)&bridgeConnect, sizeof(bridgeConnect)) != 0) {
+                closesocket(transportSock);
+                lastError = "Failed to reach " + hopLabel + " through previous hop";
+                DestroyJumpPoolEntry(entry);
+                return nullptr;
+            }
+        }
+
+        hopSession = libssh2_session_init();
+        if (!hopSession) {
+            closesocket(transportSock);
+            lastError = "Failed to init ssh session for " + hopLabel;
+            DestroyJumpPoolEntry(entry);
+            return nullptr;
+        }
+
+        if (!HandshakeAndAuthHop(hopSession, transportSock, hop, hopLabel, lastError)) {
+            libssh2_session_free(hopSession);
+            closesocket(transportSock);
+            DestroyJumpPoolEntry(entry);
+            return nullptr;
+        }
+
+        // 池化 IO 全部走 ioMutex + EAGAIN,session 置非阻塞;keepalive 每 30s
+        libssh2_session_set_blocking(hopSession, 0);
+        libssh2_keepalive_config(hopSession, 1, 30);
+
+        entry->hopSocks.push_back(transportSock);
+        entry->hopSessions.push_back(hopSession);
+        if (i == 0) {
+            entry->sock = transportSock;
         }
     }
-    freeaddrinfo(jumpAddrs);
-
-    if (!jumpConnected) {
-        closesocket(entry->sock);
-        lastError = "Failed to connect to jump host: " + config.jumpHost;
-        return nullptr;
-    }
-
-    // 2. 第一跳 SSH 握手与鉴权
-    entry->session = libssh2_session_init();
-    if (!entry->session) {
-        closesocket(entry->sock);
-        entry->sock = INVALID_SOCKET;
-        lastError = "Failed to init jump ssh session";
-        return nullptr;
-    }
-
-    if (libssh2_session_handshake(entry->session, entry->sock) != 0) {
-        libssh2_session_free(entry->session);
-        entry->session = NULL;
-        closesocket(entry->sock);
-        entry->sock = INVALID_SOCKET;
-        lastError = "Jump host SSH handshake failed";
-        return nullptr;
-    }
-
-    int jumpAuth = -1;
-    if (!config.jumpKey.empty()) {
-        std::string localKeyPath = Utf8ToLocalAnsi(config.jumpKey);
-        jumpAuth = libssh2_userauth_publickey_fromfile(
-            entry->session,
-            config.jumpUser.c_str(),
-            NULL,
-            localKeyPath.c_str(),
-            config.jumpKeyPassphrase.empty() ? NULL : config.jumpKeyPassphrase.c_str()
-        );
-    } else {
-        jumpAuth = libssh2_userauth_password(entry->session, config.jumpUser.c_str(), config.jumpPass.c_str());
-    }
-
-    if (jumpAuth != 0) {
-        char* err_msg = NULL;
-        int err_len = 0;
-        libssh2_session_last_error(entry->session, &err_msg, &err_len, 0);
-        lastError = "Jump host auth failed: " + (err_msg ? std::string(err_msg, err_len) : "unknown");
-        libssh2_session_free(entry->session);
-        entry->session = NULL;
-        closesocket(entry->sock);
-        entry->sock = INVALID_SOCKET;
-        return nullptr;
-    }
-
-    // 3. 池化 IO 全部走 ioMutex + EAGAIN,session 必须非阻塞
-    libssh2_session_set_blocking(entry->session, 0);
-    libssh2_keepalive_config(entry->session, 1, 30);
 
     auto* holder = new std::shared_ptr<JumpPoolEntry>(entry);
     entry->hKeepaliveThread = CreateThread(NULL, 0, JumpPoolKeepaliveThread, holder, 0, NULL);
@@ -351,7 +459,12 @@ std::shared_ptr<JumpPoolEntry> JumpConnectionPool::Create(const JumpHostConfig& 
         delete holder;
     }
 
-    PrismLog("INFO", "JumpConnectionPool established bastion connection: " + config.jumpHost);
+    std::string chainDesc;
+    for (const JumpHopConfig& hop : hops) {
+        if (!chainDesc.empty()) chainDesc += " -> ";
+        chainDesc += hop.host;
+    }
+    PrismLog("INFO", "JumpConnectionPool established bastion chain (" + std::to_string(hops.size()) + " hops): " + chainDesc);
     return entry;
 }
 
@@ -362,7 +475,9 @@ std::shared_ptr<JumpPoolEntry> JumpConnectionPool::Acquire(const JumpHostConfig&
         auto it = entries.find(key);
         if (it != entries.end() && it->second->alive) {
             it->second->refCount++;
-            PrismLog("INFO", "JumpConnectionPool reusing bastion connection: " + config.jumpHost +
+            std::vector<JumpHopConfig> hops = config.EffectiveHops();
+            std::string firstHost = hops.empty() ? std::string("(unknown)") : hops.front().host;
+            PrismLog("INFO", "JumpConnectionPool reusing bastion connection: " + firstHost +
                 " (pooled sessions=" + std::to_string(it->second->refCount.load()) + ")");
             return it->second;
         }
@@ -768,7 +883,7 @@ static bool ConnectHttpProxy(SOCKET s, const std::string& targetHost, int target
 }
 
 // Connect options implementation
-bool SSHSession::Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath, const std::string& keyPassphrase, int cols, int rows, const JumpHostConfig& jumpConfig, const ProxyConfig& proxyConfig) {
+bool SSHSession::Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath, const std::string& keyPassphrase, int cols, int rows, const JumpHostConfig& jumpConfig, const ProxyConfig& proxyConfig, bool compression) {
     lastError = "";
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
@@ -781,9 +896,10 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
     std::string connectHost = hostname;
 
     if (hasJump) {
-        PrismLog("INFO", "SSHSession connecting via pooled Jump Host: " + jumpConfig.jumpHost);
+        std::vector<JumpHopConfig> hops = jumpConfig.EffectiveHops();
+        PrismLog("INFO", "SSHSession connecting via pooled Jump Host chain (" + std::to_string(hops.size()) + " hops): " + jumpConfig.jumpHost);
 
-        // 1-2. 从共享池取堡垒机连接(命中则免二次登录),失败时错误信息与直连时一致
+        // 1-2. 从共享池取堡垒机链路(命中则免二次登录),失败时错误信息与直连时一致
         jumpPoolEntry = globalJumpPool.Acquire(jumpConfig, lastError);
         if (!jumpPoolEntry) {
             return false;
@@ -810,9 +926,10 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
         getsockname(jumpListenSock, (struct sockaddr*)&listenAddr, &len);
         int localListenPort = ntohs(listenAddr.sin_port);
 
-        // 4. 启动后台中转线程(在共享跳板连接上开通 direct-tcpip 通道)
+        // 4. 启动后台中转线程(在链路最后一跳的 session 上开通 direct-tcpip 通道)
         JumpTunnelArgs* args = new JumpTunnelArgs();
         args->pool = jumpPoolEntry;
+        args->viaSession = jumpPoolEntry->LastHopSession();
         args->listenSock = jumpListenSock;
         args->targetHost = hostname;
         args->targetPort = port;
@@ -898,6 +1015,12 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
         sock = INVALID_SOCKET;
         lastError = "libssh2_session_init failed";
         return false;
+    }
+
+    // 压缩必须在握手前声明,才会与服务端协商 zlib;对长链路/低带宽的跳板场景收益明显
+    if (compression) {
+        libssh2_session_flag(sshSession, LIBSSH2_FLAG_COMPRESS, 1);
+        PrismLog("INFO", "SSH compression enabled for " + hostname + ":" + std::to_string(port));
     }
 
     int handshake_res = libssh2_session_handshake(sshSession, sock);

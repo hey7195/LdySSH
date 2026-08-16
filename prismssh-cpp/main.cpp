@@ -1039,6 +1039,24 @@ static nlohmann::json BuildSavedConnectionObject(const nlohmann::json& params) {
     connObj["jumpKeyPassphrase"] = SafeGetJsonString(params, "jumpKeyPassphrase", "");
     PutEncryptedSecret(connObj, "jumpPass", "jumpPass_encrypted", SafeGetJsonString(params, "jumpPass", ""));
 
+    // 多级跳板链与压缩开关原样持久化
+    if (params.contains("jumpChain") && params["jumpChain"].is_array()) {
+        nlohmann::json chain = nlohmann::json::array();
+        for (const auto& hop : params["jumpChain"]) {
+            if (!hop.is_object()) continue;
+            nlohmann::json hopObj;
+            hopObj["host"] = SafeGetJsonString(hop, "host", "");
+            hopObj["port"] = SafeGetJsonInt(hop, "port", 22);
+            hopObj["user"] = SafeGetJsonString(hop, "user", "");
+            hopObj["key"] = SafeGetJsonString(hop, "key", "");
+            hopObj["keyPassphrase"] = SafeGetJsonString(hop, "keyPassphrase", "");
+            PutEncryptedSecret(hopObj, "pass", "pass_encrypted", SafeGetJsonString(hop, "pass", ""));
+            chain.push_back(hopObj);
+        }
+        connObj["jumpChain"] = chain;
+    }
+    connObj["compression"] = SafeGetJsonBool(params, "compression", false);
+
     connObj["proxyType"] = SafeGetJsonString(params, "proxyType", "none");
     connObj["proxyHost"] = SafeGetJsonString(params, "proxyHost", "");
     connObj["proxyPort"] = SafeGetJsonInt(params, "proxyPort", 1080);
@@ -1091,6 +1109,20 @@ static bool SaveConnectionConfig(const std::string& oldKey, const nlohmann::json
         connObj["password"] = SafeGetJsonString(oldConn, "password", "");
         if (oldConn.contains("password_encrypted")) {
             connObj["password_encrypted"] = oldConn["password_encrypted"];
+        }
+        // 编辑时空密码的跳转沿用旧链对应位置的密文
+        if (connObj.contains("jumpChain") && connObj["jumpChain"].is_array() && oldConn.contains("jumpChain") && oldConn["jumpChain"].is_array()) {
+            size_t idx = 0;
+            for (auto& hop : connObj["jumpChain"]) {
+                if (idx >= oldConn["jumpChain"].size()) break;
+                const nlohmann::json& oldHop = oldConn["jumpChain"][idx];
+                if (hop.is_object() && oldHop.is_object() &&
+                    SafeGetJsonString(hop, "pass", "").empty() && oldHop.contains("pass_encrypted")) {
+                    hop["pass"] = oldHop.value("pass", "");
+                    hop["pass_encrypted"] = oldHop["pass_encrypted"];
+                }
+                ++idx;
+            }
         }
     }
     conns[savedKey] = connObj;
@@ -1180,6 +1212,18 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                             conn["jumpPass"] = "";
                         }
                         conn.erase("jumpPass_encrypted");
+                    }
+
+                    if (conn.contains("jumpChain") && conn["jumpChain"].is_array()) {
+                        for (auto& hop : conn["jumpChain"]) {
+                            if (!hop.is_object()) continue;
+                            if (hop.contains("pass_encrypted") && hop["pass_encrypted"].get<bool>()) {
+                                std::string encryptedHopPass = hop.value("pass", "");
+                                std::string decryptedHopPass = fernetKey.empty() ? "" : DecryptFernetPassword(fernetKey, encryptedHopPass);
+                                hop["pass"] = decryptedHopPass.empty() ? "" : decryptedHopPass;
+                                hop.erase("pass_encrypted");
+                            }
+                        }
                     }
 
                     if (conn.contains("proxyPass_encrypted") && conn["proxyPass_encrypted"].get<bool>()) {
@@ -1621,13 +1665,29 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string keyPath = SafeGetJsonString(params, "keyPath", "");
             std::string keyPassphrase = SafeGetJsonString(params, "keyPassphrase", "");
             
-            // 提取堡垒机代理参数
+            // 提取堡垒机代理参数(兼容单跳字段 + 多级跳板链)
             std::string jumpHost = SafeGetJsonString(params, "jumpHost", "");
             int jumpPort = SafeGetJsonInt(params, "jumpPort", 22);
             std::string jumpUser = SafeGetJsonString(params, "jumpUser", "");
             std::string jumpPass = SafeGetJsonString(params, "jumpPass", "");
             std::string jumpKey = SafeGetJsonString(params, "jumpKey", "");
             std::string jumpKeyPassphrase = SafeGetJsonString(params, "jumpKeyPassphrase", "");
+            std::vector<JumpHopConfig> jumpHops;
+            if (params.contains("jumpChain") && params["jumpChain"].is_array()) {
+                for (const auto& hop : params["jumpChain"]) {
+                    if (!hop.is_object()) continue;
+                    JumpHopConfig hopCfg;
+                    hopCfg.host = SafeGetJsonString(hop, "host", "");
+                    hopCfg.port = SafeGetJsonInt(hop, "port", 22);
+                    hopCfg.user = SafeGetJsonString(hop, "user", "");
+                    hopCfg.pass = SafeGetJsonString(hop, "pass", "");
+                    hopCfg.key = SafeGetJsonString(hop, "key", "");
+                    hopCfg.keyPassphrase = SafeGetJsonString(hop, "keyPassphrase", "");
+                    if (!hopCfg.host.empty()) {
+                        jumpHops.push_back(hopCfg);
+                    }
+                }
+            }
 
             // 提取 SOCKS5 / HTTP 代理参数
             std::string proxyType = SafeGetJsonString(params, "proxyType", "none");
@@ -1635,6 +1695,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             int proxyPort = SafeGetJsonInt(params, "proxyPort", 1080);
             std::string proxyUser = SafeGetJsonString(params, "proxyUser", "");
             std::string proxyPass = SafeGetJsonString(params, "proxyPass", "");
+            bool compression = SafeGetJsonBool(params, "compression", false);
 
             std::string storeKey = hostname + "@" + username;
             
@@ -1646,10 +1707,10 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 }
             }
 
-            std::thread([sessId, hostname, port, username, password, keyPath, keyPassphrase, storeKey, reqId, jumpHost, jumpPort, jumpUser, jumpPass, jumpKey, jumpKeyPassphrase, proxyType, proxyHost, proxyPort, proxyUser, proxyPass]() {
+            std::thread([sessId, hostname, port, username, password, keyPath, keyPassphrase, storeKey, reqId, jumpHost, jumpPort, jumpUser, jumpPass, jumpKey, jumpKeyPassphrase, jumpHops, proxyType, proxyHost, proxyPort, proxyUser, proxyPass, compression]() {
                 auto session = std::make_shared<SSHSession>(sessId);
                 PrismLog("INFO", "SSHSession connect initiated asynchronously for " + storeKey);
-                
+
                 JumpHostConfig jc;
                 jc.jumpHost = jumpHost;
                 jc.jumpPort = jumpPort;
@@ -1657,6 +1718,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 jc.jumpPass = jumpPass;
                 jc.jumpKey = jumpKey;
                 jc.jumpKeyPassphrase = jumpKeyPassphrase;
+                jc.hops = jumpHops;
 
                 ProxyConfig pc;
                 pc.proxyType = proxyType;
@@ -1665,7 +1727,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 pc.proxyUser = proxyUser;
                 pc.proxyPass = proxyPass;
 
-                bool success = session->Connect(hostname, port, username, password, keyPath, keyPassphrase, 80, 24, jc, pc);
+                bool success = session->Connect(hostname, port, username, password, keyPath, keyPassphrase, 80, 24, jc, pc, compression);
                 
                 nlohmann::json response;
                 response["id"] = reqId;

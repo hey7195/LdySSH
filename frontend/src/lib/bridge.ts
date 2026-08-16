@@ -412,6 +412,17 @@ export interface SavedConnection {
   jumpKey?: string;
   jumpKeyPassphrase?: string;
   jumpSavedConnectionId?: string;
+  jumpChain?: JumpHop[];
+  compression?: boolean;
+}
+
+export interface JumpHop {
+  host: string;
+  port?: number;
+  user?: string;
+  pass?: string;
+  key?: string;
+  keyPassphrase?: string;
 }
 
 export interface SshKeyPair {
@@ -555,6 +566,8 @@ export interface ConnectParams {
   jumpPass?: string;
   jumpKey?: string;
   jumpKeyPassphrase?: string;
+  jumpChain?: JumpHop[];
+  compression?: boolean;
 }
 
 export interface NativeResult {

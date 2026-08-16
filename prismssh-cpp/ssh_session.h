@@ -17,6 +17,18 @@
 #include <libssh2_sftp.h>
 #include "session.h"
 
+struct JumpHostConfig;
+
+// 链路中的一跳
+struct JumpHopConfig {
+    std::string host;
+    int port = 22;
+    std::string user;
+    std::string pass;
+    std::string key;
+    std::string keyPassphrase;
+};
+
 struct JumpHostConfig {
     std::string jumpHost;
     int jumpPort = 22;
@@ -24,17 +36,38 @@ struct JumpHostConfig {
     std::string jumpPass;
     std::string jumpKey;
     std::string jumpKeyPassphrase;
+    // 完整多级链;为空时回退到上面的单跳字段(向后兼容)
+    std::vector<JumpHopConfig> hops;
+
+    // 归一化:无论单跳还是链式,统一返回跳板序列
+    std::vector<JumpHopConfig> EffectiveHops() const {
+        if (!hops.empty()) return hops;
+        if (jumpHost.empty()) return {};
+        JumpHopConfig first;
+        first.host = jumpHost;
+        first.port = jumpPort;
+        first.user = jumpUser;
+        first.pass = jumpPass;
+        first.key = jumpKey;
+        first.keyPassphrase = jumpKeyPassphrase;
+        return { first };
+    }
 };
 
-// 共享堡垒机连接:同一跳板(主机+端口+用户+凭据)的所有会话复用一次登录
+// 共享堡垒机连接:同一跳板链(逐跳主机+端口+用户+凭据)的所有会话复用一次登录
 struct JumpPoolEntry {
     std::string key;
-    SOCKET sock = INVALID_SOCKET;
-    LIBSSH2_SESSION* session = NULL;   // 非阻塞模式,所有 libssh2 调用须持有 ioMutex
-    std::mutex ioMutex;
+    SOCKET sock = INVALID_SOCKET;               // 第一跳直连 TCP
+    std::vector<SOCKET> hopSocks;               // 每一跳的传输 socket(含第一跳)
+    std::vector<LIBSSH2_SESSION*> hopSessions;  // 逐跳 session,最后一跳用于开目标隧道
+    std::vector<SOCKET> bridgeListenSocks;      // 中间跳的本地监听 socket
+    std::vector<HANDLE> bridgeThreads;          // 中间跳的桥接线程
+    std::mutex ioMutex;                          // 序列化对任意 hopSession 的 libssh2 调用
     std::atomic<int> refCount{ 0 };
     std::atomic<bool> alive{ true };
     HANDLE hKeepaliveThread = NULL;
+
+    LIBSSH2_SESSION* LastHopSession() const { return hopSessions.empty() ? NULL : hopSessions.back(); }
 };
 
 class JumpConnectionPool {
@@ -100,7 +133,7 @@ public:
     bool IsConnected() override;
 
     // Connect options
-    bool Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath = "", const std::string& keyPassphrase = "", int cols = 80, int rows = 24, const JumpHostConfig& jumpConfig = {}, const ProxyConfig& proxyConfig = {});
+    bool Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath = "", const std::string& keyPassphrase = "", int cols = 80, int rows = 24, const JumpHostConfig& jumpConfig = {}, const ProxyConfig& proxyConfig = {}, bool compression = false);
 
     // SFTP operations
     bool EnsureSftpSession(std::string& error);
