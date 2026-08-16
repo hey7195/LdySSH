@@ -2025,8 +2025,7 @@ describe("command library", () => {
     fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
     fireEvent.click(await screen.findByRole("tab", { name: "文件" }));
 
-    expect(await screen.findByText("拖拽上传")).toBeInTheDocument();
-    expect(screen.getByText(/当前会话：Local Shell/)).toBeInTheDocument();
+    expect(await screen.findByText(/当前不是 SSH 会话，暂不能浏览远程文件。/)).toBeInTheDocument();
   });
 
   test("loads remote files for a connected SSH session", async () => {

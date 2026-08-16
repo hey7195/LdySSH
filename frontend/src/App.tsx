@@ -8240,7 +8240,6 @@ const QUICK_REMOTE_LOCATIONS = [
   { label: "Web", path: "/var/www" },
   { label: "数据", path: "/data" }
 ];
-
 function TerminalFileSidebar({
   activeSession,
   terminalCwd,
@@ -8316,7 +8315,6 @@ function TerminalFileSidebar({
   const [isDualPane, setIsDualPane] = useState(false);
   const canBrowseRemote = activeSession?.kind === "ssh" && activeSession.connected;
 
-  // 终端当前工作目录与 SFTP 目录实时跟随联动
   useEffect(() => {
     if (autoFollowTerminalCwd && terminalCwd && terminalCwd !== remotePath) {
       setRemotePath(terminalCwd);
@@ -8479,7 +8477,7 @@ function TerminalFileSidebar({
 
   return (
     <div
-      className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[var(--app-bg)] relative"
+      className="flex flex-col h-full min-h-0 w-full bg-[var(--panel-bg)] relative overflow-hidden select-none"
       onDragOver={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -8499,392 +8497,374 @@ function TerminalFileSidebar({
         }
       }}
     >
-      <div className="border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-extrabold text-[var(--app-text)]">文件浏览 & 传输</h2>
-            <p className="mt-0.5 text-[11px] text-[var(--app-muted)]">
-              {activeSession ? `当前会话：${activeSession.title}` : "连接 SSH 后查看文件"}
-            </p>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setIsDualPane((prev) => !prev)}
-              className={cn(
-                "flex h-7 px-2 items-center gap-1 rounded-lg border text-[11px] font-extrabold transition-colors cursor-pointer shadow-2xs",
-                isDualPane
-                  ? "bg-indigo-600 text-white border-indigo-600"
-                  : "bg-[var(--panel-bg)] text-[var(--app-text)] border-[var(--app-line)] hover:bg-[var(--fill-1)]"
-              )}
-              title="切换双栏本地/远程 Commander 对比模式"
+      {/* 拖拽释放区遮罩 Overlay (全覆盖) */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center border-2 border-dashed border-emerald-500 bg-emerald-950/80 p-6 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-150 backdrop-blur-sm">
+          <Upload className="h-12 w-12 text-emerald-400 animate-bounce" />
+          <div className="mt-3 text-base font-extrabold text-white">释放文件以立即上传至服务器</div>
+          <div className="mt-1 font-mono text-xs font-semibold text-emerald-300">目标路径: {remotePath}</div>
+        </div>
+      )}
+
+      {/* 顶部路径导航与核心操作栏 */}
+      <div className="flex flex-col border-b border-[var(--app-line)] bg-[var(--sidebar-bg)] shrink-0">
+        <div className="flex min-w-0 items-center gap-1.5 px-3 py-2 border-b border-[var(--app-line)]/60">
+          <button
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+            disabled={remotePath === "/"}
+            title="返回上级目录"
+            onClick={() => setRemotePath(parentRemotePath(remotePath))}
+          >
+            <ChevronDown className="h-3.5 w-3.5 rotate-90" />
+          </button>
+          <button
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+            title="根目录"
+            onClick={() => setRemotePath("/")}
+          >
+            <Home className="h-3.5 w-3.5" />
+          </button>
+          {isEditingPath ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setRemotePath(inputPath.trim() || "/");
+                setIsEditingPath(false);
+              }}
+              className="min-w-0 flex-1"
             >
-              <Columns2 className="h-3.5 w-3.5" />
-              <span>{isDualPane ? "双栏视图" : "单栏视图"}</span>
-            </button>
-            <FolderOpen className="h-4 w-4 text-emerald-600 shrink-0" />
-          </div>
-        </div>
-      </div>
-      <div className="min-h-0 overflow-auto p-3 relative">
-        {/* 拖拽释放区遮罩 Overlay */}
-        {isDragging && (
-          <div className="absolute inset-2 z-40 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-emerald-500 bg-emerald-50/95 p-6 text-center shadow-xl animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xs">
-            <Upload className="h-10 w-10 text-emerald-600 animate-bounce" />
-            <div className="mt-3 text-sm font-extrabold text-emerald-900">释放文件以拖拽上传</div>
-            <div className="mt-1 font-mono text-xs font-semibold text-emerald-700">目标路径: {remotePath}</div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 shadow-2xs">
-            <div className="text-xs font-extrabold text-[var(--app-text)]">拖拽上传</div>
-            <div className="mt-1 text-[11px] leading-4 text-[var(--app-muted)]">直接将电脑文件拖拽至此处上传。</div>
-          </div>
-          <div className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 shadow-2xs">
-            <div className="text-xs font-extrabold text-[var(--app-text)]">远程目录</div>
-            <div className="mt-1 text-[11px] leading-4 text-[var(--app-muted)]">选择 SSH 会话后实时管理。</div>
-          </div>
-        </div>
-
-        {uploadStatus && (
-          <div className="mt-2.5 flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-xs font-extrabold text-emerald-800 shadow-2xs">
-            <span className="truncate">{uploadStatus}</span>
-            <button className="text-[10px] text-emerald-700 hover:text-emerald-900 ml-2 shrink-0 cursor-pointer" onClick={() => setUploadStatus("")}>关闭</button>
-          </div>
-        )}
-
-        {canBrowseRemote ? (
-          <div className="mt-3 min-w-0 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] shadow-2xs">
-            <div className="flex min-w-0 items-center gap-1.5 border-b border-[var(--app-line)] px-3 py-2">
+              <input
+                autoFocus
+                className="h-7 w-full rounded-lg bg-[var(--panel-bg)] px-2 font-mono text-[11px] text-[var(--app-text)] border border-emerald-500 focus:outline-none"
+                value={inputPath}
+                onChange={(e) => setInputPath(e.target.value)}
+                onBlur={() => setIsEditingPath(false)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setIsEditingPath(false);
+                }}
+              />
+            </form>
+          ) : (
+            <div
+              aria-label="远程路径面包屑"
+              className="min-w-0 flex-1 flex items-center gap-1 overflow-x-auto scrollbar-none rounded-lg bg-[var(--fill-1)] px-2 py-0.5 font-mono text-[11px] font-bold text-[var(--app-text)] border border-[var(--app-line)] select-none"
+            >
               <button
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-                disabled={remotePath === "/"}
-                title="返回上级目录"
-                onClick={() => setRemotePath(parentRemotePath(remotePath))}
-              >
-                <ChevronDown className="h-3.5 w-3.5 rotate-90" />
-              </button>
-              <button
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
-                title="根目录"
                 onClick={() => setRemotePath("/")}
+                className="hover:bg-[var(--fill-2)] px-1.5 py-0.5 rounded text-purple-400 hover:text-purple-300 font-bold transition-colors cursor-pointer shrink-0"
+                title="跳转至根目录 /"
               >
-                <Home className="h-3.5 w-3.5" />
+                /
               </button>
-              {isEditingPath ? (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    setRemotePath(inputPath.trim() || "/");
-                    setIsEditingPath(false);
-                  }}
-                  className="min-w-0 flex-1"
-                >
-                  <input
-                    autoFocus
-                    className="h-7 w-full rounded-lg bg-[var(--panel-bg)] px-2 font-mono text-[11px] text-[var(--app-text)] border border-emerald-500 focus:outline-none"
-                    value={inputPath}
-                    onChange={(e) => setInputPath(e.target.value)}
-                    onBlur={() => setIsEditingPath(false)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") setIsEditingPath(false);
-                    }}
-                  />
-                </form>
-              ) : (
-                <div
-                  aria-label="远程路径面包屑"
-                  className="min-w-0 flex-1 flex items-center gap-1 overflow-x-auto scrollbar-none rounded-lg bg-[var(--fill-1)] px-2 py-0.5 font-mono text-[11px] font-bold text-[var(--app-text)] border border-[var(--app-line)] select-none"
-                >
-                  <button
-                    onClick={() => setRemotePath("/")}
-                    className="hover:bg-[var(--fill-2)] px-1.5 py-0.5 rounded text-purple-400 hover:text-purple-300 font-bold transition-colors cursor-pointer shrink-0"
-                    title="跳转至根目录 /"
-                  >
-                    /
-                  </button>
-                  {remotePath
-                    .split("/")
-                    .filter(Boolean)
-                    .map((segment, idx, arr) => {
-                      const partialPath = "/" + arr.slice(0, idx + 1).join("/");
-                      const isLast = idx === arr.length - 1;
-                      return (
-                        <div key={idx} className="flex items-center gap-1 shrink-0">
-                          <span className="text-[var(--app-muted)] text-[10px] select-none">›</span>
-                          <button
-                            onClick={() => setRemotePath(partialPath)}
-                            className={cn(
-                              "px-1.5 py-0.5 rounded transition-colors cursor-pointer truncate max-w-[140px]",
-                              isLast
-                                ? "bg-purple-500/20 text-purple-300 font-extrabold border border-purple-500/30 shadow-2xs"
-                                : "hover:bg-[var(--fill-2)] text-[var(--app-text)] hover:text-purple-400"
-                            )}
-                            title={`跳转至: ${partialPath}`}
-                          >
-                            {segment}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  <button
-                    onClick={() => {
-                      setInputPath(remotePath);
-                      setIsEditingPath(true);
-                    }}
-                    className="ml-auto text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] p-1 rounded hover:bg-[var(--fill-2)] cursor-pointer shrink-0"
-                    title="点击手动编辑绝对路径"
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
+              {remotePath
+                .split("/")
+                .filter(Boolean)
+                .map((segment, idx, arr) => {
+                  const partialPath = "/" + arr.slice(0, idx + 1).join("/");
+                  const isLast = idx === arr.length - 1;
+                  return (
+                    <div key={idx} className="flex items-center gap-1 shrink-0">
+                      <span className="text-[var(--app-muted)] text-[10px] select-none">›</span>
+                      <button
+                        onClick={() => setRemotePath(partialPath)}
+                        className={cn(
+                          "px-1.5 py-0.5 rounded transition-colors cursor-pointer truncate max-w-[140px]",
+                          isLast
+                            ? "bg-purple-500/20 text-purple-300 font-extrabold border border-purple-500/30 shadow-2xs"
+                            : "hover:bg-[var(--fill-2)] text-[var(--app-text)] hover:text-purple-400"
+                        )}
+                        title={`跳转至: ${partialPath}`}
+                      >
+                        {segment}
+                      </button>
+                    </div>
+                  );
+                })}
               <button
-                className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors shadow-2xs cursor-pointer"
-                title="在当前目录新建空白文件"
-                onClick={() => void createNewFile()}
+                onClick={() => {
+                  setInputPath(remotePath);
+                  setIsEditingPath(true);
+                }}
+                className="ml-auto text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] p-1 rounded hover:bg-[var(--fill-2)] cursor-pointer shrink-0"
+                title="点击手动编辑绝对路径"
               >
-                <Plus className="h-3.5 w-3.5" />
-                <span>新建文件</span>
-              </button>
-              <button
-                className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-[11px] font-extrabold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 transition-colors shadow-2xs cursor-pointer"
-                title="在当前目录新建子文件夹"
-                onClick={() => void createNewFolder()}
-              >
-                <FolderPlus className="h-3.5 w-3.5" />
-                <span>新建目录</span>
-              </button>
-              <button
-                className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 text-[11px] font-extrabold text-blue-400 hover:bg-blue-500/20 transition-colors shadow-2xs cursor-pointer"
-                title="搜索远程文件名或进行文本内容 Grep 检索"
-                onClick={() => onOpenSearch?.(remotePath)}
-              >
-                <Search className="h-3.5 w-3.5" />
-                <span>检索</span>
-              </button>
-              <button
-                className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 text-[11px] font-extrabold text-emerald-700 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer"
-                title="选择本地文件上传到当前目录"
-                onClick={() => void triggerManualUpload()}
-              >
-                <Upload className="h-3.5 w-3.5 text-emerald-600" />
-                <span>上传</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setWrapFileNames((w) => !w)}
-                className={cn(
-                  "inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border text-[11px] font-extrabold transition-colors shadow-2xs cursor-pointer",
-                  wrapFileNames
-                    ? "bg-purple-500/20 text-purple-400 border-purple-500/40"
-                    : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
-                )}
-                title={wrapFileNames ? "当前为长文件名全称完整换行展示模式 (点击切换为单行截断)" : "切换为长文件名全称换行展示模式"}
-              >
-                <WrapText className="h-3.5 w-3.5" />
-                <span>{wrapFileNames ? "全称换行" : "单行显示"}</span>
-              </button>
-              <button
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
-                title="刷新远程文件"
-                onClick={() => setReloadToken((token) => token + 1)}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
+                <Pencil className="h-3 w-3" />
               </button>
             </div>
-            {/* 常用目录快速跳转 Chips 栏 */}
-            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none border-b border-[var(--app-line)] px-3 py-1.5 bg-[var(--sidebar-bg)]">
-              <span className="text-[10px] font-extrabold text-[var(--app-muted)] shrink-0 select-none">常用跳转:</span>
-              {terminalCwd && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRemotePath(terminalCwd);
-                    setAutoFollowTerminalCwd(true);
-                  }}
-                  className={cn(
-                    "flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-mono font-bold transition-all shrink-0 cursor-pointer select-none border",
-                    remotePath === terminalCwd
-                      ? "bg-emerald-600 text-white border-emerald-500 shadow-2xs"
-                      : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
-                  )}
-                  title={`终端当前目录: ${terminalCwd} (点击即刻跳转并开启自动跟随)`}
-                >
-                  <RotateCcw className="h-2.5 w-2.5" />
-                  <span>📍 终端: {terminalCwd}</span>
-                </button>
-              )}
-              {QUICK_REMOTE_LOCATIONS.map((loc) => (
-                <button
-                  key={loc.path}
-                  type="button"
-                  onClick={() => setRemotePath(loc.path)}
-                  className={cn(
-                    "rounded-md px-2 py-0.5 text-[10px] font-mono font-bold transition-all shrink-0 cursor-pointer select-none",
-                    remotePath === loc.path
-                      ? "bg-purple-500 text-white shadow-2xs"
-                      : "bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-purple-400 border border-[var(--app-line)]"
-                  )}
-                  title={`快速跳转至: ${loc.path}`}
-                >
-                  {loc.label} ({loc.path})
-                </button>
-              ))}
-            </div>
+          )}
+          <button
+            className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors shadow-2xs cursor-pointer"
+            title="在当前目录新建空白文件"
+            onClick={() => void createNewFile()}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>新建文件</span>
+          </button>
+          <button
+            className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-[11px] font-extrabold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 transition-colors shadow-2xs cursor-pointer"
+            title="在当前目录新建子文件夹"
+            onClick={() => void createNewFolder()}
+          >
+            <FolderPlus className="h-3.5 w-3.5" />
+            <span>新建目录</span>
+          </button>
+          <button
+            className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 text-[11px] font-extrabold text-blue-400 hover:bg-blue-500/20 transition-colors shadow-2xs cursor-pointer"
+            title="搜索远程文件名或进行文本内容 Grep 检索"
+            onClick={() => onOpenSearch?.(remotePath)}
+          >
+            <Search className="h-3.5 w-3.5" />
+            <span>检索</span>
+          </button>
+          <button
+            className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 dark:border-emerald-500/30 text-[11px] font-extrabold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer"
+            title="选择本地文件上传到当前目录"
+            onClick={() => void triggerManualUpload()}
+          >
+            <Upload className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>上传</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setWrapFileNames((w) => !w)}
+            className={cn(
+              "inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border text-[11px] font-extrabold transition-colors shadow-2xs cursor-pointer",
+              wrapFileNames
+                ? "bg-purple-500/20 text-purple-400 border-purple-500/40"
+                : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+            )}
+            title={wrapFileNames ? "当前为长文件名全称完整换行展示模式 (点击切换为单行截断)" : "切换为长文件名全称换行展示模式"}
+          >
+            <WrapText className="h-3.5 w-3.5" />
+            <span>{wrapFileNames ? "全称换行" : "单行显示"}</span>
+          </button>
+          <button
+            onClick={() => setIsDualPane((prev) => !prev)}
+            className={cn(
+              "inline-flex h-7 px-2 shrink-0 items-center gap-1 rounded-lg border text-[11px] font-extrabold transition-colors cursor-pointer shadow-2xs",
+              isDualPane
+                ? "bg-indigo-600 text-white border-indigo-600"
+                : "bg-[var(--fill-1)] text-[var(--app-text)] border-[var(--app-line)] hover:bg-[var(--fill-2)]"
+            )}
+            title="切换双栏本地/远程 Commander 对比模式"
+          >
+            <Columns2 className="h-3.5 w-3.5" />
+            <span>{isDualPane ? "双栏" : "单栏"}</span>
+          </button>
+          <button
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+            title="刷新远程文件"
+            onClick={() => setReloadToken((token) => token + 1)}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        </div>
 
-            {/* 智能检索 / 绝对路径回车直达栏 */}
-            <div className="flex items-center gap-2 border-b border-[var(--app-line)] px-3 py-1.5 bg-[var(--fill-1)]">
-              <Search className="h-3.5 w-3.5 text-[var(--app-muted)] shrink-0" />
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
+        {/* 常用目录快速跳转 Chips 栏 */}
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none px-3 py-1.5 bg-[var(--sidebar-bg)] border-b border-[var(--app-line)]/50">
+          <span className="text-[10px] font-extrabold text-[var(--app-muted)] shrink-0 select-none">常用跳转:</span>
+          {terminalCwd && (
+            <button
+              type="button"
+              onClick={() => {
+                setRemotePath(terminalCwd);
+                setAutoFollowTerminalCwd(true);
+              }}
+              className={cn(
+                "flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-mono font-bold transition-all shrink-0 cursor-pointer select-none border",
+                remotePath === terminalCwd
+                  ? "bg-emerald-600 text-white border-emerald-500 shadow-2xs"
+                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+              )}
+              title={`终端当前目录: ${terminalCwd} (点击即刻跳转并开启自动跟随)`}
+            >
+              <RotateCcw className="h-2.5 w-2.5" />
+              <span>📍 终端: {terminalCwd}</span>
+            </button>
+          )}
+          {QUICK_REMOTE_LOCATIONS.map((loc) => (
+            <button
+              key={loc.path}
+              type="button"
+              onClick={() => setRemotePath(loc.path)}
+              className={cn(
+                "rounded-md px-2 py-0.5 text-[10px] font-mono font-bold transition-all shrink-0 cursor-pointer select-none",
+                remotePath === loc.path
+                  ? "bg-purple-500 text-white shadow-2xs"
+                  : "bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-purple-400 border border-[var(--app-line)]"
+              )}
+              title={`快速跳转至: ${loc.path}`}
+            >
+              {loc.label} ({loc.path})
+            </button>
+          ))}
+        </div>
+
+        {/* 智能检索 / 绝对路径回车直达栏 */}
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--fill-1)]">
+          <Search className="h-3.5 w-3.5 text-[var(--app-muted)] shrink-0" />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const val = fileFilter.trim();
+              if (!val) return;
+              if (val.startsWith("/") || val.startsWith("~") || val.includes("/")) {
+                const target = val.startsWith("~") ? val.replace(/^~/, "/root") : val;
+                setRemotePath(target);
+                setFileFilter("");
+              }
+            }}
+            className="flex-1 flex items-center gap-1.5 min-w-0"
+          >
+            <input
+              className="w-full bg-transparent text-xs text-[var(--app-text)] placeholder:text-[var(--app-muted)] focus:outline-none font-medium"
+              placeholder="输入路径回车跳转 (如 /data/debian12/images)，或检索文件名..."
+              value={fileFilter}
+              onChange={(e) => setFileFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
                   const val = fileFilter.trim();
-                  if (!val) return;
                   if (val.startsWith("/") || val.startsWith("~") || val.includes("/")) {
+                    e.preventDefault();
                     const target = val.startsWith("~") ? val.replace(/^~/, "/root") : val;
                     setRemotePath(target);
                     setFileFilter("");
                   }
-                }}
-                className="flex-1 flex items-center gap-1.5 min-w-0"
+                }
+              }}
+            />
+            {(fileFilter.trim().startsWith("/") || fileFilter.trim().startsWith("~") || fileFilter.trim().includes("/")) && (
+              <button
+                type="submit"
+                className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] shadow-2xs cursor-pointer shrink-0 transition-colors"
+                title="立即跳转至该路径"
               >
-                <input
-                  className="w-full bg-transparent text-xs text-[var(--app-text)] placeholder:text-[var(--app-muted)] focus:outline-none font-medium"
-                  placeholder="输入路径回车跳转 (如 /data/debian12/images)，或检索文件名..."
-                  value={fileFilter}
-                  onChange={(e) => setFileFilter(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      const val = fileFilter.trim();
-                      if (val.startsWith("/") || val.startsWith("~") || val.includes("/")) {
-                        e.preventDefault();
-                        const target = val.startsWith("~") ? val.replace(/^~/, "/root") : val;
-                        setRemotePath(target);
-                        setFileFilter("");
-                      }
-                    }
-                  }}
-                />
-                {(fileFilter.trim().startsWith("/") || fileFilter.trim().startsWith("~") || fileFilter.trim().includes("/")) && (
-                  <button
-                    type="submit"
-                    className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] shadow-2xs cursor-pointer shrink-0 transition-colors"
-                    title="立即跳转至该路径"
-                  >
-                    前往 ➔
-                  </button>
-                )}
-                {fileFilter && (
-                  <button
-                    type="button"
-                    className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer shrink-0"
-                    onClick={() => setFileFilter("")}
-                  >
-                    ✕
-                  </button>
-                )}
-              </form>
-            </div>
+                前往 ➔
+              </button>
+            )}
+            {fileFilter && (
+              <button
+                type="button"
+                className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer shrink-0"
+                onClick={() => setFileFilter("")}
+              >
+                ✕
+              </button>
+            )}
+          </form>
+        </div>
+      </div>
 
-            {/* 实时传输任务与大文件下载进度条面板 (Transfer Queue & Realtime Progress Widget) */}
-            {transferTasks.length > 0 && (
-              <div className="border-b border-[var(--app-line)] bg-[var(--fill-1)] p-2.5">
-                <div className="flex items-center justify-between pb-1.5 border-b border-[var(--app-line)]/60">
-                  <div className="flex items-center gap-1.5 text-xs font-extrabold text-[var(--app-text)]">
-                    <Download className="h-3.5 w-3.5 text-emerald-500 animate-pulse" />
-                    <span>传输任务 ({transferTasks.filter(t => t.status === "transferring").length} 进行中)</span>
+      {uploadStatus && (
+        <div className="flex items-center justify-between border-b border-emerald-200 bg-emerald-50/90 dark:bg-emerald-950/60 dark:border-emerald-900 px-3 py-1.5 text-xs font-extrabold text-emerald-800 dark:text-emerald-200 shrink-0">
+          <span className="truncate">{uploadStatus}</span>
+          <button className="text-[10px] text-emerald-700 dark:text-emerald-300 hover:text-emerald-900 ml-2 shrink-0 cursor-pointer" onClick={() => setUploadStatus("")}>关闭</button>
+        </div>
+      )}
+
+      {/* 实时传输任务与大文件下载进度条面板 */}
+      {transferTasks.length > 0 && (
+        <div className="border-b border-[var(--app-line)] bg-[var(--fill-1)] p-2.5 shrink-0">
+          <div className="flex items-center justify-between pb-1.5 border-b border-[var(--app-line)]/60">
+            <div className="flex items-center gap-1.5 text-xs font-extrabold text-[var(--app-text)]">
+              <Download className="h-3.5 w-3.5 text-emerald-500 animate-pulse" />
+              <span>传输任务 ({transferTasks.filter(t => t.status === "transferring").length} 进行中)</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onClearCompletedTransfers?.()}
+              className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer"
+              title="清除已完成与已失败的任务"
+            >
+              清空已结束
+            </button>
+          </div>
+          <div className="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1">
+            {transferTasks.map((task) => (
+              <div key={task.id} className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 text-xs shadow-2xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {task.type === "upload" ? (
+                      <Upload className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                    )}
+                    <span className="font-mono font-bold text-[var(--app-text)] truncate max-w-[180px]" title={task.name}>
+                      {task.name}
+                    </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onClearCompletedTransfers?.()}
-                    className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer"
-                    title="清除已完成与已失败的任务"
-                  >
-                    清空已结束
-                  </button>
-                </div>
-                <div className="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {transferTasks.map((task) => (
-                    <div key={task.id} className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 text-xs shadow-2xs">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {task.type === "upload" ? (
-                            <Upload className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-                          ) : (
-                            <Download className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                          )}
-                          <span className="font-mono font-bold text-[var(--app-text)] truncate max-w-[180px]" title={task.name}>
-                            {task.name}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
-                          {task.status === "transferring" && (
-                            <>
-                              {task.speed && <span className="text-sky-400 font-bold">{task.speed}</span>}
-                              <span className={cn("font-black", task.type === "upload" ? "text-blue-400" : "text-emerald-400")}>
-                                {task.progress}%
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onCancelTransfer?.(task.sessionId || activeSession?.id || "", task.id, task.type);
-                                }}
-                                className="text-[10px] text-rose-400 hover:text-rose-300 font-bold ml-1 cursor-pointer"
-                                title={`取消此${task.type === "upload" ? "上传" : "下载"}`}
-                              >
-                                ✕
-                              </button>
-                            </>
-                          )}
-                          {task.status === "completed" && (
-                            <span className="text-emerald-500 font-extrabold flex items-center gap-0.5">
-                              <CheckCircle2 className="h-3 w-3" /> 已完成
-                            </span>
-                          )}
-                          {task.status === "error" && (
-                            <span className="text-rose-500 font-extrabold" title={task.error}>
-                              ❌ {task.error || "失败"}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {/* 进度条轨道 */}
-                      <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-[var(--app-line)]">
-                        <div
-                          className={cn(
-                            "h-full transition-all duration-200",
-                            task.status === "completed"
-                              ? "bg-emerald-500"
-                              : task.status === "error"
-                              ? "bg-rose-500"
-                              : task.type === "upload"
-                              ? "bg-blue-400 bg-gradient-to-r from-blue-500 to-cyan-400 animate-pulse"
-                              : "bg-emerald-400 bg-gradient-to-r from-emerald-500 to-teal-400 animate-pulse"
-                          )}
-                          style={{ width: `${task.progress}%` }}
-                        />
-                      </div>
-                      <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--app-muted)] font-mono">
-                        <span className="truncate max-w-[180px]" title={task.remotePath}>{task.remotePath}</span>
-                        <span>
-                          {task.lastBytes && task.lastBytes > 0 ? `${formatBytes(task.lastBytes)} / ` : ""}
-                          {task.size > 0 ? formatBytes(task.size) : ""}
+                  <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
+                    {task.status === "transferring" && (
+                      <>
+                        {task.speed && <span className="text-sky-400 font-bold">{task.speed}</span>}
+                        <span className={cn("font-black", task.type === "upload" ? "text-blue-400" : "text-emerald-400")}>
+                          {task.progress}%
                         </span>
-                      </div>
-                    </div>
-                  ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onCancelTransfer?.(task.sessionId || activeSession?.id || "", task.id, task.type);
+                          }}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 font-bold ml-1 cursor-pointer"
+                          title={`取消此${task.type === "upload" ? "上传" : "下载"}`}
+                        >
+                          ✕
+                        </button>
+                      </>
+                    )}
+                    {task.status === "completed" && (
+                      <span className="text-emerald-500 font-extrabold flex items-center gap-0.5">
+                        <CheckCircle2 className="h-3 w-3" /> 已完成
+                      </span>
+                    )}
+                    {task.status === "error" && (
+                      <span className="text-rose-500 font-extrabold" title={task.error}>
+                        ❌ {task.error || "失败"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {/* 进度条轨道 */}
+                <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-[var(--app-line)]">
+                  <div
+                    className={cn(
+                      "h-full transition-all duration-200",
+                      task.status === "completed"
+                        ? "bg-emerald-500"
+                        : task.status === "error"
+                        ? "bg-rose-500"
+                        : task.type === "upload"
+                        ? "bg-blue-400 bg-gradient-to-r from-blue-500 to-cyan-400 animate-pulse"
+                        : "bg-emerald-400 bg-gradient-to-r from-emerald-500 to-teal-400 animate-pulse"
+                    )}
+                    style={{ width: `${task.progress}%` }}
+                  />
+                </div>
+                <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--app-muted)] font-mono">
+                  <span className="truncate max-w-[180px]" title={task.remotePath}>{task.remotePath}</span>
+                  <span>
+                    {task.lastBytes && task.lastBytes > 0 ? `${formatBytes(task.lastBytes)} / ` : ""}
+                    {task.size > 0 ? formatBytes(task.size) : ""}
+                  </span>
                 </div>
               </div>
-            )}
-            {loading && <div className="px-3 py-8 text-center text-xs text-[var(--app-muted)] font-extrabold">正在读取目录...</div>}
-            {!loading && error && <div className="px-3 py-8 text-center text-xs text-rose-600 font-extrabold">{error}</div>}
-            {!loading && !error && entries.length === 0 && <div className="px-3 py-8 text-center text-xs text-[var(--app-muted)] font-extrabold">目录为空。</div>}
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 核心文件列表区域 (100% 全高撑满底部) */}
+      <div className="flex-1 min-h-0 w-full overflow-hidden bg-[var(--panel-bg)] flex flex-col relative">
+        {canBrowseRemote ? (
+          <>
+            {loading && <div className="p-8 text-center text-xs text-[var(--app-muted)] font-extrabold">正在读取目录...</div>}
+            {!loading && error && <div className="p-8 text-center text-xs text-rose-600 font-extrabold">{error}</div>}
+            {!loading && !error && entries.length === 0 && <div className="p-8 text-center text-xs text-[var(--app-muted)] font-extrabold">目录为空。</div>}
             {!loading && !error && entries.length > 0 && (
               <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto select-none scrollbar-thin">
                 <div style={{ minWidth: `${colWidths.name + colWidths.size + colWidths.type + colWidths.date + colWidths.permissions + 30}px` }}>
                   {/* FinalShell 风格表头（支持按住竖线左右任意拖拽调整列宽） */}
-                  <div className="flex items-center bg-[var(--fill-1)]/90 border-b border-[var(--app-line)] text-[11px] font-bold text-[var(--app-muted)] sticky top-0 z-10">
+                  <div className="flex items-center bg-[var(--sidebar-bg)] border-b border-[var(--app-line)] text-[11px] font-bold text-[var(--app-muted)] sticky top-0 z-10">
                     {/* 文件名列头 */}
                     <div
                       style={{ width: `${colWidths.name}px`, minWidth: `${colWidths.name}px` }}
@@ -9280,9 +9260,9 @@ function TerminalFileSidebar({
                 )}
               </div>
             )}
-          </div>
+          </>
         ) : (
-          <div className="mt-3 rounded-2xl border border-dashed border-[var(--app-line)] bg-[var(--panel-bg)] px-3 py-8 text-center text-xs font-extrabold text-[var(--app-muted)]">
+          <div className="m-6 rounded-2xl border border-dashed border-[var(--app-line)] bg-[var(--sidebar-bg)] p-8 text-center text-xs font-extrabold text-[var(--app-muted)]">
             {emptyMessage}
           </div>
         )}
