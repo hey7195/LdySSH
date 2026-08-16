@@ -1726,7 +1726,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 output = session->GetOutput();
             }
             if (!output.empty()) {
-                PrismLog("INFO", "get_output data length from " + sessId + ": " + std::to_string(output.length()) + " bytes");
+                PrismLog("DEBUG", "get_output data length from " + sessId + ": " + std::to_string(output.length()) + " bytes");
             }
             
             nlohmann::json retObj;

@@ -1020,7 +1020,7 @@ DWORD WINAPI SSHSession::StaticReadThread(LPVOID param) {
 }
 
 void SSHSession::ReadLoop() {
-    char buffer[16384];
+    char buffer[32768];
     auto lastKeepalive = std::chrono::steady_clock::now();
     while (running && sshChannel) {
         fd_set fd;
@@ -1028,7 +1028,7 @@ void SSHSession::ReadLoop() {
         FD_SET(sock, &fd);
         timeval tv;
         tv.tv_sec = 0;
-        tv.tv_usec = 50000;
+        tv.tv_usec = 15000;
         int select_res = select(0, &fd, NULL, NULL, &tv);
         if (select_res > 0) {
             std::lock_guard<std::mutex> lock(sshMutex);
