@@ -292,52 +292,52 @@
   background-size: cover;
   background-attachment: fixed;
 
-  --app-bg: rgba(8, 16, 28, 0.35);
-  --panel-bg: rgba(10, 18, 30, 0.40);
-  --sidebar-bg: rgba(8, 15, 25, 0.35);
-  --subtle-bg: rgba(255, 255, 255, 0.05);
-  --raised-bg: rgba(16, 26, 40, 0.45);
-  --ground-bg: rgba(6, 12, 20, 0.50);
+  --app-bg: rgba(6, 12, 22, 0.55);
+  --panel-bg: rgba(10, 18, 32, 0.70);
+  --sidebar-bg: rgba(8, 14, 26, 0.65);
+  --subtle-bg: rgba(255, 255, 255, 0.08);
+  --raised-bg: rgba(16, 26, 42, 0.75);
+  --ground-bg: rgba(6, 12, 20, 0.75);
 
-  --app-text: #eaf3f6;
-  --text-secondary: rgba(214, 232, 238, 0.8);
-  --app-muted: rgba(214, 232, 238, 0.5);
-  --text-quaternary: rgba(214, 232, 238, 0.3);
+  --app-text: #ffffff;
+  --text-secondary: #e2e8f0;
+  --app-muted: #94a3b8;
+  --text-quaternary: #64748b;
 
-  --app-line: rgba(255, 255, 255, 0.10);
-  --app-line-subtle: rgba(255, 255, 255, 0.06);
-  --fill-1: rgba(255, 255, 255, 0.06);
-  --fill-2: rgba(255, 255, 255, 0.10);
-  --fill-3: rgba(255, 255, 255, 0.16);
+  --app-line: rgba(255, 255, 255, 0.15);
+  --app-line-subtle: rgba(255, 255, 255, 0.08);
+  --fill-1: rgba(255, 255, 255, 0.10);
+  --fill-2: rgba(255, 255, 255, 0.16);
+  --fill-3: rgba(255, 255, 255, 0.24);
 
   --accent: #34d3bd;
   --accent-hover: #6ee7d3;
   --accent-active: #14b8a5;
-  --accent-soft: rgba(110, 231, 211, 0.12);
-  --accent-soft-strong: rgba(110, 231, 211, 0.22);
-  --accent-text: #6ee7d3;
+  --accent-soft: rgba(52, 211, 189, 0.18);
+  --accent-soft-strong: rgba(52, 211, 189, 0.28);
+  --accent-text: #34d3bd;
   --on-accent: #06121a;
-  --text-selected: rgba(110, 231, 211, 0.22);
-  --accent-grad: linear-gradient(135deg, #6ee7d3 0%, #7dd3fc 100%);
-  --accent-glow: 0 0 24px rgba(110, 231, 211, 0.30);
-  --accent-grad-soft: linear-gradient(135deg, rgba(110, 231, 211, 0.14) 0%, rgba(125, 211, 252, 0.14) 100%);
+  --text-selected: rgba(52, 211, 189, 0.30);
+  --accent-grad: linear-gradient(135deg, #34d3bd 0%, #38bdf8 100%);
+  --accent-glow: 0 0 24px rgba(52, 211, 189, 0.40);
+  --accent-grad-soft: linear-gradient(135deg, rgba(52, 211, 189, 0.20) 0%, rgba(56, 189, 248, 0.20) 100%);
 
-  --success: #4ade80;
-  --success-soft: rgba(74, 222, 128, 0.12);
-  --success-text: #86efac;
-  --danger: #fb7185;
-  --danger-hover: #f43f5e;
-  --danger-soft: rgba(251, 113, 133, 0.12);
-  --danger-text: #fda4af;
-  --warning: #fbbf24;
-  --warning-soft: rgba(251, 191, 36, 0.12);
-  --warning-text: #fde68a;
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.18);
+  --success-text: #34d399;
+  --danger: #f43f5e;
+  --danger-hover: #e11d48;
+  --danger-soft: rgba(244, 63, 94, 0.18);
+  --danger-text: #fb7185;
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.18);
+  --warning-text: #fbbf24;
 
-  --terminal-bg: rgba(6, 12, 20, 0.35);
-  --terminal-text: #e8f0f4;
-  --mask-base: rgba(4, 10, 18, 0.45);
-  --shadow-raised: 0 12px 40px rgba(2, 8, 16, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  --shadow-input: 0 1px 2px rgba(2, 8, 16, 0.3);
+  --terminal-bg: rgba(6, 12, 20, 0.45);
+  --terminal-text: #ffffff;
+  --mask-base: rgba(4, 10, 18, 0.55);
+  --shadow-raised: 0 12px 40px rgba(2, 8, 16, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+  --shadow-input: 0 1px 2px rgba(2, 8, 16, 0.4);
 }
 
 /* 极光:面板容器统一磨砂玻璃 */

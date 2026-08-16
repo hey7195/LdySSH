@@ -3518,9 +3518,9 @@ function HostSidebar({
           <button
             onClick={onOpenDialog}
             title="新建主机连接"
-            className="flex w-full h-8.5 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.98] text-white text-xs font-extrabold shadow-sm shadow-emerald-900/30 border border-emerald-400/30 transition-all cursor-pointer whitespace-nowrap tracking-wide"
+            className="flex w-full h-8.5 items-center justify-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-slate-950 text-xs font-black shadow-md shadow-emerald-950/60 border border-emerald-300/40 transition-all cursor-pointer whitespace-nowrap tracking-wide"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-4 w-4 stroke-[3]" />
             <span>新建 SSH 连接</span>
           </button>
 
@@ -3533,9 +3533,9 @@ function HostSidebar({
             className="flex items-center gap-1.5"
           >
             <div className="relative flex-1">
-              <Zap className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-amber-400" />
+              <Zap className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-amber-400" />
               <Input
-                className="pl-7 pr-2 h-7.5 text-xs font-mono rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-amber-500/60 focus:bg-[var(--fill-2)] transition-all"
+                className="pl-7.5 pr-2 h-7.5 text-xs font-mono font-bold rounded-lg border border-slate-700/80 bg-slate-900/90 text-white outline-none placeholder:text-slate-400 shadow-inner w-full focus:border-amber-400 focus:bg-slate-900 transition-all"
                 value={quickConnectStr}
                 placeholder="直连: [user@]ip[:port]"
                 onChange={(e) => setQuickConnectStr(e.target.value)}
@@ -3545,7 +3545,7 @@ function HostSidebar({
               type="submit"
               disabled={!quickConnectStr.trim()}
               title="立即发起快速直连 (Enter)"
-              className="h-7.5 px-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-slate-950 text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+              className="h-7.5 px-3 rounded-lg bg-amber-400 hover:bg-amber-300 active:scale-[0.98] text-slate-950 text-xs font-black shadow-sm transition-all cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
             >
               <span>直连</span>
               <Play className="h-2.5 w-2.5 fill-current" />
@@ -3555,13 +3555,13 @@ function HostSidebar({
           {/* 快速直连历史标签 */}
           {quickHistory.length > 0 && !query && (
             <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pt-0.5 text-[10px]">
-              <span className="text-[10px] text-[var(--app-muted)] font-bold shrink-0">历史:</span>
+              <span className="text-[10px] text-slate-300 font-extrabold shrink-0">历史:</span>
               {quickHistory.map((item) => (
                 <button
                   key={item}
                   type="button"
                   onClick={() => handleQuickConnect(item)}
-                  className="rounded-md bg-[var(--fill-1)] hover:bg-amber-500/15 text-[var(--app-text)] hover:text-amber-400 border border-[var(--app-line)] hover:border-amber-500/30 px-1.5 py-0.5 font-mono text-[10px] font-medium shrink-0 transition-colors cursor-pointer"
+                  className="rounded-md bg-slate-900/90 hover:bg-amber-500/20 text-slate-100 hover:text-amber-300 border border-slate-700/80 hover:border-amber-400/50 px-1.5 py-0.5 font-mono text-[10px] font-bold shrink-0 transition-colors cursor-pointer"
                   title={`点击立即直连: ${item}`}
                 >
                   {item}
@@ -3573,7 +3573,7 @@ function HostSidebar({
                   setQuickHistory([]);
                   localStorage.removeItem("ldyssh_quick_connect_history");
                 }}
-                className="text-[10px] text-[var(--app-muted)] hover:text-rose-400 px-1 shrink-0 cursor-pointer"
+                className="text-[10px] text-slate-400 hover:text-rose-400 px-1 shrink-0 cursor-pointer font-bold"
                 title="清空快速直连历史"
               >
                 ✕
@@ -3583,9 +3583,9 @@ function HostSidebar({
 
           {/* Row 2: 独立全宽搜索框 */}
           <div className="relative w-full">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <Input
-              className="pl-7 pr-7 h-7.5 text-xs rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-2xs w-full focus:border-emerald-500/60 transition-colors"
+              className="pl-7.5 pr-7 h-7.5 text-xs font-bold rounded-lg border border-slate-700/80 bg-slate-900/90 text-white outline-none placeholder:text-slate-400 shadow-inner w-full focus:border-emerald-400 focus:bg-slate-900 transition-all"
               value={query}
               placeholder="搜索主机 / IP / 标签..."
               onChange={(event) => onQueryChange(event.target.value)}
@@ -3594,50 +3594,50 @@ function HostSidebar({
               <button
                 type="button"
                 onClick={() => onQueryChange("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
 
-          {/* Row 3: 2x2 均等网格工具栏 (彻底解决挤压与文字竖排折行问题) */}
+          {/* Row 3: 2x2 均等网格工具栏 (高对比度微磁贴) */}
           <div className="grid grid-cols-2 gap-1.5 w-full">
             <button
               onClick={() => setShowTagMenu((prev) => !prev)}
               title="按标签筛选主机"
               className={cn(
-                "flex h-7 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-medium transition-all cursor-pointer w-full whitespace-nowrap shadow-2xs px-2",
+                "flex h-7.5 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-extrabold transition-all cursor-pointer w-full whitespace-nowrap shadow-xs px-2",
                 activeTagFilter
-                  ? "bg-indigo-600 border-indigo-500 text-white shadow-xs"
-                  : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--text-secondary)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)]"
+                  ? "bg-indigo-600 border-indigo-400 text-white shadow-sm"
+                  : "border-slate-700/70 bg-slate-900/85 text-slate-100 hover:bg-slate-800 hover:text-white hover:border-slate-500"
               )}
             >
-              <Filter className="h-3 w-3 shrink-0" />
+              <Filter className="h-3 w-3 text-indigo-400 shrink-0" />
               <span>标签筛选</span>
             </button>
             <button
               onClick={onOpenKeyManager}
               title="密钥库管理"
-              className="flex h-7 items-center justify-center gap-1.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--fill-2)] hover:text-indigo-400 transition-all cursor-pointer w-full whitespace-nowrap shadow-2xs px-2"
+              className="flex h-7.5 items-center justify-center gap-1.5 rounded-lg border border-slate-700/70 bg-slate-900/85 text-[11px] font-extrabold text-slate-100 hover:bg-slate-800 hover:text-white hover:border-slate-500 transition-all cursor-pointer w-full whitespace-nowrap shadow-xs px-2"
             >
-              <KeyRound className="h-3 w-3 shrink-0" />
+              <KeyRound className="h-3 w-3 text-amber-400 shrink-0" />
               <span>密钥管理</span>
             </button>
             <button
               onClick={onOpenPresets}
               title="常用连接预设模板管理"
-              className="flex h-7 items-center justify-center gap-1.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--fill-2)] hover:text-purple-400 transition-all cursor-pointer w-full whitespace-nowrap shadow-2xs px-2"
+              className="flex h-7.5 items-center justify-center gap-1.5 rounded-lg border border-slate-700/70 bg-slate-900/85 text-[11px] font-extrabold text-slate-100 hover:bg-slate-800 hover:text-white hover:border-slate-500 transition-all cursor-pointer w-full whitespace-nowrap shadow-xs px-2"
             >
-              <Sliders className="h-3 w-3 shrink-0" />
+              <Sliders className="h-3 w-3 text-purple-400 shrink-0" />
               <span>连接预设</span>
             </button>
             <button
               onClick={onRefresh}
               title="刷新主机列表"
-              className="flex h-7 items-center justify-center gap-1.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] transition-all cursor-pointer w-full whitespace-nowrap shadow-2xs px-2"
+              className="flex h-7.5 items-center justify-center gap-1.5 rounded-lg border border-slate-700/70 bg-slate-900/85 text-[11px] font-extrabold text-slate-100 hover:bg-slate-800 hover:text-white hover:border-slate-500 transition-all cursor-pointer w-full whitespace-nowrap shadow-xs px-2"
             >
-              <RefreshCw className="h-3 w-3 shrink-0" />
+              <RefreshCw className="h-3 w-3 text-sky-400 shrink-0" />
               <span>刷新列表</span>
             </button>
           </div>
@@ -3648,8 +3648,8 @@ function HostSidebar({
               <button
                 onClick={() => { onActiveTagFilterChange?.(""); setShowTagMenu(false); }}
                 className={cn(
-                  "rounded-lg px-2 py-0.5 font-bold cursor-pointer transition-colors shrink-0",
-                  !activeTagFilter ? "bg-slate-900 text-white" : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)]"
+                  "rounded-lg px-2 py-0.5 font-black cursor-pointer transition-colors shrink-0",
+                  !activeTagFilter ? "bg-slate-900 text-white" : "bg-slate-800 text-slate-300 hover:text-white"
                 )}
               >
                 全部
@@ -3674,29 +3674,45 @@ function HostSidebar({
           )}
         </div>
 
-        {/* 核心功能导航菜单 (Linear 胶囊微磁贴流，节省 60%+ 纵向空间) */}
+        {/* 核心功能导航菜单 (高对比度 Linear 胶囊微磁贴流) */}
         <div className="p-2 border-b border-[var(--app-line)]">
           <div className="grid grid-cols-2 gap-1.5">
             {tools.map((tool) => {
               const Icon = tool.icon;
               const active = activeTool === tool.id;
+              const toolColorMap: Record<string, { activeBg: string; inactiveIcon: string }> = {
+                ssh: { activeBg: "bg-emerald-600 border-emerald-400 shadow-emerald-500/40", inactiveIcon: "text-emerald-400" },
+                local: { activeBg: "bg-teal-600 border-teal-400 shadow-teal-500/40", inactiveIcon: "text-teal-400" },
+                cmd: { activeBg: "bg-purple-600 border-purple-400 shadow-purple-500/40", inactiveIcon: "text-purple-400" },
+                monitor: { activeBg: "bg-sky-600 border-sky-400 shadow-sky-500/40", inactiveIcon: "text-sky-400" },
+                serial: { activeBg: "bg-amber-600 border-amber-400 shadow-amber-500/40", inactiveIcon: "text-amber-400" },
+                ebpf: { activeBg: "bg-rose-600 border-rose-400 shadow-rose-500/40", inactiveIcon: "text-rose-400" },
+                cluster: { activeBg: "bg-indigo-600 border-indigo-400 shadow-indigo-500/40", inactiveIcon: "text-indigo-400" },
+                git: { activeBg: "bg-orange-600 border-orange-400 shadow-orange-500/40", inactiveIcon: "text-orange-400" },
+                browser: { activeBg: "bg-cyan-600 border-cyan-400 shadow-cyan-500/40", inactiveIcon: "text-cyan-400" },
+                settings: { activeBg: "bg-slate-700 border-slate-500 shadow-slate-700/40", inactiveIcon: "text-slate-300" }
+              };
+              const colorInfo = toolColorMap[tool.id] || { activeBg: "bg-emerald-600 border-emerald-400", inactiveIcon: "text-emerald-400" };
 
               return (
                 <button
                   key={tool.id}
                   title={tool.title || tool.label}
                   className={cn(
-                    "flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs transition-all duration-150 cursor-pointer select-none border min-w-0 tracking-tight",
+                    "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-all duration-150 cursor-pointer select-none border min-w-0 tracking-tight shadow-xs",
                     active
-                      ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/35 shadow-xs font-bold"
-                      : "border-[var(--app-line)]/60 bg-[var(--fill-1)] text-[var(--text-secondary)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] hover:border-[var(--app-line)] font-medium"
+                      ? cn("text-white shadow-md font-black", colorInfo.activeBg)
+                      : "border-slate-700/70 bg-slate-900/85 text-slate-100 hover:bg-slate-800 hover:text-white hover:border-slate-500 font-extrabold"
                   )}
                   onClick={() => onActiveToolChange?.(tool.id as any)}
                 >
-                  <Icon className={cn("h-3.5 w-3.5 shrink-0 transition-colors", active ? "text-emerald-400" : "text-[var(--app-muted)]")} />
-                  <span className="truncate text-[11px] font-bold">{tool.label}</span>
+                  <Icon className={cn("h-3.5 w-3.5 shrink-0 transition-colors", active ? "text-white" : colorInfo.inactiveIcon)} />
+                  <span className="truncate text-[11px] font-extrabold">{tool.label}</span>
                   {tool.id === "local" && sessions.length > 0 && (
-                    <span className="ml-auto rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1 py-0 text-[9px] font-mono font-bold shrink-0">
+                    <span className={cn(
+                      "ml-auto rounded-md px-1.5 py-0 text-[9px] font-mono font-bold shrink-0",
+                      active ? "bg-white/30 text-white" : "bg-emerald-500/25 text-emerald-400 border border-emerald-500/30"
+                    )}>
                       {sessions.length}
                     </span>
                   )}
@@ -3810,27 +3826,27 @@ function HostSidebar({
                                 setHostContextMenu({ x: e.clientX, y: e.clientY, connection });
                                 setMoveSubmenuOpen(false);
                               }}
-                              className="relative flex flex-col gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2 transition-all duration-150 hover:border-emerald-500/50 hover:shadow-sm group select-none cursor-pointer w-full min-w-0 overflow-hidden"
+                              className="relative flex flex-col gap-1 rounded-xl border border-slate-700/70 bg-slate-900/85 hover:bg-slate-800 p-2.5 transition-all duration-150 hover:border-emerald-500/60 hover:shadow-md group select-none cursor-pointer w-full min-w-0 overflow-hidden backdrop-blur-md"
                               title={`${connection.name || connection.hostname}\n地址: ${connection.username || "root"}@${connection.hostname || "localhost"}:${connection.port || 22}\n分组: ${connection.group || connection.folder || "未分组"}`}
                             >
                               <div className="flex items-center gap-2 min-w-0 w-full">
-                                <div className="relative flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shrink-0">
-                                  <Server className="h-3 w-3" />
+                                <div className="relative flex h-6.5 w-6.5 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shrink-0">
+                                  <Server className="h-3.5 w-3.5" />
                                   <span className="absolute -bottom-0.5 -right-0.5 flex h-1.5 w-1.5">
-                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400"></span>
                                   </span>
                                 </div>
                                 
                                 <button className="min-w-0 flex-1 text-left cursor-pointer overflow-hidden" onClick={() => onConnect(connection)}>
                                   <div className="flex items-center justify-between gap-1 w-full min-w-0">
-                                    <span className="truncate text-xs font-extrabold text-[var(--app-text)] min-w-0 flex-1" title={connection.name || connection.hostname}>
+                                    <span className="truncate text-xs font-black text-white min-w-0 flex-1 tracking-tight" title={connection.name || connection.hostname}>
                                       {connection.name || connection.hostname}
                                     </span>
-                                    <span className="rounded-md bg-emerald-500/10 border border-emerald-500/20 px-1 py-0.2 font-mono text-[9px] font-bold text-emerald-500 shrink-0">
+                                    <span className="rounded-md bg-emerald-500/20 border border-emerald-500/40 px-1.5 py-0.5 font-mono text-[9px] font-black text-emerald-300 shrink-0">
                                       24ms
                                     </span>
                                   </div>
-                                  <div className="truncate font-mono text-[10px] font-medium text-[var(--app-muted)] w-full block mt-0.5" title={`${connection.username || "root"}@${connection.hostname || "localhost"}:${connection.port || 22}`}>
+                                  <div className="truncate font-mono text-[11px] font-bold text-slate-300 w-full block mt-0.5" title={`${connection.username || "root"}@${connection.hostname || "localhost"}:${connection.port || 22}`}>
                                     {connection.username || "root"}@{connection.hostname || "localhost"}
                                   </div>
                                 </button>
@@ -4158,11 +4174,11 @@ function SidebarSection({
           className="flex items-center gap-1.5 text-left cursor-pointer min-w-0 shrink whitespace-nowrap"
           onClick={() => setIsOpen((current) => !current)}
         >
-          <span className="text-xs font-extrabold uppercase tracking-wide text-[var(--app-muted)] whitespace-nowrap shrink-0">{title}</span>
+          <span className="text-xs font-black uppercase tracking-wide text-slate-200 whitespace-nowrap shrink-0">{title}</span>
           {typeof count === "number" && (
-            <span className="rounded-md bg-[var(--fill-2)] px-1.5 py-0.5 text-[10px] font-mono tabular-nums text-[var(--app-muted)] shrink-0">{count}</span>
+            <span className="rounded-md bg-slate-800 text-slate-200 border border-slate-700 px-1.5 py-0.2 text-[10px] font-mono font-bold tabular-nums shrink-0">{count}</span>
           )}
-          <ChevronDown className={cn("h-3.5 w-3.5 text-[var(--app-muted)] transition-transform shrink-0", !isOpen && "-rotate-90")} />
+          <ChevronDown className={cn("h-3.5 w-3.5 text-slate-400 transition-transform shrink-0", !isOpen && "-rotate-90")} />
         </button>
         {action && <div className="shrink-0">{action}</div>}
       </div>
