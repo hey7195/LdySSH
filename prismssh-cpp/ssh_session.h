@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <chrono>
+#include <atomic>
 #include <nlohmann/json.hpp>
 #include <libssh2.h>
 #include <libssh2_sftp.h>
@@ -24,6 +25,31 @@ struct JumpHostConfig {
     std::string jumpKey;
     std::string jumpKeyPassphrase;
 };
+
+// 共享堡垒机连接:同一跳板(主机+端口+用户+凭据)的所有会话复用一次登录
+struct JumpPoolEntry {
+    std::string key;
+    SOCKET sock = INVALID_SOCKET;
+    LIBSSH2_SESSION* session = NULL;   // 非阻塞模式,所有 libssh2 调用须持有 ioMutex
+    std::mutex ioMutex;
+    std::atomic<int> refCount{ 0 };
+    std::atomic<bool> alive{ true };
+    HANDLE hKeepaliveThread = NULL;
+};
+
+class JumpConnectionPool {
+public:
+    // 返回池中已有或新建的跳板连接;失败返回 nullptr 并填充 lastError
+    std::shared_ptr<JumpPoolEntry> Acquire(const JumpHostConfig& config, std::string& lastError);
+    void Release(const std::shared_ptr<JumpPoolEntry>& entry);
+private:
+    std::shared_ptr<JumpPoolEntry> Create(const JumpHostConfig& config, std::string& lastError);
+    static std::string BuildKey(const JumpHostConfig& config);
+    std::mutex poolMutex;
+    std::unordered_map<std::string, std::shared_ptr<JumpPoolEntry>> entries;
+};
+
+extern JumpConnectionPool globalJumpPool;
 
 struct ProxyConfig {
     std::string proxyType; // "none", "socks5", "http"
@@ -45,9 +71,8 @@ public:
     LIBSSH2_CHANNEL* sshChannel = NULL;
     LIBSSH2_SFTP* sftpSession = NULL;
     
-    // 堡垒机第一跳变量
-    SOCKET jumpSock = INVALID_SOCKET;
-    LIBSSH2_SESSION* jumpSshSession = NULL;
+    // 堡垒机第一跳:共享池连接 + 每会话本地中转
+    std::shared_ptr<JumpPoolEntry> jumpPoolEntry;
     SOCKET jumpListenSock = INVALID_SOCKET;
     HANDLE hJumpThread = NULL;
     
@@ -105,6 +130,8 @@ public:
 
 private:
     std::string osType;
+    // 归还共享跳板连接与本地中转资源(Disconnect 与连接中途失败路径共用)
+    void ReleaseJumpResources();
     std::string ListDirectory(const std::string& path);
     std::string CreateDirectory(const std::string& path);
     std::string DeleteFile(const std::string& path);
