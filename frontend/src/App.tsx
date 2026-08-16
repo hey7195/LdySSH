@@ -4,6 +4,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
 import {
   Activity,
@@ -5559,6 +5560,12 @@ function TerminalSurface({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const decoderRef = useRef<TextDecoder | null>(null);
   const pushDecodersRef = useRef<Record<string, TextDecoder>>({});
+  // 终端输出渲染合并与轮询降级状态
+  const pendingTerminalWritesRef = useRef<Record<string, string[]>>({});
+  const terminalWriteFlushScheduledRef = useRef(false);
+  const pushSeenRef = useRef<Record<string, boolean>>({});
+  const highlightRulesRef = useRef(highlightRules);
+  const secondaryIdRef = useRef<string | undefined>(undefined);
 
   // 副分屏终端引用与状态
   const secondaryContainerRef = useRef<HTMLDivElement | null>(null);
@@ -6037,6 +6044,11 @@ function TerminalSurface({
   }, [onOutput]);
 
   useEffect(() => {
+    highlightRulesRef.current = highlightRules;
+    secondaryIdRef.current = secondarySession?.id;
+  }, [highlightRules, secondarySession?.id]);
+
+  useEffect(() => {
     searchAddonRef.current?.clearDecorations();
     setSearchResult({ resultIndex: -1, resultCount: 0 });
   }, [activeSession?.id]);
@@ -6114,6 +6126,40 @@ function TerminalSurface({
     return decoder.decode(bytes, { stream: true });
   }
 
+  function enqueueTerminalWrite(sessionId: string, output: string) {
+    const pending = pendingTerminalWritesRef.current;
+    (pending[sessionId] ??= []).push(output);
+    if (terminalWriteFlushScheduledRef.current) return;
+    terminalWriteFlushScheduledRef.current = true;
+    const run = () => {
+      terminalWriteFlushScheduledRef.current = false;
+      flushPendingTerminalWrites();
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(run);
+    } else {
+      setTimeout(run, 4);
+    }
+  }
+
+  function flushPendingTerminalWrites() {
+    const pending = pendingTerminalWritesRef.current;
+    for (const sessionId of Object.keys(pending)) {
+      const chunks = pending[sessionId];
+      delete pending[sessionId];
+      if (!chunks || chunks.length === 0) continue;
+      const output = chunks.length === 1 ? chunks[0] : chunks.join("");
+      const target =
+        sessionId === activeIdRef.current
+          ? terminalRef.current
+          : sessionId === secondaryIdRef.current
+            ? secondaryTerminalRef.current
+            : null;
+      if (!target) continue;
+      writeHighlightedOrRaw(target, output, highlightRulesRef.current);
+    }
+  }
+
   function openTerminalMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
     const selection = terminalRef.current?.getSelection() || selectedText;
@@ -6148,6 +6194,8 @@ function TerminalSurface({
     setSelectedText("");
     terminalRef.current?.dispose();
     container.replaceChildren();
+    // 终端重建时 transcript 会整体重放,丢弃旧实例遗留的待写数据避免重复渲染
+    delete pendingTerminalWritesRef.current[activeSession.id];
     const appearance = getTerminalAppearance(terminalAppearance);
     const terminalThemeOptions = getTerminalColors(terminalTheme, appearance, Boolean(terminalBackgroundImage));
     const terminal = new XTerm({
@@ -6170,6 +6218,7 @@ function TerminalSurface({
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(searchAddon);
     terminal.open(container);
+    attachFastRenderer(terminal);
     fitAddon.fit();
     terminal.focus();
     if (typeof (terminal as any).onScroll === "function") {
@@ -6250,7 +6299,7 @@ function TerminalSurface({
     terminal.writeln(`\x1b[36m${activeSession.title}\x1b[0m`);
     terminal.writeln("");
     if (initialTranscript) {
-      terminal.write(applyHighlightRules(initialTranscript, highlightRules));
+      writeHighlightedOrRaw(terminal, initialTranscript, highlightRules);
     }
     decoderRef.current = new TextDecoder("utf-8");
     terminal.onData((data) => {
@@ -6322,19 +6371,23 @@ function TerminalSurface({
     resize();
     scheduleTerminalLayoutRestore();
 
-    const interval = window.setInterval(async () => {
+    const pollOutput = async (force: boolean) => {
+      // 已确认走推送通道的会话跳过快速轮询,由看门狗低频兜底
+      if (!force && pushSeenRef.current[activeSession.id]) return;
       const result = await nativeBridge.getOutput(activeSession.id);
-      if (result.output) {
-        const output = decodeTerminalOutput(result.output, decoderRef);
-        maybeLeaveRawCommandMode(output);
-        terminal.write(applyHighlightRules(output, highlightRules));
-        onOutput(activeSession.id, output);
-      }
-    }, 160);
+      if (!result.output) return;
+      const output = decodeTerminalOutput(result.output, decoderRef);
+      maybeLeaveRawCommandMode(output);
+      writeHighlightedOrRaw(terminal, output, highlightRulesRef.current);
+      onOutput(activeSession.id, output);
+    };
+    const interval = window.setInterval(() => void pollOutput(false), 160);
+    const watchdog = window.setInterval(() => void pollOutput(true), 5000);
 
     return () => {
       clearScheduledTerminalLayoutRestore();
       window.clearInterval(interval);
+      window.clearInterval(watchdog);
       observer.disconnect();
       selectionDisposable.dispose();
       searchResultDisposable.dispose();
@@ -6352,6 +6405,7 @@ function TerminalSurface({
 
     secondaryTerminalRef.current?.dispose();
     container.replaceChildren();
+    delete pendingTerminalWritesRef.current[secondarySession.id];
     const appearance = getTerminalAppearance(terminalAppearance);
     const terminalThemeOptions = getTerminalColors(terminalTheme, appearance, Boolean(terminalBackgroundImage));
     const term = new XTerm({
@@ -6372,6 +6426,7 @@ function TerminalSurface({
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(container);
+    attachFastRenderer(term);
     fitAddon.fit();
     if (typeof (term as any).onScroll === "function") {
       (term as any).onScroll(() => {
@@ -6461,17 +6516,20 @@ function TerminalSurface({
     observer.observe(container);
     resize();
 
-    const interval = window.setInterval(async () => {
+    const pollOutput = async (force: boolean) => {
+      if (!force && pushSeenRef.current[secondarySession.id]) return;
       const result = await nativeBridge.getOutput(secondarySession.id);
-      if (result.output) {
-        const output = decodeTerminalOutput(result.output, secondaryDecoderRef);
-        term.write(applyHighlightRules(output, highlightRules));
-        onOutput(secondarySession.id, output);
-      }
-    }, 160);
+      if (!result.output) return;
+      const output = decodeTerminalOutput(result.output, secondaryDecoderRef);
+      writeHighlightedOrRaw(term, output, highlightRulesRef.current);
+      onOutput(secondarySession.id, output);
+    };
+    const interval = window.setInterval(() => void pollOutput(false), 160);
+    const watchdog = window.setInterval(() => void pollOutput(true), 5000);
 
     return () => {
       window.clearInterval(interval);
+      window.clearInterval(watchdog);
       observer.disconnect();
       term.dispose();
       secondaryTerminalRef.current = null;
@@ -6487,18 +6545,18 @@ function TerminalSurface({
       const output = decodePushedTerminalOutput(sessionId, data);
       if (!output) return;
 
+      // 收到过推送的会话走推送通道,轮询自动降级为看门狗
+      pushSeenRef.current[sessionId] = true;
       onOutputRef.current(sessionId, output);
       if (sessionId === activeIdRef.current) {
         maybeLeaveRawCommandMode(output);
-        terminalRef.current?.write(applyHighlightRules(output, highlightRules));
-      } else if (secondarySession && sessionId === secondarySession.id) {
-        secondaryTerminalRef.current?.write(applyHighlightRules(output, highlightRules));
       }
+      enqueueTerminalWrite(sessionId, output);
     };
     return () => {
       window.handlePushOutput = undefined;
     };
-  }, [highlightRules, secondarySession?.id]);
+  }, []);
 
   function moveSearchMatch(direction: 1 | -1) {
     runTerminalSearch(direction);
@@ -7610,7 +7668,37 @@ function isVisibleTerminalReplyResidue(data: string) {
   return data.length > 0;
 }
 
+// 单帧待写数据超过该值时跳过正则高亮,避免 cat 大文件时阻塞渲染
+const TERMINAL_HIGHLIGHT_SKIP_BYTES = 65536;
+
+function writeHighlightedOrRaw(target: XTerm, output: string, rules: HighlightRule[]) {
+  target.write(output.length > TERMINAL_HIGHLIGHT_SKIP_BYTES ? output : applyHighlightRules(output, rules));
+}
+
+function attachFastRenderer(terminal: XTerm) {
+  // WebGL 渲染器在大输出刷屏时远快于默认 DOM 渲染;初始化失败或上下文丢失时自动回退 DOM
+  try {
+    const addon = new WebglAddon();
+    addon.onContextLoss(() => addon.dispose());
+    terminal.loadAddon(addon);
+    return addon;
+  } catch {
+    return null;
+  }
+}
+
+const BASE64_CHUNK_SIZE = 0x8000;
+const uint8ArrayBase64 = Uint8Array as unknown as {
+  fromBase64?: (input: string) => Uint8Array;
+};
+
 function base64ToBytes(base64: string) {
+  const nativeDecode = uint8ArrayBase64.fromBase64;
+  if (typeof nativeDecode === "function") {
+    try {
+      return nativeDecode.call(Uint8Array, base64);
+    } catch {}
+  }
   const raw = atob(base64);
   const bytes = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i += 1) {
@@ -7620,9 +7708,15 @@ function base64ToBytes(base64: string) {
 }
 
 function bytesToBase64(bytes: Uint8Array) {
+  const nativeEncode = (bytes as unknown as { toBase64?: () => string }).toBase64;
+  if (typeof nativeEncode === "function") {
+    try {
+      return nativeEncode.call(bytes);
+    } catch {}
+  }
   let binary = "";
-  for (let i = 0; i < bytes.byteLength; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.byteLength; i += BASE64_CHUNK_SIZE) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + BASE64_CHUNK_SIZE) as unknown as number[]);
   }
   return btoa(binary);
 }

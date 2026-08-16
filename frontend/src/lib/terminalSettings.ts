@@ -395,14 +395,26 @@ const terminalControlSequencePattern = "\\x1b\\[[0-9;?]*[ -/]*[@-~]|\\x1b\\][^\\
 const terminalControlSequenceSplitter = new RegExp(`(${terminalControlSequencePattern})`, "g");
 const terminalControlSequenceExact = new RegExp(`^(?:${terminalControlSequencePattern})$`);
 
-export function applyHighlightRules(text: string, rules: HighlightRule[]) {
-  if (!text || rules.length === 0) return text;
+// 规则数组引用不变时复用编译结果,避免每条终端输出都重新 filter/sort/编译正则
+let compiledHighlightRulesCache: { rules: HighlightRule[]; compiled: CompiledHighlightRule[] } | null = null;
 
+function getCompiledHighlightRules(rules: HighlightRule[]) {
+  if (compiledHighlightRulesCache?.rules === rules) {
+    return compiledHighlightRulesCache.compiled;
+  }
   const compiled = rules
     .filter((rule) => rule.enabled && (rule.scope === "terminal" || rule.scope === "all"))
     .sort((left, right) => left.priority - right.priority)
     .map((rule) => ({ rule, regex: createRegex(rule) }))
-    .filter((entry): entry is { rule: HighlightRule; regex: RegExp } => Boolean(entry.regex));
+    .filter((entry): entry is CompiledHighlightRule => Boolean(entry.regex));
+  compiledHighlightRulesCache = { rules, compiled };
+  return compiled;
+}
+
+export function applyHighlightRules(text: string, rules: HighlightRule[]) {
+  if (!text || rules.length === 0) return text;
+
+  const compiled = getCompiledHighlightRules(rules);
 
   if (compiled.length === 0) return text;
 
