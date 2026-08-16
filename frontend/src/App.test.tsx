@@ -284,6 +284,31 @@ describe("AI tools panel", () => {
     expect(screen.getByPlaceholderText("输入任务，选择 Codex 或 Hermes 执行...")).toBeInTheDocument();
   });
 
+  test("deck layout mode replaces top tabs with the vertical session stack", async () => {
+    render(<App />);
+
+    // 模拟真实操作:设置里切到甲板布局
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(await screen.findByRole("button", { name: /甲板 · 左侧会话栈/ }));
+    expect(await screen.findByRole("button", { name: /经典 · 顶部标签页/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(await screen.findByRole("button", { name: /打开 Local Shell/ }));
+
+    // 甲板布局:左侧出现会话栈,顶部标签条消失
+    expect(await screen.findByText("会话 · 1")).toBeInTheDocument();
+    expect(screen.getByTitle("新建连接 (返回主机列表)")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Local Shell" })).not.toBeInTheDocument();
+
+    // 切回经典布局:会话栈消失,顶部标签回归
+    fireEvent.click(screen.getByTitle("本地终端"));
+    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(await screen.findByRole("button", { name: /经典 · 顶部标签页/ }));
+    fireEvent.click(screen.getByTitle("本地终端"));
+    expect(await screen.findByRole("button", { name: "Local Shell" })).toBeInTheDocument();
+  });
+
   test("shows terminal selection as a removable AI context chip", async () => {
     render(<App />);
 

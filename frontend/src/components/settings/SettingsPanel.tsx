@@ -224,6 +224,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = (props) => {
                   </button>
                 ))}
               </div>
+              <p className="text-[11px] leading-relaxed text-[var(--app-muted)]">
+                布局作用于终端工作区:关闭设置并打开一个终端会话即可看到变化(甲板模式下左侧会出现会话栈,顶部标签页隐藏)。
+              </p>
 
               <h3 className="text-sm font-bold text-[var(--app-text)] flex items-center gap-2 pt-2 border-t border-[var(--app-line)]">
                 <Terminal className="h-4 w-4 text-emerald-500" /> 终端配色方案
