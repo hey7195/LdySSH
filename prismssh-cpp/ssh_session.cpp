@@ -1224,13 +1224,35 @@ void SSHSession::ReadLoop() {
             int readBytes = libssh2_channel_read(sshChannel, buffer, sizeof(buffer) - 1);
             if (readBytes > 0) {
                 std::string accum(buffer, readBytes);
-                
+
                 while (accum.size() < 65536) {
                     int readNow = libssh2_channel_read(sshChannel, buffer, sizeof(buffer) - 1);
                     if (readNow > 0) {
                         accum.append(buffer, readNow);
                     } else {
                         break;
+                    }
+                }
+
+                // 大流量聚合窗口:首批已读满 8KB 且尚未到 64KB 时,最多再等 4ms 凑大批量,
+                // 降低 base64/JSON/PostMessage 的消息条数;交互小包(命令回显)不进此路径,零延迟
+                for (int burst = 0; burst < 2 && accum.size() >= 8192 && accum.size() < 65536 && running && sshChannel; ++burst) {
+                    fd_set burstFd;
+                    FD_ZERO(&burstFd);
+                    FD_SET(sock, &burstFd);
+                    timeval burstTv;
+                    burstTv.tv_sec = 0;
+                    burstTv.tv_usec = 2000;
+                    if (select(0, &burstFd, NULL, NULL, &burstTv) <= 0) {
+                        break;
+                    }
+                    while (accum.size() < 65536) {
+                        int readNow = libssh2_channel_read(sshChannel, buffer, sizeof(buffer) - 1);
+                        if (readNow > 0) {
+                            accum.append(buffer, readNow);
+                        } else {
+                            break;
+                        }
                     }
                 }
 
