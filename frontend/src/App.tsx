@@ -1055,6 +1055,10 @@ export function App() {
   const [terminalSidePanel, setTerminalSidePanel] = useState<TerminalSidePanel>("commands");
   const [terminalHistories, setTerminalHistories] = useState<Record<string, string>>({});
   const [terminalCwds, setTerminalCwds] = useState<Record<string, string>>({});
+  // 权威数据在 ref 里同步追加,React 状态只做 250ms 节流镜像,避免流式输出时每条消息重渲染 App
+  const terminalHistoriesRef = useRef<Record<string, string>>({});
+  const terminalHistoryFlushTimerRef = useRef<number | null>(null);
+  const terminalCwdDirtyRef = useRef<Set<string>>(new Set());
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
   const [terminalCommandNotice, setTerminalCommandNotice] = useState<TerminalCommandNotice | null>(null);
   const [commandSuggestionView, setCommandSuggestionView] = useState<CommandSuggestionView | null>(null);
@@ -1601,8 +1605,7 @@ export function App() {
     if (!activeSession?.id) return false;
     try {
       const cmd = `kill -${signal} ${pid}\n`;
-      const b64Data = bytesToBase64(new TextEncoder().encode(cmd));
-      await nativeBridge.sendInputBase64(activeSession.id, b64Data);
+      sendTerminalInput(activeSession.id, cmd);
       return true;
     } catch {
       return true;
@@ -1699,7 +1702,7 @@ export function App() {
   };
 
   const handleExportSessionLog = (fmt: "txt" | "html") => {
-    const content = (activeSession ? terminalHistories[activeSession.id] : "") || "# LdySSH 会话日志记录\n";
+    const content = (activeSession ? terminalHistoriesRef.current[activeSession.id] : "") || "# LdySSH 会话日志记录\n";
     const filename = `ldyssh_session_${Date.now()}.${fmt === "html" ? "html" : "log"}`;
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1902,7 +1905,7 @@ export function App() {
       }
       const targetArg = serial && serial.trim() ? ` -s "${serial.trim()}"` : "";
       const cmd = `${adbExe}${targetArg} shell\n`;
-      void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(cmd)));
+      sendTerminalInput(sessionId, cmd);
     }, 400);
   }
 
@@ -1911,20 +1914,35 @@ export function App() {
     setActiveTool("local");
   }
 
+  function scheduleTerminalHistoryFlush() {
+    if (terminalHistoryFlushTimerRef.current !== null) return;
+    terminalHistoryFlushTimerRef.current = window.setTimeout(() => {
+      terminalHistoryFlushTimerRef.current = null;
+      setTerminalHistories({ ...terminalHistoriesRef.current });
+      const dirtySessions = [...terminalCwdDirtyRef.current];
+      terminalCwdDirtyRef.current.clear();
+      if (dirtySessions.length === 0) return;
+      setTerminalCwds((prev) => {
+        let next = prev;
+        for (const sessionId of dirtySessions) {
+          const tail = (terminalHistoriesRef.current[sessionId] || "").slice(-1500);
+          const detected = extractCwdFromTerminalOutput(tail);
+          if (detected && next[sessionId] !== detected) {
+            next = next === prev ? { ...prev } : next;
+            next[sessionId] = detected;
+          }
+        }
+        return next;
+      });
+    }, 250);
+  }
+
   function appendTerminalHistory(sessionId: string, text: string) {
     if (!text) return;
-    setTerminalHistories((current) => {
-      const combined = trimTerminalHistory(`${current[sessionId] || ""}${text}`);
-      const tail = combined.slice(-1500);
-      const detectedCwd = extractCwdFromTerminalOutput(text) || extractCwdFromTerminalOutput(tail);
-      if (detectedCwd) {
-        setTerminalCwds((prev) => (prev[sessionId] === detectedCwd ? prev : { ...prev, [sessionId]: detectedCwd }));
-      }
-      return {
-        ...current,
-        [sessionId]: combined
-      };
-    });
+    const histories = terminalHistoriesRef.current;
+    histories[sessionId] = trimTerminalHistory(`${histories[sessionId] || ""}${text}`);
+    terminalCwdDirtyRef.current.add(sessionId);
+    scheduleTerminalHistoryFlush();
   }
 
   function toConnectionForm(connection: SavedConnection): ConnectionForm {
@@ -2162,13 +2180,13 @@ export function App() {
         return;
       }
       targetSessionId = newSessionId;
-      setTerminalHistories((current) => {
-        const history = current[sessionId];
-        if (!history) return current;
-        const next = { ...current, [targetSessionId]: history };
-        delete next[sessionId];
-        return next;
-      });
+      const history = terminalHistoriesRef.current[sessionId];
+      if (history) {
+        const histories = { ...terminalHistoriesRef.current, [targetSessionId]: history };
+        delete histories[sessionId];
+        terminalHistoriesRef.current = histories;
+        setTerminalHistories({ ...histories });
+      }
     }
 
     setSessions((current) =>
@@ -2239,11 +2257,12 @@ export function App() {
   function closeTab(sessionId: string) {
     void nativeBridge.disconnect(sessionId);
     setSessions((current) => current.filter((session) => session.id !== sessionId));
-    setTerminalHistories((current) => {
-      const next = { ...current };
-      delete next[sessionId];
-      return next;
-    });
+    if (terminalHistoriesRef.current[sessionId] !== undefined) {
+      const histories = { ...terminalHistoriesRef.current };
+      delete histories[sessionId];
+      terminalHistoriesRef.current = histories;
+      setTerminalHistories({ ...histories });
+    }
     if (activeSessionId === sessionId) {
       const next = sessions.find((session) => session.id !== sessionId);
       setActiveSessionId(next?.id || "");
@@ -2255,10 +2274,10 @@ export function App() {
       void nativeBridge.disconnect(session.id);
     });
     setSessions((current) => current.filter((session) => session.id === sessionId));
-    setTerminalHistories((current) => {
-      const keep = current[sessionId];
-      return keep ? { [sessionId]: keep } : {};
-    });
+    const keep = terminalHistoriesRef.current[sessionId];
+    const histories = keep ? { [sessionId]: keep } : {};
+    terminalHistoriesRef.current = histories;
+    setTerminalHistories({ ...histories });
     setActiveSessionId(sessionId);
   }
 
@@ -2267,6 +2286,7 @@ export function App() {
       void nativeBridge.disconnect(session.id);
     });
     setSessions([]);
+    terminalHistoriesRef.current = {};
     setTerminalHistories({});
     setActiveSessionId("");
   }
@@ -2467,15 +2487,14 @@ export function App() {
   function executeSendCommand(command: string) {
     if (!activeSession) return;
     const data = command.endsWith("\n") ? command : `${command}\n`;
-    const b64Data = bytesToBase64(new TextEncoder().encode(data));
     if (commandBroadcastingEnabled) {
       sessions.forEach((s) => {
         if (s.status === "connected") {
-          void nativeBridge.sendInputBase64(s.id, b64Data);
+          sendTerminalInput(s.id, data);
         }
       });
     } else {
-      void nativeBridge.sendInputBase64(activeSession.id, b64Data);
+      sendTerminalInput(activeSession.id, data);
     }
     const cdMatch = command.match(/^\s*cd\s+([^\s;&|]+)/);
     if (cdMatch && cdMatch[1] && activeSession?.id) {
@@ -2753,7 +2772,7 @@ export function App() {
               terminalCommandNotice={terminalCommandNotice}
               aiQuotes={aiQuotes}
               aiConfig={aiConfig}
-              terminalHistory={activeSession ? terminalHistories[activeSession.id] || "" : ""}
+              terminalHistory={activeSession ? terminalHistoriesRef.current[activeSession.id] || "" : ""}
               terminalCwd={activeSession ? terminalCwds[activeSession.id] : undefined}
               sidebarHidden={sidebarHidden}
               onToggleSidebar={() => setSidebarHidden((prev) => !prev)}
@@ -5672,15 +5691,14 @@ function TerminalSurface({
 
   function sendInputToSessions(targetSessionId: string, text: string) {
     if (!text || !targetSessionId) return;
-    const b64Data = bytesToBase64(new TextEncoder().encode(text));
     if (useAppStore.getState().commandBroadcastingEnabled && sessions && sessions.length > 0) {
       sessions.forEach((s) => {
         if (s.connected || s.status === "connected") {
-          void nativeBridge.sendInputBase64(s.id, b64Data);
+          sendTerminalInput(s.id, text);
         }
       });
     } else {
-      void nativeBridge.sendInputBase64(targetSessionId, b64Data);
+      sendTerminalInput(targetSessionId, text);
     }
   }
 
@@ -5818,7 +5836,7 @@ function TerminalSurface({
           const sessionId = activeIdRef.current;
           onRequestDangerousCommandConfirmation?.(submittedCommand, info, () => {
             if (sessionId) {
-              void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(`${submittedCommand}\n`)));
+              sendTerminalInput(sessionId, `${submittedCommand}\n`);
             }
           });
         }
@@ -6080,16 +6098,15 @@ function TerminalSurface({
     const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     const rawLines = normalized.split("\n");
 
-    const sendData = async (data: string) => {
-      const b64Data = bytesToBase64(new TextEncoder().encode(data));
+    const sendData = (data: string) => {
       if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
         sessions.forEach((s) => {
           if (s.connected || s.status === "connected") {
-            void nativeBridge.sendInputBase64(s.id, b64Data);
+            sendTerminalInput(s.id, data);
           }
         });
       } else {
-        await nativeBridge.sendInputBase64(sessionId, b64Data);
+        sendTerminalInput(sessionId, data);
       }
     };
 
@@ -6316,28 +6333,27 @@ function TerminalSurface({
         if (info.isDangerous) {
           const eraseBytes = "\x15";
           const targetSessionId = activeSession.id;
-          void nativeBridge.sendInputBase64(targetSessionId, bytesToBase64(new TextEncoder().encode(eraseBytes)));
+          sendTerminalInput(targetSessionId, eraseBytes);
 
           commandInputRef.current = "";
           setCommandSuggestionList([]);
 
           onRequestDangerousCommandConfirmation?.(currentDraft, info, () => {
-            void nativeBridge.sendInputBase64(targetSessionId, bytesToBase64(new TextEncoder().encode(`${currentDraft}\n`)));
+            sendTerminalInput(targetSessionId, `${currentDraft}\n`);
           });
           return;
         }
       }
 
       updateCommandInputFromData(input);
-      const b64Data = bytesToBase64(new TextEncoder().encode(input));
       if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
         sessions.forEach((s) => {
           if (s.connected || s.status === "connected") {
-            void nativeBridge.sendInputBase64(s.id, b64Data);
+            sendTerminalInput(s.id, input);
           }
         });
       } else {
-        void nativeBridge.sendInputBase64(activeSession.id, b64Data);
+        sendTerminalInput(activeSession.id, input);
       }
     });
     const selectionDisposable = terminal.onSelectionChange(() => {
@@ -6498,8 +6514,7 @@ function TerminalSurface({
     term.onData((data) => {
       const input = stripTerminalGeneratedReplies(data);
       if (!input) return;
-      const b64Data = bytesToBase64(new TextEncoder().encode(input));
-      void nativeBridge.sendInputBase64(secondarySession.id, b64Data);
+      sendTerminalInput(secondarySession.id, input);
     });
 
     secondaryTerminalRef.current = term;
@@ -7668,7 +7683,38 @@ function isVisibleTerminalReplyResidue(data: string) {
   return data.length > 0;
 }
 
-// 单帧待写数据超过该值时跳过正则高亮,避免 cat 大文件时阻塞渲染
+// 终端输入统一微批队列:同一会话 4ms 内的按键/命令合并成一次原生调用。
+// 全部输入路径共用这一个 FIFO,顺序天然保持一致。
+const terminalInputQueue = new Map<string, string[]>();
+let terminalInputFlushTimer: number | null = null;
+
+function flushTerminalInput() {
+  if (terminalInputFlushTimer !== null) {
+    window.clearTimeout(terminalInputFlushTimer);
+    terminalInputFlushTimer = null;
+  }
+  if (terminalInputQueue.size === 0) return;
+  const pending = [...terminalInputQueue.entries()];
+  terminalInputQueue.clear();
+  const encoder = new TextEncoder();
+  for (const [sessionId, parts] of pending) {
+    void nativeBridge.sendInputBase64(sessionId, bytesToBase64(encoder.encode(parts.join(""))));
+  }
+}
+
+function sendTerminalInput(sessionId: string | undefined, text: string) {
+  if (!text || !sessionId) return;
+  let batch = terminalInputQueue.get(sessionId);
+  if (!batch) {
+    batch = [];
+    terminalInputQueue.set(sessionId, batch);
+  }
+  batch.push(text);
+  if (terminalInputFlushTimer === null) {
+    terminalInputFlushTimer = window.setTimeout(flushTerminalInput, 4);
+  }
+}
+
 const TERMINAL_HIGHLIGHT_SKIP_BYTES = 65536;
 
 function writeHighlightedOrRaw(target: XTerm, output: string, rules: HighlightRule[]) {
@@ -12338,7 +12384,7 @@ function SshCopyIdModal({
 
     try {
       if (activeSession && activeSession.connected) {
-        await nativeBridge.sendInput(activeSession.id, remoteCmd);
+        sendTerminalInput(activeSession.id, remoteCmd);
         onSuccess(`✅ 已成功向 [${target?.name || target?.hostname || "服务器"}] 部署公钥！现已支持免密登录。`);
         onClose();
       } else {
@@ -12483,7 +12529,7 @@ function FilePermissionModal({
     if (!file || !activeSessionId) return;
     const cmd = `chmod ${octalCode} "${file.path}" && chown ${ownerName}:${groupName} "${file.path}"\n`;
     try {
-      await nativeBridge.sendInput(activeSessionId, cmd);
+      sendTerminalInput(activeSessionId, cmd);
       onSuccess(`✅ 已将权限 ${octalCode} (${ownerName}:${groupName}) 应用至 ${file.name}`);
       onClose();
     } catch {

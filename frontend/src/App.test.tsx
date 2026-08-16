@@ -1109,7 +1109,7 @@ describe("command library", () => {
     });
 
     expect(await screen.findByText("1 / 2")).toBeInTheDocument();
-    expect(screen.getByText(/needle in old command output/)).toBeInTheDocument();
+    expect(await screen.findByText(/needle in old command output/)).toBeInTheDocument();
     expect(terminalMock.findPreviousCalls.at(-1)?.term).toBe("needle");
     expect(terminalMock.findPreviousCalls.at(-1)?.options).toMatchObject({
       caseSensitive: false,
@@ -1565,9 +1565,10 @@ describe("command library", () => {
     terminalMock.dataHandler?.("\x1b");
     terminalMock.dataHandler?.(":wq\r");
 
-    await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalledTimes(3));
+    // 输入微批:同帧按键合并成一次原生调用,字节内容与顺序保持不变
+    await waitFor(() => expect(window.pywebview?.api?.send_input_base64).toHaveBeenCalledTimes(1));
     const payloads = (window.pywebview?.api?.send_input_base64 as ReturnType<typeof vi.fn>).mock.calls.map((call) => atob(call[1] as string));
-    expect(payloads).toEqual(["i", "\x1b", ":wq\r"]);
+    expect(payloads).toEqual(["i\x1b:wq\r"]);
   });
 
   test("does not forward terminal-generated OSC and DCS query replies as shell input", async () => {
@@ -1631,7 +1632,7 @@ describe("command library", () => {
       now.mockReturnValue(2000);
       terminalMock.dataHandler?.("he");
 
-      expect(sendInput).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1));
       expect(atob(sendInput.mock.calls[0][1] as string)).toBe("he");
     } finally {
       now.mockRestore();
@@ -1704,7 +1705,7 @@ describe("command library", () => {
     });
 
     expect(enterHandled).toBe(false);
-    expect(sendInput).toHaveBeenCalledWith("local-1", bytesToBase64(new TextEncoder().encode("f -h")));
+    await waitFor(() => expect(sendInput).toHaveBeenCalledWith("local-1", bytesToBase64(new TextEncoder().encode("f -h"))));
 
     let handled = true;
     await act(async () => {
