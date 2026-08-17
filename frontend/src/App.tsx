@@ -2862,7 +2862,12 @@ export function App() {
             />
           )}
           {activeTool === "git" && (
-            <GitVisualizerPanel onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)} />
+            <GitVisualizerPanel
+              onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)}
+              activeSessionTitle={activeSession?.title}
+              currentCwd={activeSession ? terminalCwds[activeSession.id] : undefined}
+              onNavigateTerminal={() => setActiveTool("ssh")}
+            />
           )}
           {activeTool === "browser" && (
             <BrowserPanel
