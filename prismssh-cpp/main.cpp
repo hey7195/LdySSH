@@ -3251,6 +3251,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     DWORD dwCornerPreference = DWMWCP_ROUND;
     DwmSetWindowAttribute(hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, &dwCornerPreference, sizeof(dwCornerPreference));
 
+    SetTimer(hWnd, 1002, 16, NULL);
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
 
@@ -3285,6 +3286,14 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
                         webviewController = controller;
                         webviewController->get_CoreWebView2(&webviewWindow);
+
+                        webviewWindow->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                            [](ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+                                if (hWnd) {
+                                    KillTimer(hWnd, 1002);
+                                }
+                                return S_OK;
+                            }).Get(), nullptr);
 
                         Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
                         if (SUCCEEDED(webviewWindow->get_Settings(&settings)) && settings) {
@@ -3530,6 +3539,90 @@ static void CloseApplication(HWND targetHWnd) {
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_TIMER:
+        if (wParam == 1002) {
+            RECT rc;
+            GetClientRect(hWnd, &rc);
+            int cx = (rc.right - rc.left) / 2;
+            int cy = (rc.bottom - rc.top) / 2;
+            RECT barArea = { cx - 120, cy + 30, cx + 120, cy + 60 };
+            InvalidateRect(hWnd, &barArea, FALSE);
+            return 0;
+        }
+        break;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        if (hdc) {
+            RECT rc;
+            GetClientRect(hWnd, &rc);
+            int width = rc.right - rc.left;
+            int height = rc.bottom - rc.top;
+
+            HDC memDC = CreateCompatibleDC(hdc);
+            HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
+            HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+
+            HBRUSH bgBrush = CreateSolidBrush(RGB(11, 14, 20));
+            FillRect(memDC, &rc, bgBrush);
+            DeleteObject(bgBrush);
+
+            int cx = width / 2;
+            int cy = height / 2;
+
+            HICON hIcon = (HICON)GetClassLongPtr(hWnd, GCLP_HICON);
+            if (hIcon) {
+                DrawIconEx(memDC, cx - 28, cy - 80, hIcon, 56, 56, 0, NULL, DI_NORMAL);
+            }
+
+            SetBkMode(memDC, TRANSPARENT);
+            SetTextColor(memDC, RGB(248, 250, 252));
+            HFONT hTitleFont = CreateFontW(-20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+            HFONT oldFont = (HFONT)SelectObject(memDC, hTitleFont);
+            RECT titleRc = { cx - 200, cy - 14, cx + 200, cy + 14 };
+            DrawTextW(memDC, L"LdySSH", -1, &titleRc, DT_CENTER | DT_SINGLELINE);
+
+            SetTextColor(memDC, RGB(100, 116, 139));
+            HFONT hSubFont = CreateFontW(-12, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+            SelectObject(memDC, hSubFont);
+            RECT subRc = { cx - 200, cy + 16, cx + 200, cy + 34 };
+            DrawTextW(memDC, L"正在启动极客终端工作台...", -1, &subRc, DT_CENTER | DT_SINGLELINE);
+
+            RECT barBg = { cx - 75, cy + 42, cx + 75, cy + 45 };
+            HBRUSH barBgBrush = CreateSolidBrush(RGB(30, 41, 59));
+            FillRect(memDC, &barBg, barBgBrush);
+            DeleteObject(barBgBrush);
+
+            static int s_animTick = 0;
+            s_animTick = (s_animTick + 4) % 190;
+            int barWidth = 60;
+            int chunkLeft = cx - 75 + s_animTick - barWidth;
+            int chunkRight = chunkLeft + barWidth;
+            if (chunkLeft < cx - 75) chunkLeft = cx - 75;
+            if (chunkRight > cx + 75) chunkRight = cx + 75;
+            if (chunkRight > chunkLeft) {
+                RECT chunkRc = { chunkLeft, cy + 42, chunkRight, cy + 45 };
+                HBRUSH chunkBrush = CreateSolidBrush(RGB(16, 185, 129));
+                FillRect(memDC, &chunkRc, chunkBrush);
+                DeleteObject(chunkBrush);
+            }
+
+            BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+
+            SelectObject(memDC, oldFont);
+            DeleteObject(hTitleFont);
+            DeleteObject(hSubFont);
+            SelectObject(memDC, oldBitmap);
+            DeleteObject(memBitmap);
+            DeleteDC(memDC);
+
+            EndPaint(hWnd, &ps);
+            return 0;
+        }
+        break;
+    }
     case WM_GETMINMAXINFO: {
         auto mmi = reinterpret_cast<MINMAXINFO*>(lParam);
         HMONITOR monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
