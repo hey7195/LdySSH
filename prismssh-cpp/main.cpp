@@ -39,6 +39,8 @@
 #include "chatgpt_subwindow.h"
 #include "ui_assets.hpp"
 
+#include <gdiplus.h>
+#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "winhttp.lib")
@@ -3225,6 +3227,10 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         LaunchPythonBackend(L"..\\..\\..\\prismssh.py");
     }
 
+    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+    ULONG_PTR gdiplusToken = 0;
+    Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+
     WNDCLASSEX wcex;
     wcex.cbSize = sizeof(WNDCLASSEX);
     wcex.style = CS_HREDRAW | CS_VREDRAW;
@@ -3234,7 +3240,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     wcex.hInstance = hInstance;
     wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wcex.hbrBackground = CreateSolidBrush(RGB(11, 14, 20));
+    wcex.hbrBackground = CreateSolidBrush(RGB(9, 13, 22));
     wcex.lpszMenuName = NULL;
     wcex.lpszClassName = _T("LdySSHCppWindowClass");
     wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
@@ -3595,55 +3601,166 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
             HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
 
-            HBRUSH bgBrush = CreateSolidBrush(RGB(11, 14, 20));
-            FillRect(memDC, &rc, bgBrush);
-            DeleteObject(bgBrush);
+            {
+                Gdiplus::Graphics g(memDC);
+                g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+                g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
 
-            int cx = width / 2;
-            int cy = height / 2;
+                // Deep premium dark background #090d16
+                Gdiplus::SolidBrush bgBrush(Gdiplus::Color(255, 9, 13, 22));
+                g.FillRectangle(&bgBrush, 0, 0, width, height);
 
-            HICON hIcon = (HICON)GetClassLongPtr(hWnd, GCLP_HICON);
-            if (hIcon) {
-                DrawIconEx(memDC, cx - 28, cy - 80, hIcon, 56, 56, 0, NULL, DI_NORMAL);
-            }
+                int cx = width / 2;
+                int cy = height / 2;
 
-            SetBkMode(memDC, TRANSPARENT);
-            SetTextColor(memDC, RGB(248, 250, 252));
-            HFONT hTitleFont = CreateFontW(-20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-            HFONT oldFont = (HFONT)SelectObject(memDC, hTitleFont);
-            RECT titleRc = { cx - 200, cy - 14, cx + 200, cy + 14 };
-            DrawTextW(memDC, L"LdySSH", -1, &titleRc, DT_CENTER | DT_SINGLELINE);
+                // Ambient center glow
+                Gdiplus::GraphicsPath glowPath;
+                glowPath.AddEllipse(cx - 160, cy - 160, 320, 320);
+                Gdiplus::PathGradientBrush glowBrush(&glowPath);
+                glowBrush.SetCenterColor(Gdiplus::Color(35, 16, 185, 129));
+                Gdiplus::Color surroundColor = Gdiplus::Color(0, 9, 13, 22);
+                int count = 1;
+                glowBrush.SetSurroundColors(&surroundColor, &count);
+                g.FillPath(&glowBrush, &glowPath);
 
-            SetTextColor(memDC, RGB(100, 116, 139));
-            HFONT hSubFont = CreateFontW(-12, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-            SelectObject(memDC, hSubFont);
-            RECT subRc = { cx - 200, cy + 16, cx + 200, cy + 34 };
-            DrawTextW(memDC, L"正在启动极客终端工作台...", -1, &subRc, DT_CENTER | DT_SINGLELINE);
+                // Logo container (68x68 rounded rectangle with emerald-to-cyan gradient)
+                int logoSize = 68;
+                int logoX = cx - logoSize / 2;
+                int logoY = cy - 100;
 
-            RECT barBg = { cx - 75, cy + 42, cx + 75, cy + 45 };
-            HBRUSH barBgBrush = CreateSolidBrush(RGB(30, 41, 59));
-            FillRect(memDC, &barBg, barBgBrush);
-            DeleteObject(barBgBrush);
+                Gdiplus::GraphicsPath logoPath;
+                int rad = 20;
+                logoPath.AddArc(logoX, logoY, rad, rad, 180, 90);
+                logoPath.AddArc(logoX + logoSize - rad, logoY, rad, rad, 270, 90);
+                logoPath.AddArc(logoX + logoSize - rad, logoY + logoSize - rad, rad, rad, 0, 90);
+                logoPath.AddArc(logoX, logoY + logoSize - rad, rad, rad, 90, 90);
+                logoPath.CloseFigure();
 
-            static int s_animTick = 0;
-            s_animTick = (s_animTick + 4) % 190;
-            int barWidth = 60;
-            int chunkLeft = cx - 75 + s_animTick - barWidth;
-            int chunkRight = chunkLeft + barWidth;
-            if (chunkLeft < cx - 75) chunkLeft = cx - 75;
-            if (chunkRight > cx + 75) chunkRight = cx + 75;
-            if (chunkRight > chunkLeft) {
-                RECT chunkRc = { chunkLeft, cy + 42, chunkRight, cy + 45 };
-                HBRUSH chunkBrush = CreateSolidBrush(RGB(16, 185, 129));
-                FillRect(memDC, &chunkRc, chunkBrush);
-                DeleteObject(chunkBrush);
+                Gdiplus::LinearGradientBrush logoGrad(
+                    Gdiplus::Point(logoX, logoY),
+                    Gdiplus::Point(logoX + logoSize, logoY + logoSize),
+                    Gdiplus::Color(255, 16, 185, 129),
+                    Gdiplus::Color(255, 6, 182, 212)
+                );
+                g.FillPath(&logoGrad, &logoPath);
+
+                Gdiplus::Pen logoBorder(Gdiplus::Color(100, 255, 255, 255), 1.0f);
+                g.DrawPath(&logoBorder, &logoPath);
+
+                // Draw crisp terminal icon ">_" inside badge
+                Gdiplus::Pen iconPen(Gdiplus::Color(255, 255, 255, 255), 2.5f);
+                iconPen.SetStartCap(Gdiplus::LineCapRound);
+                iconPen.SetEndCap(Gdiplus::LineCapRound);
+                iconPen.SetLineJoin(Gdiplus::LineJoinRound);
+
+                // ">" chevron
+                Gdiplus::Point chevronPts[3] = {
+                    Gdiplus::Point(logoX + 22, logoY + 24),
+                    Gdiplus::Point(logoX + 33, logoY + 34),
+                    Gdiplus::Point(logoX + 22, logoY + 44)
+                };
+                g.DrawLines(&iconPen, chevronPts, 3);
+                // "_" underline
+                g.DrawLine(&iconPen, logoX + 37, logoY + 44, logoX + 48, logoY + 44);
+
+                // App Title "LdySSH"
+                Gdiplus::FontFamily fontFamily(L"Segoe UI");
+                Gdiplus::Font titleFont(&fontFamily, 18, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                Gdiplus::SolidBrush titleBrush(Gdiplus::Color(255, 255, 255, 255));
+                Gdiplus::StringFormat format;
+                format.SetAlignment(Gdiplus::StringAlignmentCenter);
+                format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+
+                Gdiplus::RectF titleRect((Gdiplus::REAL)(cx - 150), (Gdiplus::REAL)(cy - 16), 300.0f, 30.0f);
+                g.DrawString(L"LdySSH", -1, &titleFont, titleRect, &format, &titleBrush);
+
+                // Subtitle: "正在启动终端工作台..."
+                Gdiplus::Font subFont(&fontFamily, 12, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+                Gdiplus::SolidBrush subBrush(Gdiplus::Color(255, 148, 163, 184));
+                Gdiplus::RectF subRect((Gdiplus::REAL)(cx - 150), (Gdiplus::REAL)(cy + 18), 300.0f, 22.0f);
+                g.DrawString(L"正在启动终端工作台...", -1, &subFont, subRect, &format, &subBrush);
+
+                // Capsule progress track (220x6 rounded rectangle)
+                int trackWidth = 220;
+                int trackHeight = 6;
+                int trackX = cx - trackWidth / 2;
+                int trackY = cy + 50;
+
+                Gdiplus::GraphicsPath trackPath;
+                trackPath.AddArc(trackX, trackY, trackHeight, trackHeight, 180, 90);
+                trackPath.AddArc(trackX + trackWidth - trackHeight, trackY, trackHeight, trackHeight, 270, 90);
+                trackPath.AddArc(trackX + trackWidth - trackHeight, trackY + trackHeight - trackHeight, trackHeight, trackHeight, 0, 90);
+                trackPath.AddArc(trackX, trackY + trackHeight - trackHeight, trackHeight, trackHeight, 90, 90);
+                trackPath.CloseFigure();
+
+                Gdiplus::SolidBrush trackBg(Gdiplus::Color(40, 255, 255, 255));
+                g.FillPath(&trackBg, &trackPath);
+                Gdiplus::Pen trackBorder(Gdiplus::Color(30, 255, 255, 255), 1.0f);
+                g.DrawPath(&trackBorder, &trackPath);
+
+                // Glowing animated cyber beam moving across the track
+                static int s_animTick = 0;
+                s_animTick = (s_animTick + 4) % (trackWidth + 80);
+                int beamWidth = 70;
+                int beamLeft = trackX - 40 + s_animTick - beamWidth;
+                int beamRight = beamLeft + beamWidth;
+
+                if (beamRight > trackX && beamLeft < trackX + trackWidth) {
+                    g.SetClip(&trackPath);
+                    Gdiplus::LinearGradientBrush beamGrad(
+                        Gdiplus::Point(beamLeft, trackY),
+                        Gdiplus::Point(beamRight, trackY),
+                        Gdiplus::Color(0, 16, 185, 129),
+                        Gdiplus::Color(255, 56, 189, 248)
+                    );
+                    Gdiplus::Color colors[4] = {
+                        Gdiplus::Color(0, 16, 185, 129),
+                        Gdiplus::Color(255, 16, 185, 129),
+                        Gdiplus::Color(255, 56, 189, 248),
+                        Gdiplus::Color(0, 56, 189, 248)
+                    };
+                    Gdiplus::REAL positions[4] = { 0.0f, 0.3f, 0.7f, 1.0f };
+                    beamGrad.SetInterpolationColors(colors, positions, 4);
+
+                    g.FillRectangle(&beamGrad, beamLeft, trackY, beamWidth, trackHeight);
+                    g.ResetClip();
+                }
+
+                // High-tech micro pill badge [ • 核心服务就绪 ]
+                int badgeWidth = 110;
+                int badgeHeight = 22;
+                int badgeX = cx - badgeWidth / 2;
+                int badgeY = cy + 72;
+
+                Gdiplus::GraphicsPath badgePath;
+                int bRad = 10;
+                badgePath.AddArc(badgeX, badgeY, bRad, bRad, 180, 90);
+                badgePath.AddArc(badgeX + badgeWidth - bRad, badgeY, bRad, bRad, 270, 90);
+                badgePath.AddArc(badgeX + badgeWidth - bRad, badgeY + badgeHeight - bRad, bRad, bRad, 0, 90);
+                badgePath.AddArc(badgeX, badgeY + badgeHeight - bRad, bRad, bRad, 90, 90);
+                badgePath.CloseFigure();
+
+                Gdiplus::SolidBrush badgeBg(Gdiplus::Color(20, 255, 255, 255));
+                g.FillPath(&badgeBg, &badgePath);
+                Gdiplus::Pen badgeBorder(Gdiplus::Color(25, 255, 255, 255), 1.0f);
+                g.DrawPath(&badgeBorder, &badgePath);
+
+                // Green dot
+                Gdiplus::SolidBrush dotBrush(Gdiplus::Color(255, 16, 185, 129));
+                g.FillEllipse(&dotBrush, badgeX + 12, badgeY + 8, 6, 6);
+
+                // Badge text
+                Gdiplus::Font badgeFont(&fontFamily, 10, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                Gdiplus::SolidBrush badgeTextBrush(Gdiplus::Color(255, 148, 163, 184));
+                Gdiplus::RectF badgeTextRect((Gdiplus::REAL)(badgeX + 22), (Gdiplus::REAL)(badgeY + 1), (Gdiplus::REAL)(badgeWidth - 22), (Gdiplus::REAL)(badgeHeight));
+                Gdiplus::StringFormat bFormat;
+                bFormat.SetAlignment(Gdiplus::StringAlignmentNear);
+                bFormat.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                g.DrawString(L"核心服务就绪", -1, &badgeFont, badgeTextRect, &bFormat, &badgeTextBrush);
             }
 
             BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
 
-            SelectObject(memDC, oldFont);
-            DeleteObject(hTitleFont);
-            DeleteObject(hSubFont);
             SelectObject(memDC, oldBitmap);
             DeleteObject(memBitmap);
             DeleteDC(memDC);

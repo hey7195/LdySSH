@@ -7,19 +7,19 @@
     <title>LdySSH</title>
     <style>
       html, body, #root {
-        background-color: #0b0e14;
+        background-color: #090d16;
         color: #f8fafc;
         margin: 0;
         padding: 0;
         width: 100%;
         height: 100%;
         overflow: hidden;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
       }
       .app-startup-splash {
         position: fixed;
         inset: 0;
-        background: #0b0e14;
+        background: radial-gradient(circle at 50% 45%, #111a2e 0%, #090d16 75%);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -27,70 +27,164 @@
         user-select: none;
         z-index: 999999;
       }
+      .app-startup-glow {
+        position: absolute;
+        width: 320px;
+        height: 320px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(6, 182, 212, 0.05) 50%, transparent 70%);
+        filter: blur(40px);
+        pointer-events: none;
+        animation: splashGlowPulse 3s ease-in-out infinite alternate;
+      }
+      @keyframes splashGlowPulse {
+        0% { transform: scale(0.85); opacity: 0.6; }
+        100% { transform: scale(1.15); opacity: 1; }
+      }
+      .app-startup-card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        z-index: 2;
+      }
+      .app-startup-logo-container {
+        position: relative;
+        margin-bottom: 22px;
+      }
       .app-startup-logo {
-        width: 58px;
-        height: 58px;
-        border-radius: 16px;
+        width: 68px;
+        height: 68px;
+        border-radius: 20px;
         background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 0 35px rgba(16, 185, 129, 0.35);
-        margin-bottom: 18px;
+        box-shadow: 0 10px 30px -5px rgba(16, 185, 129, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        animation: splashLogoFloat 3s ease-in-out infinite alternate;
+      }
+      @keyframes splashLogoFloat {
+        0% { transform: translateY(0); }
+        100% { transform: translateY(-4px); }
       }
       .app-startup-title {
-        font-size: 18px;
+        font-size: 24px;
         font-weight: 800;
-        color: #f8fafc;
-        letter-spacing: 0.5px;
-        margin-bottom: 6px;
+        color: #ffffff;
+        letter-spacing: 0.05em;
+        margin-bottom: 8px;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
       }
       .app-startup-subtitle {
-        font-size: 12px;
-        font-weight: 600;
-        color: #64748b;
-        margin-bottom: 22px;
+        font-size: 13px;
+        font-weight: 500;
+        color: #94a3b8;
+        letter-spacing: 0.02em;
+        margin-bottom: 24px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
       }
-      .app-startup-progress-bar {
-        width: 130px;
-        height: 3px;
-        background: rgba(255, 255, 255, 0.08);
+      .app-startup-dots span {
+        display: inline-block;
+        animation: splashDotAnim 1.4s infinite ease-in-out both;
+      }
+      .app-startup-dots span:nth-child(1) { animation-delay: -0.32s; }
+      .app-startup-dots span:nth-child(2) { animation-delay: -0.16s; }
+      @keyframes splashDotAnim {
+        0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+        40% { opacity: 1; transform: scale(1.2); color: #10b981; }
+      }
+      .app-startup-progress-track {
+        width: 220px;
+        height: 6px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 99px;
         overflow: hidden;
         position: relative;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
       }
-      .app-startup-progress-inner {
+      .app-startup-progress-beam {
         position: absolute;
         top: 0;
         bottom: 0;
-        width: 45%;
-        background: linear-gradient(90deg, #10b981, #06b6d4);
+        width: 40%;
+        background: linear-gradient(90deg, transparent 0%, #10b981 30%, #38bdf8 70%, transparent 100%);
         border-radius: 99px;
-        animation: appSplashAnim 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.8));
+        animation: splashBeamAnim 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
       }
-      @keyframes appSplashAnim {
-        0% { left: -45%; }
-        50% { left: 40%; }
-        100% { left: 100%; }
+      @keyframes splashBeamAnim {
+        0% { left: -40%; width: 30%; }
+        50% { width: 55%; }
+        100% { left: 100%; width: 30%; }
+      }
+      .app-startup-badges {
+        display: flex;
+        gap: 12px;
+        margin-top: 20px;
+      }
+      .app-startup-badge {
+        font-size: 11px;
+        font-weight: 600;
+        color: #64748b;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 4px 10px;
+        border-radius: 99px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .app-startup-badge-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #10b981;
+        box-shadow: 0 0 8px #10b981;
       }
     </style>
   </head>
   <body>
     <div id="root">
       <div class="app-startup-splash">
-        <div class="app-startup-logo">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="4 17 10 11 4 5"></polyline>
-            <line x1="12" y1="19" x2="20" y2="19"></line>
-          </svg>
-        </div>
-        <div class="app-startup-title">LdySSH</div>
-        <div class="app-startup-subtitle">正在启动极客终端工作台...</div>
-        <div class="app-startup-progress-bar">
-          <div class="app-startup-progress-inner"></div>
+        <div class="app-startup-glow"></div>
+        <div class="app-startup-card">
+          <div class="app-startup-logo-container">
+            <div class="app-startup-logo">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+            </div>
+          </div>
+          <div class="app-startup-title">LdySSH</div>
+          <div class="app-startup-subtitle">
+            <span>正在启动终端工作台</span>
+            <span class="app-startup-dots"><span>.</span><span>.</span><span>.</span></span>
+          </div>
+          <div class="app-startup-progress-track">
+            <div class="app-startup-progress-beam"></div>
+          </div>
+          <div class="app-startup-badges">
+            <div class="app-startup-badge">
+              <span class="app-startup-badge-dot"></span>
+              <span>核心服务就绪</span>
+            </div>
+            <div class="app-startup-badge">
+              <span>全协议加速</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+        try { window.chrome?.webview?.postMessage(JSON.stringify({ id: 'dom_ready', action: 'dom_ready', args: [] })); } catch(e) {}
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
