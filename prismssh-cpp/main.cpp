@@ -3191,9 +3191,29 @@ void LaunchPythonBackend(const wchar_t* scriptPath) {
     }
 }
 
-int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+static bool g_windowShown = false;
+static int g_startupCmdShow = SW_SHOW;
+
+void EnsureMainWindowVisible() {
+    if (!g_windowShown && hWnd) {
+        g_windowShown = true;
+        ShowWindow(hWnd, g_startupCmdShow);
+        UpdateWindow(hWnd);
+        SetForegroundWindow(hWnd);
+    }
+}
+
+int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
+                     _In_opt_ HINSTANCE hPrevInstance,
+                     _In_ LPWSTR    lpCmdLine,
+                     _In_ int       nCmdShow)
+{
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+
     hInst = hInstance;
     libssh2_init(0);
+    g_startupCmdShow = nCmdShow;
 
     // Auto-detect and launch Python AI Backend services in background (daemon mode)
     if (GetFileAttributesW(L"prismssh.py") != INVALID_FILE_ATTRIBUTES) {
@@ -3213,7 +3233,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     wcex.hInstance = hInstance;
     wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wcex.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wcex.hbrBackground = CreateSolidBrush(RGB(11, 14, 20)); // Match #0b0e14 dark theme
     wcex.lpszMenuName = NULL;
     wcex.lpszClassName = _T("LdySSHCppWindowClass");
     wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
@@ -3250,22 +3270,38 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     DWORD dwCornerPreference = DWMWCP_ROUND;
     DwmSetWindowAttribute(hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, &dwCornerPreference, sizeof(dwCornerPreference));
 
-    ShowWindow(hWnd, nCmdShow);
-    UpdateWindow(hWnd);
+    // Fallback safety timer: guarantee window becomes visible within 1.2s even if offline or unexpected navigation delay
+    SetTimer(hWnd, 9999, 1200, [](HWND h, UINT, UINT_PTR id, DWORD) {
+        KillTimer(h, id);
+        EnsureMainWindowVisible();
+    });
 
     HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-                if (FAILED(result)) return result;
+                if (FAILED(result)) {
+                    EnsureMainWindowVisible();
+                    return result;
+                }
 
                 webviewEnv = env;
 
                 env->CreateCoreWebView2Controller(hWnd, Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                     [](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
-                        if (FAILED(result)) return result;
+                        if (FAILED(result)) {
+                            EnsureMainWindowVisible();
+                            return result;
+                        }
 
                         webviewController = controller;
                         webviewController->get_CoreWebView2(&webviewWindow);
+
+                        // Hook NavigationCompleted to instantly display window once first DOM frame renders
+                        webviewWindow->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                            [](ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+                                EnsureMainWindowVisible();
+                                return S_OK;
+                            }).Get(), nullptr);
 
                         Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
                         if (SUCCEEDED(webviewWindow->get_Settings(&settings)) && settings) {
