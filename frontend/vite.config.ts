@@ -16,7 +16,6 @@ export default defineConfig({
           if (!id.includes("node_modules")) return undefined;
           if (id.includes("@xterm")) return "xterm";
           if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return "react-vendor";
-          if (id.includes("react-markdown") || id.includes("remark") || id.includes("micromark") || id.includes("unified") || id.includes("mdast") || id.includes("hast") || id.includes("unist")) return "markdown";
           if (id.includes("@radix-ui")) return "radix";
           if (id.includes("lucide-react")) return "icons";
           return "vendor";

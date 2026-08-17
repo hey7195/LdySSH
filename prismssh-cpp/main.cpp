@@ -1787,9 +1787,6 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             if (session) {
                 output = session->GetOutput();
             }
-            if (!output.empty()) {
-                PrismLog("DEBUG", "get_output data length from " + sessId + ": " + std::to_string(output.length()) + " bytes");
-            }
             
             nlohmann::json retObj;
             retObj["output"] = Base64Encode(output); // Encode to base64 for binary safety
