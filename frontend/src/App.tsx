@@ -4665,7 +4665,7 @@ function TerminalWorkspace({
 
   return (
     <div className={cn("grid h-full grid-rows-[40px_minmax(0,1fr)_32px]", terminalBackgroundImage ? "bg-transparent" : "bg-[var(--app-bg)]")}>
-      <div className={cn("flex items-center justify-between border-b border-[var(--app-line)] pl-2.5 pr-2.5 h-10 select-none relative", terminalBackgroundImage ? "bg-[var(--sidebar-bg)]/80 backdrop-blur-md" : "bg-[var(--sidebar-bg)]")}>
+      <div className={cn("flex items-center justify-between border-b border-[var(--app-line)] pl-2.5 pr-2.5 h-10 select-none relative z-40", terminalBackgroundImage ? "bg-[var(--sidebar-bg)]/80 backdrop-blur-md" : "bg-[var(--sidebar-bg)]")}>
         <div
           className="flex h-full min-w-0 flex-1 items-end gap-1.5 overflow-x-auto pb-0.5 scrollbar-none"
           onWheel={(e) => {
@@ -4825,7 +4825,7 @@ function TerminalWorkspace({
         </div>
 
         {/* ☰ 标签页与工作区快捷控制下拉菜单 */}
-        <div className="relative shrink-0">
+        <div className="relative shrink-0 z-50">
           <button
             className={cn(
               "flex h-7.5 w-7.5 items-center justify-center rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[var(--app-text)] transition-all shadow-2xs cursor-pointer",
@@ -4838,11 +4838,13 @@ function TerminalWorkspace({
           </button>
 
           {topMenuOpen && (
-            <div
-              role="menu"
-              className="absolute right-0 top-9.5 z-50 w-52 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)]/95 backdrop-blur-xl p-1.5 text-xs font-bold text-[var(--app-text)] shadow-2xl animate-in fade-in zoom-in-95 duration-150 select-none"
-              onMouseLeave={() => setTopMenuOpen(false)}
-            >
+            <>
+              <div className="fixed inset-0 z-[90]" onClick={() => setTopMenuOpen(false)} />
+              <div
+                role="menu"
+                className="absolute right-0 top-9.5 z-[100] w-52 rounded-2xl border border-slate-700/80 bg-slate-900/95 backdrop-blur-xl p-1.5 text-xs font-bold text-slate-100 shadow-2xl animate-in fade-in zoom-in-95 duration-150 select-none"
+                onMouseLeave={() => setTopMenuOpen(false)}
+              >
               <button
                 role="menuitem"
                 className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer"
@@ -4991,8 +4993,9 @@ function TerminalWorkspace({
                 <span>关闭全部标签页</span>
               </button>
             </div>
-          )}
-        </div>
+          </>
+        )}
+      </div>
 
         {menuSession && tabMenu && (
           <div
