@@ -3618,11 +3618,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
                 // Ambient breathing center glow
                 float glowPulse = (sinf(s_animTick * 0.05f) + 1.0f) * 0.5f; // 0.0 to 1.0
-                int glowRadius = (int)(150 + glowPulse * 20);
+                int glowRadius = (int)(160 + glowPulse * 25);
                 Gdiplus::GraphicsPath glowPath;
                 glowPath.AddEllipse(cx - glowRadius, cy - glowRadius - 10, glowRadius * 2, glowRadius * 2);
                 Gdiplus::PathGradientBrush glowBrush(&glowPath);
-                BYTE glowAlpha = (BYTE)(30 + glowPulse * 20);
+                BYTE glowAlpha = (BYTE)(35 + glowPulse * 20);
                 glowBrush.SetCenterColor(Gdiplus::Color(glowAlpha, 16, 185, 129));
                 Gdiplus::Color surroundColor = Gdiplus::Color(0, 9, 13, 22);
                 int count = 1;
@@ -3633,7 +3633,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 float logoFloat = sinf(s_animTick * 0.06f) * 4.0f;
                 int logoSize = 70;
                 int logoX = cx - logoSize / 2;
-                int logoY = (int)((cy - 105) + logoFloat);
+                int logoY = (int)((cy - 108) + logoFloat);
+                float logoCenterX = (float)cx;
+                float logoCenterY = (float)(logoY + logoSize / 2);
+
+                // Orbiting dashed halo ring around logo
+                Gdiplus::Pen orbitPen(Gdiplus::Color(45, 6, 182, 212), 1.0f);
+                orbitPen.SetDashStyle(Gdiplus::DashStyleDash);
+                g.DrawEllipse(&orbitPen, logoCenterX - 55.0f, logoCenterY - 22.0f, 110.0f, 44.0f);
+
+                // Orbiting quantum electron particle
+                float orbitAngle = s_animTick * 0.06f;
+                float electronX = logoCenterX + cosf(orbitAngle) * 55.0f;
+                float electronY = logoCenterY + sinf(orbitAngle) * 22.0f;
+
+                Gdiplus::SolidBrush electronGlow(Gdiplus::Color(70, 56, 189, 248));
+                g.FillEllipse(&electronGlow, electronX - 5.0f, electronY - 5.0f, 10.0f, 10.0f);
+                Gdiplus::SolidBrush electronDot(Gdiplus::Color(255, 255, 255, 255));
+                g.FillEllipse(&electronDot, electronX - 2.5f, electronY - 2.5f, 5.0f, 5.0f);
 
                 Gdiplus::GraphicsPath logoPath;
                 int rad = 22;
@@ -3651,7 +3668,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 );
                 g.FillPath(&logoGrad, &logoPath);
 
-                Gdiplus::Pen logoBorder(Gdiplus::Color(120, 255, 255, 255), 1.2f);
+                Gdiplus::Pen logoBorder(Gdiplus::Color(130, 255, 255, 255), 1.2f);
                 g.DrawPath(&logoBorder, &logoPath);
 
                 // Draw crisp terminal icon ">_" inside badge
@@ -3698,21 +3715,36 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     curCharX += letterWidths[i];
                 }
 
-                // Dynamic subtitle with animated jumping dots: "正在启动终端工作台 . . ."
-                Gdiplus::Font subFont(&fontFamily, 12, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-                Gdiplus::SolidBrush subBrush(Gdiplus::Color(255, 148, 163, 184));
-                Gdiplus::StringFormat subFormat;
-                subFormat.SetAlignment(Gdiplus::StringAlignmentNear);
-                subFormat.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                // Dynamic jumping & glowing Chinese characters: "正 在 启 动 终 端 工 作 台"
+                Gdiplus::FontFamily cnFamily(L"Microsoft YaHei");
+                Gdiplus::Font cnFont(&cnFamily, 13, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                Gdiplus::StringFormat cnFormat;
+                cnFormat.SetAlignment(Gdiplus::StringAlignmentCenter);
+                cnFormat.SetLineAlignment(Gdiplus::StringAlignmentCenter);
 
-                const wchar_t* subBaseText = L"正在启动终端工作台";
-                Gdiplus::RectF subBaseRect((Gdiplus::REAL)(cx - 72), (Gdiplus::REAL)(cy + 16), 130.0f, 22.0f);
-                g.DrawString(subBaseText, -1, &subFont, subBaseRect, &subFormat, &subBrush);
+                const wchar_t* cnChars[] = { L"正", L"在", L"启", L"动", L"终", L"端", L"工", L"作", L"台" };
+                float cnCharW = 16.0f;
+                float totalCnW = 9 * cnCharW + 24.0f; // includes 3 dots
+                float startCnX = cx - totalCnW / 2.0f;
 
-                // 3 jumping dots
+                for (int i = 0; i < 9; i++) {
+                    float wavePhase = (s_animTick * 0.10f) - i * 0.38f;
+                    float cnYOffset = sinf(wavePhase) * 3.5f;
+                    float glowVal = (sinf(wavePhase) + 1.0f) * 0.5f;
+
+                    BYTE cnr = (BYTE)(148 + glowVal * (52 - 148));
+                    BYTE cng = (BYTE)(163 + glowVal * (211 - 163));
+                    BYTE cnb = (BYTE)(184 + glowVal * (153 - 184));
+
+                    Gdiplus::SolidBrush cnCharBrush(Gdiplus::Color(255, cnr, cng, cnb));
+                    Gdiplus::RectF cnRect(startCnX + i * cnCharW, (cy + 16.0f) + cnYOffset, cnCharW, 22.0f);
+                    g.DrawString(cnChars[i], -1, &cnFont, cnRect, &cnFormat, &cnCharBrush);
+                }
+
+                // 3 jumping dots after Chinese text
                 for (int d = 0; d < 3; d++) {
-                    float dotPhase = (s_animTick * 0.12f) - d * 0.45f;
-                    float dotOffset = sinf(dotPhase) * 3.0f;
+                    float dotPhase = (s_animTick * 0.10f) - (9 + d) * 0.38f;
+                    float dotOffset = sinf(dotPhase) * 3.5f;
                     float dotGlow = (sinf(dotPhase) + 1.0f) * 0.5f;
 
                     BYTE dotR = (BYTE)(148 + dotGlow * (52 - 148));
@@ -3720,62 +3752,59 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     BYTE dotB = (BYTE)(184 + dotGlow * (153 - 184));
 
                     Gdiplus::SolidBrush dotBrush(Gdiplus::Color(255, dotR, dotG, dotB));
-                    Gdiplus::RectF dotRect((Gdiplus::REAL)(cx + 56 + d * 6), (Gdiplus::REAL)(cy + 16 + dotOffset), 8.0f, 22.0f);
-                    g.DrawString(L".", -1, &subFont, dotRect, &subFormat, &dotBrush);
+                    Gdiplus::RectF dotRect(startCnX + 9 * cnCharW + d * 7.0f, (cy + 16.0f) + dotOffset, 8.0f, 22.0f);
+                    g.DrawString(L".", -1, &cnFont, dotRect, &cnFormat, &dotBrush);
                 }
 
-                // Sleek Capsule progress track (240x7 rounded rectangle)
-                int trackWidth = 240;
-                int trackHeight = 7;
-                int trackX = cx - trackWidth / 2;
-                int trackY = cy + 46;
+                // 14-Cell Futuristic Cyber Energy Matrix Loading Track
+                int cellCount = 14;
+                float cellWidth = 13.0f;
+                float cellHeight = 7.0f;
+                float cellGap = 4.0f;
+                float totalCellsWidth = cellCount * cellWidth + (cellCount - 1) * cellGap;
+                float startCellsX = cx - totalCellsWidth / 2.0f;
+                float cellsY = cy + 48.0f;
 
-                Gdiplus::GraphicsPath trackPath;
-                int tRad = 6;
-                trackPath.AddArc(trackX, trackY, tRad, tRad, 180, 90);
-                trackPath.AddArc(trackX + trackWidth - tRad, trackY, tRad, tRad, 270, 90);
-                trackPath.AddArc(trackX + trackWidth - tRad, trackY + trackHeight - tRad, tRad, tRad, 0, 90);
-                trackPath.AddArc(trackX, trackY + trackHeight - tRad, tRad, tRad, 90, 90);
-                trackPath.CloseFigure();
+                float wavePos = fmodf((float)s_animTick * 0.22f, (float)cellCount + 4.0f) - 2.0f;
 
-                Gdiplus::SolidBrush trackBg(Gdiplus::Color(45, 255, 255, 255));
-                g.FillPath(&trackBg, &trackPath);
-                Gdiplus::Pen trackBorder(Gdiplus::Color(40, 255, 255, 255), 1.0f);
-                g.DrawPath(&trackBorder, &trackPath);
+                for (int c = 0; c < cellCount; c++) {
+                    float dist = fabsf((float)c - wavePos);
+                    float activeGlow = 0.0f;
+                    if (dist < 3.2f) {
+                        activeGlow = 1.0f - (dist / 3.2f);
+                    }
 
-                // High-speed moving cyber quantum beam
-                int beamWidth = 90;
-                int totalSpan = trackWidth + beamWidth + 60;
-                int beamPos = (s_animTick * 4) % totalSpan;
-                int beamLeft = trackX - beamWidth + beamPos;
-                int beamRight = beamLeft + beamWidth;
+                    float cellX = startCellsX + c * (cellWidth + cellGap);
+                    Gdiplus::GraphicsPath cellPath;
+                    float cr = 3.0f;
+                    cellPath.AddArc(cellX, cellsY, cr, cr, 180, 90);
+                    cellPath.AddArc(cellX + cellWidth - cr, cellsY, cr, cr, 270, 90);
+                    cellPath.AddArc(cellX + cellWidth - cr, cellsY + cellHeight - cr, cr, cr, 0, 90);
+                    cellPath.AddArc(cellX, cellsY + cellHeight - cr, cr, cr, 90, 90);
+                    cellPath.CloseFigure();
 
-                if (beamRight > trackX && beamLeft < trackX + trackWidth) {
-                    g.SetClip(&trackPath);
-                    Gdiplus::LinearGradientBrush beamGrad(
-                        Gdiplus::Point(beamLeft, trackY),
-                        Gdiplus::Point(beamRight, trackY),
-                        Gdiplus::Color(0, 16, 185, 129),
-                        Gdiplus::Color(255, 56, 189, 248)
-                    );
-                    Gdiplus::Color colors[4] = {
-                        Gdiplus::Color(0, 16, 185, 129),
-                        Gdiplus::Color(220, 16, 185, 129),
-                        Gdiplus::Color(255, 56, 189, 248),
-                        Gdiplus::Color(0, 56, 189, 248)
-                    };
-                    Gdiplus::REAL positions[4] = { 0.0f, 0.25f, 0.75f, 1.0f };
-                    beamGrad.SetInterpolationColors(colors, positions, 4);
+                    if (activeGlow > 0.05f) {
+                        BYTE cellR = (BYTE)(16 + activeGlow * (56 - 16));
+                        BYTE cellG = (BYTE)(185 + activeGlow * (189 - 185));
+                        BYTE cellB = (BYTE)(129 + activeGlow * (248 - 129));
+                        BYTE cellA = (BYTE)(70 + activeGlow * 185);
 
-                    g.FillRectangle(&beamGrad, beamLeft, trackY, beamWidth, trackHeight);
-                    g.ResetClip();
+                        Gdiplus::SolidBrush activeBrush(Gdiplus::Color(cellA, cellR, cellG, cellB));
+                        g.FillPath(&activeBrush, &cellPath);
+                    } else {
+                        Gdiplus::SolidBrush dimBrush(Gdiplus::Color(30, 255, 255, 255));
+                        g.FillPath(&dimBrush, &cellPath);
+                    }
+
+                    Gdiplus::Pen cellBorder(Gdiplus::Color(activeGlow > 0.2f ? 110 : 30, 255, 255, 255), 1.0f);
+                    g.DrawPath(&cellBorder, &cellPath);
                 }
 
                 // Micro pill badge [ • 核心服务就绪 ]
-                int badgeWidth = 116;
+                int badgeWidth = 120;
                 int badgeHeight = 24;
                 int badgeX = cx - badgeWidth / 2;
-                int badgeY = cy + 70;
+                int badgeY = cy + 72;
 
                 Gdiplus::GraphicsPath badgePath;
                 int bRad = 12;
@@ -3792,14 +3821,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
                 // Pulsing Green dot
                 float dotPulse = (sinf(s_animTick * 0.15f) + 1.0f) * 0.5f;
-                int dotSize = (int)(6 + dotPulse * 2);
+                int dotSize = (int)(6 + dotPulse * 2.5f);
                 Gdiplus::SolidBrush dotBrush(Gdiplus::Color(255, 16, 185, 129));
-                g.FillEllipse(&dotBrush, badgeX + 12 - (dotSize - 6) / 2, badgeY + 9 - (dotSize - 6) / 2, dotSize, dotSize);
+                g.FillEllipse(&dotBrush, (float)(badgeX + 12 - (dotSize - 6) / 2), (float)(badgeY + 9 - (dotSize - 6) / 2), (float)dotSize, (float)dotSize);
 
                 // Badge text
-                Gdiplus::Font badgeFont(&fontFamily, 11, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                Gdiplus::Font badgeFont(&cnFamily, 11, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
                 Gdiplus::SolidBrush badgeTextBrush(Gdiplus::Color(255, 148, 163, 184));
-                Gdiplus::RectF badgeTextRect((Gdiplus::REAL)(badgeX + 22), (Gdiplus::REAL)(badgeY + 1), (Gdiplus::REAL)(badgeWidth - 22), (Gdiplus::REAL)(badgeHeight));
+                Gdiplus::RectF badgeTextRect((Gdiplus::REAL)(badgeX + 22), (Gdiplus::REAL)(badgeY + 1), (Gdiplus::REAL)(badgeWidth - 24), (Gdiplus::REAL)(badgeHeight));
                 Gdiplus::StringFormat bFormat;
                 bFormat.SetAlignment(Gdiplus::StringAlignmentNear);
                 bFormat.SetLineAlignment(Gdiplus::StringAlignmentCenter);
