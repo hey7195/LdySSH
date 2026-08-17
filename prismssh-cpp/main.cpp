@@ -9,6 +9,7 @@
 #include <tchar.h>
 #include <wrl.h>
 #include <WebView2.h>
+#include <WebView2EnvironmentOptions.h>
 #include <shlwapi.h>
 #include <fstream>
 #include <sstream>
@@ -3253,7 +3254,25 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
 
-    HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
+    std::wstring configDir = GetConfigDirectory();
+    std::wstring webviewDataDir = configDir + L"\\EBWebView";
+    CreateDirectoryW(configDir.c_str(), NULL);
+    CreateDirectoryW(webviewDataDir.c_str(), NULL);
+
+    auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+    if (options) {
+        options->put_AdditionalBrowserArguments(
+            L"--disable-background-networking "
+            L"--disable-component-update "
+            L"--disable-domain-reliability "
+            L"--disable-sync "
+            L"--no-first-run "
+            L"--enable-fast-unload "
+            L"--disable-features=msEdgeLocalDataStore,msWebOOUI,msPdfOOUI,Translate"
+        );
+    }
+
+    HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, webviewDataDir.c_str(), options.Get(),
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
                 if (FAILED(result)) return result;
@@ -3272,11 +3291,11 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                             settings->put_AreDefaultContextMenusEnabled(FALSE);
                         }
 
-                        // Set main WebView2 default background to transparent to prevent white flashing/edges
+                        // Set main WebView2 default background to dark color to match app theme
                         Microsoft::WRL::ComPtr<ICoreWebView2Controller2> controller2;
                         if (SUCCEEDED(webviewController->QueryInterface(IID_PPV_ARGS(&controller2)))) {
-                            COREWEBVIEW2_COLOR transparentColor = { 0, 0, 0, 0 };
-                            controller2->put_DefaultBackgroundColor(transparentColor);
+                            COREWEBVIEW2_COLOR appDarkColor = { 255, 11, 14, 20 };
+                            controller2->put_DefaultBackgroundColor(appDarkColor);
                         }
 
                         RECT bounds;
