@@ -63,6 +63,15 @@ ComPtr<ICoreWebView2Controller> webviewController;
 ComPtr<ICoreWebView2> webviewWindow;
 ComPtr<ICoreWebView2Environment> webviewEnv;
 
+void RevealMainWebView() {
+    if (webviewController != nullptr) {
+        webviewController->put_IsVisible(TRUE);
+    }
+    if (hWnd) {
+        KillTimer(hWnd, 1002);
+    }
+}
+
 struct HeartbeatUpdate {
     std::string hostname;
     int delay;
@@ -1142,6 +1151,17 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
     response["id"] = reqId;
     
     try {
+        if (action == "app_ready" || action == "dom_ready") {
+            RevealMainWebView();
+            response["status"] = "success";
+            response["result"] = "true";
+            std::wstring responseW = Utf8ToUtf16(response.dump());
+            if (webviewWindow != nullptr) {
+                webviewWindow->PostWebMessageAsJson(responseW.c_str());
+            }
+            return;
+        }
+
         if (action == "fallback_retry") {
             std::wstring exeDir = GetExeDirectory();
             std::wstring uiPath = exeDir + L"\\ui";
@@ -3252,6 +3272,10 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     DwmSetWindowAttribute(hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, &dwCornerPreference, sizeof(dwCornerPreference));
 
     SetTimer(hWnd, 1002, 16, NULL);
+    SetTimer(hWnd, 9999, 2500, [](HWND h, UINT, UINT_PTR id, DWORD) {
+        KillTimer(h, id);
+        RevealMainWebView();
+    });
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
 
@@ -3287,10 +3311,16 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                         webviewController = controller;
                         webviewController->get_CoreWebView2(&webviewWindow);
 
+                        // Keep webview invisible initially while loading and parsing, allowing native 60FPS splash screen to run seamlessly
+                        webviewController->put_IsVisible(FALSE);
+
                         webviewWindow->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
                             [](ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
                                 if (hWnd) {
-                                    KillTimer(hWnd, 1002);
+                                    SetTimer(hWnd, 9998, 200, [](HWND h, UINT, UINT_PTR id, DWORD) {
+                                        KillTimer(h, id);
+                                        RevealMainWebView();
+                                    });
                                 }
                                 return S_OK;
                             }).Get(), nullptr);

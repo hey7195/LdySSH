@@ -63,6 +63,9 @@ export const nativeBridge = {
   getSavedConnections() {
     return callNative<Record<string, SavedConnection>>("get_saved_connections", {});
   },
+  appReady() {
+    return callNative("app_ready", {});
+  },
   deleteSavedConnection(key: string) {
     return callNative<{ success: boolean; error?: string }>("delete_saved_connection", { success: false }, key);
   },

@@ -1778,6 +1778,7 @@ export function App() {
         setIsAdmin(true);
       }
     });
+    void nativeBridge.appReady();
   }, []);
 
   useEffect(() => {
