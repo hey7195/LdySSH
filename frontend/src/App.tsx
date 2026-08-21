@@ -2422,6 +2422,17 @@ export function App() {
     );
   }
 
+  function reorderSessions(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    setSessions((current) => {
+      if (fromIndex >= current.length || toIndex >= current.length) return current;
+      const updated = [...current];
+      const [moved] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, moved);
+      return updated;
+    });
+  }
+
   function addAiQuote(text: string, sourceTitle: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -2946,6 +2957,7 @@ export function App() {
               onAddFolder={addCommandFolder}
               onSaveCommand={saveCommand}
               onRenameTab={renameSession}
+              onReorderTabs={reorderSessions}
               onOpenClipboardDrawer={() => setClipboardDrawerOpen(true)}
               onOpenBatchRunner={() => setBatchRunnerOpen(true)}
               transferTasks={persistentTransferTasks}
@@ -4546,6 +4558,7 @@ function TerminalWorkspace({
   onAddFolder,
   onSaveCommand,
   onRenameTab,
+  onReorderTabs,
   onOpenAdbForward,
   onOpenScrcpy,
   isAdmin,
@@ -4608,6 +4621,7 @@ function TerminalWorkspace({
   onAddFolder?: (name: string) => void;
   onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
   onRenameTab?: (sessionId: string, newTitle: string) => void;
+  onReorderTabs?: (fromIndex: number, toIndex: number) => void;
   onOpenAdbForward?: () => void;
   onOpenScrcpy?: () => void;
   isAdmin?: boolean;
@@ -4624,9 +4638,11 @@ function TerminalWorkspace({
   const [shortcutParameterRequest, setShortcutParameterRequest] = useState<ShortcutParameterRequest | null>(null);
   const menuSession = tabMenu ? sessions.find((session) => session.id === tabMenu.sessionId) : undefined;
 
-  // 标签页就地重命名状态
+  // 标签页就地重命名状态与拖拽重排状态
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingTabTitle, setEditingTabTitle] = useState("");
+  const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
+  const [dragOverTabIndex, setDragOverTabIndex] = useState<number | null>(null);
 
   // 右侧栏 100% 自由拖拽缩放宽度状态与折叠状态 (支持类似 FinalShell 任意拉宽)
   const [rightSidebarWidth, setRightSidebarWidth] = useState(420);
@@ -4754,7 +4770,7 @@ function TerminalWorkspace({
 
           <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0 mb-1.5" />
 
-          {/* 动态 SSH/Local 现代 IDE 标签页 (支持鼠标中键关闭、双击重命名);deck 布局改由左侧会话栈承载 */}
+          {/* 动态 SSH/Local 现代 IDE 标签页 (支持鼠标中键关闭、双击重命名、拖拽重新排序);deck 布局改由左侧会话栈承载 */}
           {layoutMode === "classic" && sessions.map((session, index) => {
             const isActive = session.id === activeSessionId;
             const status = getSessionTabStatus(session);
@@ -4763,6 +4779,37 @@ function TerminalWorkspace({
             return (
               <div
                 key={session.id}
+                draggable={!isEditingThisTab}
+                onDragStart={(event) => {
+                  event.dataTransfer.setData("text/plain", String(index));
+                  event.dataTransfer.effectAllowed = "move";
+                  setDraggedTabIndex(index);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  if (dragOverTabIndex !== index) {
+                    setDragOverTabIndex(index);
+                  }
+                }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                  if (dragOverTabIndex === index) {
+                    setDragOverTabIndex(null);
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (draggedTabIndex !== null && draggedTabIndex !== index) {
+                    onReorderTabs?.(draggedTabIndex, index);
+                  }
+                  setDraggedTabIndex(null);
+                  setDragOverTabIndex(null);
+                }}
+                onDragEnd={() => {
+                  setDraggedTabIndex(null);
+                  setDragOverTabIndex(null);
+                }}
                 onMouseDown={(event) => {
                   if (event.button === 1) {
                     // 鼠标中键直接关闭标签
@@ -4771,10 +4818,16 @@ function TerminalWorkspace({
                   }
                 }}
                 className={cn(
-                  "group relative flex h-8 min-w-[130px] max-w-64 cursor-pointer items-center justify-between gap-2 rounded-t-xl border px-3 text-xs font-extrabold transition-all select-none shrink-0",
+                  "group relative flex h-8 min-w-[130px] max-w-64 cursor-grab active:cursor-grabbing items-center justify-between gap-2 rounded-t-xl border px-3 text-xs font-extrabold transition-all select-none shrink-0",
                   isActive
                     ? "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-500/25"
-                    : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+                    : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-2)]",
+                  draggedTabIndex === index && "opacity-40 scale-95 border-dashed border-emerald-400/80",
+                  dragOverTabIndex === index && draggedTabIndex !== index && (
+                    draggedTabIndex !== null && draggedTabIndex < index
+                      ? "border-r-4 border-r-emerald-400 bg-emerald-500/25 ring-2 ring-emerald-500/40"
+                      : "border-l-4 border-l-emerald-400 bg-emerald-500/25 ring-2 ring-emerald-500/40"
+                  )
                 )}
               >
                 {isEditingThisTab ? (
@@ -7376,6 +7429,27 @@ function TerminalCommandSidebar({
   const [newCmdStr, setNewCmdStr] = useState("");
   const [newCmdDesc, setNewCmdDesc] = useState("");
   const [addCmdCr, setAddCmdCr] = useState(true);
+  const newCmdTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  function insertParamIntoNewCmd(paramText: string) {
+    const textarea = newCmdTextareaRef.current;
+    if (!textarea) {
+      setNewCmdStr((prev) => `${prev}${paramText}`);
+      return;
+    }
+    const start = textarea.selectionStart ?? newCmdStr.length;
+    const end = textarea.selectionEnd ?? newCmdStr.length;
+    const before = newCmdStr.slice(0, start);
+    const after = newCmdStr.slice(end);
+    const updated = `${before}${paramText}${after}`;
+    setNewCmdStr(updated);
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const newPos = start + paramText.length;
+      textarea.setSelectionRange(newPos, newPos);
+    });
+  }
 
   const keyword = query.trim().toLowerCase();
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
@@ -7762,6 +7836,7 @@ function TerminalCommandSidebar({
                 <div>
                   <label className="block text-zinc-300 mb-1 font-extrabold">命令</label>
                   <textarea
+                    ref={newCmdTextareaRef}
                     rows={4}
                     value={newCmdStr}
                     onChange={(e) => setNewCmdStr(e.target.value)}
@@ -7779,7 +7854,7 @@ function TerminalCommandSidebar({
                         key={num}
                         type="button"
                         onClick={() => {
-                          setNewCmdStr((prev) => `${prev}[p#${num} 参数${num}]`);
+                          insertParamIntoNewCmd(`[p#${num} 参数${num}]`);
                         }}
                         className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1 text-xs font-extrabold text-zinc-200 hover:border-emerald-500 hover:bg-emerald-500/20 hover:text-emerald-400 transition-all cursor-pointer shadow-2xs active:scale-95"
                       >
@@ -9398,6 +9473,7 @@ function CommandPanel({
   const [editingCommand, setEditingCommand] = useState<(CommandItem & { folderId: string }) | null>(null);
   const [pendingCommandKey, setPendingCommandKey] = useState("");
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
+  const drawerCmdTextareaRef = useRef<HTMLTextAreaElement>(null);
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
   const keyword = query.trim().toLowerCase();
   const visibleFolders = folders
@@ -9452,11 +9528,47 @@ function CommandPanel({
   }
 
   function insertCommandParameter(index: number) {
-    setDraft((current) => ({ ...current, command: `${current.command}[p#${index} 参数名]` }));
+    const paramText = `[p#${index} 参数名]`;
+    const textarea = drawerCmdTextareaRef.current;
+    if (!textarea) {
+      setDraft((current) => ({ ...current, command: `${current.command}${paramText}` }));
+      return;
+    }
+    const curVal = draft.command || "";
+    const start = textarea.selectionStart ?? curVal.length;
+    const end = textarea.selectionEnd ?? curVal.length;
+    const before = curVal.slice(0, start);
+    const after = curVal.slice(end);
+    const updated = `${before}${paramText}${after}`;
+    setDraft((current) => ({ ...current, command: updated }));
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const newPos = start + paramText.length;
+      textarea.setSelectionRange(newPos, newPos);
+    });
   }
 
   function insertEditingCommandParameter(index: number) {
-    setEditingCommand((current) => current ? { ...current, command: `${current.command}[p#${index} 参数名]` } : current);
+    const paramText = `[p#${index} 参数名]`;
+    const textarea = drawerCmdTextareaRef.current;
+    if (!textarea) {
+      setEditingCommand((current) => current ? { ...current, command: `${current.command}${paramText}` } : current);
+      return;
+    }
+    const curVal = editingCommand?.command || "";
+    const start = textarea.selectionStart ?? curVal.length;
+    const end = textarea.selectionEnd ?? curVal.length;
+    const before = curVal.slice(0, start);
+    const after = curVal.slice(end);
+    const updated = `${before}${paramText}${after}`;
+    setEditingCommand((current) => current ? { ...current, command: updated } : current);
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const newPos = start + paramText.length;
+      textarea.setSelectionRange(newPos, newPos);
+    });
   }
 
   function sendCommand(command: CommandItem & { folderId: string }) {
@@ -9617,6 +9729,7 @@ function CommandPanel({
             </div>
 
             <Textarea
+              ref={drawerCmdTextareaRef}
               className="min-h-16 font-mono text-xs rounded-xl p-2.5 border-[var(--app-line)] bg-slate-900 text-emerald-400 placeholder:text-slate-500 shadow-inner"
               value={editingCommand ? editingCommand.command : draft.command}
               placeholder="命令内容... 支持占位符如: top -b -n1 | head -n [p#1 行数]"

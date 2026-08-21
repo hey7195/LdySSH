@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import * as React from "react";
+import type { ButtonHTMLAttributes, ReactNode, InputHTMLAttributes, TextareaHTMLAttributes } from "react";
 import { cn } from "../lib/utils";
 
 /**
@@ -60,33 +61,41 @@ export function Button({
   );
 }
 
-export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={cn(
-        "h-10.5 w-full rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-4 text-sm font-medium text-[var(--app-text)] outline-none shadow-2xs transition-all duration-200",
-        "placeholder:text-[var(--app-muted)]",
-        "focus:border-[var(--accent)] focus:ring-4 focus:ring-[var(--accent-soft)]",
-        props.className
-      )}
-    />
-  );
-}
+export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  (props, ref) => {
+    return (
+      <input
+        ref={ref}
+        {...props}
+        className={cn(
+          "h-10.5 w-full rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-4 text-sm font-medium text-[var(--app-text)] outline-none shadow-2xs transition-all duration-200",
+          "placeholder:text-[var(--app-muted)]",
+          "focus:border-[var(--accent)] focus:ring-4 focus:ring-[var(--accent-soft)]",
+          props.className
+        )}
+      />
+    );
+  }
+);
+Input.displayName = "Input";
 
-export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return (
-    <textarea
-      {...props}
-      className={cn(
-        "min-h-24 w-full rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3 text-sm leading-6 font-medium text-[var(--app-text)] outline-none shadow-2xs transition-all duration-200",
-        "placeholder:text-[var(--app-muted)]",
-        "focus:border-[var(--accent)] focus:ring-4 focus:ring-[var(--accent-soft)]",
-        props.className
-      )}
-    />
-  );
-}
+export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
+  (props, ref) => {
+    return (
+      <textarea
+        ref={ref}
+        {...props}
+        className={cn(
+          "min-h-24 w-full rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3 text-sm leading-6 font-medium text-[var(--app-text)] outline-none shadow-2xs transition-all duration-200",
+          "placeholder:text-[var(--app-muted)]",
+          "focus:border-[var(--accent)] focus:ring-4 focus:ring-[var(--accent-soft)]",
+          props.className
+        )}
+      />
+    );
+  }
+);
+Textarea.displayName = "Textarea";
 
 export function Panel({
   title,

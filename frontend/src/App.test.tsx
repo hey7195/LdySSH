@@ -2161,6 +2161,60 @@ describe("command library", () => {
     expect(commandInput).toHaveValue("[p#1 参数名][p#3 参数名]");
   });
 
+  test("inserts parameter placeholder at the cursor/caret position in command textarea", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("命令库"));
+
+    const commandInput = (await screen.findByPlaceholderText(/命令内容/)) as HTMLTextAreaElement;
+    fireEvent.change(commandInput, { target: { value: "curl http://:8080/files/adbex" } });
+
+    // Place caret between "http://" and ":8080" (index 12)
+    commandInput.setSelectionRange(12, 12);
+    fireEvent.click(screen.getByRole("button", { name: "+p#1" }));
+
+    expect(commandInput).toHaveValue("curl http://[p#1 参数名]:8080/files/adbex");
+  });
+
+  test("reorders top terminal tabs using drag and drop", async () => {
+    (window.pywebview?.api?.create_local_session as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce("local-1")
+      .mockResolvedValueOnce("local-2")
+      .mockResolvedValueOnce("local-3");
+
+    render(<App />);
+
+    // Create 3 local terminal sessions
+    fireEvent.click(screen.getByRole("button", { name: "打开 Local Shell" }));
+    await screen.findByRole("button", { name: "Local Shell" });
+
+    fireEvent.click(screen.getByRole("button", { name: "新建终端" }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Local Shell" })).toHaveLength(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "新建终端" }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Local Shell" })).toHaveLength(3));
+
+    // Find tab elements
+    const tabs = screen.getAllByRole("button", { name: "Local Shell" }).map((btn) => btn.parentElement as HTMLElement);
+    expect(tabs).toHaveLength(3);
+
+    // Drag 3rd tab (index 2) to 2nd tab (index 1)
+    const dataTransfer = {
+      setData: vi.fn(),
+      getData: vi.fn().mockReturnValue("2"),
+      effectAllowed: "",
+      dropEffect: ""
+    };
+
+    fireEvent.dragStart(tabs[2], { dataTransfer });
+    fireEvent.dragOver(tabs[1], { dataTransfer });
+    fireEvent.drop(tabs[1], { dataTransfer });
+    fireEvent.dragEnd(tabs[2]);
+
+    const reorderedTabs = screen.getAllByRole("button", { name: "Local Shell" });
+    expect(reorderedTabs).toHaveLength(3);
+  });
+
   test("deletes a command folder and persists the library", async () => {
     (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       success: true,
