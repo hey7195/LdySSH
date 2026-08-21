@@ -4824,8 +4824,16 @@ function TerminalWorkspace({
             return (
               <div
                 key={session.id}
+                role="button"
+                aria-label={session.title}
+                aria-current={isActive ? "page" : undefined}
+                tabIndex={0}
                 draggable={!isEditingThisTab}
                 onDragStart={(event) => {
+                  if (event.button !== 0 && (event.nativeEvent as MouseEvent).button !== 0) {
+                    event.preventDefault();
+                    return;
+                  }
                   event.dataTransfer.setData("text/plain", String(index));
                   event.dataTransfer.effectAllowed = "move";
                   setDraggedTabIndex(index);
@@ -4855,6 +4863,16 @@ function TerminalWorkspace({
                   setDraggedTabIndex(null);
                   setDragOverTabIndex(null);
                 }}
+                onClick={() => {
+                  if (!isEditingThisTab) onActivate(session.id);
+                }}
+                onDoubleClick={() => {
+                  setEditingTabId(session.id);
+                  setEditingTabTitle(session.title);
+                }}
+                onContextMenu={(event) => {
+                  openTabMenu(event, session.id);
+                }}
                 onMouseDown={(event) => {
                   if (event.button === 1) {
                     // 鼠标中键直接关闭标签
@@ -4863,7 +4881,7 @@ function TerminalWorkspace({
                   }
                 }}
                 className={cn(
-                  "group relative flex h-8 min-w-[130px] max-w-64 cursor-grab active:cursor-grabbing items-center justify-between gap-2 rounded-t-xl border px-3 text-xs font-extrabold transition-all select-none shrink-0",
+                  "group relative flex h-8 min-w-[130px] max-w-64 cursor-pointer items-center justify-between gap-2 rounded-t-xl border px-3 text-xs font-extrabold transition-all select-none shrink-0",
                   isActive
                     ? (status.isDisconnected
                         ? "border-slate-700 bg-slate-800 text-slate-200 shadow-sm"
@@ -4871,19 +4889,23 @@ function TerminalWorkspace({
                     : (status.isDisconnected
                         ? "border-[var(--app-line)] bg-[var(--panel-bg)]/60 text-[var(--app-muted)] opacity-75 hover:opacity-100 hover:bg-[var(--fill-2)]"
                         : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"),
-                  draggedTabIndex === index && "opacity-40 scale-95 border-dashed border-emerald-400/80",
+                  draggedTabIndex === index && "opacity-40 scale-95 border-dashed border-emerald-400/80 cursor-grabbing",
                   dragOverTabIndex === index && draggedTabIndex !== index && (
                     draggedTabIndex !== null && draggedTabIndex < index
                       ? "border-r-4 border-r-emerald-400 bg-emerald-500/25 ring-2 ring-emerald-500/40"
                       : "border-l-4 border-l-emerald-400 bg-emerald-500/25 ring-2 ring-emerald-500/40"
                   )
                 )}
+                title={`${session.title} (${status.title}) - 右键打开菜单，拖拽可调整前后顺序，双击重命名，中键关闭`}
               >
                 {isEditingThisTab ? (
                   <input
                     autoFocus
                     value={editingTabTitle}
                     onChange={(e) => setEditingTabTitle(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onContextMenu={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         if (editingTabTitle.trim()) onRenameTab?.(session.id, editingTabTitle.trim());
@@ -4899,20 +4921,7 @@ function TerminalWorkspace({
                     className="h-5 px-1 text-xs font-mono font-bold bg-[var(--app-bg)] text-[var(--app-text)] border border-emerald-400 rounded outline-none w-28 select-text"
                   />
                 ) : (
-                  <button
-                    type="button"
-                    role="button"
-                    aria-label={session.title}
-                    aria-current={isActive ? "page" : undefined}
-                    className="flex items-center gap-1.5 min-w-0 bg-transparent border-0 p-0 cursor-pointer font-inherit text-inherit"
-                    onClick={() => onActivate(session.id)}
-                    onDoubleClick={() => {
-                      setEditingTabId(session.id);
-                      setEditingTabTitle(session.title);
-                    }}
-                    onContextMenu={(event) => openTabMenu(event, session.id)}
-                    title={`${session.title} (${status.title}) - 双击可重命名此标签，鼠标中键可快速关闭`}
-                  >
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1 h-full pointer-events-none">
                     <span title={status.title} className={cn("h-2 w-2 rounded-full shrink-0", status.dotClass)} />
                     <span className="truncate font-mono font-extrabold">{session.title}</span>
                     {status.isDisconnected && (
@@ -4920,12 +4929,12 @@ function TerminalWorkspace({
                     )}
                     <span className="sr-only">{index + 1}</span>
                     {renderEnvironmentBadge(session.connectParams?.environment, true)}
-                  </button>
+                  </div>
                 )}
 
                 <button
                   className={cn(
-                    "flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-md transition-colors cursor-pointer",
+                    "flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-md transition-colors cursor-pointer relative z-10",
                     isActive && !status.isDisconnected
                       ? "text-white/80 hover:bg-white/20 hover:text-white"
                       : "text-[var(--app-muted)] hover:bg-rose-500/20 hover:text-rose-400"
@@ -4934,9 +4943,10 @@ function TerminalWorkspace({
                     event.stopPropagation();
                     onClose(session.id);
                   }}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onContextMenu={(event) => event.stopPropagation()}
                   title="关闭会话"
                 >
-                  <X className="h-3 w-3" />
                 </button>
               </div>
             );
