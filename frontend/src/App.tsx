@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -4692,10 +4693,33 @@ function TerminalWorkspace({
     window.addEventListener("pointerup", onPointerUp);
   }, [rightSidebarWidth]);
 
+  useEffect(() => {
+    if (!tabMenu) return;
+    const handleDown = (e: MouseEvent) => {
+      const menuEl = document.getElementById("tab-context-menu");
+      if (menuEl && !menuEl.contains(e.target as Node)) {
+        setTabMenu(null);
+      }
+    };
+    const handleKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setTabMenu(null);
+    };
+    window.addEventListener("mousedown", handleDown, true);
+    window.addEventListener("keydown", handleKey, true);
+    return () => {
+      window.removeEventListener("mousedown", handleDown, true);
+      window.removeEventListener("keydown", handleKey, true);
+    };
+  }, [tabMenu]);
+
   function openTabMenu(event: ReactMouseEvent, sessionId: string) {
     event.preventDefault();
+    event.stopPropagation();
     onActivate(sessionId);
-    setTabMenu({ sessionId, x: event.clientX, y: event.clientY });
+    const rect = event.currentTarget.getBoundingClientRect();
+    const posX = Math.max(8, Math.min(rect.left, window.innerWidth - 210));
+    const posY = Math.min(rect.bottom + 4, window.innerHeight - 380);
+    setTabMenu({ sessionId, x: posX, y: posY });
   }
 
   function runTabAction(action: (sessionId: string) => void) {
@@ -5092,10 +5116,11 @@ function TerminalWorkspace({
         )}
       </div>
 
-        {menuSession && tabMenu && (
+        {menuSession && tabMenu && typeof document !== "undefined" && createPortal(
           <div
+            id="tab-context-menu"
             role="menu"
-            className="fixed z-50 w-44 rounded-xl border border-[var(--app-line)] bg-[var(--raised-bg)]/95 backdrop-blur-xl p-1 text-xs font-semibold text-[var(--app-text)] shadow-2xl animate-in zoom-in-95 duration-100"
+            className="fixed z-50 w-48 rounded-xl border border-[var(--app-line)] bg-[var(--raised-bg)]/95 backdrop-blur-xl p-1 text-xs font-semibold text-[var(--app-text)] shadow-2xl animate-in zoom-in-95 duration-100"
             style={{ left: tabMenu.x, top: tabMenu.y }}
             onMouseLeave={() => setTabMenu(null)}
           >
@@ -5205,7 +5230,8 @@ function TerminalWorkspace({
               <X className="h-3.5 w-3.5 text-rose-500" />
               关闭全部
             </button>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
       <div
@@ -6541,8 +6567,28 @@ function TerminalSurface({
     }
   }
 
+  useEffect(() => {
+    if (!terminalMenu) return;
+    const handleDown = (e: MouseEvent) => {
+      const menuEl = document.getElementById("terminal-context-menu");
+      if (menuEl && !menuEl.contains(e.target as Node)) {
+        setTerminalMenu(null);
+      }
+    };
+    const handleKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setTerminalMenu(null);
+    };
+    window.addEventListener("mousedown", handleDown, true);
+    window.addEventListener("keydown", handleKey, true);
+    return () => {
+      window.removeEventListener("mousedown", handleDown, true);
+      window.removeEventListener("keydown", handleKey, true);
+    };
+  }, [terminalMenu]);
+
   function openTerminalMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
+    event.stopPropagation();
     const selection = terminalRef.current?.getSelection() || selectedText;
     const appearance = getTerminalAppearance(terminalAppearance);
 
@@ -6552,7 +6598,9 @@ function TerminalSurface({
       }
       return;
     }
-    setTerminalMenu({ x: event.clientX, y: event.clientY, selection });
+    const posX = Math.max(8, Math.min(event.clientX, window.innerWidth - 200));
+    const posY = Math.max(8, Math.min(event.clientY, window.innerHeight - 340));
+    setTerminalMenu({ x: posX, y: posY, selection });
   }
 
   async function copyTerminalSelection(selection: string) {
@@ -7255,6 +7303,7 @@ function TerminalSurface({
       >
         <Search className="h-3.5 w-3.5" />
       </button>
+
       {searchOpen && (
         <div
           className="absolute right-5 top-14 z-20 w-[min(380px,calc(100%-40px))] rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 text-xs text-[var(--app-text)] shadow-xl"
@@ -7330,8 +7379,9 @@ function TerminalSurface({
           添加到对话
         </button>
       )}
-      {terminalMenu && activeSession && (
+      {terminalMenu && activeSession && typeof document !== "undefined" && createPortal(
         <div
+          id="terminal-context-menu"
           role="menu"
           className="fixed z-50 min-w-36 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs text-[var(--app-text)] shadow-xl"
           style={{ left: terminalMenu.x, top: terminalMenu.y }}
@@ -7457,7 +7507,8 @@ function TerminalSurface({
             <RotateCcw className="h-3.5 w-3.5 text-amber-400" />
             <span>清空屏幕 (Clear)</span>
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
