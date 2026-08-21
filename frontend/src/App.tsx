@@ -7437,18 +7437,31 @@ function TerminalCommandSidebar({
       setNewCmdStr((prev) => `${prev}${paramText}`);
       return;
     }
+    textarea.focus();
     const start = textarea.selectionStart ?? newCmdStr.length;
     const end = textarea.selectionEnd ?? newCmdStr.length;
-    const before = newCmdStr.slice(0, start);
-    const after = newCmdStr.slice(end);
-    const updated = `${before}${paramText}${after}`;
-    setNewCmdStr(updated);
 
-    requestAnimationFrame(() => {
-      textarea.focus();
-      const newPos = start + paramText.length;
-      textarea.setSelectionRange(newPos, newPos);
-    });
+    let insertedViaExec = false;
+    try {
+      insertedViaExec = document.execCommand("insertText", false, paramText);
+    } catch (e) {
+      insertedViaExec = false;
+    }
+
+    if (!insertedViaExec) {
+      const before = newCmdStr.slice(0, start);
+      const after = newCmdStr.slice(end);
+      const updated = `${before}${paramText}${after}`;
+      setNewCmdStr(updated);
+
+      requestAnimationFrame(() => {
+        textarea.focus();
+        const newPos = start + paramText.length;
+        textarea.setSelectionRange(newPos, newPos);
+      });
+    } else {
+      setNewCmdStr(textarea.value);
+    }
   }
 
   const keyword = query.trim().toLowerCase();
@@ -9534,19 +9547,32 @@ function CommandPanel({
       setDraft((current) => ({ ...current, command: `${current.command}${paramText}` }));
       return;
     }
+    textarea.focus();
     const curVal = draft.command || "";
     const start = textarea.selectionStart ?? curVal.length;
     const end = textarea.selectionEnd ?? curVal.length;
-    const before = curVal.slice(0, start);
-    const after = curVal.slice(end);
-    const updated = `${before}${paramText}${after}`;
-    setDraft((current) => ({ ...current, command: updated }));
 
-    requestAnimationFrame(() => {
-      textarea.focus();
-      const newPos = start + paramText.length;
-      textarea.setSelectionRange(newPos, newPos);
-    });
+    let insertedViaExec = false;
+    try {
+      insertedViaExec = document.execCommand("insertText", false, paramText);
+    } catch (e) {
+      insertedViaExec = false;
+    }
+
+    if (!insertedViaExec) {
+      const before = curVal.slice(0, start);
+      const after = curVal.slice(end);
+      const updated = `${before}${paramText}${after}`;
+      setDraft((current) => ({ ...current, command: updated }));
+
+      requestAnimationFrame(() => {
+        textarea.focus();
+        const newPos = start + paramText.length;
+        textarea.setSelectionRange(newPos, newPos);
+      });
+    } else {
+      setDraft((current) => ({ ...current, command: textarea.value }));
+    }
   }
 
   function insertEditingCommandParameter(index: number) {
@@ -9556,19 +9582,32 @@ function CommandPanel({
       setEditingCommand((current) => current ? { ...current, command: `${current.command}${paramText}` } : current);
       return;
     }
+    textarea.focus();
     const curVal = editingCommand?.command || "";
     const start = textarea.selectionStart ?? curVal.length;
     const end = textarea.selectionEnd ?? curVal.length;
-    const before = curVal.slice(0, start);
-    const after = curVal.slice(end);
-    const updated = `${before}${paramText}${after}`;
-    setEditingCommand((current) => current ? { ...current, command: updated } : current);
 
-    requestAnimationFrame(() => {
-      textarea.focus();
-      const newPos = start + paramText.length;
-      textarea.setSelectionRange(newPos, newPos);
-    });
+    let insertedViaExec = false;
+    try {
+      insertedViaExec = document.execCommand("insertText", false, paramText);
+    } catch (e) {
+      insertedViaExec = false;
+    }
+
+    if (!insertedViaExec) {
+      const before = curVal.slice(0, start);
+      const after = curVal.slice(end);
+      const updated = `${before}${paramText}${after}`;
+      setEditingCommand((current) => current ? { ...current, command: updated } : current);
+
+      requestAnimationFrame(() => {
+        textarea.focus();
+        const newPos = start + paramText.length;
+        textarea.setSelectionRange(newPos, newPos);
+      });
+    } else {
+      setEditingCommand((current) => current ? { ...current, command: textarea.value } : current);
+    }
   }
 
   function sendCommand(command: CommandItem & { folderId: string }) {
