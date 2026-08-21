@@ -1394,29 +1394,79 @@ void SSHSession::ReadLoop() {
                 nlohmann::json pushMsg;
                 pushMsg["action"] = "push_output";
                 pushMsg["sessionId"] = sessionId;
-                pushMsg["data"] = Base64Encode("\r\n[SSH Connection closed]\r\n");
+                pushMsg["data"] = Base64Encode("\r\n\x1b[33m[SSH Connection closed by remote host]\x1b[0m\r\n");
                 
                 if (hWnd != NULL) {
                     std::wstring* pStr = new std::wstring(Utf8ToUtf16(pushMsg.dump()));
                     if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pStr)) {
                         delete pStr;
                     }
+
+                    nlohmann::json closeMsg;
+                    closeMsg["action"] = "session_closed";
+                    closeMsg["sessionId"] = sessionId;
+                    std::wstring* pCloseStr = new std::wstring(Utf8ToUtf16(closeMsg.dump()));
+                    if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pCloseStr)) {
+                        delete pCloseStr;
+                    }
                 }
                 running = false;
                 break;
             }
         } else if (select_res < 0) {
+            nlohmann::json pushMsg;
+            pushMsg["action"] = "push_output";
+            pushMsg["sessionId"] = sessionId;
+            pushMsg["data"] = Base64Encode("\r\n\x1b[31m[SSH Connection error - socket closed]\x1b[0m\r\n");
+
+            if (hWnd != NULL) {
+                std::wstring* pStr = new std::wstring(Utf8ToUtf16(pushMsg.dump()));
+                if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pStr)) {
+                    delete pStr;
+                }
+
+                nlohmann::json closeMsg;
+                closeMsg["action"] = "session_closed";
+                closeMsg["sessionId"] = sessionId;
+                std::wstring* pCloseStr = new std::wstring(Utf8ToUtf16(closeMsg.dump()));
+                if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pCloseStr)) {
+                    delete pCloseStr;
+                }
+            }
             running = false;
             break;
         }
 
-        // Periodically send keepalive every 10 seconds
+        // Periodically send keepalive every 5 seconds to rapidly detect host shutdown/disconnect
         auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastKeepalive).count() >= 10) {
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastKeepalive).count() >= 5) {
             std::lock_guard<std::mutex> lock(sshMutex);
             if (sshSession && running) {
                 int seconds_to_next = 0;
-                libssh2_keepalive_send(sshSession, &seconds_to_next);
+                int ka_res = libssh2_keepalive_send(sshSession, &seconds_to_next);
+                if (ka_res < 0 && ka_res != LIBSSH2_ERROR_EAGAIN) {
+                    nlohmann::json pushMsg;
+                    pushMsg["action"] = "push_output";
+                    pushMsg["sessionId"] = sessionId;
+                    pushMsg["data"] = Base64Encode("\r\n\x1b[31m[SSH Connection lost - host unreachable]\x1b[0m\r\n");
+
+                    if (hWnd != NULL) {
+                        std::wstring* pStr = new std::wstring(Utf8ToUtf16(pushMsg.dump()));
+                        if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pStr)) {
+                            delete pStr;
+                        }
+
+                        nlohmann::json closeMsg;
+                        closeMsg["action"] = "session_closed";
+                        closeMsg["sessionId"] = sessionId;
+                        std::wstring* pCloseStr = new std::wstring(Utf8ToUtf16(closeMsg.dump()));
+                        if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pCloseStr)) {
+                            delete pCloseStr;
+                        }
+                    }
+                    running = false;
+                    break;
+                }
             }
             lastKeepalive = now;
         }

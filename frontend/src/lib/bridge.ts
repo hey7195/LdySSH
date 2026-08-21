@@ -15,6 +15,7 @@ declare global {
     windowMaximize?: () => void;
     windowClose?: () => void;
     handlePushOutput?: (sessionId: string, data: string) => void;
+    handleSessionClosed?: (sessionId: string) => void;
   }
 }
 

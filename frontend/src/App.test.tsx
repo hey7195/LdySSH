@@ -2229,6 +2229,24 @@ describe("command library", () => {
     expect(reorderedTabs).toHaveLength(3);
   });
 
+  test("marks session disconnected and shows disconnected badge when SSH server disconnects", async () => {
+    (window.pywebview?.api?.create_local_session as ReturnType<typeof vi.fn>).mockResolvedValueOnce("local-1");
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "打开 Local Shell" }));
+    await screen.findByRole("button", { name: "Local Shell" });
+
+    // Simulate session closed notification from backend
+    act(() => {
+      window.handleSessionClosed?.("local-1");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("已断开")).toBeInTheDocument();
+    });
+  });
+
   test("deletes a command folder and persists the library", async () => {
     (window.pywebview?.api?.get_command_library as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       success: true,

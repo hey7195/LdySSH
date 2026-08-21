@@ -377,6 +377,14 @@ void LocalSession::ReadLoop() {
             if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pStr)) {
                 delete pStr;
             }
+
+            nlohmann::json closeMsg;
+            closeMsg["action"] = "session_closed";
+            closeMsg["sessionId"] = sessionId;
+            std::wstring* pCloseStr = new std::wstring(Utf8ToUtf16(closeMsg.dump()));
+            if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pCloseStr)) {
+                delete pCloseStr;
+            }
         }
         running = false;
     }

@@ -203,14 +203,14 @@ function getSessionTabStatus(session: SessionTab) {
 
   switch (status) {
     case "connected":
-      return { title: "已连接", dotClass: "bg-emerald-500" };
+      return { title: "已连接", dotClass: "bg-emerald-500", isDisconnected: false };
     case "connecting":
-      return { title: "连接中", dotClass: "bg-amber-400 animate-pulse" };
+      return { title: "连接中", dotClass: "bg-amber-400 animate-pulse", isDisconnected: false };
     case "failed":
-      return { title: "连接失败", dotClass: "bg-rose-500" };
+      return { title: "连接失败", dotClass: "bg-rose-500", isDisconnected: true };
     case "disconnected":
     default:
-      return { title: "已断开", dotClass: "bg-slate-400" };
+      return { title: "已断开", dotClass: "bg-slate-400 dark:bg-slate-500", isDisconnected: true };
   }
 }
 
@@ -253,6 +253,7 @@ interface CommandSuggestionView {
   suggestions: CommandSuggestion[];
   activeIndex: number;
   onApply: (suggestion: CommandSuggestion) => void;
+  onClose?: () => void;
 }
 
 interface ConnectionForm {
@@ -2432,6 +2433,26 @@ export function App() {
       return updated;
     });
   }
+
+  function markSessionDisconnected(sessionId: string) {
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId ? { ...session, connected: false, status: "disconnected" } : session
+      )
+    );
+    if (sessionId === activeSessionId) {
+      setCommandSuggestionView(null);
+    }
+  }
+
+  useEffect(() => {
+    window.handleSessionClosed = (sessionId: string) => {
+      markSessionDisconnected(sessionId);
+    };
+    return () => {
+      window.handleSessionClosed = undefined;
+    };
+  }, [activeSessionId]);
 
   function addAiQuote(text: string, sourceTitle: string) {
     const trimmed = text.trim();
@@ -4820,8 +4841,12 @@ function TerminalWorkspace({
                 className={cn(
                   "group relative flex h-8 min-w-[130px] max-w-64 cursor-grab active:cursor-grabbing items-center justify-between gap-2 rounded-t-xl border px-3 text-xs font-extrabold transition-all select-none shrink-0",
                   isActive
-                    ? "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-500/25"
-                    : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-2)]",
+                    ? (status.isDisconnected
+                        ? "border-slate-700 bg-slate-800 text-slate-200 shadow-sm"
+                        : "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-500/25")
+                    : (status.isDisconnected
+                        ? "border-[var(--app-line)] bg-[var(--panel-bg)]/60 text-[var(--app-muted)] opacity-75 hover:opacity-100 hover:bg-[var(--fill-2)]"
+                        : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"),
                   draggedTabIndex === index && "opacity-40 scale-95 border-dashed border-emerald-400/80",
                   dragOverTabIndex === index && draggedTabIndex !== index && (
                     draggedTabIndex !== null && draggedTabIndex < index
@@ -4862,10 +4887,13 @@ function TerminalWorkspace({
                       setEditingTabTitle(session.title);
                     }}
                     onContextMenu={(event) => openTabMenu(event, session.id)}
-                    title="双击可重命名此标签，鼠标中键可快速关闭"
+                    title={`${session.title} (${status.title}) - 双击可重命名此标签，鼠标中键可快速关闭`}
                   >
                     <span title={status.title} className={cn("h-2 w-2 rounded-full shrink-0", status.dotClass)} />
                     <span className="truncate font-mono font-extrabold">{session.title}</span>
+                    {status.isDisconnected && (
+                      <span className="rounded bg-slate-700/80 text-[9px] font-mono font-bold px-1.5 py-0 text-slate-300 shrink-0 border border-slate-600/60">已断开</span>
+                    )}
                     <span className="sr-only">{index + 1}</span>
                     {renderEnvironmentBadge(session.connectParams?.environment, true)}
                   </button>
@@ -4874,7 +4902,9 @@ function TerminalWorkspace({
                 <button
                   className={cn(
                     "flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-md transition-colors cursor-pointer",
-                    isActive ? "text-white/80 hover:bg-white/20 hover:text-white" : "text-[var(--app-muted)] hover:bg-rose-50 hover:text-rose-600"
+                    isActive && !status.isDisconnected
+                      ? "text-white/80 hover:bg-white/20 hover:text-white"
+                      : "text-[var(--app-muted)] hover:bg-rose-500/20 hover:text-rose-400"
                   )}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -5224,7 +5254,10 @@ function TerminalWorkspace({
                   >
                     <div className="flex items-center gap-2">
                       <span title={status.title} className={cn("h-2 w-2 shrink-0 rounded-full", status.dotClass)} />
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs font-bold text-[var(--app-text)]">{session.title}</span>
+                      <span className={cn("min-w-0 flex-1 truncate font-mono text-xs font-bold text-[var(--app-text)]", status.isDisconnected && "opacity-75")}>{session.title}</span>
+                      {status.isDisconnected && (
+                        <span className="rounded bg-slate-700/80 text-[9px] font-mono font-bold px-1.5 py-0 text-slate-300 shrink-0 border border-slate-600/60">已断开</span>
+                      )}
                       <button
                         className="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--app-muted)] hover:text-rose-500 group-hover:flex cursor-pointer"
                         title="关闭会话"
@@ -5688,18 +5721,32 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
           <GripHorizontal className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
           <span className="truncate">{hasCustomPosition ? "提示面板 (固定位置)" : "提示面板 (光标跟随)"}</span>
         </button>
-        <button
-          type="button"
-          title="复位提示框到光标下方跟随"
-          aria-label="重置提示面板位置"
-          className="flex h-4.5 w-4.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer shrink-0 transition-colors"
-          onClick={(e) => {
-            e.stopPropagation();
-            resetToCursorDefault();
-          }}
-        >
-          <RotateCcw className="h-3 w-3" />
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            title="复位提示框到光标下方跟随"
+            aria-label="重置提示面板位置"
+            className="flex h-4.5 w-4.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer shrink-0 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              resetToCursorDefault();
+            }}
+          >
+            <RotateCcw className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            title="关闭提示面板 (Esc)"
+            aria-label="关闭提示面板"
+            className="flex h-4.5 w-4.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-rose-500/20 hover:text-rose-400 cursor-pointer shrink-0 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              view.onClose?.();
+            }}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5 pr-2.5 space-y-1">
         {view.suggestions.map((suggestion, index) => {
@@ -6336,16 +6383,33 @@ function TerminalSurface({
   }, [commandSuggestionsEnabled, commandSuggestionSources]);
 
   useEffect(() => {
-    if (commandSuggestions.length === 0) {
+    if (
+      !activeSession ||
+      !activeSession.connected ||
+      activeSession.status === "disconnected" ||
+      activeSession.status === "failed" ||
+      commandSuggestions.length === 0
+    ) {
       onCommandSuggestionViewChange(null);
       return;
     }
     onCommandSuggestionViewChange({
       suggestions: commandSuggestions,
       activeIndex: activeCommandSuggestionIndex,
-      onApply: applyCommandSuggestion
+      onApply: applyCommandSuggestion,
+      onClose: () => {
+        resetCommandInput();
+        onCommandSuggestionViewChange(null);
+      }
     });
-  }, [activeCommandSuggestionIndex, commandSuggestions, onCommandSuggestionViewChange]);
+  }, [
+    activeCommandSuggestionIndex,
+    commandSuggestions,
+    onCommandSuggestionViewChange,
+    activeSession?.id,
+    activeSession?.connected,
+    activeSession?.status
+  ]);
 
   useEffect(() => () => onCommandSuggestionViewChange(null), [onCommandSuggestionViewChange]);
 
@@ -6865,6 +6929,14 @@ function TerminalSurface({
       onOutputRef.current(sessionId, output);
       if (sessionId === activeIdRef.current) {
         maybeLeaveRawCommandMode(output);
+      }
+      if (
+        output.includes("[SSH Connection closed") ||
+        output.includes("[SSH Connection lost") ||
+        output.includes("[SSH Connection error") ||
+        output.includes("[Process exited]")
+      ) {
+        window.handleSessionClosed?.(sessionId);
       }
       enqueueTerminalWrite(sessionId, output);
     };
