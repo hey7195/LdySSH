@@ -7442,10 +7442,12 @@ function TerminalCommandSidebar({
     const end = textarea.selectionEnd ?? newCmdStr.length;
 
     let insertedViaExec = false;
-    try {
-      insertedViaExec = document.execCommand("insertText", false, paramText);
-    } catch (e) {
-      insertedViaExec = false;
+    if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+      try {
+        insertedViaExec = document.execCommand("insertText", false, paramText);
+      } catch (e) {
+        insertedViaExec = false;
+      }
     }
 
     if (!insertedViaExec) {
@@ -7853,6 +7855,47 @@ function TerminalCommandSidebar({
                     rows={4}
                     value={newCmdStr}
                     onChange={(e) => setNewCmdStr(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
+                        e.preventDefault();
+                        const textarea = e.currentTarget;
+                        const pos = textarea.selectionStart ?? 0;
+                        const val = textarea.value;
+                        const lastNewline = val.lastIndexOf("\n", pos - 1);
+                        const lineStart = lastNewline === -1 ? 0 : lastNewline + 1;
+                        if (pos > lineStart) {
+                          textarea.setSelectionRange(lineStart, pos);
+                          let executed = false;
+                          if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+                            try {
+                              executed = document.execCommand("delete");
+                            } catch {}
+                          }
+                          if (!executed) {
+                            const updated = val.slice(0, lineStart) + val.slice(pos);
+                            setNewCmdStr(updated);
+                            requestAnimationFrame(() => {
+                              textarea.setSelectionRange(lineStart, lineStart);
+                            });
+                          }
+                        } else if (pos === lineStart && lineStart > 0) {
+                          textarea.setSelectionRange(lastNewline, pos);
+                          let executed = false;
+                          if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+                            try {
+                              executed = document.execCommand("delete");
+                            } catch {}
+                          }
+                          if (!executed) {
+                            const updated = val.slice(0, lastNewline) + val.slice(pos);
+                            setNewCmdStr(updated);
+                            requestAnimationFrame(() => {
+                              textarea.setSelectionRange(lastNewline, lastNewline);
+                            });
+                          }
+                        }
+                      }
+                    }}
                     placeholder="例如: top -b -n 1 | head -n 20"
                     className="w-full rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-emerald-400 font-mono text-[11px] leading-relaxed focus:border-emerald-500 focus:outline-none shadow-inner"
                   />
@@ -9776,6 +9819,49 @@ function CommandPanel({
                 const val = event.target.value;
                 if (editingCommand) setEditingCommand((c) => c ? { ...c, command: val } : c);
                 else setDraft((c) => ({ ...c, command: val }));
+              }}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
+                  e.preventDefault();
+                  const textarea = e.currentTarget;
+                  const pos = textarea.selectionStart ?? 0;
+                  const val = textarea.value;
+                  const lastNewline = val.lastIndexOf("\n", pos - 1);
+                  const lineStart = lastNewline === -1 ? 0 : lastNewline + 1;
+                  if (pos > lineStart) {
+                    textarea.setSelectionRange(lineStart, pos);
+                    let executed = false;
+                    if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+                      try {
+                        executed = document.execCommand("delete");
+                      } catch {}
+                    }
+                    if (!executed) {
+                      const updated = val.slice(0, lineStart) + val.slice(pos);
+                      if (editingCommand) setEditingCommand((c) => c ? { ...c, command: updated } : c);
+                      else setDraft((c) => ({ ...c, command: updated }));
+                      requestAnimationFrame(() => {
+                        textarea.setSelectionRange(lineStart, lineStart);
+                      });
+                    }
+                  } else if (pos === lineStart && lineStart > 0) {
+                    textarea.setSelectionRange(lastNewline, pos);
+                    let executed = false;
+                    if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+                      try {
+                        executed = document.execCommand("delete");
+                      } catch {}
+                    }
+                    if (!executed) {
+                      const updated = val.slice(0, lastNewline) + val.slice(pos);
+                      if (editingCommand) setEditingCommand((c) => c ? { ...c, command: updated } : c);
+                      else setDraft((c) => ({ ...c, command: updated }));
+                      requestAnimationFrame(() => {
+                        textarea.setSelectionRange(lastNewline, lastNewline);
+                      });
+                    }
+                  }
+                }
               }}
             />
 
