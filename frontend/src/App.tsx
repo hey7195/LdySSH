@@ -4366,66 +4366,129 @@ function Workbench({
   onImportFinalShellHosts?: () => void;
   finalShellHostCount?: number;
 }) {
+  const [showConfigMenu, setShowConfigMenu] = useState(false);
   const onlineCount = savedConnections.filter((connection) => getHostLiveStatus(connection, sessions) === "connected").length;
   const keyCount = savedConnections.filter((item) => item.keyPath).length;
   const groupCount = new Set(savedConnections.map((item) => item.group).filter(Boolean)).size;
 
   return (
-    <div className="h-full overflow-auto bg-[var(--app-bg)] px-10 py-7">
-      <div className="mx-auto max-w-6xl space-y-7">
+    <div
+      className="h-full overflow-auto bg-[var(--app-bg)] px-5 sm:px-8 py-5"
+      onClick={() => {
+        if (showConfigMenu) setShowConfigMenu(false);
+      }}
+    >
+      <div className="mx-auto max-w-7xl space-y-5">
         {/* 页头导航栏 */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-2 border-b border-[var(--app-line)]/50">
+          <div className="min-w-0 shrink-0">
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-extrabold tracking-tight text-[var(--app-text)]">主机工作台</h1>
-              <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-extrabold text-[var(--accent-text)] shadow-2xs">
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[var(--app-text)] whitespace-nowrap">主机工作台</h1>
+              <span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-xs font-extrabold text-[var(--accent-text)] shadow-2xs whitespace-nowrap">
                 {savedConnections.length} 台主机
               </span>
             </div>
-            <p className="mt-1.5 text-xs font-medium text-[var(--text-secondary)]">快速管理 SSH 会话、系统资源与 SFTP 文件传输管道。</p>
+            <p className="mt-1 text-xs font-medium text-[var(--text-secondary)] whitespace-nowrap">快速管理 SSH 会话、系统资源与 SFTP 文件传输管道。</p>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="relative w-64">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-muted)]" />
+
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap justify-start md:justify-end" onClick={(e) => e.stopPropagation()}>
+            <div className="relative w-44 sm:w-56">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
               <Input
-                className="h-10 pl-9 pr-14 text-xs rounded-full shadow-2xs"
+                className="h-8.5 pl-8 pr-12 text-xs rounded-full shadow-2xs"
                 value={query}
                 placeholder="搜索主机 / IP..."
                 onChange={(event) => onQueryChange(event.target.value)}
               />
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-[var(--fill-2)] px-2 py-0.5 font-mono text-[9px] font-bold text-[var(--app-muted)]">
+              <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full bg-[var(--fill-2)] px-1.5 py-0.2 font-mono text-[9px] font-bold text-[var(--app-muted)]">
                 Ctrl K
               </span>
             </div>
-            <Button variant="outline" size={32} className="rounded-full w-10 h-10 px-0 shadow-2xs" onClick={onRefresh} title="刷新主机状态">
-              <RefreshCw className="h-4 w-4" />
+
+            <Button variant="outline" size={32} className="rounded-full w-8.5 h-8.5 px-0 shadow-2xs shrink-0" onClick={onRefresh} title="刷新主机状态">
+              <RefreshCw className="h-3.5 w-3.5" />
             </Button>
-            <Button
-              variant="outline"
-              size={32}
-              className="rounded-full px-3.5 h-10 text-xs font-extrabold shadow-2xs gap-1.5 border-teal-500/40 text-teal-400 hover:bg-teal-500/15"
-              onClick={onImportFinalShellHosts}
-              title={finalShellHostCount ? `从本机 FinalShell 导入全部已保存连接 (已检测到 ${finalShellHostCount} 台)` : "从 FinalShell 导入主机连接"}
-            >
-              <Zap className="h-4 w-4 text-teal-400 animate-pulse" />
-              <span className="hidden md:inline">导FinalShell</span>
-              {(finalShellHostCount || 0) > 0 && (
-                <span className="rounded-full bg-teal-500/30 text-teal-200 px-1.5 py-0.2 font-mono text-[9px] font-extrabold">
-                  {finalShellHostCount}
-                </span>
+
+            {/* 导入 / 导出高级配置工具下拉菜单 */}
+            <div className="relative shrink-0">
+              <Button
+                variant="outline"
+                size={32}
+                className="rounded-full px-3 h-8.5 text-xs font-extrabold shadow-2xs gap-1.5 border-teal-500/40 text-teal-400 hover:bg-teal-500/15"
+                onClick={() => setShowConfigMenu((prev) => !prev)}
+                title="导入 / 导出与迁移工具"
+              >
+                <Sliders className="h-3.5 w-3.5 text-teal-400" />
+                <span>导入 / 导出</span>
+                {(finalShellHostCount || 0) > 0 && (
+                  <span className="rounded-full bg-teal-500/30 text-teal-200 px-1.5 py-0.2 font-mono text-[9px] font-extrabold">
+                    {finalShellHostCount}
+                  </span>
+                )}
+                <ChevronDown className={cn("h-3 w-3 opacity-60 transition-transform", showConfigMenu && "rotate-180")} />
+              </Button>
+
+              {showConfigMenu && (
+                <div className="absolute right-0 top-10 z-50 w-60 rounded-2xl border border-[var(--app-line)] bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+                  <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    配置迁移与导入
+                  </div>
+                  {(finalShellHostCount || 0) > 0 && (
+                    <button
+                      type="button"
+                      className="w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs bg-teal-500/15 text-teal-300 hover:bg-teal-500/25 border border-teal-500/30 transition-colors cursor-pointer mb-1 group"
+                      onClick={() => {
+                        setShowConfigMenu(false);
+                        onImportFinalShellHosts?.();
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-teal-400 shrink-0 animate-pulse" />
+                        <div>
+                          <div className="font-black text-xs text-teal-200">一键导入 FinalShell</div>
+                          <div className="text-[10px] text-teal-400/80">已检测到 {finalShellHostCount} 台主机</div>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black bg-teal-500 text-slate-950 rounded px-1.5 py-0.5">
+                        导入
+                      </span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setShowConfigMenu(false);
+                      onImportOpenSsh?.();
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-xs">导入 OpenSSH 配置</div>
+                      <div className="text-[10px] text-slate-400">解析本地 ~/.ssh/config</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer mt-0.5"
+                    onClick={() => {
+                      setShowConfigMenu(false);
+                      onExportOpenSsh?.();
+                    }}
+                  >
+                    <Upload className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-xs">导出 OpenSSH 配置</div>
+                      <div className="text-[10px] text-slate-400">导出为标准 config 文件</div>
+                    </div>
+                  </button>
+                </div>
               )}
-            </Button>
-            <Button variant="outline" size={32} className="rounded-full px-3.5 h-10 text-xs font-bold shadow-2xs gap-1.5" onClick={onImportOpenSsh} title="一键解析并导入本地 OpenSSH ~/.ssh/config">
-              <Download className="h-4 w-4 text-purple-400" />
-              <span className="hidden md:inline">导入配置</span>
-            </Button>
-            <Button variant="outline" size={32} className="rounded-full px-3.5 h-10 text-xs font-bold shadow-2xs gap-1.5" onClick={onExportOpenSsh} title="将全部已保存主机导出为标准 OpenSSH ~/.ssh/config 格式">
-              <Upload className="h-4 w-4 text-sky-400" />
-              <span className="hidden md:inline">导出配置</span>
-            </Button>
-            <Button onClick={onOpenDialog} size={32} className="rounded-full px-5 h-10 text-xs font-extrabold shadow-md bg-emerald-600 hover:bg-emerald-700 text-white">
-              <Plus className="h-4 w-4" />
-              新建连接
+            </div>
+
+            <Button onClick={onOpenDialog} size={32} className="rounded-full px-4 h-8.5 text-xs font-extrabold shadow-md bg-emerald-600 hover:bg-emerald-700 text-white shrink-0">
+              <Plus className="h-3.5 w-3.5" />
+              <span>新建连接</span>
             </Button>
           </div>
         </div>
