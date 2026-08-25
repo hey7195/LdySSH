@@ -2405,8 +2405,76 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                     retObj["error"] = "Failed to parse system stats";
                 }
             } else {
-                retObj["success"] = false;
-                retObj["error"] = "Session not found";
+                try {
+                    nlohmann::json stats = nlohmann::json::object();
+                    MEMORYSTATUSEX memStatus;
+                    memStatus.dwLength = sizeof(memStatus);
+                    if (GlobalMemoryStatusEx(&memStatus)) {
+                        stats["memory_usage"] = std::to_string(memStatus.dwMemoryLoad) + "%";
+                        DWORDLONG usedBytes = memStatus.ullTotalPhys - memStatus.ullAvailPhys;
+                        char buf[64];
+                        if (usedBytes >= 1073741824ULL) {
+                            sprintf_s(buf, "%.1fG", (double)usedBytes / (1024.0 * 1024.0 * 1024.0));
+                        } else {
+                            sprintf_s(buf, "%lluM", usedBytes / (1024 * 1024));
+                        }
+                        stats["memory_used"] = buf;
+                        if (memStatus.ullTotalPhys >= 1073741824ULL) {
+                            sprintf_s(buf, "%.1fG", (double)memStatus.ullTotalPhys / (1024.0 * 1024.0 * 1024.0));
+                        } else {
+                            sprintf_s(buf, "%lluM", memStatus.ullTotalPhys / (1024 * 1024));
+                        }
+                        stats["memory_total"] = buf;
+                    }
+                    ULARGE_INTEGER freeBytesAvail, totalBytes, totalFreeBytes;
+                    if (GetDiskFreeSpaceExW(L"C:\\", &freeBytesAvail, &totalBytes, &totalFreeBytes)) {
+                        DWORDLONG used = totalBytes.QuadPart - totalFreeBytes.QuadPart;
+                        double usage = (double)used / totalBytes.QuadPart * 100.0;
+                        char buf[64];
+                        sprintf_s(buf, "%.1f%%", usage);
+                        stats["disk_usage"] = buf;
+                        sprintf_s(buf, "%.1f GB", (double)used / (1024.0 * 1024.0 * 1024.0));
+                        stats["disk_used"] = buf;
+                        sprintf_s(buf, "%.1f GB", (double)totalBytes.QuadPart / (1024.0 * 1024.0 * 1024.0));
+                        stats["disk_total"] = buf;
+                    }
+                    static FILETIME prevIdleTime = {0, 0};
+                    static FILETIME prevKernelTime = {0, 0};
+                    static FILETIME prevUserTime = {0, 0};
+                    FILETIME idleTime, kernelTime, userTime;
+                    if (GetSystemTimes(&idleTime, &kernelTime, &userTime)) {
+                        ULARGE_INTEGER idle, kernel, user;
+                        idle.LowPart = idleTime.dwLowDateTime; idle.HighPart = idleTime.dwHighDateTime;
+                        kernel.LowPart = kernelTime.dwLowDateTime; kernel.HighPart = kernelTime.dwHighDateTime;
+                        user.LowPart = userTime.dwLowDateTime; user.HighPart = userTime.dwHighDateTime;
+                        ULARGE_INTEGER pIdle, pKernel, pUser;
+                        pIdle.LowPart = prevIdleTime.dwLowDateTime; pIdle.HighPart = prevIdleTime.dwHighDateTime;
+                        pKernel.LowPart = prevKernelTime.dwLowDateTime; pKernel.HighPart = prevKernelTime.dwHighDateTime;
+                        pUser.LowPart = prevUserTime.dwLowDateTime; pUser.HighPart = prevUserTime.dwHighDateTime;
+                        ULONGLONG diffSys = (kernel.QuadPart - pKernel.QuadPart) + (user.QuadPart - pUser.QuadPart);
+                        ULONGLONG diffIdle = idle.QuadPart - pIdle.QuadPart;
+                        double cpuUsage = 0.0;
+                        if (diffSys > 0 && pKernel.QuadPart > 0) {
+                            cpuUsage = (double)(diffSys - diffIdle) / diffSys * 100.0;
+                            if (cpuUsage < 0) cpuUsage = 0.0;
+                            if (cpuUsage > 100.0) cpuUsage = 100.0;
+                        }
+                        prevIdleTime = idleTime;
+                        prevKernelTime = kernelTime;
+                        prevUserTime = userTime;
+                        char buf[64];
+                        sprintf_s(buf, "%.1f%%", cpuUsage);
+                        stats["cpu_usage"] = buf;
+                    }
+                    stats["rx_speed"] = "-";
+                    stats["tx_speed"] = "-";
+                    stats["traffic_str"] = "本地终端";
+                    retObj["success"] = true;
+                    retObj["stats"] = stats;
+                } catch(...) {
+                    retObj["success"] = false;
+                    retObj["error"] = "Failed to query local stats";
+                }
             }
             response["status"] = "success";
             response["result"] = retObj.dump();

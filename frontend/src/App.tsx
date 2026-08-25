@@ -4666,6 +4666,56 @@ function TerminalWorkspace({
   const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
   const [dragOverTabIndex, setDragOverTabIndex] = useState<number | null>(null);
 
+  // 当前激活会话实时系统性能统计缓存 (CPU, 内存, 磁盘, 上下行实时流量)
+  const [liveStats, setLiveStats] = useState<Record<string, {
+    cpu_usage?: string;
+    memory_usage?: string;
+    memory_used?: string;
+    memory_total?: string;
+    disk_usage?: string;
+    disk_used?: string;
+    disk_total?: string;
+    rx_speed?: string;
+    tx_speed?: string;
+    traffic_str?: string;
+  }>>({});
+
+  useEffect(() => {
+    if (!activeSession || !visible) return;
+    if (activeSession.kind === "ssh" && !activeSession.connected) return;
+
+    let isMounted = true;
+    let isFetching = false;
+
+    const fetchLiveStats = async () => {
+      if (isFetching || !activeSession) return;
+      isFetching = true;
+      try {
+        const res = await nativeBridge.getSystemStats(activeSession.id);
+        if (isMounted && res && res.success && res.stats) {
+          setLiveStats((prev) => ({
+            ...prev,
+            [activeSession.id]: res.stats as any
+          }));
+        }
+      } catch {
+        // ignore
+      } finally {
+        isFetching = false;
+      }
+    };
+
+    void fetchLiveStats();
+    const intervalId = setInterval(() => {
+      void fetchLiveStats();
+    }, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [activeSession?.id, activeSession?.connected, visible]);
+
   // 右侧栏 100% 自由拖拽缩放宽度状态与折叠状态 (支持类似 FinalShell 任意拉宽)
   const [rightSidebarWidth, setRightSidebarWidth] = useState(420);
   const layoutMode = useAppStore((s) => s.layoutMode);
@@ -5468,25 +5518,49 @@ function TerminalWorkspace({
 
           <div className="h-3 w-px bg-[var(--app-line)] shrink-0 hidden sm:inline-block" />
 
-          {/* 默认常驻底部性能状态指示条 (CPU / 内存 / 磁盘 / 实时流量) - 免点击直接看 */}
-          <div className="flex items-center gap-2.5 font-mono text-[10px] bg-[var(--fill-1)] border border-[var(--app-line)] px-2 py-0.5 rounded-lg shadow-2xs shrink-0 select-none">
-            <span className="flex items-center gap-1 font-bold text-emerald-400">
-              <Cpu className="h-3 w-3" />
-              <span>CPU: 12%</span>
-            </span>
-            <span className="flex items-center gap-1 font-bold text-sky-400">
-              <Activity className="h-3 w-3" />
-              <span>内存: 2.1G (26%)</span>
-            </span>
-            <span className="flex items-center gap-1 font-bold text-purple-400">
-              <HardDrive className="h-3 w-3" />
-              <span>磁盘: 42%</span>
-            </span>
-            <span className="flex items-center gap-1 font-bold text-amber-400">
-              <ArrowRightLeft className="h-3 w-3" />
-              <span>↑1.2M ↓4.5M</span>
-            </span>
-          </div>
+          {/* 实时性能状态指示条 (CPU / 内存 / 磁盘 / 实时流量) - 随当前激活标签动态更新 */}
+          {(() => {
+            const currentStats = activeSession ? liveStats[activeSession.id] : undefined;
+            const isConn = activeSession ? (activeSession.kind === "local" ? true : activeSession.connected) : false;
+            const cpuText = currentStats?.cpu_usage ? `CPU: ${currentStats.cpu_usage}` : (isConn ? "CPU: ..." : "CPU: --");
+            const memText = currentStats?.memory_usage 
+              ? (currentStats.memory_used ? `内存: ${currentStats.memory_used} (${currentStats.memory_usage})` : `内存: ${currentStats.memory_usage}`)
+              : (isConn ? "内存: ..." : "内存: --");
+            const diskText = currentStats?.disk_usage ? `磁盘: ${currentStats.disk_usage}` : (isConn ? "磁盘: ..." : "磁盘: --");
+            const trafficText = currentStats?.traffic_str 
+              ? currentStats.traffic_str 
+              : (currentStats?.tx_speed || currentStats?.rx_speed 
+                  ? `↑${currentStats.tx_speed || "0B/s"} ↓${currentStats.rx_speed || "0B/s"}` 
+                  : (isConn ? "↑0B/s ↓0B/s" : "↑-- ↓--"));
+
+            return (
+              <div 
+                className="flex items-center gap-2.5 font-mono text-[10px] bg-[var(--fill-1)] border border-[var(--app-line)] px-2 py-0.5 rounded-lg shadow-2xs shrink-0 select-none transition-all"
+                title={
+                  activeSession
+                    ? `【${activeSession.title} 实时系统指标】\n• CPU 负载: ${currentStats?.cpu_usage || "采样中..."}\n• 内存占用: ${currentStats?.memory_used || "--"} / ${currentStats?.memory_total || "--"} (${currentStats?.memory_usage || "--"})\n• 根磁盘占用: ${currentStats?.disk_used || "--"} / ${currentStats?.disk_total || "--"} (${currentStats?.disk_usage || "--"})\n• 实时网络: ${currentStats?.traffic_str || "--"}`
+                    : "当前无活动会话"
+                }
+              >
+                <span className="flex items-center gap-1 font-bold text-emerald-400">
+                  <Cpu className="h-3 w-3" />
+                  <span>{cpuText}</span>
+                </span>
+                <span className="flex items-center gap-1 font-bold text-sky-400">
+                  <Activity className="h-3 w-3" />
+                  <span>{memText}</span>
+                </span>
+                <span className="flex items-center gap-1 font-bold text-purple-400">
+                  <HardDrive className="h-3 w-3" />
+                  <span>{diskText}</span>
+                </span>
+                <span className="flex items-center gap-1 font-bold text-amber-400">
+                  <ArrowRightLeft className="h-3 w-3" />
+                  <span>{trafficText}</span>
+                </span>
+              </div>
+            );
+          })()}
 
           <div className="h-3 w-px bg-[var(--app-line)] shrink-0 hidden lg:inline-block" />
 

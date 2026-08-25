@@ -1,4 +1,4 @@
-import{r as i,j as e}from"./react-vendor-DrROGObh.js";import{n as L}from"./index-DyPJMLV3.js";import{M as B,X as I,Q as T,U as g,R as E,u as H,z as A,e as U,a4 as z,aE as F}from"./icons-vIjovFHI.js";import"./xterm-D4-UIvWF.js";import"./radix-DJ7h6sHa.js";import"./vendor-ueV0y0RK.js";const J=({isOpen:j,onClose:y,savedConnections:N=[],adbDevices:w=[]})=>{const[l,p]=i.useState([]),[h,k]=i.useState(`# 批量巡检与状态汇总脚本
+import{r as i,j as e}from"./react-vendor-DrROGObh.js";import{n as L}from"./index-CsAOJVmW.js";import{M as B,X as I,Q as T,U as g,R as E,u as H,z as A,e as U,a4 as z,aE as F}from"./icons-vIjovFHI.js";import"./xterm-D4-UIvWF.js";import"./radix-DJ7h6sHa.js";import"./vendor-ueV0y0RK.js";const J=({isOpen:j,onClose:y,savedConnections:N=[],adbDevices:w=[]})=>{const[l,p]=i.useState([]),[h,k]=i.useState(`# 批量巡检与状态汇总脚本
 uname -a
 df -h / | grep -v Filesystem
 free -m | grep Mem

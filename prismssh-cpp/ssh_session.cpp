@@ -1845,6 +1845,18 @@ std::string SSHSession::GetSystemInfo() {
     return info.dump();
 }
 
+static std::string LocalFormatSpeed(double bytes_per_sec) {
+    char buf[64];
+    if (bytes_per_sec >= 1024.0 * 1024.0) {
+        sprintf_s(buf, "%.2f MB/s", bytes_per_sec / (1024.0 * 1024.0));
+    } else if (bytes_per_sec >= 1024.0) {
+        sprintf_s(buf, "%.1f KB/s", bytes_per_sec / 1024.0);
+    } else {
+        sprintf_s(buf, "%.0f B/s", bytes_per_sec);
+    }
+    return buf;
+}
+
 std::string SSHSession::GetSystemStats() {
     std::string os = DetectOS();
     nlohmann::json stats = nlohmann::json::object();
@@ -1885,8 +1897,18 @@ std::string SSHSession::GetSystemStats() {
             char buf[64];
             sprintf_s(buf, "%.1f%%", usage_percent);
             stats["memory_usage"] = buf;
-            stats["memory_used"] = std::to_string(used_kb / 1024) + " MB";
-            stats["memory_total"] = std::to_string(total_kb / 1024) + " MB";
+            if (used_kb >= 1048576) {
+                sprintf_s(buf, "%.1fG", (double)used_kb / 1048576.0);
+            } else {
+                sprintf_s(buf, "%lldM", used_kb / 1024);
+            }
+            stats["memory_used"] = buf;
+            if (total_kb >= 1048576) {
+                sprintf_s(buf, "%.1fG", (double)total_kb / 1048576.0);
+            } else {
+                sprintf_s(buf, "%lldM", total_kb / 1024);
+            }
+            stats["memory_total"] = buf;
         }
 
         std::string disk_info = ExecuteCommand("wmic logicaldisk where size!=0 get size,freespace,caption");
@@ -1912,10 +1934,65 @@ std::string SSHSession::GetSystemStats() {
                 break;
             }
         }
+
+        std::string ns_out = ExecuteCommand("netstat -e");
+        unsigned long long cur_rx = 0, cur_tx = 0;
+        auto ns_lines = SplitString(ns_out, '\n');
+        for (auto& line : ns_lines) {
+            std::string trimmed = TrimString(line);
+            if (trimmed.rfind("Bytes", 0) == 0 || trimmed.rfind("字节", 0) == 0) {
+                auto parts = SplitStringWhitespace(trimmed);
+                if (parts.size() >= 3) {
+                    try {
+                        cur_rx = std::stoull(parts[1]);
+                        cur_tx = std::stoull(parts[2]);
+                    } catch(...) {}
+                }
+                break;
+            }
+        }
+        auto now = std::chrono::steady_clock::now();
+        double seconds = 1.0;
+        if (lastNetTime.time_since_epoch().count() > 0) {
+            seconds = std::chrono::duration<double>(now - lastNetTime).count();
+            if (seconds <= 0) seconds = 1.0;
+        }
+        lastNetTime = now;
+        double down_speed = 0;
+        double up_speed = 0;
+        if (lastRxBytes.count("total") > 0 && cur_rx >= lastRxBytes["total"]) {
+            down_speed = (cur_rx - lastRxBytes["total"]) / seconds;
+        }
+        if (lastTxBytes.count("total") > 0 && cur_tx >= lastTxBytes["total"]) {
+            up_speed = (cur_tx - lastTxBytes["total"]) / seconds;
+        }
+        lastRxBytes["total"] = cur_rx;
+        lastTxBytes["total"] = cur_tx;
+        stats["rx_speed"] = LocalFormatSpeed(down_speed);
+        stats["tx_speed"] = LocalFormatSpeed(up_speed);
+        stats["traffic_str"] = "↑" + LocalFormatSpeed(up_speed) + " ↓" + LocalFormatSpeed(down_speed);
     } else if (os == "linux") {
-        std::string cpu_info = ExecuteCommand("cat /proc/stat | grep \"cpu \" | head -1");
-        if (!cpu_info.empty()) {
-            auto parts = SplitStringWhitespace(cpu_info);
+        std::string combined_out = ExecuteCommand("sh -c 'cat /proc/stat 2>/dev/null | head -1; echo \"===MEM===\"; cat /proc/meminfo 2>/dev/null | grep -E \"MemTotal|MemAvailable\"; echo \"===NET===\"; cat /proc/net/dev 2>/dev/null; echo \"===DISK===\"; df -h / 2>/dev/null | tail -1' 2>/dev/null");
+        
+        std::string cpu_section, mem_section, net_section, disk_section;
+        if (!combined_out.empty()) {
+            size_t mem_pos = combined_out.find("===MEM===");
+            size_t net_pos = combined_out.find("===NET===");
+            size_t disk_pos = combined_out.find("===DISK===");
+            
+            if (mem_pos != std::string::npos && net_pos != std::string::npos && disk_pos != std::string::npos) {
+                cpu_section = combined_out.substr(0, mem_pos);
+                mem_section = combined_out.substr(mem_pos + 9, net_pos - (mem_pos + 9));
+                net_section = combined_out.substr(net_pos + 9, disk_pos - (net_pos + 9));
+                disk_section = combined_out.substr(disk_pos + 10);
+            } else {
+                cpu_section = combined_out;
+            }
+        }
+        
+        // 1. CPU
+        if (!cpu_section.empty()) {
+            auto parts = SplitStringWhitespace(cpu_section);
             if (parts.size() >= 8) {
                 try {
                     long long idle = std::stoll(parts[4]);
@@ -1923,7 +2000,6 @@ std::string SSHSession::GetSystemStats() {
                     for (size_t i = 1; i < 8 && i < parts.size(); ++i) {
                         total += std::stoll(parts[i]);
                     }
-                    
                     double usage = 0.0;
                     if (lastCpuTotal > 0 && total > lastCpuTotal) {
                         long long diff_idle = idle - lastCpuIdle;
@@ -1934,37 +2010,21 @@ std::string SSHSession::GetSystemStats() {
                     } else {
                         usage = total > 0 ? (double)(total - idle) / total * 100.0 : 0.0;
                     }
-                    
                     lastCpuIdle = idle;
                     lastCpuTotal = total;
-                    
                     char buf[64];
                     sprintf_s(buf, "%.1f%%", usage);
                     stats["cpu_usage"] = buf;
                 } catch (...) {}
             }
         } else {
-            std::string vm_output = ExecuteCommand("vmstat 1 2 | tail -1");
-            auto parts = SplitStringWhitespace(vm_output);
-            if (parts.size() >= 15) {
-                try {
-                    double idle = std::stod(parts[parts.size() - 3]);
-                    double usage = 100.0 - idle;
-                    char buf[64];
-                    sprintf_s(buf, "%.1f%%", usage);
-                    stats["cpu_usage"] = buf;
-                } catch (...) {
-                    stats["cpu_usage"] = "0.0%";
-                }
-            } else {
-                stats["cpu_usage"] = "0.0%";
-            }
+            stats["cpu_usage"] = "0.0%";
         }
-
-        std::string mem_info = ExecuteCommand("cat /proc/meminfo | grep -E \"MemTotal|MemAvailable\"");
+        
+        // 2. Memory
         long long mem_total = 0;
         long long mem_available = 0;
-        auto mem_lines = SplitString(mem_info, '\n');
+        auto mem_lines = SplitString(mem_section, '\n');
         for (auto& line : mem_lines) {
             line = TrimString(line);
             auto parts = SplitStringWhitespace(line);
@@ -1982,13 +2042,64 @@ std::string SSHSession::GetSystemStats() {
             char buf[64];
             sprintf_s(buf, "%.1f%%", usage_percent);
             stats["memory_usage"] = buf;
-            stats["memory_used"] = std::to_string(mem_used / (1024 * 1024)) + " MB";
-            stats["memory_total"] = std::to_string(mem_total / (1024 * 1024)) + " MB";
+            if (mem_used >= 1073741824) {
+                sprintf_s(buf, "%.1fG", (double)mem_used / (1024.0 * 1024.0 * 1024.0));
+            } else {
+                sprintf_s(buf, "%lldM", mem_used / (1024 * 1024));
+            }
+            stats["memory_used"] = buf;
+            if (mem_total >= 1073741824) {
+                sprintf_s(buf, "%.1fG", (double)mem_total / (1024.0 * 1024.0 * 1024.0));
+            } else {
+                sprintf_s(buf, "%lldM", mem_total / (1024 * 1024));
+            }
+            stats["memory_total"] = buf;
         }
-
-        std::string disk_info = ExecuteCommand("df -h / | tail -1");
-        if (!disk_info.empty()) {
-            auto parts = SplitStringWhitespace(disk_info);
+        
+        // 3. Network Traffic & Speed
+        unsigned long long cur_rx = 0, cur_tx = 0;
+        auto dev_lines = SplitString(net_section, '\n');
+        for (auto& line : dev_lines) {
+            std::string trimmed = TrimString(line);
+            size_t colon_pos = trimmed.find(":");
+            if (colon_pos != std::string::npos) {
+                std::string iface_name = TrimString(trimmed.substr(0, colon_pos));
+                if (iface_name == "lo") continue;
+                std::string traffic_data = trimmed.substr(colon_pos + 1);
+                auto parts = SplitStringWhitespace(traffic_data);
+                if (parts.size() >= 9) {
+                    try {
+                        cur_rx += std::stoull(parts[0]);
+                        cur_tx += std::stoull(parts[8]);
+                    } catch (...) {}
+                }
+            }
+        }
+        auto now = std::chrono::steady_clock::now();
+        double seconds = 1.0;
+        if (lastNetTime.time_since_epoch().count() > 0) {
+            seconds = std::chrono::duration<double>(now - lastNetTime).count();
+            if (seconds <= 0) seconds = 1.0;
+        }
+        lastNetTime = now;
+        double down_speed = 0;
+        double up_speed = 0;
+        if (lastRxBytes.count("total") > 0 && cur_rx >= lastRxBytes["total"]) {
+            down_speed = (cur_rx - lastRxBytes["total"]) / seconds;
+        }
+        if (lastTxBytes.count("total") > 0 && cur_tx >= lastTxBytes["total"]) {
+            up_speed = (cur_tx - lastTxBytes["total"]) / seconds;
+        }
+        lastRxBytes["total"] = cur_rx;
+        lastTxBytes["total"] = cur_tx;
+        stats["rx_speed"] = LocalFormatSpeed(down_speed);
+        stats["tx_speed"] = LocalFormatSpeed(up_speed);
+        stats["traffic_str"] = "↑" + LocalFormatSpeed(up_speed) + " ↓" + LocalFormatSpeed(down_speed);
+        
+        // 4. Disk Usage
+        disk_section = TrimString(disk_section);
+        if (!disk_section.empty()) {
+            auto parts = SplitStringWhitespace(disk_section);
             if (parts.size() >= 6) {
                 stats["disk_total"] = parts[1];
                 stats["disk_used"] = parts[2];
@@ -2109,18 +2220,6 @@ std::string SSHSession::GetDiskUsage() {
         }
     }
     return disk_array.dump();
-}
-
-static std::string LocalFormatSpeed(double bytes_per_sec) {
-    char buf[64];
-    if (bytes_per_sec >= 1024.0 * 1024.0) {
-        sprintf_s(buf, "%.2f MB/s", bytes_per_sec / (1024.0 * 1024.0));
-    } else if (bytes_per_sec >= 1024.0) {
-        sprintf_s(buf, "%.1f KB/s", bytes_per_sec / 1024.0);
-    } else {
-        sprintf_s(buf, "%.0f B/s", bytes_per_sec);
-    }
-    return buf;
 }
 
 std::string SSHSession::GetNetworkInfo() {
