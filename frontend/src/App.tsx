@@ -4995,7 +4995,7 @@ function TerminalWorkspace({
                       liveStats[session.id]?.cpu_usage && (
                         <span
                           className={cn(
-                            "rounded font-mono font-bold text-[9px] px-1 py-0 border shrink-0 transition-colors",
+                            "rounded font-mono font-bold text-[9px] px-1.5 py-0.5 border shrink-0 transition-colors",
                             (parseFloat(liveStats[session.id].cpu_usage!) || 0) > 75
                               ? "bg-rose-500/25 text-rose-200 border-rose-500/50"
                               : (parseFloat(liveStats[session.id].cpu_usage!) || 0) > 40
@@ -5004,9 +5004,9 @@ function TerminalWorkspace({
                                   ? "bg-black/25 text-white border-white/20"
                                   : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
                           )}
-                          title={`【${session.title} 动态负载】\n• CPU: ${liveStats[session.id].cpu_usage}\n• 内存: ${liveStats[session.id].memory_used || "--"} (${liveStats[session.id].memory_usage || "--"})\n• 磁盘: ${liveStats[session.id].disk_usage || "--"}`}
+                          title={`【${session.title} 动态负载】\n• CPU 占用: ${liveStats[session.id].cpu_usage}\n• 内存占用: ${liveStats[session.id].memory_used || "--"} (${liveStats[session.id].memory_usage || "--"})\n• 根磁盘占用: ${liveStats[session.id].disk_usage || "--"}\n• 实时网络: ${liveStats[session.id].traffic_str || "--"}`}
                         >
-                          {liveStats[session.id].cpu_usage}
+                          CPU: {liveStats[session.id].cpu_usage}
                         </span>
                       )
                     )}
@@ -5519,30 +5519,6 @@ function TerminalWorkspace({
             <span>{activeSession ? `${activeSession.kind === "ssh" ? "SSH" : "Local"}: ${activeSession.title}` : "无活动终端"}</span>
             {renderEnvironmentBadge(activeSession?.connectParams?.environment)}
           </span>
-
-          {/* 实时延迟 Ping 指示 */}
-          {activeSession?.kind === "ssh" && activeSession.connected && (
-            <span className="flex items-center gap-1 font-mono text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded shadow-2xs shrink-0">
-              <Zap className="h-2.5 w-2.5" />
-              <span>24ms</span>
-            </span>
-          )}
-
-          {/* 主机 IP 一键复制芯片 */}
-          {activeSession?.connectParams?.hostname && (
-            <button
-              type="button"
-              onClick={() => {
-                void nativeBridge.clipboardCopy(activeSession.connectParams!.hostname);
-              }}
-              className="flex items-center gap-1 font-mono text-[10px] text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/25 px-1.5 py-0.2 rounded shadow-2xs shrink-0 cursor-pointer transition-colors"
-              title={`点击复制 IP: ${activeSession.connectParams.hostname}`}
-            >
-              <span className="text-[var(--app-muted)] font-bold">IP:</span>
-              <span className="font-extrabold">{activeSession.connectParams.hostname}</span>
-              <Copy className="h-2.5 w-2.5 text-sky-400 ml-0.5" />
-            </button>
-          )}
 
           {/* SSH 断线重连醒目标识与快捷重连按钮 */}
           {activeSession?.kind === "ssh" && !activeSession.connected && activeSession.connectParams && (
