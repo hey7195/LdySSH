@@ -32,6 +32,7 @@ import {
   FolderInput,
   FolderOpen,
   FolderPlus,
+  Gauge,
   Grid2X2,
   Globe2,
   GripHorizontal,
@@ -4666,9 +4667,12 @@ function TerminalWorkspace({
   const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
   const [dragOverTabIndex, setDragOverTabIndex] = useState<number | null>(null);
 
-  // 当前激活会话实时系统性能统计缓存 (CPU, 内存, 磁盘, 上下行实时流量)
+  // 当前激活会话实时系统性能统计缓存 (CPU, 内存, 磁盘, 上下行实时流量, 系统负载, 运行时间)
   const [liveStats, setLiveStats] = useState<Record<string, {
     cpu_usage?: string;
+    load_avg?: string;
+    load_avg_str?: string;
+    uptime?: string;
     memory_usage?: string;
     memory_used?: string;
     memory_total?: string;
@@ -5541,11 +5545,14 @@ function TerminalWorkspace({
 
           <div className="h-3 w-px bg-[var(--app-line)] shrink-0 hidden sm:inline-block" />
 
-          {/* 实时性能状态指示条 (CPU / 内存 / 磁盘 / 实时流量) - 随当前激活标签动态更新 */}
+          {/* 实时性能状态指示条 (CPU / 负载 / 内存 / 磁盘 / 实时流量) - 随当前激活标签动态更新 */}
           {(() => {
             const currentStats = activeSession ? liveStats[activeSession.id] : undefined;
             const isConn = activeSession ? (activeSession.kind === "local" ? true : activeSession.connected) : false;
             const cpuText = currentStats?.cpu_usage ? `CPU: ${currentStats.cpu_usage}` : (isConn ? "CPU: ..." : "CPU: --");
+            const loadText = currentStats?.load_avg && currentStats.load_avg !== "-" 
+              ? `负载: ${currentStats.load_avg}` 
+              : null;
             const memText = currentStats?.memory_usage 
               ? (currentStats.memory_used ? `内存: ${currentStats.memory_used} (${currentStats.memory_usage})` : `内存: ${currentStats.memory_usage}`)
               : (isConn ? "内存: ..." : "内存: --");
@@ -5561,7 +5568,7 @@ function TerminalWorkspace({
                 className="flex items-center gap-2.5 font-mono text-[10px] bg-[var(--fill-1)] border border-[var(--app-line)] px-2 py-0.5 rounded-lg shadow-2xs shrink-0 select-none transition-all"
                 title={
                   activeSession
-                    ? `【${activeSession.title} 实时系统指标】\n• CPU 负载: ${currentStats?.cpu_usage || "采样中..."}\n• 内存占用: ${currentStats?.memory_used || "--"} / ${currentStats?.memory_total || "--"} (${currentStats?.memory_usage || "--"})\n• 根磁盘占用: ${currentStats?.disk_used || "--"} / ${currentStats?.disk_total || "--"} (${currentStats?.disk_usage || "--"})\n• 实时网络: ${currentStats?.traffic_str || "--"}`
+                    ? `【${activeSession.title} 实时系统指标】\n• 运行时间: ${currentStats?.uptime || "--"}\n• 动态负载 (uptime): ${currentStats?.load_avg_str || (currentStats?.load_avg ? `load average: ${currentStats.load_avg}` : "--")}\n• CPU 负载: ${currentStats?.cpu_usage || "采样中..."}\n• 内存占用: ${currentStats?.memory_used || "--"} / ${currentStats?.memory_total || "--"} (${currentStats?.memory_usage || "--"})\n• 根磁盘占用: ${currentStats?.disk_used || "--"} / ${currentStats?.disk_total || "--"} (${currentStats?.disk_usage || "--"})\n• 实时网络: ${currentStats?.traffic_str || "--"}`
                     : "当前无活动会话"
                 }
               >
@@ -5569,6 +5576,12 @@ function TerminalWorkspace({
                   <Cpu className="h-3 w-3" />
                   <span>{cpuText}</span>
                 </span>
+                {loadText && (
+                  <span className="flex items-center gap-1 font-bold text-amber-400">
+                    <Gauge className="h-3 w-3" />
+                    <span>{loadText}</span>
+                  </span>
+                )}
                 <span className="flex items-center gap-1 font-bold text-sky-400">
                   <Activity className="h-3 w-3" />
                   <span>{memText}</span>
@@ -5577,7 +5590,7 @@ function TerminalWorkspace({
                   <HardDrive className="h-3 w-3" />
                   <span>{diskText}</span>
                 </span>
-                <span className="flex items-center gap-1 font-bold text-amber-400">
+                <span className="flex items-center gap-1 font-bold text-teal-400">
                   <ArrowRightLeft className="h-3 w-3" />
                   <span>{trafficText}</span>
                 </span>

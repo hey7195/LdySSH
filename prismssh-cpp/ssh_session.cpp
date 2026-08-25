@@ -1972,19 +1972,25 @@ std::string SSHSession::GetSystemStats() {
         stats["tx_speed"] = LocalFormatSpeed(up_speed);
         stats["traffic_str"] = "↑" + LocalFormatSpeed(up_speed) + " ↓" + LocalFormatSpeed(down_speed);
     } else if (os == "linux") {
-        std::string combined_out = ExecuteCommand("sh -c 'cat /proc/stat 2>/dev/null | head -1; echo \"===MEM===\"; cat /proc/meminfo 2>/dev/null | grep -E \"MemTotal|MemAvailable\"; echo \"===NET===\"; cat /proc/net/dev 2>/dev/null; echo \"===DISK===\"; df -h / 2>/dev/null | tail -1' 2>/dev/null");
+        std::string combined_out = ExecuteCommand("sh -c 'cat /proc/stat 2>/dev/null | head -1; echo \"===MEM===\"; cat /proc/meminfo 2>/dev/null | grep -E \"MemTotal|MemAvailable\"; echo \"===NET===\"; cat /proc/net/dev 2>/dev/null; echo \"===DISK===\"; df -h / 2>/dev/null | tail -1; echo \"===UPTIME===\"; uptime 2>/dev/null || cat /proc/loadavg 2>/dev/null' 2>/dev/null");
         
-        std::string cpu_section, mem_section, net_section, disk_section;
+        std::string cpu_section, mem_section, net_section, disk_section, uptime_section;
         if (!combined_out.empty()) {
             size_t mem_pos = combined_out.find("===MEM===");
             size_t net_pos = combined_out.find("===NET===");
             size_t disk_pos = combined_out.find("===DISK===");
+            size_t uptime_pos = combined_out.find("===UPTIME===");
             
             if (mem_pos != std::string::npos && net_pos != std::string::npos && disk_pos != std::string::npos) {
                 cpu_section = combined_out.substr(0, mem_pos);
                 mem_section = combined_out.substr(mem_pos + 9, net_pos - (mem_pos + 9));
                 net_section = combined_out.substr(net_pos + 9, disk_pos - (net_pos + 9));
-                disk_section = combined_out.substr(disk_pos + 10);
+                if (uptime_pos != std::string::npos) {
+                    disk_section = combined_out.substr(disk_pos + 10, uptime_pos - (disk_pos + 10));
+                    uptime_section = combined_out.substr(uptime_pos + 12);
+                } else {
+                    disk_section = combined_out.substr(disk_pos + 10);
+                }
             } else {
                 cpu_section = combined_out;
             }
@@ -2104,6 +2110,38 @@ std::string SSHSession::GetSystemStats() {
                 stats["disk_total"] = parts[1];
                 stats["disk_used"] = parts[2];
                 stats["disk_usage"] = parts[4];
+            }
+        }
+
+        // 5. Uptime & Load Average
+        uptime_section = TrimString(uptime_section);
+        if (!uptime_section.empty()) {
+            stats["uptime_raw"] = uptime_section;
+            size_t load_pos = uptime_section.find("load average:");
+            if (load_pos == std::string::npos) {
+                load_pos = uptime_section.find("load averages:");
+            }
+            if (load_pos != std::string::npos) {
+                std::string loads = TrimString(uptime_section.substr(load_pos + 13));
+                stats["load_avg"] = loads;
+                stats["load_avg_str"] = "load average: " + loads;
+            } else {
+                auto parts = SplitStringWhitespace(uptime_section);
+                if (parts.size() >= 3) {
+                    std::string loads = parts[0] + ", " + parts[1] + ", " + parts[2];
+                    stats["load_avg"] = loads;
+                    stats["load_avg_str"] = "load average: " + loads;
+                }
+            }
+            size_t up_pos = uptime_section.find("up ");
+            if (up_pos != std::string::npos) {
+                size_t comma_users = uptime_section.find("user", up_pos);
+                if (comma_users != std::string::npos) {
+                    size_t last_comma = uptime_section.rfind(',', comma_users);
+                    if (last_comma != std::string::npos && last_comma > up_pos) {
+                        stats["uptime"] = TrimString(uptime_section.substr(up_pos + 3, last_comma - (up_pos + 3)));
+                    }
+                }
             }
         }
     } else {

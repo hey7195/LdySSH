@@ -2466,6 +2466,20 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                         sprintf_s(buf, "%.1f%%", cpuUsage);
                         stats["cpu_usage"] = buf;
                     }
+                    DWORD uptimeMs = GetTickCount();
+                    DWORD upSec = uptimeMs / 1000;
+                    DWORD upDays = upSec / 86400;
+                    DWORD upHours = (upSec % 86400) / 3600;
+                    DWORD upMins = (upSec % 3600) / 60;
+                    char upBuf[64];
+                    if (upDays > 0) {
+                        sprintf_s(upBuf, "up %u days, %02u:%02u", upDays, upHours, upMins);
+                    } else {
+                        sprintf_s(upBuf, "up %02u:%02u", upHours, upMins);
+                    }
+                    stats["uptime"] = upBuf;
+                    stats["load_avg"] = "-";
+                    stats["load_avg_str"] = "load average: -";
                     stats["rx_speed"] = "-";
                     stats["tx_speed"] = "-";
                     stats["traffic_str"] = "本地终端";
