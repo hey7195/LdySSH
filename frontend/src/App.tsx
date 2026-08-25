@@ -3631,30 +3631,35 @@ function HostSidebar({
     >
       <div className="flex h-full flex-col">
         <div className="p-2.5 border-b border-[var(--app-line)] space-y-2">
-          {/* Row 1: 新建连接按钮 + ⚡ 一键导FinalShell 按钮 */}
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={onOpenDialog}
-              title="新建主机连接"
-              className="flex flex-1 h-8.5 items-center justify-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-slate-950 text-xs font-black shadow-md shadow-emerald-950/60 border border-emerald-300/40 transition-all cursor-pointer whitespace-nowrap tracking-wide"
-            >
-              <Plus className="h-4 w-4 stroke-[3]" />
-              <span>新建 SSH 连接</span>
-            </button>
+          {/* Row 1: 全宽新建连接按钮 */}
+          <button
+            onClick={onOpenDialog}
+            title="新建主机连接"
+            className="flex w-full h-8.5 items-center justify-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-slate-950 text-xs font-black shadow-md shadow-emerald-950/60 border border-emerald-300/40 transition-all cursor-pointer whitespace-nowrap tracking-wide"
+          >
+            <Plus className="h-4 w-4 stroke-[3]" />
+            <span>新建 SSH 连接</span>
+          </button>
+
+          {/* 当检测到本机 FinalShell 时，显示专属一键导入胶囊卡片 */}
+          {(finalShellHostCount || 0) > 0 && (
             <button
               onClick={onImportFinalShellHosts}
-              title={finalShellHostCount ? `从本机 FinalShell 导入全部已保存连接 (已检测到 ${finalShellHostCount} 台)` : "从 FinalShell 导入主机连接"}
-              className="flex items-center justify-center gap-1 h-8.5 px-2.5 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 text-teal-400 border border-teal-500/40 hover:border-teal-400/70 active:scale-[0.98] text-[11px] font-extrabold transition-all cursor-pointer whitespace-nowrap shadow-sm"
+              className="w-full flex items-center justify-between rounded-xl px-2.5 py-1.5 bg-gradient-to-r from-teal-500/20 via-emerald-500/15 to-transparent border border-teal-500/40 text-teal-400 hover:border-teal-400/70 hover:bg-teal-500/25 transition-all text-left group shadow-2xs cursor-pointer"
+              title={`检测到本机 FinalShell 连接 (${finalShellHostCount} 台)，点击一键无感导入并自动解密全部密码`}
             >
-              <Zap className="h-3.5 w-3.5 text-teal-400 shrink-0 animate-pulse" />
-              <span>导FinalShell</span>
-              {(finalShellHostCount || 0) > 0 && (
-                <span className="ml-0.5 rounded-full bg-teal-500/30 text-teal-200 px-1.5 py-0.2 font-mono text-[9px] font-extrabold border border-teal-400/40">
-                  {finalShellHostCount}
-                </span>
-              )}
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Zap className="h-3.5 w-3.5 text-teal-400 shrink-0 animate-pulse" />
+                <div className="truncate">
+                  <div className="text-[11px] font-black leading-tight text-teal-300">一键导入 FinalShell</div>
+                  <div className="text-[9px] text-teal-400/80 font-mono">已发现 {finalShellHostCount} 台服务器</div>
+                </div>
+              </div>
+              <span className="text-[10px] font-black bg-teal-500 text-slate-950 rounded-md px-2 py-0.5 shadow-2xs group-hover:scale-105 transition-transform shrink-0">
+                导入
+              </span>
             </button>
-          </div>
+          )}
 
           {/* Row 1.5: ⚡ 快速直连输入栏 */}
           <form
