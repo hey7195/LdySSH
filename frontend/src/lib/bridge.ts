@@ -83,6 +83,23 @@ export const nativeBridge = {
       folderCount?: number;
     }>("detect_finalshell_commands", { success: false, detected: false });
   },
+  detectFinalShellHosts() {
+    return callNative<{
+      success: boolean;
+      detected: boolean;
+      connDir?: string;
+      hostCount?: number;
+      hosts?: SavedConnection[];
+    }>("detect_finalshell_hosts", { success: false, detected: false, hosts: [] });
+  },
+  importFinalShellHosts(connDir = "") {
+    return callNative<{
+      success: boolean;
+      imported: number;
+      hosts?: SavedConnection[];
+      error?: string;
+    }>("import_finalshell_hosts", { success: false, imported: 0, hosts: [] }, connDir);
+  },
   saveCommandLibrary(folders: CommandFolder[]) {
     return callNative<{ success: boolean; error?: string }>("save_command_library", { success: false }, JSON.stringify(folders));
   },

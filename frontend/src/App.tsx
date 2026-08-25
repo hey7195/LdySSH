@@ -1511,6 +1511,42 @@ export function App() {
     { id: "preset_ubuntu", name: "Ubuntu Web集群模板", port: 22, username: "ubuntu", defaultRemotePath: "/var/www" }
   ]);
 
+  // FinalShell SSH 连接自动感知状态
+  const [finalShellHostCount, setFinalShellHostCount] = useState(0);
+  const [finalShellConnDir, setFinalShellConnDir] = useState("");
+
+  useEffect(() => {
+    nativeBridge.detectFinalShellHosts().then((res) => {
+      if (res.detected && (res.hostCount || 0) > 0) {
+        setFinalShellHostCount(res.hostCount || 0);
+        setFinalShellConnDir(res.connDir || "");
+      }
+    }).catch(() => {});
+  }, []);
+
+  const handleImportFinalShellHosts = async () => {
+    try {
+      const res = await nativeBridge.importFinalShellHosts(finalShellConnDir);
+      if (res.success && res.imported > 0) {
+        await refreshConnections();
+        alert(`🎉 成功从 FinalShell 导入 ${res.imported} 台主机连接（密码已自动解密并安全保存）！`);
+        return;
+      }
+      const selected = await nativeBridge.showOpenFolderDialog("选择 FinalShell 的 conn 连接配置目录");
+      if (selected.folderPath) {
+        const manualRes = await nativeBridge.importFinalShellHosts(selected.folderPath);
+        if (manualRes.success && manualRes.imported > 0) {
+          await refreshConnections();
+          alert(`🎉 成功从 FinalShell 导入 ${manualRes.imported} 台主机连接！`);
+        } else {
+          alert("未在该目录中找到有效的 FinalShell 连接配置。");
+        }
+      }
+    } catch (err: any) {
+      alert(`导入 FinalShell 主机失败: ${err?.message || "未知异常"}`);
+    }
+  };
+
   // OpenSSH ~/.ssh/config 导入导出状态
   const [openSshModalOpen, setOpenSshModalOpen] = useState(false);
   const [openSshConfigText, setOpenSshConfigText] = useState("");
@@ -2882,6 +2918,8 @@ export function App() {
             onRenameGroup={renameGroup}
             onDeleteGroup={deleteGroup}
             onMoveHostToGroup={moveHostToGroup}
+            onImportFinalShellHosts={handleImportFinalShellHosts}
+            finalShellHostCount={finalShellHostCount}
           />
         </div>
         <main className="min-w-0 overflow-hidden">
@@ -2897,6 +2935,8 @@ export function App() {
               onDeleteConnection={requestDeleteSavedConnection}
               onImportOpenSsh={() => setOpenSshModalOpen(true)}
               onExportOpenSsh={handleExportOpenSsh}
+              onImportFinalShellHosts={handleImportFinalShellHosts}
+              finalShellHostCount={finalShellHostCount}
             />
           )}
           {activeTool === "cmd" && (
@@ -3464,7 +3504,9 @@ function HostSidebar({
   onCreateGroup,
   onRenameGroup,
   onDeleteGroup,
-  onMoveHostToGroup
+  onMoveHostToGroup,
+  onImportFinalShellHosts,
+  finalShellHostCount
 }: {
   query: string;
   activeTool: Tool;
@@ -3492,6 +3534,8 @@ function HostSidebar({
   onRenameGroup?: (oldName: string, newName: string) => void;
   onDeleteGroup?: (groupName: string) => void;
   onMoveHostToGroup?: (connection: SavedConnection, targetGroup: string) => void;
+  onImportFinalShellHosts?: () => void;
+  finalShellHostCount?: number;
 }) {
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [showTagMenu, setShowTagMenu] = useState(false);
@@ -3587,15 +3631,30 @@ function HostSidebar({
     >
       <div className="flex h-full flex-col">
         <div className="p-2.5 border-b border-[var(--app-line)] space-y-2">
-          {/* Row 1: 全宽新建连接按钮 */}
-          <button
-            onClick={onOpenDialog}
-            title="新建主机连接"
-            className="flex w-full h-8.5 items-center justify-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-slate-950 text-xs font-black shadow-md shadow-emerald-950/60 border border-emerald-300/40 transition-all cursor-pointer whitespace-nowrap tracking-wide"
-          >
-            <Plus className="h-4 w-4 stroke-[3]" />
-            <span>新建 SSH 连接</span>
-          </button>
+          {/* Row 1: 新建连接按钮 + ⚡ 一键导FinalShell 按钮 */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onOpenDialog}
+              title="新建主机连接"
+              className="flex flex-1 h-8.5 items-center justify-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-slate-950 text-xs font-black shadow-md shadow-emerald-950/60 border border-emerald-300/40 transition-all cursor-pointer whitespace-nowrap tracking-wide"
+            >
+              <Plus className="h-4 w-4 stroke-[3]" />
+              <span>新建 SSH 连接</span>
+            </button>
+            <button
+              onClick={onImportFinalShellHosts}
+              title={finalShellHostCount ? `从本机 FinalShell 导入全部已保存连接 (已检测到 ${finalShellHostCount} 台)` : "从 FinalShell 导入主机连接"}
+              className="flex items-center justify-center gap-1 h-8.5 px-2.5 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 text-teal-400 border border-teal-500/40 hover:border-teal-400/70 active:scale-[0.98] text-[11px] font-extrabold transition-all cursor-pointer whitespace-nowrap shadow-sm"
+            >
+              <Zap className="h-3.5 w-3.5 text-teal-400 shrink-0 animate-pulse" />
+              <span>导FinalShell</span>
+              {(finalShellHostCount || 0) > 0 && (
+                <span className="ml-0.5 rounded-full bg-teal-500/30 text-teal-200 px-1.5 py-0.2 font-mono text-[9px] font-extrabold border border-teal-400/40">
+                  {finalShellHostCount}
+                </span>
+              )}
+            </button>
+          </div>
 
           {/* Row 1.5: ⚡ 快速直连输入栏 */}
           <form
@@ -4283,7 +4342,9 @@ function Workbench({
   onDeleteConnection,
   onCreateLocal,
   onImportOpenSsh,
-  onExportOpenSsh
+  onExportOpenSsh,
+  onImportFinalShellHosts,
+  finalShellHostCount
 }: {
   savedConnections: SavedConnection[];
   sessions?: SessionTab[];
@@ -4297,6 +4358,8 @@ function Workbench({
   onCreateLocal?: () => void;
   onImportOpenSsh?: () => void;
   onExportOpenSsh?: () => void;
+  onImportFinalShellHosts?: () => void;
+  finalShellHostCount?: number;
 }) {
   const onlineCount = savedConnections.filter((connection) => getHostLiveStatus(connection, sessions) === "connected").length;
   const keyCount = savedConnections.filter((item) => item.keyPath).length;
@@ -4331,6 +4394,21 @@ function Workbench({
             </div>
             <Button variant="outline" size={32} className="rounded-full w-10 h-10 px-0 shadow-2xs" onClick={onRefresh} title="刷新主机状态">
               <RefreshCw className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size={32}
+              className="rounded-full px-3.5 h-10 text-xs font-extrabold shadow-2xs gap-1.5 border-teal-500/40 text-teal-400 hover:bg-teal-500/15"
+              onClick={onImportFinalShellHosts}
+              title={finalShellHostCount ? `从本机 FinalShell 导入全部已保存连接 (已检测到 ${finalShellHostCount} 台)` : "从 FinalShell 导入主机连接"}
+            >
+              <Zap className="h-4 w-4 text-teal-400 animate-pulse" />
+              <span className="hidden md:inline">导FinalShell</span>
+              {(finalShellHostCount || 0) > 0 && (
+                <span className="rounded-full bg-teal-500/30 text-teal-200 px-1.5 py-0.2 font-mono text-[9px] font-extrabold">
+                  {finalShellHostCount}
+                </span>
+              )}
             </Button>
             <Button variant="outline" size={32} className="rounded-full px-3.5 h-10 text-xs font-bold shadow-2xs gap-1.5" onClick={onImportOpenSsh} title="一键解析并导入本地 OpenSSH ~/.ssh/config">
               <Download className="h-4 w-4 text-purple-400" />

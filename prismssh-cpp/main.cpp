@@ -1596,6 +1596,182 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
+        else if (action == "detect_finalshell_hosts") {
+            nlohmann::json retObj;
+            retObj["success"] = false;
+            retObj["detected"] = false;
+            retObj["hosts"] = nlohmann::json::array();
+
+            std::vector<std::wstring> candidateDirs;
+            candidateDirs.push_back(L"D:\\finalshell\\conn");
+            candidateDirs.push_back(L"C:\\finalshell\\conn");
+            candidateDirs.push_back(L"E:\\finalshell\\conn");
+            candidateDirs.push_back(L"F:\\finalshell\\conn");
+
+            WCHAR appData[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                candidateDirs.push_back(std::wstring(appData) + L"\\finalshell\\conn");
+                candidateDirs.push_back(std::wstring(appData) + L"\\FinalShell\\conn");
+            }
+            WCHAR userProfile[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                candidateDirs.push_back(std::wstring(userProfile) + L"\\.finalshell\\conn");
+                candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Roaming\\finalshell\\conn");
+                candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Roaming\\FinalShell\\conn");
+                candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Local\\finalshell\\conn");
+                candidateDirs.push_back(std::wstring(userProfile) + L"\\Desktop\\FinalShell\\conn");
+            }
+
+            for (const auto& dir : candidateDirs) {
+                DWORD attr = GetFileAttributesW(dir.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::wstring searchPattern = dir + L"\\*.json";
+                    WIN32_FIND_DATAW fd;
+                    HANDLE hFind = FindFirstFileW(searchPattern.c_str(), &fd);
+                    if (hFind != INVALID_HANDLE_VALUE) {
+                        nlohmann::json hostList = nlohmann::json::array();
+                        do {
+                            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                                std::wstring filePath = dir + L"\\" + fd.cFileName;
+                                std::string content = ReadFileToUtf8(filePath);
+                                if (!content.empty()) {
+                                    try {
+                                        auto cfg = nlohmann::json::parse(content);
+                                        int64_t deleteTime = cfg.value("delete_time", 0LL);
+                                        if (deleteTime > 0) continue;
+
+                                        std::string host = cfg.value("host", "");
+                                        if (host.empty()) continue;
+
+                                        std::string name = cfg.value("name", "");
+                                        std::string user = cfg.value("user_name", "root");
+                                        int port = cfg.value("port", 22);
+                                        std::string encPass = cfg.value("password", "");
+                                        std::string decPass = DecryptFinalShellPassword(encPass);
+                                        std::string desc = cfg.value("description", "");
+
+                                        nlohmann::json item;
+                                        item["name"] = name.empty() ? host : name;
+                                        item["hostname"] = host;
+                                        item["port"] = port;
+                                        item["username"] = user.empty() ? "root" : user;
+                                        item["password"] = decPass;
+                                        item["group"] = "FinalShell";
+                                        item["folder"] = "FinalShell";
+                                        item["description"] = desc;
+                                        item["save"] = true;
+                                        item["hasPassword"] = !decPass.empty();
+                                        hostList.push_back(item);
+                                    } catch (...) {}
+                                }
+                            }
+                        } while (FindNextFileW(hFind, &fd));
+                        FindClose(hFind);
+
+                        if (!hostList.empty()) {
+                            retObj["success"] = true;
+                            retObj["detected"] = true;
+                            retObj["connDir"] = Utf16ToUtf8(dir);
+                            retObj["hostCount"] = (int)hostList.size();
+                            retObj["hosts"] = hostList;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "import_finalshell_hosts") {
+            std::string customDir = (args.size() > 0 && args[0].is_string()) ? args[0].get<std::string>() : "";
+            std::vector<std::wstring> candidateDirs;
+            if (!customDir.empty()) {
+                candidateDirs.push_back(Utf8ToUtf16(customDir));
+            } else {
+                candidateDirs.push_back(L"D:\\finalshell\\conn");
+                candidateDirs.push_back(L"C:\\finalshell\\conn");
+                candidateDirs.push_back(L"E:\\finalshell\\conn");
+                candidateDirs.push_back(L"F:\\finalshell\\conn");
+                WCHAR appData[MAX_PATH] = { 0 };
+                if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                    candidateDirs.push_back(std::wstring(appData) + L"\\finalshell\\conn");
+                    candidateDirs.push_back(std::wstring(appData) + L"\\FinalShell\\conn");
+                }
+                WCHAR userProfile[MAX_PATH] = { 0 };
+                if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                    candidateDirs.push_back(std::wstring(userProfile) + L"\\.finalshell\\conn");
+                    candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Roaming\\finalshell\\conn");
+                    candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Roaming\\FinalShell\\conn");
+                    candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Local\\finalshell\\conn");
+                    candidateDirs.push_back(std::wstring(userProfile) + L"\\Desktop\\FinalShell\\conn");
+                }
+            }
+
+            int importedCount = 0;
+            nlohmann::json importedList = nlohmann::json::array();
+            for (const auto& dir : candidateDirs) {
+                DWORD attr = GetFileAttributesW(dir.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::wstring searchPattern = dir + L"\\*.json";
+                    WIN32_FIND_DATAW fd;
+                    HANDLE hFind = FindFirstFileW(searchPattern.c_str(), &fd);
+                    if (hFind != INVALID_HANDLE_VALUE) {
+                        do {
+                            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                                std::wstring filePath = dir + L"\\" + fd.cFileName;
+                                std::string content = ReadFileToUtf8(filePath);
+                                if (!content.empty()) {
+                                    try {
+                                        auto cfg = nlohmann::json::parse(content);
+                                        int64_t deleteTime = cfg.value("delete_time", 0LL);
+                                        if (deleteTime > 0) continue;
+
+                                        std::string host = cfg.value("host", "");
+                                        if (host.empty()) continue;
+
+                                        std::string name = cfg.value("name", "");
+                                        std::string user = cfg.value("user_name", "root");
+                                        int port = cfg.value("port", 22);
+                                        std::string encPass = cfg.value("password", "");
+                                        std::string decPass = DecryptFinalShellPassword(encPass);
+                                        std::string desc = cfg.value("description", "");
+
+                                        nlohmann::json params;
+                                        params["name"] = name.empty() ? host : name;
+                                        params["hostname"] = host;
+                                        params["port"] = port;
+                                        params["username"] = user.empty() ? "root" : user;
+                                        params["password"] = decPass;
+                                        params["group"] = "FinalShell";
+                                        params["folder"] = "FinalShell";
+                                        params["description"] = desc;
+                                        params["save"] = true;
+
+                                        std::string savedKey;
+                                        std::string saveErr;
+                                        if (SaveConnectionConfig("", params, savedKey, saveErr)) {
+                                            importedCount++;
+                                            params["key"] = savedKey;
+                                            importedList.push_back(params);
+                                        }
+                                    } catch (...) {}
+                                }
+                            }
+                        } while (FindNextFileW(hFind, &fd));
+                        FindClose(hFind);
+                        if (importedCount > 0) break;
+                    }
+                }
+            }
+
+            nlohmann::json retObj;
+            retObj["success"] = (importedCount > 0);
+            retObj["imported"] = importedCount;
+            retObj["hosts"] = importedList;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "hermes_http_request") {
             std::string paramsStr = args[0].get<std::string>();
             auto params = nlohmann::json::parse(paramsStr);

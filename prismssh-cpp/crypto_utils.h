@@ -25,4 +25,7 @@ std::string DecryptFernetPassword(const std::string& fernetKeyBase64, const std:
 std::string LoadFernetKey();
 std::string GetOrCreateFernetKey();
 
+// FinalShell password decryption
+std::string DecryptFinalShellPassword(const std::string& encPass);
+
 #endif // CRYPTO_UTILS_H
