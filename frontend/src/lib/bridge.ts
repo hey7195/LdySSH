@@ -73,6 +73,16 @@ export const nativeBridge = {
   getCommandLibrary() {
     return callNative<CommandLibraryResult>("get_command_library", { success: false, folders: [] });
   },
+  detectFinalShellCommands() {
+    return callNative<{
+      success: boolean;
+      detected: boolean;
+      configPath?: string;
+      rawJson?: string;
+      commandCount?: number;
+      folderCount?: number;
+    }>("detect_finalshell_commands", { success: false, detected: false });
+  },
   saveCommandLibrary(folders: CommandFolder[]) {
     return callNative<{ success: boolean; error?: string }>("save_command_library", { success: false }, JSON.stringify(folders));
   },

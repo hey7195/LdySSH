@@ -10,7 +10,7 @@ const DEFAULT_IMPORT_FOLDER = "导入命令";
 const COMMAND_KEYS = ["command", "cmd", "commandText", "script", "shell", "content"];
 const NAME_KEYS = ["name", "title", "label"];
 const DESCRIPTION_KEYS = ["description", "desc", "remark", "memo"];
-const FINAL_SHELL_PARAM_PATTERN = /\[p#(\d+)(?:\s+([^\]]+))?\]/g;
+const FINAL_SHELL_PARAM_PATTERN = /\[(?:p#|#)?(\d+)(?:\s+([^\]]+))?\]/g;
 const SHELL_VAR_PARAM_PATTERN = /\$\{([a-zA-Z0-9_\u4e00-\u9fa5]+)\}/g;
 const ANGLE_VAR_PARAM_PATTERN = /<([a-zA-Z0-9_\u4e00-\u9fa5]+)>/g;
 
@@ -24,14 +24,14 @@ export function extractCommandParameters(command: string): CommandParameter[] {
   const parameters: CommandParameter[] = [];
   const seen = new Set<string>();
 
-  // 1. FinalShell 经典 [p#1 参数名]
+  // 1. FinalShell 经典 [p#1 参数名] 或 [#1]
   for (const match of command.matchAll(FINAL_SHELL_PARAM_PATTERN)) {
     const key = `p#${match[1]}`;
     if (!seen.has(key)) {
       seen.add(key);
       parameters.push({
         key,
-        name: (match[2] || key).trim(),
+        name: (match[2] || `参数 ${match[1]}`).trim(),
         token: match[0]
       });
     }
@@ -71,8 +71,11 @@ export function extractCommandParameters(command: string): CommandParameter[] {
 
 export function fillCommandParameters(command: string, values: Record<string, string>) {
   let res = command;
-  // 1. 替换 FinalShell [p#1]
-  res = res.replace(FINAL_SHELL_PARAM_PATTERN, (_token, index: string) => values[`p#${index}`]?.trim() || "");
+  // 1. 替换 FinalShell [p#1] / [#1]
+  res = res.replace(FINAL_SHELL_PARAM_PATTERN, (_token, index: string) => {
+    const val = values[`p#${index}`] ?? values[`#${index}`] ?? values[index];
+    return val !== undefined && val !== "" ? val.trim() : "";
+  });
 
   // 2. 替换 ${VAR}
   res = res.replace(SHELL_VAR_PARAM_PATTERN, (token, name: string) => {
@@ -166,11 +169,38 @@ export function normalizeCommandFolders(folders: CommandFolder[]) {
 function parseJsonCommands(text: string, source: string) {
   try {
     const data = JSON.parse(text);
+
+    // 1. FinalShell 真实配置格式: quick_commands 字段
+    if (data?.quick_commands) {
+      const rawGroups = Array.isArray(data.quick_commands) ? data.quick_commands : [data.quick_commands];
+      const folders: CommandFolder[] = rawGroups.map((group: any) => {
+        const folderName = String(group?.name || group?.title || "默认分类").trim() || "默认分类";
+        const commands = (Array.isArray(group?.commands) ? group.commands : []).map((cmd: any) => ({
+          id: String(cmd?.id || makeStableId("cmd", `${folderName}:${cmd?.name || cmd?.command}:${cmd?.command}`)),
+          name: String(cmd?.name || cmd?.title || cmd?.command || "未命名命令").trim(),
+          command: String(cmd?.command || cmd?.cmd || "").trim(),
+          autoExecute: cmd?.append_cr !== undefined ? Boolean(cmd.append_cr) : true,
+          description: String(cmd?.description || cmd?.desc || "")
+        })).filter((c: any) => c.command.length > 0);
+        return {
+          id: String(group?.id || makeStableId("folder", folderName)),
+          name: folderName,
+          commands
+        };
+      }).filter((f: any) => f.commands.length > 0);
+
+      if (folders.length > 0) {
+        return normalizeCommandFolders(folders);
+      }
+    }
+
+    // 2. LdSSH / 通用 CommandFolder[] 结构
     const folders = Array.isArray(data) ? data : Array.isArray(data?.folders) ? data.folders : null;
     if (folders) {
       return normalizeCommandFolders(folders as CommandFolder[]);
     }
 
+    // 3. 通用嵌套 JSON
     const collected = new Map<string, CommandItem[]>();
     collectJsonCommands(data, [], collected);
     return foldersFromMap(collected, source || DEFAULT_IMPORT_FOLDER);

@@ -1,4 +1,4 @@
-import{r,j as e}from"./react-vendor-DrROGObh.js";import{F as k,h as T,G as E,X as P,C as j,B as D,S as F}from"./icons-DUY8vHYp.js";const l=[{name:"Nginx 反向代理配置 (Nginx Config)",path:"/etc/nginx/sites-available/default",content:`server {
+import{r,j as e}from"./react-vendor-DrROGObh.js";import{F as k,h as T,G as E,X as P,C as j,B as D,S as F}from"./icons-Dd5faaqg.js";const l=[{name:"Nginx 反向代理配置 (Nginx Config)",path:"/etc/nginx/sites-available/default",content:`server {
     listen 80;
     server_name example.com www.example.com;
 

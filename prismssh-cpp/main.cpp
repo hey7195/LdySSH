@@ -1525,6 +1525,77 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
+        else if (action == "detect_finalshell_commands") {
+            nlohmann::json retObj;
+            retObj["success"] = false;
+            retObj["detected"] = false;
+
+            std::vector<std::wstring> candidatePaths;
+            candidatePaths.push_back(L"D:\\finalshell\\config.json");
+            candidatePaths.push_back(L"C:\\finalshell\\config.json");
+            candidatePaths.push_back(L"E:\\finalshell\\config.json");
+            candidatePaths.push_back(L"F:\\finalshell\\config.json");
+
+            WCHAR appData[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                candidatePaths.push_back(std::wstring(appData) + L"\\finalshell\\config.json");
+            }
+            WCHAR userProfile[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\.finalshell\\config.json");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\AppData\\Roaming\\finalshell\\config.json");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\AppData\\Local\\finalshell\\config.json");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\Desktop\\FinalShell\\config.json");
+            }
+
+            for (const auto& path : candidatePaths) {
+                DWORD attr = GetFileAttributesW(path.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::string content = ReadFileToUtf8(path);
+                    if (!content.empty()) {
+                        try {
+                            auto jsonCfg = nlohmann::json::parse(content);
+                            if (jsonCfg.contains("quick_commands")) {
+                                auto& qc = jsonCfg["quick_commands"];
+                                int cmdCount = 0;
+                                int folderCount = 0;
+                                if (qc.is_array()) {
+                                    folderCount = (int)qc.size();
+                                    for (auto& g : qc) {
+                                        if (g.contains("commands") && g["commands"].is_array()) {
+                                            cmdCount += (int)g["commands"].size();
+                                        }
+                                    }
+                                } else if (qc.is_object()) {
+                                    folderCount = 1;
+                                    if (qc.contains("commands") && qc["commands"].is_array()) {
+                                        cmdCount += (int)qc["commands"].size();
+                                    }
+                                }
+
+                                int ulen = WideCharToMultiByte(CP_UTF8, 0, path.c_str(), (int)path.size(), NULL, 0, NULL, NULL);
+                                std::string utf8Path = "";
+                                if (ulen > 0) {
+                                    utf8Path.resize(ulen);
+                                    WideCharToMultiByte(CP_UTF8, 0, path.c_str(), (int)path.size(), &utf8Path[0], ulen, NULL, NULL);
+                                }
+
+                                retObj["success"] = true;
+                                retObj["detected"] = true;
+                                retObj["configPath"] = utf8Path;
+                                retObj["commandCount"] = cmdCount;
+                                retObj["folderCount"] = folderCount;
+                                retObj["rawJson"] = content;
+                                break;
+                            }
+                        } catch (...) {}
+                    }
+                }
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "hermes_http_request") {
             std::string paramsStr = args[0].get<std::string>();
             auto params = nlohmann::json::parse(paramsStr);

@@ -2586,7 +2586,33 @@ export function App() {
 
   async function importCommandLibrary(source: string) {
     setCommandTransferStatus("");
-    const selected = await nativeBridge.showOpenFileDialog(source === "FinalShell" ? "选择 FinalShell 命令文件" : "选择命令库文件");
+
+    if (source === "FinalShellAuto") {
+      try {
+        const detected = await nativeBridge.detectFinalShellCommands();
+        if (!detected.detected || !detected.rawJson) {
+          setCommandTransferStatus("未在系统默认路径找到 FinalShell 配置文件。");
+          return;
+        }
+        const imported = parseCommandLibraryImport(detected.rawJson, "FinalShell");
+        if (imported.imported === 0) {
+          setCommandTransferStatus("FinalShell 配置中暂无快捷命令。");
+          return;
+        }
+        const next = mergeCommandFolders(commandFolders, imported.folders);
+        updateCommandFolders(next);
+        const firstImportedFolder = imported.folders[0]?.name;
+        const activeImportedFolder = next.find((folder) => folder.name === firstImportedFolder);
+        setActiveCommandFolderId(activeImportedFolder?.id || next[0]?.id || "");
+        setCommandTransferStatus(`已成功从本机 FinalShell 自动无感导入 ${imported.imported} 条快捷命令！`);
+        return;
+      } catch (err: any) {
+        setCommandTransferStatus(`从 FinalShell 导入失败: ${err?.message || "未知异常"}`);
+        return;
+      }
+    }
+
+    const selected = await nativeBridge.showOpenFileDialog(source === "FinalShell" ? "选择 FinalShell 配置文件" : "选择命令库文件");
     if (!selected.filePath) return;
 
     const file = await nativeBridge.readBase64File(selected.filePath);
@@ -9772,6 +9798,20 @@ function CommandPanel({
   const [editingCommand, setEditingCommand] = useState<(CommandItem & { folderId: string }) | null>(null);
   const [pendingCommandKey, setPendingCommandKey] = useState("");
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
+  const [finalShellInfo, setFinalShellInfo] = useState<{ detected: boolean; count: number; path: string } | null>(null);
+  const [showImportPopover, setShowImportPopover] = useState(false);
+
+  useEffect(() => {
+    nativeBridge.detectFinalShellCommands().then((res) => {
+      if (res.detected && (res.commandCount || 0) > 0) {
+        setFinalShellInfo({
+          detected: true,
+          count: res.commandCount || 0,
+          path: res.configPath || ""
+        });
+      }
+    }).catch(() => {});
+  }, []);
   const drawerCmdTextareaRef = useRef<HTMLTextAreaElement>(null);
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
   const keyword = query.trim().toLowerCase();
@@ -9924,6 +9964,25 @@ function CommandPanel({
             </p>
           </div>
 
+          {finalShellInfo && (
+            <button
+              onClick={() => onImportCommands("FinalShellAuto")}
+              className="mt-2.5 w-full flex items-center justify-between rounded-xl px-2.5 py-1.5 bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-transparent border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500/60 hover:bg-emerald-500/20 transition-all text-left group shadow-2xs cursor-pointer"
+              title={`发现本机 FinalShell 配置 (${finalShellInfo.path})，点击一键无感导入全部命令`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Zap className="h-3.5 w-3.5 text-emerald-500 shrink-0 animate-pulse" />
+                <div className="truncate">
+                  <div className="text-[10px] font-extrabold leading-tight">一键移植 FinalShell</div>
+                  <div className="text-[9px] opacity-75 font-mono">已发现 {finalShellInfo.count} 条快捷命令</div>
+                </div>
+              </div>
+              <span className="text-[9px] font-extrabold bg-emerald-500 text-white rounded-md px-1.5 py-0.5 shadow-2xs group-hover:scale-105 transition-transform">
+                导入
+              </span>
+            </button>
+          )}
+
           <div className="relative mt-3">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
             <Input
@@ -9944,11 +10003,54 @@ function CommandPanel({
               <Download className="h-3 w-3" />
               导出
             </Button>
-            <label className="h-7 flex-1 rounded-full border border-[var(--app-line)] bg-[var(--panel-bg)] hover:bg-[var(--fill-1)] flex items-center justify-center gap-1 text-[11px] font-extrabold text-[var(--app-text)] cursor-pointer shadow-2xs">
-              <Upload className="h-3 w-3" />
-              导入
+            <div className="relative flex-1">
               <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && onImportCommands("本地文件")} />
-            </label>
+              <Button
+                variant="outline"
+                size={26}
+                className="h-7 w-full rounded-full text-[11px] font-extrabold flex items-center justify-center gap-1 text-[var(--app-text)] shadow-2xs"
+                onClick={() => {
+                  if (finalShellInfo) {
+                    setShowImportPopover(!showImportPopover);
+                  } else {
+                    onImportCommands("本地文件");
+                  }
+                }}
+              >
+                <Upload className="h-3 w-3" />
+                导入
+              </Button>
+              {showImportPopover && (
+                <div className="absolute left-0 top-8 z-50 w-52 rounded-2xl border border-[var(--app-line)] bg-[var(--popover-bg)] p-1.5 shadow-xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+                  <button
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-[var(--app-text)] hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setShowImportPopover(false);
+                      onImportCommands("FinalShellAuto");
+                    }}
+                  >
+                    <Zap className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-[11px]">从本机 FinalShell 导入</div>
+                      <div className="text-[9px] text-[var(--text-secondary)]">自动读取 {finalShellInfo?.count || 0} 条配置</div>
+                    </div>
+                  </button>
+                  <button
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-[var(--app-text)] hover:bg-[var(--fill-1)] transition-colors mt-0.5 cursor-pointer"
+                    onClick={() => {
+                      setShowImportPopover(false);
+                      onImportCommands("本地文件");
+                    }}
+                  >
+                    <FolderOpen className="h-3.5 w-3.5 text-[var(--app-muted)] shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-[11px]">选择本地文件导入</div>
+                      <div className="text-[9px] text-[var(--text-secondary)]">支持 JSON / XML / TXT</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="mt-3 flex items-center gap-1.5">
