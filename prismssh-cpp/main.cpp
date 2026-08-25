@@ -1147,6 +1147,202 @@ static bool SaveConnectionConfig(const std::string& oldKey, const nlohmann::json
     return true;
 }
 
+static std::vector<nlohmann::json> ParseWindTermSessionsFromJson(const std::string& content) {
+    std::vector<nlohmann::json> result;
+    if (content.empty()) return result;
+    try {
+        auto root = nlohmann::json::parse(content);
+        std::vector<nlohmann::json> items;
+        if (root.is_array()) {
+            for (auto& elem : root) items.push_back(elem);
+        } else if (root.is_object()) {
+            if (root.contains("sessions") && root["sessions"].is_array()) {
+                for (auto& elem : root["sessions"]) items.push_back(elem);
+            } else {
+                for (auto it = root.begin(); it != root.end(); ++it) {
+                    if (it.value().is_object()) items.push_back(it.value());
+                }
+            }
+        }
+
+        for (auto& item : items) {
+            std::string host = "";
+            if (item.contains("session.host") && item["session.host"].is_string()) {
+                host = item["session.host"].get<std::string>();
+            } else if (item.contains("host") && item["host"].is_string()) {
+                host = item["host"].get<std::string>();
+            } else if (item.contains("session.target") && item["session.target"].is_string()) {
+                host = item["session.target"].get<std::string>();
+            } else if (item.contains("target") && item["target"].is_string()) {
+                host = item["target"].get<std::string>();
+            }
+            if (host.empty()) continue;
+
+            std::string name = "";
+            if (item.contains("session.name") && item["session.name"].is_string()) {
+                name = item["session.name"].get<std::string>();
+            } else if (item.contains("name") && item["name"].is_string()) {
+                name = item["name"].get<std::string>();
+            }
+            if (name.empty()) name = host;
+
+            int port = 22;
+            if (item.contains("session.port")) {
+                if (item["session.port"].is_number()) port = item["session.port"].get<int>();
+                else if (item["session.port"].is_string()) {
+                    try { port = std::stoi(item["session.port"].get<std::string>()); } catch(...) {}
+                }
+            } else if (item.contains("port")) {
+                if (item["port"].is_number()) port = item["port"].get<int>();
+                else if (item["port"].is_string()) {
+                    try { port = std::stoi(item["port"].get<std::string>()); } catch(...) {}
+                }
+            }
+
+            std::string user = "root";
+            if (item.contains("session.user") && item["session.user"].is_string()) {
+                user = item["session.user"].get<std::string>();
+            } else if (item.contains("user") && item["user"].is_string()) {
+                user = item["user"].get<std::string>();
+            } else if (item.contains("username") && item["username"].is_string()) {
+                user = item["username"].get<std::string>();
+            }
+
+            if (host.find('@') != std::string::npos) {
+                size_t atIdx = host.find('@');
+                user = host.substr(0, atIdx);
+                host = host.substr(atIdx + 1);
+            }
+            if (host.find(':') != std::string::npos) {
+                size_t colIdx = host.find(':');
+                try { port = std::stoi(host.substr(colIdx + 1)); } catch(...) {}
+                host = host.substr(0, colIdx);
+            }
+
+            std::string group = "WindTerm";
+            if (item.contains("session.group") && item["session.group"].is_string() && !item["session.group"].get<std::string>().empty()) {
+                group = item["session.group"].get<std::string>();
+            } else if (item.contains("group") && item["group"].is_string() && !item["group"].get<std::string>().empty()) {
+                group = item["group"].get<std::string>();
+            }
+
+            std::string desc = "";
+            if (item.contains("session.description") && item["session.description"].is_string()) {
+                desc = item["session.description"].get<std::string>();
+            } else if (item.contains("description") && item["description"].is_string()) {
+                desc = item["description"].get<std::string>();
+            }
+
+            std::string password = "";
+            if (item.contains("session.password") && item["session.password"].is_string()) {
+                password = item["session.password"].get<std::string>();
+            } else if (item.contains("password") && item["password"].is_string()) {
+                password = item["password"].get<std::string>();
+            } else if (item.contains("session.autoLogin") && item["session.autoLogin"].is_object()) {
+                auto& al = item["session.autoLogin"];
+                if (al.contains("password") && al["password"].is_string()) {
+                    password = al["password"].get<std::string>();
+                }
+            }
+
+            std::string keyPath = "";
+            if (item.contains("session.identityFile") && item["session.identityFile"].is_string()) {
+                keyPath = item["session.identityFile"].get<std::string>();
+            } else if (item.contains("identityFile") && item["identityFile"].is_string()) {
+                keyPath = item["identityFile"].get<std::string>();
+            } else if (item.contains("keyPath") && item["keyPath"].is_string()) {
+                keyPath = item["keyPath"].get<std::string>();
+            }
+
+            nlohmann::json conn;
+            conn["name"] = name;
+            conn["hostname"] = host;
+            conn["port"] = port;
+            conn["username"] = user.empty() ? "root" : user;
+            conn["password"] = password;
+            conn["keyPath"] = keyPath;
+            conn["group"] = group;
+            conn["folder"] = group;
+            conn["description"] = desc;
+            conn["save"] = true;
+            conn["hasPassword"] = !password.empty();
+            result.push_back(conn);
+        }
+    } catch (...) {}
+    return result;
+}
+
+static std::vector<nlohmann::json> ParseWindTermSnippetsFromJson(const std::string& content) {
+    std::vector<nlohmann::json> folders;
+    if (content.empty()) return folders;
+    try {
+        auto root = nlohmann::json::parse(content);
+        std::vector<nlohmann::json> items;
+        if (root.is_array()) {
+            for (auto& elem : root) items.push_back(elem);
+        } else if (root.is_object()) {
+            if (root.contains("snippets") && root["snippets"].is_array()) {
+                for (auto& elem : root["snippets"]) items.push_back(elem);
+            } else {
+                for (auto it = root.begin(); it != root.end(); ++it) {
+                    if (it.value().is_object()) items.push_back(it.value());
+                }
+            }
+        }
+
+        std::unordered_map<std::string, std::vector<nlohmann::json>> groupMap;
+        for (auto& item : items) {
+            std::string name = "";
+            if (item.contains("snippet.name") && item["snippet.name"].is_string()) name = item["snippet.name"].get<std::string>();
+            else if (item.contains("name") && item["name"].is_string()) name = item["name"].get<std::string>();
+            else if (item.contains("title") && item["title"].is_string()) name = item["title"].get<std::string>();
+
+            std::string body = "";
+            if (item.contains("snippet.body") && item["snippet.body"].is_string()) body = item["snippet.body"].get<std::string>();
+            else if (item.contains("snippet.command") && item["snippet.command"].is_string()) body = item["snippet.command"].get<std::string>();
+            else if (item.contains("command") && item["command"].is_string()) body = item["command"].get<std::string>();
+            else if (item.contains("cmd") && item["cmd"].is_string()) body = item["cmd"].get<std::string>();
+            if (body.empty() && name.empty()) continue;
+            if (name.empty()) name = body;
+
+            while (!body.empty() && (body.back() == '\n' || body.back() == '\r')) {
+                body.pop_back();
+            }
+
+            std::string group = "WindTerm 快捷指令";
+            if (item.contains("snippet.group") && item["snippet.group"].is_string() && !item["snippet.group"].get<std::string>().empty()) {
+                group = item["snippet.group"].get<std::string>();
+            } else if (item.contains("group") && item["group"].is_string() && !item["group"].get<std::string>().empty()) {
+                group = item["group"].get<std::string>();
+            } else if (item.contains("category") && item["category"].is_string() && !item["category"].get<std::string>().empty()) {
+                group = item["category"].get<std::string>();
+            }
+
+            std::string desc = "";
+            if (item.contains("snippet.description") && item["snippet.description"].is_string()) desc = item["snippet.description"].get<std::string>();
+            else if (item.contains("description") && item["description"].is_string()) desc = item["description"].get<std::string>();
+
+            nlohmann::json cmd;
+            cmd["id"] = "wt_cmd_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + "_" + std::to_string(rand() % 10000);
+            cmd["name"] = name;
+            cmd["command"] = body;
+            cmd["description"] = desc;
+            cmd["autoExecute"] = false;
+            groupMap[group].push_back(cmd);
+        }
+
+        int folderIdx = 1;
+        for (auto& kv : groupMap) {
+            nlohmann::json folder;
+            folder["id"] = "wt_folder_" + std::to_string(folderIdx++);
+            folder["name"] = kv.first;
+            folder["commands"] = kv.second;
+            folders.push_back(folder);
+        }
+    } catch (...) {}
+    return folders;
+}
+
 // API router and handler
 void HandleApiCall(const std::string& reqId, const std::string& action, const nlohmann::json& args) {
     nlohmann::json response;
@@ -1769,6 +1965,245 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             retObj["success"] = (importedCount > 0);
             retObj["imported"] = importedCount;
             retObj["hosts"] = importedList;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "detect_windterm_hosts") {
+            nlohmann::json retObj;
+            retObj["success"] = false;
+            retObj["detected"] = false;
+            retObj["hosts"] = nlohmann::json::array();
+
+            std::vector<std::wstring> candidatePaths;
+            candidatePaths.push_back(L"D:\\WindTerm\\profiles\\global\\user.sessions");
+            candidatePaths.push_back(L"D:\\WindTerm\\profiles\\user.sessions");
+            candidatePaths.push_back(L"C:\\WindTerm\\profiles\\global\\user.sessions");
+            candidatePaths.push_back(L"C:\\WindTerm\\profiles\\user.sessions");
+            candidatePaths.push_back(L"E:\\WindTerm\\profiles\\global\\user.sessions");
+            candidatePaths.push_back(L"E:\\WindTerm\\profiles\\user.sessions");
+            candidatePaths.push_back(L"F:\\WindTerm\\profiles\\global\\user.sessions");
+
+            WCHAR appData[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\user.sessions");
+                candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\user.sessions");
+            }
+            WCHAR userProfile[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\user.sessions");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\AppData\\Local\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\Desktop\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\Desktop\\WindTerm\\profiles\\user.sessions");
+            }
+
+            for (const auto& path : candidatePaths) {
+                DWORD attr = GetFileAttributesW(path.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::string content = ReadFileToUtf8(path);
+                    if (!content.empty()) {
+                        auto parsedHosts = ParseWindTermSessionsFromJson(content);
+                        if (!parsedHosts.empty()) {
+                            retObj["success"] = true;
+                            retObj["detected"] = true;
+                            retObj["configPath"] = Utf16ToUtf8(path);
+                            retObj["hostCount"] = (int)parsedHosts.size();
+                            retObj["hosts"] = parsedHosts;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "import_windterm_hosts") {
+            std::string customPath = (args.size() > 0 && args[0].is_string()) ? args[0].get<std::string>() : "";
+            std::vector<std::wstring> candidatePaths;
+            if (!customPath.empty()) {
+                std::wstring wCustom = Utf8ToUtf16(customPath);
+                DWORD attr = GetFileAttributesW(wCustom.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES) {
+                    if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+                        candidatePaths.push_back(wCustom + L"\\profiles\\global\\user.sessions");
+                        candidatePaths.push_back(wCustom + L"\\profiles\\user.sessions");
+                        candidatePaths.push_back(wCustom + L"\\global\\user.sessions");
+                        candidatePaths.push_back(wCustom + L"\\user.sessions");
+                    } else {
+                        candidatePaths.push_back(wCustom);
+                    }
+                }
+            } else {
+                candidatePaths.push_back(L"D:\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(L"D:\\WindTerm\\profiles\\user.sessions");
+                candidatePaths.push_back(L"C:\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(L"C:\\WindTerm\\profiles\\user.sessions");
+                candidatePaths.push_back(L"E:\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(L"F:\\WindTerm\\profiles\\global\\user.sessions");
+                WCHAR appData[MAX_PATH] = { 0 };
+                if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                    candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\global\\user.sessions");
+                    candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\user.sessions");
+                    candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\global\\user.sessions");
+                    candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\user.sessions");
+                }
+                WCHAR userProfile[MAX_PATH] = { 0 };
+                if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                    candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\global\\user.sessions");
+                    candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\user.sessions");
+                    candidatePaths.push_back(std::wstring(userProfile) + L"\\AppData\\Local\\WindTerm\\profiles\\global\\user.sessions");
+                    candidatePaths.push_back(std::wstring(userProfile) + L"\\Desktop\\WindTerm\\profiles\\global\\user.sessions");
+                }
+            }
+
+            int importedCount = 0;
+            nlohmann::json importedList = nlohmann::json::array();
+            for (const auto& path : candidatePaths) {
+                DWORD attr = GetFileAttributesW(path.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::string content = ReadFileToUtf8(path);
+                    if (!content.empty()) {
+                        auto parsedHosts = ParseWindTermSessionsFromJson(content);
+                        for (auto& hostParams : parsedHosts) {
+                            std::string savedKey;
+                            std::string saveErr;
+                            if (SaveConnectionConfig("", hostParams, savedKey, saveErr)) {
+                                importedCount++;
+                                hostParams["key"] = savedKey;
+                                importedList.push_back(hostParams);
+                            }
+                        }
+                        if (importedCount > 0) break;
+                    }
+                }
+            }
+
+            nlohmann::json retObj;
+            retObj["success"] = (importedCount > 0);
+            retObj["imported"] = importedCount;
+            retObj["hosts"] = importedList;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "detect_windterm_commands") {
+            nlohmann::json retObj;
+            retObj["success"] = false;
+            retObj["detected"] = false;
+            retObj["folders"] = nlohmann::json::array();
+
+            std::vector<std::wstring> candidatePaths;
+            candidatePaths.push_back(L"D:\\WindTerm\\profiles\\terminal\\user.snippets");
+            candidatePaths.push_back(L"D:\\WindTerm\\profiles\\user.snippets");
+            candidatePaths.push_back(L"C:\\WindTerm\\profiles\\terminal\\user.snippets");
+            candidatePaths.push_back(L"C:\\WindTerm\\profiles\\user.snippets");
+            candidatePaths.push_back(L"E:\\WindTerm\\profiles\\terminal\\user.snippets");
+            candidatePaths.push_back(L"F:\\WindTerm\\profiles\\terminal\\user.snippets");
+
+            WCHAR appData[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\terminal\\user.snippets");
+                candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\user.snippets");
+                candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\terminal\\user.snippets");
+            }
+            WCHAR userProfile[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\terminal\\user.snippets");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\user.snippets");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\Desktop\\WindTerm\\profiles\\terminal\\user.snippets");
+            }
+
+            for (const auto& path : candidatePaths) {
+                DWORD attr = GetFileAttributesW(path.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::string content = ReadFileToUtf8(path);
+                    if (!content.empty()) {
+                        auto parsedFolders = ParseWindTermSnippetsFromJson(content);
+                        int totalCmds = 0;
+                        for (auto& f : parsedFolders) {
+                            if (f.contains("commands") && f["commands"].is_array()) {
+                                totalCmds += (int)f["commands"].size();
+                            }
+                        }
+                        if (totalCmds > 0) {
+                            retObj["success"] = true;
+                            retObj["detected"] = true;
+                            retObj["configPath"] = Utf16ToUtf8(path);
+                            retObj["commandCount"] = totalCmds;
+                            retObj["folderCount"] = (int)parsedFolders.size();
+                            retObj["folders"] = parsedFolders;
+                            retObj["rawJson"] = content;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "import_windterm_commands") {
+            std::string inputStr = (args.size() > 0 && args[0].is_string()) ? args[0].get<std::string>() : "";
+            std::vector<nlohmann::json> parsedFolders;
+            if (!inputStr.empty() && (inputStr[0] == '[' || inputStr[0] == '{')) {
+                parsedFolders = ParseWindTermSnippetsFromJson(inputStr);
+            } else if (!inputStr.empty()) {
+                std::wstring wPath = Utf8ToUtf16(inputStr);
+                DWORD attr = GetFileAttributesW(wPath.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES) {
+                    if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+                        std::vector<std::wstring> subPaths = {
+                            wPath + L"\\profiles\\terminal\\user.snippets",
+                            wPath + L"\\profiles\\user.snippets",
+                            wPath + L"\\terminal\\user.snippets",
+                            wPath + L"\\user.snippets"
+                        };
+                        for (auto& sp : subPaths) {
+                            std::string c = ReadFileToUtf8(sp);
+                            if (!c.empty()) {
+                                parsedFolders = ParseWindTermSnippetsFromJson(c);
+                                if (!parsedFolders.empty()) break;
+                            }
+                        }
+                    } else {
+                        std::string c = ReadFileToUtf8(wPath);
+                        if (!c.empty()) parsedFolders = ParseWindTermSnippetsFromJson(c);
+                    }
+                }
+            } else {
+                std::vector<std::wstring> candidatePaths = {
+                    L"D:\\WindTerm\\profiles\\terminal\\user.snippets",
+                    L"D:\\WindTerm\\profiles\\user.snippets",
+                    L"C:\\WindTerm\\profiles\\terminal\\user.snippets",
+                    L"C:\\WindTerm\\profiles\\user.snippets"
+                };
+                WCHAR appData[MAX_PATH] = { 0 };
+                if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                    candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\terminal\\user.snippets");
+                    candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\terminal\\user.snippets");
+                }
+                for (auto& cp : candidatePaths) {
+                    std::string c = ReadFileToUtf8(cp);
+                    if (!c.empty()) {
+                        parsedFolders = ParseWindTermSnippetsFromJson(c);
+                        if (!parsedFolders.empty()) break;
+                    }
+                }
+            }
+
+            int importedCount = 0;
+            for (auto& f : parsedFolders) {
+                if (f.contains("commands") && f["commands"].is_array()) {
+                    importedCount += (int)f["commands"].size();
+                }
+            }
+
+            nlohmann::json retObj;
+            retObj["success"] = (importedCount > 0);
+            retObj["importedCount"] = importedCount;
+            retObj["folders"] = parsedFolders;
             response["status"] = "success";
             response["result"] = retObj.dump();
         }

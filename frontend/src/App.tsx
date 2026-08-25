@@ -1522,7 +1522,18 @@ export function App() {
         setFinalShellConnDir(res.connDir || "");
       }
     }).catch(() => {});
+
+    nativeBridge.detectWindTermHosts().then((res) => {
+      if (res.detected && (res.hostCount || 0) > 0) {
+        setWindTermHostCount(res.hostCount || 0);
+        setWindTermHostPath(res.configPath || "");
+      }
+    }).catch(() => {});
   }, []);
+
+  // WindTerm SSH 连接自动感知状态
+  const [windTermHostCount, setWindTermHostCount] = useState(0);
+  const [windTermHostPath, setWindTermHostPath] = useState("");
 
   const handleImportFinalShellHosts = async () => {
     try {
@@ -1544,6 +1555,29 @@ export function App() {
       }
     } catch (err: any) {
       alert(`导入 FinalShell 主机失败: ${err?.message || "未知异常"}`);
+    }
+  };
+
+  const handleImportWindTermHosts = async () => {
+    try {
+      const res = await nativeBridge.importWindTermHosts(windTermHostPath);
+      if (res.success && res.imported > 0) {
+        await refreshConnections();
+        alert(`🎉 成功从 WindTerm 导入 ${res.imported} 台主机连接！`);
+        return;
+      }
+      const selected = await nativeBridge.showOpenFolderDialog("选择 WindTerm 的 profiles 目录或 user.sessions 所在文件夹");
+      if (selected.folderPath) {
+        const manualRes = await nativeBridge.importWindTermHosts(selected.folderPath);
+        if (manualRes.success && manualRes.imported > 0) {
+          await refreshConnections();
+          alert(`🎉 成功从 WindTerm 导入 ${manualRes.imported} 台主机连接！`);
+        } else {
+          alert("未在该目录中找到有效的 WindTerm 会话配置文件 (user.sessions)。");
+        }
+      }
+    } catch (err: any) {
+      alert(`导入 WindTerm 主机失败: ${err?.message || "未知异常"}`);
     }
   };
 
@@ -2648,7 +2682,35 @@ export function App() {
       }
     }
 
-    const selected = await nativeBridge.showOpenFileDialog(source === "FinalShell" ? "选择 FinalShell 配置文件" : "选择命令库文件");
+    if (source === "WindTermAuto") {
+      try {
+        const detected = await nativeBridge.detectWindTermCommands();
+        if (!detected.detected || !detected.rawJson) {
+          setCommandTransferStatus("未在系统默认路径找到 WindTerm 代码片段文件。");
+          return;
+        }
+        const imported = parseCommandLibraryImport(detected.rawJson, "WindTerm");
+        if (imported.imported === 0) {
+          setCommandTransferStatus("WindTerm 配置中暂无代码片段。");
+          return;
+        }
+        const next = mergeCommandFolders(commandFolders, imported.folders);
+        updateCommandFolders(next);
+        const firstImportedFolder = imported.folders[0]?.name;
+        const activeImportedFolder = next.find((folder) => folder.name === firstImportedFolder);
+        setActiveCommandFolderId(activeImportedFolder?.id || next[0]?.id || "");
+        setCommandTransferStatus(`已成功从本机 WindTerm 自动无感导入 ${imported.imported} 条代码片段！`);
+        return;
+      } catch (err: any) {
+        setCommandTransferStatus(`从 WindTerm 导入失败: ${err?.message || "未知异常"}`);
+        return;
+      }
+    }
+
+    const selected = await nativeBridge.showOpenFileDialog(
+      source === "FinalShell" ? "选择 FinalShell 配置文件 (config.json)" :
+      source === "WindTerm" ? "选择 WindTerm 代码片段文件 (user.snippets)" : "选择命令库文件"
+    );
     if (!selected.filePath) return;
 
     const file = await nativeBridge.readBase64File(selected.filePath);
@@ -2920,6 +2982,8 @@ export function App() {
             onMoveHostToGroup={moveHostToGroup}
             onImportFinalShellHosts={handleImportFinalShellHosts}
             finalShellHostCount={finalShellHostCount}
+            onImportWindTermHosts={handleImportWindTermHosts}
+            windTermHostCount={windTermHostCount}
           />
         </div>
         <main className="min-w-0 overflow-hidden">
@@ -2937,6 +3001,8 @@ export function App() {
               onExportOpenSsh={handleExportOpenSsh}
               onImportFinalShellHosts={handleImportFinalShellHosts}
               finalShellHostCount={finalShellHostCount}
+              onImportWindTermHosts={handleImportWindTermHosts}
+              windTermHostCount={windTermHostCount}
             />
           )}
           {activeTool === "cmd" && (
@@ -3506,7 +3572,9 @@ function HostSidebar({
   onDeleteGroup,
   onMoveHostToGroup,
   onImportFinalShellHosts,
-  finalShellHostCount
+  finalShellHostCount,
+  onImportWindTermHosts,
+  windTermHostCount
 }: {
   query: string;
   activeTool: Tool;
@@ -3536,6 +3604,8 @@ function HostSidebar({
   onMoveHostToGroup?: (connection: SavedConnection, targetGroup: string) => void;
   onImportFinalShellHosts?: () => void;
   finalShellHostCount?: number;
+  onImportWindTermHosts?: () => void;
+  windTermHostCount?: number;
 }) {
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [showTagMenu, setShowTagMenu] = useState(false);
@@ -3598,7 +3668,8 @@ function HostSidebar({
       const matchQuery = !query.trim() || 
         (c.name || "").toLowerCase().includes(query.toLowerCase()) || 
         (c.hostname || "").toLowerCase().includes(query.toLowerCase()) ||
-        (c.folder || "").toLowerCase().includes(query.toLowerCase());
+        (c.username || "").toLowerCase().includes(query.toLowerCase()) ||
+        (c.tags || []).some((t) => t.toLowerCase().includes(query.toLowerCase()));
       
       const matchTag = !activeTagFilter || (c.tags || []).includes(activeTagFilter);
       return matchQuery && matchTag;
@@ -3656,6 +3727,26 @@ function HostSidebar({
                 </div>
               </div>
               <span className="text-[10px] font-black bg-teal-500 text-slate-950 rounded-md px-2 py-0.5 shadow-2xs group-hover:scale-105 transition-transform shrink-0">
+                导入
+              </span>
+            </button>
+          )}
+
+          {/* 当检测到本机 WindTerm 时，显示专属一键导入胶囊卡片 */}
+          {(windTermHostCount || 0) > 0 && (
+            <button
+              onClick={onImportWindTermHosts}
+              className="w-full flex items-center justify-between rounded-xl px-2.5 py-1.5 bg-gradient-to-r from-cyan-500/20 via-sky-500/15 to-transparent border border-cyan-500/40 text-cyan-400 hover:border-cyan-400/70 hover:bg-cyan-500/25 transition-all text-left group shadow-2xs cursor-pointer"
+              title={`检测到本机 WindTerm 会话 (${windTermHostCount} 台)，点击一键导入`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Zap className="h-3.5 w-3.5 text-cyan-400 shrink-0 animate-pulse" />
+                <div className="truncate">
+                  <div className="text-[11px] font-black leading-tight text-cyan-300">一键导入 WindTerm</div>
+                  <div className="text-[9px] text-cyan-400/80 font-mono">已发现 {windTermHostCount} 台会话</div>
+                </div>
+              </div>
+              <span className="text-[10px] font-black bg-cyan-500 text-slate-950 rounded-md px-2 py-0.5 shadow-2xs group-hover:scale-105 transition-transform shrink-0">
                 导入
               </span>
             </button>
@@ -4349,7 +4440,9 @@ function Workbench({
   onImportOpenSsh,
   onExportOpenSsh,
   onImportFinalShellHosts,
-  finalShellHostCount
+  finalShellHostCount,
+  onImportWindTermHosts,
+  windTermHostCount
 }: {
   savedConnections: SavedConnection[];
   sessions?: SessionTab[];
@@ -4365,6 +4458,8 @@ function Workbench({
   onExportOpenSsh?: () => void;
   onImportFinalShellHosts?: () => void;
   finalShellHostCount?: number;
+  onImportWindTermHosts?: () => void;
+  windTermHostCount?: number;
 }) {
   const [showConfigMenu, setShowConfigMenu] = useState(false);
   const onlineCount = savedConnections.filter((connection) => getHostLiveStatus(connection, sessions) === "connected").length;
@@ -4420,20 +4515,20 @@ function Workbench({
               >
                 <Sliders className="h-3.5 w-3.5 text-teal-400" />
                 <span>导入 / 导出</span>
-                {(finalShellHostCount || 0) > 0 && (
+                {((finalShellHostCount || 0) + (windTermHostCount || 0)) > 0 && (
                   <span className="rounded-full bg-teal-500/30 text-teal-200 px-1.5 py-0.2 font-mono text-[9px] font-extrabold">
-                    {finalShellHostCount}
+                    {(finalShellHostCount || 0) + (windTermHostCount || 0)}
                   </span>
                 )}
                 <ChevronDown className={cn("h-3 w-3 opacity-60 transition-transform", showConfigMenu && "rotate-180")} />
               </Button>
 
               {showConfigMenu && (
-                <div className="absolute right-0 top-10 z-50 w-60 rounded-2xl border border-[var(--app-line)] bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+                <div className="absolute right-0 top-10 z-50 w-64 rounded-2xl border border-[var(--app-line)] bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
                   <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    配置迁移与导入
+                    主机连接导入与迁移
                   </div>
-                  {(finalShellHostCount || 0) > 0 && (
+                  {(finalShellHostCount || 0) > 0 ? (
                     <button
                       type="button"
                       className="w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs bg-teal-500/15 text-teal-300 hover:bg-teal-500/25 border border-teal-500/30 transition-colors cursor-pointer mb-1 group"
@@ -4445,7 +4540,7 @@ function Workbench({
                       <div className="flex items-center gap-2">
                         <Zap className="h-4 w-4 text-teal-400 shrink-0 animate-pulse" />
                         <div>
-                          <div className="font-black text-xs text-teal-200">一键导入 FinalShell</div>
+                          <div className="font-black text-xs text-teal-200">从 FinalShell 导入</div>
                           <div className="text-[10px] text-teal-400/80">已检测到 {finalShellHostCount} 台主机</div>
                         </div>
                       </div>
@@ -4453,7 +4548,60 @@ function Workbench({
                         导入
                       </span>
                     </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer mb-1"
+                      onClick={() => {
+                        setShowConfigMenu(false);
+                        onImportFinalShellHosts?.();
+                      }}
+                    >
+                      <Zap className="h-3.5 w-3.5 text-teal-400 shrink-0" />
+                      <div>
+                        <div className="font-extrabold text-xs">从 FinalShell 导入</div>
+                        <div className="text-[10px] text-slate-400">选择 conn 目录</div>
+                      </div>
+                    </button>
                   )}
+
+                  {(windTermHostCount || 0) > 0 ? (
+                    <button
+                      type="button"
+                      className="w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 border border-cyan-500/30 transition-colors cursor-pointer mb-1 group"
+                      onClick={() => {
+                        setShowConfigMenu(false);
+                        onImportWindTermHosts?.();
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-cyan-400 shrink-0 animate-pulse" />
+                        <div>
+                          <div className="font-black text-xs text-cyan-200">从 WindTerm 导入</div>
+                          <div className="text-[10px] text-cyan-400/80">已检测到 {windTermHostCount} 台会话</div>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black bg-cyan-500 text-slate-950 rounded px-1.5 py-0.5">
+                        导入
+                      </span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer mb-1"
+                      onClick={() => {
+                        setShowConfigMenu(false);
+                        onImportWindTermHosts?.();
+                      }}
+                    >
+                      <Zap className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                      <div>
+                        <div className="font-extrabold text-xs">从 WindTerm 导入</div>
+                        <div className="text-[10px] text-slate-400">选择 user.sessions / profiles</div>
+                      </div>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
@@ -9945,12 +10093,23 @@ function CommandPanel({
   const [pendingCommandKey, setPendingCommandKey] = useState("");
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [finalShellInfo, setFinalShellInfo] = useState<{ detected: boolean; count: number; path: string } | null>(null);
+  const [windTermInfo, setWindTermInfo] = useState<{ detected: boolean; count: number; path: string } | null>(null);
   const [showImportPopover, setShowImportPopover] = useState(false);
 
   useEffect(() => {
     nativeBridge.detectFinalShellCommands().then((res) => {
       if (res.detected && (res.commandCount || 0) > 0) {
         setFinalShellInfo({
+          detected: true,
+          count: res.commandCount || 0,
+          path: res.configPath || ""
+        });
+      }
+    }).catch(() => {});
+
+    nativeBridge.detectWindTermCommands().then((res) => {
+      if (res.detected && (res.commandCount || 0) > 0) {
+        setWindTermInfo({
           detected: true,
           count: res.commandCount || 0,
           path: res.configPath || ""
@@ -10129,6 +10288,25 @@ function CommandPanel({
             </button>
           )}
 
+          {windTermInfo && (
+            <button
+              onClick={() => onImportCommands("WindTermAuto")}
+              className="mt-2 w-full flex items-center justify-between rounded-xl px-2.5 py-1.5 bg-gradient-to-r from-cyan-500/15 via-sky-500/10 to-transparent border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:border-cyan-500/60 hover:bg-cyan-500/20 transition-all text-left group shadow-2xs cursor-pointer"
+              title={`发现本机 WindTerm 代码片段 (${windTermInfo.path})，点击一键无感导入`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Zap className="h-3.5 w-3.5 text-cyan-500 shrink-0 animate-pulse" />
+                <div className="truncate">
+                  <div className="text-[10px] font-extrabold leading-tight">一键移植 WindTerm</div>
+                  <div className="text-[9px] opacity-75 font-mono">已发现 {windTermInfo.count} 条代码片段</div>
+                </div>
+              </div>
+              <span className="text-[9px] font-extrabold bg-cyan-500 text-white rounded-md px-1.5 py-0.5 shadow-2xs group-hover:scale-105 transition-transform">
+                导入
+              </span>
+            </button>
+          )}
+
           <div className="relative mt-3">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
             <Input
@@ -10156,42 +10334,51 @@ function CommandPanel({
                 size={26}
                 className="h-7 w-full rounded-full text-[11px] font-extrabold flex items-center justify-center gap-1 text-[var(--app-text)] shadow-2xs"
                 onClick={() => {
-                  if (finalShellInfo) {
-                    setShowImportPopover(!showImportPopover);
-                  } else {
-                    onImportCommands("本地文件");
-                  }
+                  setShowImportPopover(!showImportPopover);
                 }}
               >
                 <Upload className="h-3 w-3" />
                 导入
               </Button>
               {showImportPopover && (
-                <div className="absolute left-0 top-8 z-50 w-52 rounded-2xl border border-[var(--app-line)] bg-[var(--popover-bg)] p-1.5 shadow-xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+                <div className="absolute left-0 top-8 z-50 w-56 rounded-2xl border border-[var(--app-line)] bg-slate-900/95 p-1.5 shadow-xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
                   <button
-                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-[var(--app-text)] hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-emerald-500/15 hover:text-emerald-300 transition-colors cursor-pointer"
                     onClick={() => {
                       setShowImportPopover(false);
-                      onImportCommands("FinalShellAuto");
+                      onImportCommands(finalShellInfo ? "FinalShellAuto" : "FinalShell");
                     }}
                   >
-                    <Zap className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                    <Zap className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                     <div>
-                      <div className="font-extrabold text-[11px]">从本机 FinalShell 导入</div>
-                      <div className="text-[9px] text-[var(--text-secondary)]">自动读取 {finalShellInfo?.count || 0} 条配置</div>
+                      <div className="font-extrabold text-[11px]">从 FinalShell 导入</div>
+                      <div className="text-[9px] text-slate-400">{finalShellInfo ? `自动检测到 ${finalShellInfo.count} 条` : "选择 config.json"}</div>
                     </div>
                   </button>
                   <button
-                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-[var(--app-text)] hover:bg-[var(--fill-1)] transition-colors mt-0.5 cursor-pointer"
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-cyan-500/15 hover:text-cyan-300 transition-colors cursor-pointer mt-0.5"
+                    onClick={() => {
+                      setShowImportPopover(false);
+                      onImportCommands(windTermInfo ? "WindTermAuto" : "WindTerm");
+                    }}
+                  >
+                    <Zap className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-[11px]">从 WindTerm 导入</div>
+                      <div className="text-[9px] text-slate-400">{windTermInfo ? `自动检测到 ${windTermInfo.count} 条` : "选择 user.snippets"}</div>
+                    </div>
+                  </button>
+                  <button
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-800 transition-colors mt-0.5 cursor-pointer"
                     onClick={() => {
                       setShowImportPopover(false);
                       onImportCommands("本地文件");
                     }}
                   >
-                    <FolderOpen className="h-3.5 w-3.5 text-[var(--app-muted)] shrink-0" />
+                    <FolderOpen className="h-3.5 w-3.5 text-slate-400 shrink-0" />
                     <div>
-                      <div className="font-extrabold text-[11px]">选择本地文件导入</div>
-                      <div className="text-[9px] text-[var(--text-secondary)]">支持 JSON / XML / TXT</div>
+                      <div className="font-extrabold text-[11px]">选择通用本地文件</div>
+                      <div className="text-[9px] text-slate-400">支持 JSON / XML / Snippets</div>
                     </div>
                   </button>
                 </div>

@@ -194,6 +194,27 @@ function parseJsonCommands(text: string, source: string) {
       }
     }
 
+    // 1.5 WindTerm 真实代码片段 (user.snippets) 结构
+    const rawItems = Array.isArray(data) ? data : Array.isArray(data?.snippets) ? data.snippets : null;
+    if (rawItems && rawItems.some((item: any) => item?.["snippet.name"] || item?.["snippet.body"] || item?.["snippet.command"])) {
+      const groupMap = new Map<string, CommandItem[]>();
+      for (const item of rawItems) {
+        const name = String(item?.["snippet.name"] || item?.name || item?.title || item?.["snippet.body"] || "").trim();
+        const body = String(item?.["snippet.body"] || item?.["snippet.command"] || item?.command || item?.cmd || "").trim();
+        if (!body && !name) continue;
+        const group = String(item?.["snippet.group"] || item?.group || item?.category || "WindTerm 快捷指令").trim() || "WindTerm 快捷指令";
+        const desc = String(item?.["snippet.description"] || item?.description || item?.desc || "");
+        if (!groupMap.has(group)) groupMap.set(group, []);
+        groupMap.get(group)!.push({
+          id: makeStableId("cmd", `${group}:${name}:${body}`),
+          name: name || body,
+          command: body,
+          description: desc
+        });
+      }
+      return foldersFromMap(groupMap, "WindTerm 快捷指令");
+    }
+
     // 2. LdSSH / 通用 CommandFolder[] 结构
     const folders = Array.isArray(data) ? data : Array.isArray(data?.folders) ? data.folders : null;
     if (folders) {

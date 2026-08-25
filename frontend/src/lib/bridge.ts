@@ -100,6 +100,42 @@ export const nativeBridge = {
       error?: string;
     }>("import_finalshell_hosts", { success: false, imported: 0, hosts: [] }, connDir);
   },
+  detectWindTermCommands() {
+    return callNative<{
+      success: boolean;
+      detected: boolean;
+      configPath?: string;
+      rawJson?: string;
+      commandCount?: number;
+      folderCount?: number;
+      folders?: CommandFolder[];
+    }>("detect_windterm_commands", { success: false, detected: false, folders: [] });
+  },
+  importWindTermCommands(rawJsonOrPath = "") {
+    return callNative<{
+      success: boolean;
+      importedCount: number;
+      folders?: CommandFolder[];
+      error?: string;
+    }>("import_windterm_commands", { success: false, importedCount: 0, folders: [] }, rawJsonOrPath);
+  },
+  detectWindTermHosts() {
+    return callNative<{
+      success: boolean;
+      detected: boolean;
+      configPath?: string;
+      hostCount?: number;
+      hosts?: SavedConnection[];
+    }>("detect_windterm_hosts", { success: false, detected: false, hosts: [] });
+  },
+  importWindTermHosts(customPath = "") {
+    return callNative<{
+      success: boolean;
+      imported: number;
+      hosts?: SavedConnection[];
+      error?: string;
+    }>("import_windterm_hosts", { success: false, imported: 0, hosts: [] }, customPath);
+  },
   saveCommandLibrary(folders: CommandFolder[]) {
     return callNative<{ success: boolean; error?: string }>("save_command_library", { success: false }, JSON.stringify(folders));
   },

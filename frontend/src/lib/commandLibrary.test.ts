@@ -138,4 +138,29 @@ describe("command library import/export", () => {
     });
     expect(filled).toBe("ping 1.1.1.1 -p 8080 -f test.txt");
   });
+
+  test("imports WindTerm user.snippets JSON structure", () => {
+    const windTermSnippetsJson = JSON.stringify([
+      {
+        "snippet.name": "查看容器",
+        "snippet.body": "docker ps -a",
+        "snippet.group": "Docker常用",
+        "snippet.description": "列出所有容器"
+      },
+      {
+        "snippet.name": "系统资源",
+        "snippet.body": "htop",
+        "snippet.group": "系统监控"
+      }
+    ]);
+
+    const parsed = parseCommandLibraryImport(windTermSnippetsJson, "WindTerm");
+    expect(parsed.imported).toBe(2);
+    expect(parsed.folders).toHaveLength(2);
+    expect(parsed.folders.map(f => f.name)).toContain("Docker常用");
+    expect(parsed.folders.map(f => f.name)).toContain("系统监控");
+    const dockerFolder = parsed.folders.find(f => f.name === "Docker常用");
+    expect(dockerFolder?.commands[0].command).toBe("docker ps -a");
+    expect(dockerFolder?.commands[0].name).toBe("查看容器");
+  });
 });
