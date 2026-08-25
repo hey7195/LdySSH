@@ -4681,22 +4681,37 @@ function TerminalWorkspace({
   }>>({});
 
   useEffect(() => {
-    if (!activeSession || !visible) return;
-    if (activeSession.kind === "ssh" && !activeSession.connected) return;
+    if (!visible || sessions.length === 0) return;
 
     let isMounted = true;
     let isFetching = false;
 
-    const fetchLiveStats = async () => {
-      if (isFetching || !activeSession) return;
+    const fetchAllLiveStats = async () => {
+      if (isFetching) return;
       isFetching = true;
       try {
-        const res = await nativeBridge.getSystemStats(activeSession.id);
-        if (isMounted && res && res.success && res.stats) {
-          setLiveStats((prev) => ({
-            ...prev,
-            [activeSession.id]: res.stats as any
-          }));
+        const eligibleSessions = sessions.filter(
+          (s) => s.kind === "local" || (s.kind === "ssh" && s.connected)
+        );
+        if (eligibleSessions.length === 0) return;
+
+        const results = await Promise.allSettled(
+          eligibleSessions.map(async (sess) => {
+            const res = await nativeBridge.getSystemStats(sess.id);
+            return { id: sess.id, stats: res?.success && res.stats ? res.stats : null };
+          })
+        );
+
+        if (isMounted) {
+          setLiveStats((prev) => {
+            const next = { ...prev };
+            for (const r of results) {
+              if (r.status === "fulfilled" && r.value.stats) {
+                next[r.value.id] = r.value.stats as any;
+              }
+            }
+            return next;
+          });
         }
       } catch {
         // ignore
@@ -4705,16 +4720,16 @@ function TerminalWorkspace({
       }
     };
 
-    void fetchLiveStats();
+    void fetchAllLiveStats();
     const intervalId = setInterval(() => {
-      void fetchLiveStats();
+      void fetchAllLiveStats();
     }, 2500);
 
     return () => {
       isMounted = false;
       clearInterval(intervalId);
     };
-  }, [activeSession?.id, activeSession?.connected, visible]);
+  }, [sessions, visible]);
 
   // 右侧栏 100% 自由拖拽缩放宽度状态与折叠状态 (支持类似 FinalShell 任意拉宽)
   const [rightSidebarWidth, setRightSidebarWidth] = useState(420);
@@ -4974,8 +4989,26 @@ function TerminalWorkspace({
                   <div className="flex items-center gap-1.5 min-w-0 flex-1 h-full pointer-events-none">
                     <span title={status.title} className={cn("h-2 w-2 rounded-full shrink-0", status.dotClass)} />
                     <span className="truncate font-mono font-extrabold">{session.title}</span>
-                    {status.isDisconnected && (
+                    {status.isDisconnected ? (
                       <span className="rounded bg-slate-700/80 text-[9px] font-mono font-bold px-1.5 py-0 text-slate-300 shrink-0 border border-slate-600/60">已断开</span>
+                    ) : (
+                      liveStats[session.id]?.cpu_usage && (
+                        <span
+                          className={cn(
+                            "rounded font-mono font-bold text-[9px] px-1 py-0 border shrink-0 transition-colors",
+                            (parseFloat(liveStats[session.id].cpu_usage!) || 0) > 75
+                              ? "bg-rose-500/25 text-rose-200 border-rose-500/50"
+                              : (parseFloat(liveStats[session.id].cpu_usage!) || 0) > 40
+                                ? "bg-amber-500/25 text-amber-200 border-amber-500/50"
+                                : isActive
+                                  ? "bg-black/25 text-white border-white/20"
+                                  : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                          )}
+                          title={`【${session.title} 动态负载】\n• CPU: ${liveStats[session.id].cpu_usage}\n• 内存: ${liveStats[session.id].memory_used || "--"} (${liveStats[session.id].memory_usage || "--"})\n• 磁盘: ${liveStats[session.id].disk_usage || "--"}`}
+                        >
+                          {liveStats[session.id].cpu_usage}
+                        </span>
+                      )
                     )}
                     <span className="sr-only">{index + 1}</span>
                     {renderEnvironmentBadge(session.connectParams?.environment, true)}
@@ -4997,6 +5030,7 @@ function TerminalWorkspace({
                   onContextMenu={(event) => event.stopPropagation()}
                   title="关闭会话"
                 >
+                  <X className="h-3 w-3" />
                 </button>
               </div>
             );
@@ -5341,8 +5375,26 @@ function TerminalWorkspace({
                     <div className="flex items-center gap-2">
                       <span title={status.title} className={cn("h-2 w-2 shrink-0 rounded-full", status.dotClass)} />
                       <span className={cn("min-w-0 flex-1 truncate font-mono text-xs font-bold text-[var(--app-text)]", status.isDisconnected && "opacity-75")}>{session.title}</span>
-                      {status.isDisconnected && (
+                      {status.isDisconnected ? (
                         <span className="rounded bg-slate-700/80 text-[9px] font-mono font-bold px-1.5 py-0 text-slate-300 shrink-0 border border-slate-600/60">已断开</span>
+                      ) : (
+                        liveStats[session.id]?.cpu_usage && (
+                          <span
+                            className={cn(
+                              "rounded font-mono font-bold text-[9px] px-1 py-0 border shrink-0 transition-colors",
+                              (parseFloat(liveStats[session.id].cpu_usage!) || 0) > 75
+                                ? "bg-rose-500/25 text-rose-200 border-rose-500/50"
+                                : (parseFloat(liveStats[session.id].cpu_usage!) || 0) > 40
+                                  ? "bg-amber-500/25 text-amber-200 border-amber-500/50"
+                                  : isActive
+                                    ? "bg-emerald-500/25 text-emerald-300 border-emerald-500/40"
+                                    : "bg-[var(--fill-2)] text-[var(--app-muted)] border-[var(--app-line)]"
+                            )}
+                            title={`【${session.title} 动态负载】\n• CPU: ${liveStats[session.id].cpu_usage}\n• 内存: ${liveStats[session.id].memory_used || "--"} (${liveStats[session.id].memory_usage || "--"})\n• 磁盘: ${liveStats[session.id].disk_usage || "--"}`}
+                          >
+                            {liveStats[session.id].cpu_usage}
+                          </span>
+                        )
                       )}
                       <button
                         className="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--app-muted)] hover:text-rose-500 group-hover:flex cursor-pointer"
@@ -5491,11 +5543,6 @@ function TerminalWorkspace({
               <Copy className="h-2.5 w-2.5 text-sky-400 ml-0.5" />
             </button>
           )}
-
-          {/* 终端行列尺寸标识 */}
-          <span className="font-mono text-[10px] text-[var(--app-muted)] bg-[var(--fill-1)] border border-[var(--app-line)] px-1.5 py-0.2 rounded shadow-2xs shrink-0 hidden md:inline-flex items-center gap-1">
-            <span>📐 132 × 38</span>
-          </span>
 
           {/* SSH 断线重连醒目标识与快捷重连按钮 */}
           {activeSession?.kind === "ssh" && !activeSession.connected && activeSession.connectParams && (
