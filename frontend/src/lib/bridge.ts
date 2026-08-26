@@ -481,6 +481,8 @@ export interface SavedConnection {
   jumpSavedConnectionId?: string;
   jumpChain?: JumpHop[];
   compression?: boolean;
+  description?: string;
+  remarks?: string;
 }
 
 export interface JumpHop {

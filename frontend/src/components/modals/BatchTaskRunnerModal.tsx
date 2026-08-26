@@ -7,6 +7,7 @@ import {
   Smartphone,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Clock,
   Download,
   Terminal,
@@ -48,6 +49,7 @@ export const BatchTaskRunnerModal: React.FC<BatchTaskRunnerModalProps> = ({
     "# 批量巡检与状态汇总脚本\nuname -a\ndf -h / | grep -v Filesystem\nfree -m | grep Mem\n uptime\n"
   );
   const [isRunning, setIsRunning] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
   const [taskResults, setTaskResults] = useState<HostTaskResult[]>([]);
   const [expandedHost, setExpandedHost] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -73,6 +75,7 @@ export const BatchTaskRunnerModal: React.FC<BatchTaskRunnerModalProps> = ({
   ];
 
   function toggleSelectAll() {
+    setErrorText(null);
     if (selectedHostKeys.length === allTargets.length) {
       setSelectedHostKeys([]);
     } else {
@@ -81,6 +84,7 @@ export const BatchTaskRunnerModal: React.FC<BatchTaskRunnerModalProps> = ({
   }
 
   function toggleHost(key: string) {
+    setErrorText(null);
     if (selectedHostKeys.includes(key)) {
       setSelectedHostKeys(selectedHostKeys.filter((k) => k !== key));
     } else {
@@ -89,12 +93,13 @@ export const BatchTaskRunnerModal: React.FC<BatchTaskRunnerModalProps> = ({
   }
 
   async function handleRunBatch() {
+    setErrorText(null);
     if (selectedHostKeys.length === 0) {
-      alert("请至少勾选一台目标主机或设备！");
+      setErrorText("请至少勾选一台目标主机或设备！");
       return;
     }
     if (!scriptText.trim()) {
-      alert("请输入要执行的巡检脚本！");
+      setErrorText("请输入要执行的巡检脚本！");
       return;
     }
 
@@ -290,6 +295,14 @@ export const BatchTaskRunnerModal: React.FC<BatchTaskRunnerModalProps> = ({
                 className="flex-1 w-full rounded-xl border border-[var(--app-line)] bg-zinc-950/90 p-3 font-mono text-xs text-emerald-400 focus:border-purple-500 focus:outline-none resize-none scrollbar-thin shadow-inner"
               />
             </div>
+
+            {/* Error Text Banner */}
+            {errorText && (
+              <div className="flex items-center gap-2 rounded-xl bg-rose-500/15 border border-rose-500/40 p-2.5 text-xs text-rose-300 animate-in fade-in">
+                <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+                <span>{errorText}</span>
+              </div>
+            )}
 
             {/* Run Button */}
             <button

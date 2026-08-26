@@ -10,6 +10,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import {
   Activity,
   ArrowDown,
+  AlertCircle,
   AlertTriangle,
   Bot,
   Check,
@@ -40,6 +41,7 @@ import {
   WrapText,
   HardDrive,
   Home,
+  Info,
   Image as ImageIcon,
   KeyRound,
   Menu,
@@ -1531,6 +1533,21 @@ export function App() {
     }).catch(() => {});
   }, []);
 
+  // 全局 Toast 通知消息系统
+  const [toasts, setToasts] = useState<{ id: string; type: "success" | "error" | "info" | "warning"; title?: string; message: string; duration?: number }[]>([]);
+
+  const showToast = useCallback((message: string, type: "success" | "error" | "info" | "warning" = "success", title?: string, duration = 4000) => {
+    const id = "toast_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    setToasts((prev) => [...prev, { id, type, title, message, duration }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, duration);
+  }, []);
+
+  const closeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   // WindTerm SSH 连接自动感知状态
   const [windTermHostCount, setWindTermHostCount] = useState(0);
   const [windTermHostPath, setWindTermHostPath] = useState("");
@@ -1540,7 +1557,7 @@ export function App() {
       const res = await nativeBridge.importFinalShellHosts(finalShellConnDir);
       if (res.success && res.imported > 0) {
         await refreshConnections();
-        alert(`🎉 成功从 FinalShell 导入 ${res.imported} 台主机连接（密码已自动解密并安全保存）！`);
+        showToast(`🎉 成功从 FinalShell 导入 ${res.imported} 台主机连接（密码已自动解密并安全保存）！`, "success", "导入成功");
         return;
       }
       const selected = await nativeBridge.showOpenFolderDialog("选择 FinalShell 的 conn 连接配置目录");
@@ -1548,13 +1565,13 @@ export function App() {
         const manualRes = await nativeBridge.importFinalShellHosts(selected.folderPath);
         if (manualRes.success && manualRes.imported > 0) {
           await refreshConnections();
-          alert(`🎉 成功从 FinalShell 导入 ${manualRes.imported} 台主机连接！`);
+          showToast(`🎉 成功从 FinalShell 导入 ${manualRes.imported} 台主机连接！`, "success", "导入成功");
         } else {
-          alert("未在该目录中找到有效的 FinalShell 连接配置。");
+          showToast("未在该目录中找到有效的 FinalShell 连接配置。", "warning", "未发现配置");
         }
       }
     } catch (err: any) {
-      alert(`导入 FinalShell 主机失败: ${err?.message || "未知异常"}`);
+      showToast(`导入 FinalShell 主机失败: ${err?.message || "未知异常"}`, "error", "导入异常");
     }
   };
 
@@ -1563,7 +1580,7 @@ export function App() {
       const res = await nativeBridge.importWindTermHosts(windTermHostPath);
       if (res.success && res.imported > 0) {
         await refreshConnections();
-        alert(`🎉 成功从 WindTerm 导入 ${res.imported} 台主机连接！`);
+        showToast(`🎉 成功从 WindTerm 导入 ${res.imported} 台主机连接！`, "success", "导入成功");
         return;
       }
       const selected = await nativeBridge.showOpenFolderDialog("选择 WindTerm 的 profiles 目录或 user.sessions 所在文件夹");
@@ -1571,13 +1588,13 @@ export function App() {
         const manualRes = await nativeBridge.importWindTermHosts(selected.folderPath);
         if (manualRes.success && manualRes.imported > 0) {
           await refreshConnections();
-          alert(`🎉 成功从 WindTerm 导入 ${manualRes.imported} 台主机连接！`);
+          showToast(`🎉 成功从 WindTerm 导入 ${manualRes.imported} 台主机连接！`, "success", "导入成功");
         } else {
-          alert("未在该目录中找到有效的 WindTerm 会话配置文件 (user.sessions)。");
+          showToast("未在该目录中找到有效的 WindTerm 会话配置文件 (user.sessions)。", "warning", "未发现配置");
         }
       }
     } catch (err: any) {
-      alert(`导入 WindTerm 主机失败: ${err?.message || "未知异常"}`);
+      showToast(`导入 WindTerm 主机失败: ${err?.message || "未知异常"}`, "error", "导入异常");
     }
   };
 
@@ -1589,7 +1606,7 @@ export function App() {
   const handleImportOpenSsh = async (text: string) => {
     const parsed = parseOpenSshConfig(text);
     if (parsed.length === 0) {
-      alert("未能在文本中识别到有效的 Host 配置！请确认格式包含类似：\nHost my-server\n  HostName 1.2.3.4\n  User root");
+      showToast("未能在文本中识别到有效的 Host 配置！请确认格式包含类似：\nHost my-server\n  HostName 1.2.3.4\n  User root", "warning", "配置格式无效");
       return;
     }
     for (const c of parsed) {
@@ -1599,6 +1616,7 @@ export function App() {
     }
     await refreshConnections();
     setOpenSshImportSuccess(`✓ 成功导入 ${parsed.length} 台 OpenSSH 主机！`);
+    showToast(`✓ 成功导入 ${parsed.length} 台 OpenSSH 主机配置！`, "success", "OpenSSH 导入成功");
     setTimeout(() => {
       setOpenSshModalOpen(false);
       setOpenSshImportSuccess(null);
@@ -1956,19 +1974,24 @@ export function App() {
   );
 
   const filteredConnections = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
-    if (!keyword) return savedConnections;
+    const rawTokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (rawTokens.length === 0) return savedConnections;
     return savedConnections.filter((connection) => {
-      const label = [
+      const searchable = [
         connection.name,
         connection.hostname,
         connection.username,
-        connection.group
+        connection.group,
+        connection.folder,
+        connection.description,
+        connection.remarks,
+        String(connection.port || 22),
+        ...(connection.tags || [])
       ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
-      return label.includes(keyword);
+      return rawTokens.every((token) => searchable.includes(token));
     });
   }, [query, savedConnections]);
 
@@ -2661,12 +2684,16 @@ export function App() {
       try {
         const detected = await nativeBridge.detectFinalShellCommands();
         if (!detected.detected || !detected.rawJson) {
-          setCommandTransferStatus("未在系统默认路径找到 FinalShell 配置文件。");
+          const msg = "未在系统默认路径找到 FinalShell 配置文件。";
+          setCommandTransferStatus(msg);
+          showToast(msg, "warning", "未发现配置");
           return;
         }
         const imported = parseCommandLibraryImport(detected.rawJson, "FinalShell");
         if (imported.imported === 0) {
-          setCommandTransferStatus("FinalShell 配置中暂无快捷命令。");
+          const msg = "FinalShell 配置中暂无快捷命令。";
+          setCommandTransferStatus(msg);
+          showToast(msg, "info", "提示");
           return;
         }
         const next = mergeCommandFolders(commandFolders, imported.folders);
@@ -2674,10 +2701,14 @@ export function App() {
         const firstImportedFolder = imported.folders[0]?.name;
         const activeImportedFolder = next.find((folder) => folder.name === firstImportedFolder);
         setActiveCommandFolderId(activeImportedFolder?.id || next[0]?.id || "");
-        setCommandTransferStatus(`已成功从本机 FinalShell 自动无感导入 ${imported.imported} 条快捷命令！`);
+        const successMsg = `已成功从本机 FinalShell 自动无感导入 ${imported.imported} 条快捷命令！`;
+        setCommandTransferStatus(successMsg);
+        showToast(successMsg, "success", "导入成功");
         return;
       } catch (err: any) {
-        setCommandTransferStatus(`从 FinalShell 导入失败: ${err?.message || "未知异常"}`);
+        const errMsg = `从 FinalShell 导入失败: ${err?.message || "未知异常"}`;
+        setCommandTransferStatus(errMsg);
+        showToast(errMsg, "error", "导入失败");
         return;
       }
     }
@@ -2686,12 +2717,16 @@ export function App() {
       try {
         const detected = await nativeBridge.detectWindTermCommands();
         if (!detected.detected || !detected.rawJson) {
-          setCommandTransferStatus("未在系统默认路径找到 WindTerm 代码片段文件。");
+          const msg = "未在系统默认路径找到 WindTerm 代码片段文件。";
+          setCommandTransferStatus(msg);
+          showToast(msg, "warning", "未发现配置");
           return;
         }
         const imported = parseCommandLibraryImport(detected.rawJson, "WindTerm");
         if (imported.imported === 0) {
-          setCommandTransferStatus("WindTerm 配置中暂无代码片段。");
+          const msg = "WindTerm 配置中暂无代码片段。";
+          setCommandTransferStatus(msg);
+          showToast(msg, "info", "提示");
           return;
         }
         const next = mergeCommandFolders(commandFolders, imported.folders);
@@ -2699,10 +2734,14 @@ export function App() {
         const firstImportedFolder = imported.folders[0]?.name;
         const activeImportedFolder = next.find((folder) => folder.name === firstImportedFolder);
         setActiveCommandFolderId(activeImportedFolder?.id || next[0]?.id || "");
-        setCommandTransferStatus(`已成功从本机 WindTerm 自动无感导入 ${imported.imported} 条代码片段！`);
+        const successMsg = `已成功从本机 WindTerm 自动无感导入 ${imported.imported} 条代码片段！`;
+        setCommandTransferStatus(successMsg);
+        showToast(successMsg, "success", "导入成功");
         return;
       } catch (err: any) {
-        setCommandTransferStatus(`从 WindTerm 导入失败: ${err?.message || "未知异常"}`);
+        const errMsg = `从 WindTerm 导入失败: ${err?.message || "未知异常"}`;
+        setCommandTransferStatus(errMsg);
+        showToast(errMsg, "error", "导入失败");
         return;
       }
     }
@@ -2715,14 +2754,18 @@ export function App() {
 
     const file = await nativeBridge.readBase64File(selected.filePath);
     if (!file.content) {
-      setCommandTransferStatus("读取命令文件失败。");
+      const msg = "读取命令文件失败。";
+      setCommandTransferStatus(msg);
+      showToast(msg, "error", "读取失败");
       return;
     }
 
     const text = new TextDecoder("utf-8").decode(base64ToBytes(file.content));
     const imported = parseCommandLibraryImport(text, source);
     if (imported.imported === 0) {
-      setCommandTransferStatus("未找到可导入的命令。");
+      const msg = "未找到可导入的命令。";
+      setCommandTransferStatus(msg);
+      showToast(msg, "info", "未匹配到命令");
       return;
     }
 
@@ -2731,7 +2774,9 @@ export function App() {
     const firstImportedFolder = imported.folders[0]?.name;
     const activeImportedFolder = next.find((folder) => folder.name === firstImportedFolder);
     setActiveCommandFolderId(activeImportedFolder?.id || next[0]?.id || "");
-    setCommandTransferStatus(`已从 ${source} 导入 ${imported.imported} 条命令。`);
+    const msg = `已从 ${source} 导入 ${imported.imported} 条命令。`;
+    setCommandTransferStatus(msg);
+    showToast(msg, "success", "导入成功");
   }
 
   async function exportCommandLibrary() {
@@ -2744,7 +2789,9 @@ export function App() {
       selected.filePath,
       bytesToBase64(new TextEncoder().encode(content))
     );
-    setCommandTransferStatus(result.success ? "命令库已导出。" : result.error || "导出命令库失败。");
+    const msg = result.success ? "命令库已导出。" : result.error || "导出命令库失败。";
+    setCommandTransferStatus(msg);
+    showToast(msg, result.success ? "success" : "error", result.success ? "导出成功" : "导出异常");
   }
 
   function sendCommandToActiveSession(command: string) {
@@ -3469,6 +3516,39 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* 全局毛玻璃浮窗 Toast 通知组件 */}
+      <div className="fixed top-4 right-4 z-[99999] flex flex-col gap-2.5 pointer-events-none max-w-sm w-full select-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={cn(
+              "pointer-events-auto flex items-start gap-3 rounded-2xl p-3.5 shadow-2xl backdrop-blur-xl border transition-all duration-300 animate-in slide-in-from-top-2 fade-in",
+              t.type === "success" && "bg-emerald-950/85 border-emerald-500/40 text-emerald-100 shadow-emerald-950/50",
+              t.type === "error" && "bg-rose-950/85 border-rose-500/40 text-rose-100 shadow-rose-950/50",
+              t.type === "warning" && "bg-amber-950/85 border-amber-500/40 text-amber-100 shadow-amber-950/50",
+              t.type === "info" && "bg-slate-900/90 border-slate-700/60 text-slate-100 shadow-black/60"
+            )}
+          >
+            <div className="shrink-0 mt-0.5">
+              {t.type === "success" && <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400" />}
+              {t.type === "error" && <AlertCircle className="h-4.5 w-4.5 text-rose-400" />}
+              {t.type === "warning" && <AlertTriangle className="h-4.5 w-4.5 text-amber-400" />}
+              {t.type === "info" && <Info className="h-4.5 w-4.5 text-sky-400" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              {t.title && <div className="text-xs font-bold leading-tight mb-0.5">{t.title}</div>}
+              <div className="text-[11px] font-medium leading-relaxed opacity-90 break-words whitespace-pre-wrap">{t.message}</div>
+            </div>
+            <button
+              onClick={() => closeToast(t.id)}
+              className="shrink-0 opacity-60 hover:opacity-100 transition-opacity p-0.5 rounded-lg hover:bg-white/10 cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -3664,15 +3744,25 @@ function HostSidebar({
 
   // Filter connections by query and active tag filter
   const filteredConnections = useMemo(() => {
+    const rawTokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return savedConnections.filter((c) => {
-      const matchQuery = !query.trim() || 
-        (c.name || "").toLowerCase().includes(query.toLowerCase()) || 
-        (c.hostname || "").toLowerCase().includes(query.toLowerCase()) ||
-        (c.username || "").toLowerCase().includes(query.toLowerCase()) ||
-        (c.tags || []).some((t) => t.toLowerCase().includes(query.toLowerCase()));
-      
-      const matchTag = !activeTagFilter || (c.tags || []).includes(activeTagFilter);
-      return matchQuery && matchTag;
+      if (activeTagFilter && !(c.tags || []).includes(activeTagFilter)) {
+        return false;
+      }
+      if (rawTokens.length === 0) return true;
+      const searchable = [
+        c.name,
+        c.hostname,
+        c.username,
+        c.group,
+        c.folder,
+        c.description,
+        c.remarks,
+        String(c.port || 22),
+        ...(c.tags || [])
+      ].filter(Boolean).join(" ").toLowerCase();
+
+      return rawTokens.every((token) => searchable.includes(token));
     });
   }, [savedConnections, query, activeTagFilter]);
 

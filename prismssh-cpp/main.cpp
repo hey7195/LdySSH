@@ -4063,7 +4063,10 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
             L"--disable-sync "
             L"--no-first-run "
             L"--enable-fast-unload "
-            L"--disable-features=msEdgeLocalDataStore,msWebOOUI,msPdfOOUI,Translate"
+            L"--enable-smooth-scrolling "
+            L"--enable-zero-copy "
+            L"--disable-gpu-shader-disk-cache "
+            L"--disable-features=msEdgeLocalDataStore,msWebOOUI,msPdfOOUI,Translate,CalculateNativeWinOcclusion"
         );
     }
 
