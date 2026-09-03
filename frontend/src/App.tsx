@@ -4222,8 +4222,11 @@ function HostSidebar({
         {groupContextMenu && (
           <div
             role="menu"
-            className="fixed z-50 min-w-44 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
-            style={{ left: Math.min(groupContextMenu.x, window.innerWidth - 180), top: Math.min(groupContextMenu.y, window.innerHeight - 200) }}
+            className="fixed z-50 min-w-44 max-h-[calc(100vh-24px)] overflow-y-auto scrollbar-thin rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+            style={{
+              left: Math.max(8, Math.min(groupContextMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1000) - 200)),
+              top: Math.max(8, Math.min(groupContextMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 240))
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 font-extrabold text-[var(--app-muted)] border-b border-[var(--app-line)] mb-1 truncate">
@@ -4286,8 +4289,11 @@ function HostSidebar({
         {hostContextMenu && (
           <div
             role="menu"
-            className="fixed z-50 min-w-44 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
-            style={{ left: Math.min(hostContextMenu.x, window.innerWidth - 200), top: Math.min(hostContextMenu.y, window.innerHeight - 260) }}
+            className="fixed z-50 min-w-44 max-h-[calc(100vh-24px)] overflow-y-auto scrollbar-thin rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+            style={{
+              left: Math.max(8, Math.min(hostContextMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1000) - 220)),
+              top: Math.max(8, Math.min(hostContextMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 320))
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-1.5 font-extrabold text-[var(--app-text)] border-b border-[var(--app-line)] mb-1 truncate">
@@ -8178,13 +8184,17 @@ function TerminalCommandSidebar({
     event.preventDefault();
     event.stopPropagation();
     setBlankMenu(null);
-    setCommandMenu({ x: event.clientX, y: event.clientY, command });
+    const posX = Math.max(8, Math.min(event.clientX, (typeof window !== "undefined" ? window.innerWidth : 1000) - 200));
+    const posY = Math.max(8, Math.min(event.clientY, (typeof window !== "undefined" ? window.innerHeight : 800) - 260));
+    setCommandMenu({ x: posX, y: posY, command });
   }
 
   function handleBlankContextMenu(event: ReactMouseEvent) {
     event.preventDefault();
     setCommandMenu(null);
-    setBlankMenu({ x: event.clientX, y: event.clientY });
+    const posX = Math.max(8, Math.min(event.clientX, (typeof window !== "undefined" ? window.innerWidth : 1000) - 180));
+    const posY = Math.max(8, Math.min(event.clientY, (typeof window !== "undefined" ? window.innerHeight : 800) - 140));
+    setBlankMenu({ x: posX, y: posY });
   }
 
   function handleConfirmAddFolder(e: React.FormEvent) {
@@ -8407,7 +8417,10 @@ function TerminalCommandSidebar({
           <div
             role="menu"
             className="fixed z-50 min-w-36 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-fade-in"
-            style={{ left: blankMenu.x, top: blankMenu.y }}
+            style={{
+              left: Math.max(8, Math.min(blankMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1000) - 180)),
+              top: Math.max(8, Math.min(blankMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 140))
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -9192,6 +9205,22 @@ function TerminalFileSidebar({
     };
   }, [activeSession?.id, canBrowseRemote, remotePath, reloadToken]);
 
+  useEffect(() => {
+    if (!fileMenu) return;
+    function handlePointerDown(e: MouseEvent | PointerEvent) {
+      setFileMenu(null);
+    }
+    function handleKeyDown(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") setFileMenu(null);
+    }
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [fileMenu]);
+
   function openDirectory(entry: DirectoryEntry) {
     if (entry.type !== "directory") return;
     setRemotePath(joinRemotePath(remotePath, entry.name));
@@ -9199,7 +9228,15 @@ function TerminalFileSidebar({
 
   function openFileMenu(event: ReactMouseEvent, entry: DirectoryEntry) {
     event.preventDefault();
-    setFileMenu({ x: event.clientX, y: event.clientY, entry });
+    event.stopPropagation();
+    const menuEstimatedHeight = entry.type === "directory" ? 340 : 480;
+    const menuEstimatedWidth = 240;
+    const windowW = typeof window !== "undefined" ? window.innerWidth : 1200;
+    const windowH = typeof window !== "undefined" ? window.innerHeight : 800;
+
+    const posX = Math.max(8, Math.min(event.clientX, windowW - menuEstimatedWidth - 12));
+    const posY = Math.max(8, Math.min(event.clientY, windowH - menuEstimatedHeight - 12));
+    setFileMenu({ x: posX, y: posY, entry });
   }
 
   async function downloadRemoteFile(entry: DirectoryEntry) {
@@ -9854,8 +9891,13 @@ function TerminalFileSidebar({
             {fileMenu && (
               <div
                 role="menu"
-                className="fixed z-50 min-w-48 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1.5 text-xs font-extrabold shadow-xl animate-in fade-in zoom-in-95 duration-150"
-                style={{ left: fileMenu.x, top: fileMenu.y }}
+                className="fixed z-50 min-w-52 max-w-xs max-h-[calc(100vh-24px)] overflow-y-auto scrollbar-thin rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1.5 text-xs font-extrabold shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150"
+                style={{
+                  left: Math.max(8, Math.min(fileMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 240)),
+                  top: Math.max(8, Math.min(fileMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - (fileMenu.entry.type === "directory" ? 340 : 480)))
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onContextMenu={(e) => e.preventDefault()}
                 onMouseLeave={() => setFileMenu(null)}
               >
                 {fileMenu.entry.type === "directory" ? (
