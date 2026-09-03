@@ -3,6 +3,7 @@ import {
   DEFAULT_TERMINAL_THEME,
   DEFAULT_HIGHLIGHT_RULES,
   applyHighlightRules,
+  decodeLessHexUtf8,
   getTerminalTheme,
   getThemeAttribute,
   THEMES,
@@ -127,5 +128,24 @@ describe("terminal theme settings", () => {
     expect(getThemeAttribute("dark")).toBe("dark");
     expect(getThemeAttribute("graphite")).toBe("graphite");
     expect(getThemeAttribute("aurora")).toBe("aurora");
+  });
+});
+
+describe("decodeLessHexUtf8", () => {
+  test("automatically decodes less / git escaped UTF-8 chinese hex bytes", () => {
+    // <E6><96><87><E6><A1><A3> is "文档"
+    const raw = "<E6><96><87><E6><A1><A3><EF><BC><9A><E8><A1><A5><E5><85><85>V3.1.0<E8><87><B3>V3.2.2";
+    expect(decodeLessHexUtf8(raw)).toBe("文档：补充V3.1.0至V3.2.2");
+  });
+
+  test("strips less ANSI standout inverse escape sequences between hex bytes", () => {
+    // \x1b[7m<E6>\x1b[27m\x1b[7m<96>\x1b[27m\x1b[7m<87>\x1b[27m is "文"
+    const rawWithAnsi = "\x1b[7m<E6>\x1b[27m\x1b[7m<96>\x1b[27m\x1b[7m<87>\x1b[27m";
+    expect(decodeLessHexUtf8(rawWithAnsi)).toBe("文");
+  });
+
+  test("keeps regular text and html tags untouched", () => {
+    expect(decodeLessHexUtf8("hello <tag> world")).toBe("hello <tag> world");
+    expect(decodeLessHexUtf8("normal text 123")).toBe("normal text 123");
   });
 });

@@ -175,6 +175,7 @@ import {
   THEMES,
   TERMINAL_THEMES,
   applyHighlightRules,
+  decodeLessHexUtf8,
   getTerminalTheme,
   getThemeAttribute,
   getThemeInfo,
@@ -8765,7 +8766,8 @@ function sendTerminalInput(sessionId: string | undefined, text: string) {
 const TERMINAL_HIGHLIGHT_SKIP_BYTES = 65536;
 
 function writeHighlightedOrRaw(target: XTerm, output: string, rules: HighlightRule[]) {
-  target.write(output.length > TERMINAL_HIGHLIGHT_SKIP_BYTES ? output : applyHighlightRules(output, rules));
+  const normalized = decodeLessHexUtf8(output);
+  target.write(normalized.length > TERMINAL_HIGHLIGHT_SKIP_BYTES ? normalized : applyHighlightRules(normalized, rules));
 }
 
 function attachFastRenderer(terminal: XTerm) {

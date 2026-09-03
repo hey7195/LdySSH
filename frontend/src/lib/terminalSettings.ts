@@ -411,6 +411,31 @@ function getCompiledHighlightRules(rules: HighlightRule[]) {
   return compiled;
 }
 
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+const lessHexSequenceRegex = /((?:\x1b\[[0-9;]*m)?<[0-9A-Fa-f]{2}>(?:\x1b\[[0-9;]*m)?){2,}/g;
+const singleHexByteRegex = /<([0-9A-Fa-f]{2})>/g;
+
+export function decodeLessHexUtf8(input: string): string {
+  if (!input || !input.includes("<")) return input;
+
+  return input.replace(lessHexSequenceRegex, (matched) => {
+    const bytes: number[] = [];
+    let hexMatch: RegExpExecArray | null;
+    singleHexByteRegex.lastIndex = 0;
+    while ((hexMatch = singleHexByteRegex.exec(matched)) !== null) {
+      bytes.push(parseInt(hexMatch[1], 16));
+    }
+
+    if (bytes.length < 2) return matched;
+
+    try {
+      return utf8Decoder.decode(new Uint8Array(bytes));
+    } catch {
+      return matched;
+    }
+  });
+}
+
 export function applyHighlightRules(text: string, rules: HighlightRule[]) {
   if (!text || rules.length === 0) return text;
 
