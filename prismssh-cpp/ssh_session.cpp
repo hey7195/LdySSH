@@ -1095,6 +1095,12 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
         return false;
     }
 
+    // Proactively negotiate standard UTF-8 locale and pager charset
+    libssh2_channel_setenv(sshChannel, "LANG", "en_US.UTF-8");
+    libssh2_channel_setenv(sshChannel, "LC_ALL", "en_US.UTF-8");
+    libssh2_channel_setenv(sshChannel, "LC_CTYPE", "en_US.UTF-8");
+    libssh2_channel_setenv(sshChannel, "LESSCHARSET", "utf-8");
+
     int shell_res = libssh2_channel_shell(sshChannel);
     if (shell_res != 0) {
         char *err_msg = NULL;
