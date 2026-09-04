@@ -176,6 +176,7 @@ import {
   TERMINAL_THEMES,
   applyHighlightRules,
   decodeLessHexUtf8,
+  normalizeTerminalInverseVideo,
   getTerminalTheme,
   getThemeAttribute,
   getThemeInfo,
@@ -7170,6 +7171,7 @@ function TerminalSurface({
     const terminalThemeOptions = getTerminalColors(terminalTheme, appearance, Boolean(terminalBackgroundImage));
     const terminal = new XTerm({
       allowProposedApi: true,
+      allowTransparency: true,
       customGlyphs: true,
       cursorBlink: appearance.cursorBlink ?? true,
       cursorStyle: appearance.cursorStyle ?? "block",
@@ -7414,6 +7416,7 @@ function TerminalSurface({
     const terminalThemeOptions = getTerminalColors(terminalTheme, appearance, Boolean(terminalBackgroundImage));
     const term = new XTerm({
       allowProposedApi: true,
+      allowTransparency: true,
       customGlyphs: true,
       cursorBlink: appearance.cursorBlink ?? true,
       cursorStyle: appearance.cursorStyle ?? "block",
@@ -8840,7 +8843,7 @@ function sendTerminalInput(sessionId: string | undefined, text: string) {
 const TERMINAL_HIGHLIGHT_SKIP_BYTES = 65536;
 
 function writeHighlightedOrRaw(target: XTerm, output: string, rules: HighlightRule[]) {
-  const normalized = decodeLessHexUtf8(output);
+  const normalized = normalizeTerminalInverseVideo(decodeLessHexUtf8(output));
   target.write(normalized.length > TERMINAL_HIGHLIGHT_SKIP_BYTES ? normalized : applyHighlightRules(normalized, rules));
 }
 

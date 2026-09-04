@@ -436,6 +436,15 @@ export function decodeLessHexUtf8(input: string): string {
   });
 }
 
+export function normalizeTerminalInverseVideo(input: string): string {
+  if (!input || !input.includes("\x1b[")) return input;
+  // 转换 ANSI 反色 (\x1b[7m) 为高对比度深蓝灰表头底色 + 纯白文字, 避免壁纸/透明终端下出现实心白块或透明文字无法阅读
+  return input
+    .replace(/\x1b\[(?:1;7|7;1)m/g, "\x1b[1;48;2;30;41;59;38;2;255;255;255m")
+    .replace(/\x1b\[7m/g, "\x1b[48;2;30;41;59;38;2;241;245;249m")
+    .replace(/\x1b\[27m/g, "\x1b[49;39m");
+}
+
 export function applyHighlightRules(text: string, rules: HighlightRule[]) {
   if (!text || rules.length === 0) return text;
 
@@ -530,7 +539,25 @@ export function getTerminalTheme(theme: TerminalThemeMode, translucent = false) 
       background: translucent ? "rgba(11, 19, 41, 0.88)" : "#0b1329",
       foreground: "#e0f2fe",
       cursor: "#38bdf8",
-      selectionBackground: "#1e3a8a"
+      cursorAccent: "#0b1329",
+      selectionBackground: "#1e3a8a",
+      selectionForeground: "#ffffff",
+      black: "#1e293b",
+      red: "#f87171",
+      green: "#34d399",
+      yellow: "#fbbf24",
+      blue: "#60a5fa",
+      magenta: "#c084fc",
+      cyan: "#38bdf8",
+      white: "#e0f2fe",
+      brightBlack: "#475569",
+      brightRed: "#fca5a5",
+      brightGreen: "#6ee7b7",
+      brightYellow: "#fde047",
+      brightBlue: "#93c5fd",
+      brightMagenta: "#e9d5ff",
+      brightCyan: "#7dd3fc",
+      brightWhite: "#ffffff"
     };
   }
   if (theme === "dark") {
@@ -538,7 +565,25 @@ export function getTerminalTheme(theme: TerminalThemeMode, translucent = false) 
       background: translucent ? "rgba(10, 10, 12, 0.88)" : "#0a0a0c",
       foreground: "#f0f4ff",
       cursor: "#818cf8",
-      selectionBackground: "#312e81"
+      cursorAccent: "#0a0a0c",
+      selectionBackground: "#312e81",
+      selectionForeground: "#ffffff",
+      black: "#18181b",
+      red: "#ef4444",
+      green: "#10b981",
+      yellow: "#f59e0b",
+      blue: "#3b82f6",
+      magenta: "#a855f7",
+      cyan: "#06b6d4",
+      white: "#f0f4ff",
+      brightBlack: "#52525b",
+      brightRed: "#f87171",
+      brightGreen: "#34d399",
+      brightYellow: "#fbbf24",
+      brightBlue: "#60a5fa",
+      brightMagenta: "#c084fc",
+      brightCyan: "#22d3ee",
+      brightWhite: "#ffffff"
     };
   }
 
@@ -546,7 +591,25 @@ export function getTerminalTheme(theme: TerminalThemeMode, translucent = false) 
     background: translucent ? "rgba(255, 255, 255, 0.86)" : "#ffffff",
     foreground: "#1f2937",
     cursor: "#2563eb",
-    selectionBackground: "#dbeafe"
+    cursorAccent: "#ffffff",
+    selectionBackground: "#dbeafe",
+    selectionForeground: "#1e3a8a",
+    black: "#1f2937",
+    red: "#dc2626",
+    green: "#16a34a",
+    yellow: "#d97706",
+    blue: "#2563eb",
+    magenta: "#9333ea",
+    cyan: "#0891b2",
+    white: "#f3f4f6",
+    brightBlack: "#6b7280",
+    brightRed: "#ef4444",
+    brightGreen: "#22c55e",
+    brightYellow: "#eab308",
+    brightBlue: "#3b82f6",
+    brightMagenta: "#a855f7",
+    brightCyan: "#06b6d4",
+    brightWhite: "#ffffff"
   };
 }
 

@@ -4,6 +4,7 @@ import {
   DEFAULT_HIGHLIGHT_RULES,
   applyHighlightRules,
   decodeLessHexUtf8,
+  normalizeTerminalInverseVideo,
   getTerminalTheme,
   getThemeAttribute,
   THEMES,
@@ -147,5 +148,21 @@ describe("decodeLessHexUtf8", () => {
   test("keeps regular text and html tags untouched", () => {
     expect(decodeLessHexUtf8("hello <tag> world")).toBe("hello <tag> world");
     expect(decodeLessHexUtf8("normal text 123")).toBe("normal text 123");
+  });
+});
+
+describe("normalizeTerminalInverseVideo", () => {
+  test("replaces ANSI inverse standalone with high-contrast slate header bar", () => {
+    const topHeader = "\x1b[7m PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND\x1b[0m";
+    const normalized = normalizeTerminalInverseVideo(topHeader);
+    expect(normalized).toContain("\x1b[48;2;30;41;59;38;2;241;245;249m");
+    expect(normalized).not.toContain("\x1b[7m");
+  });
+
+  test("handles combined bold and inverse escapes", () => {
+    const boldInverse = "\x1b[1;7mHeader\x1b[27m";
+    const normalized = normalizeTerminalInverseVideo(boldInverse);
+    expect(normalized).toContain("\x1b[1;48;2;30;41;59;38;2;255;255;255m");
+    expect(normalized).toContain("\x1b[49;39m");
   });
 });
