@@ -6728,6 +6728,10 @@ function TerminalSurface({
         draft = draft.slice(0, -1);
         continue;
       }
+      if (char === "\x17") {
+        draft = draft.replace(/\S+\s*$/, "");
+        continue;
+      }
       if (char === "\x15") {
         draft = "";
         continue;
@@ -7257,6 +7261,41 @@ function TerminalSurface({
         }
         return false;
       }
+      if (
+        event.type === "keydown" &&
+        isCtrlOrMeta &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "Backspace" || event.code === "Backspace")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(activeSession.id, "\x17");
+        return false;
+      }
+      if (
+        event.type === "keydown" &&
+        event.altKey &&
+        !isCtrlOrMeta &&
+        (event.key === "Backspace" || event.code === "Backspace")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(activeSession.id, "\x1b\x7f");
+        return false;
+      }
+      if (
+        event.type === "keydown" &&
+        isCtrlOrMeta &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "Delete" || event.code === "Delete")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(activeSession.id, "\x1bd");
+        return false;
+      }
       if (!handleCommandSuggestionKey(event)) {
         return false;
       }
@@ -7452,6 +7491,41 @@ function TerminalSurface({
         if (!event.repeat) {
           void pasteTerminalClipboard(secondarySession.id);
         }
+        return false;
+      }
+      if (
+        event.type === "keydown" &&
+        isCtrlOrMeta &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "Backspace" || event.code === "Backspace")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(secondarySession.id, "\x17");
+        return false;
+      }
+      if (
+        event.type === "keydown" &&
+        event.altKey &&
+        !isCtrlOrMeta &&
+        (event.key === "Backspace" || event.code === "Backspace")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(secondarySession.id, "\x1b\x7f");
+        return false;
+      }
+      if (
+        event.type === "keydown" &&
+        isCtrlOrMeta &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "Delete" || event.code === "Delete")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(secondarySession.id, "\x1bd");
         return false;
       }
       return true;

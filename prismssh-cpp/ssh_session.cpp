@@ -1079,7 +1079,31 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
         return false;
     }
 
-    int pty_res = libssh2_channel_request_pty(sshChannel, "xterm-256color");
+    // Standard RFC 4254 terminal modes:
+    // Opcode (1 byte) + 4-byte uint32 (big endian)
+    // VERASE (3) = 127 (0x7F, ^?)
+    // VWERASE (14) = 23 (0x17, ^W)
+    // VINTR (1) = 3 (0x03, ^C)
+    // VKILL (4) = 21 (0x15, ^U)
+    // TTY_OP_END (0)
+    static const unsigned char tty_modes[] = {
+        3, 0, 0, 0, 127,  // VERASE = 127 (^?)
+        14, 0, 0, 0, 23,  // VWERASE = 23 (^W)
+        1, 0, 0, 0, 3,    // VINTR = 3 (^C)
+        4, 0, 0, 0, 21,   // VKILL = 21 (^U)
+        0                 // TTY_OP_END
+    };
+
+    int pty_res = libssh2_channel_request_pty_ex(
+        sshChannel,
+        "xterm-256color",
+        (unsigned int)strlen("xterm-256color"),
+        (const char*)tty_modes,
+        sizeof(tty_modes),
+        cols > 0 ? cols : 80,
+        rows > 0 ? rows : 24,
+        0, 0
+    );
     if (pty_res != 0) {
         char *err_msg = NULL;
         int err_msg_len = 0;
