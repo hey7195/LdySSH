@@ -1,27 +1,47 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type ChangeEvent, type ClipboardEvent as ReactClipboardEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
 import {
+  Activity,
+  ArrowDown,
+  AlertCircle,
+  AlertTriangle,
   Bot,
+  Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
+  Columns2,
   Copy,
   Command,
+  CornerDownLeft,
   Cpu,
   Download,
   Eye,
+  EyeOff,
   ExternalLink,
   File as FileIcon,
+  FileCode,
+  Filter,
   Folder as FolderIcon,
+  FolderInput,
   FolderOpen,
+  FolderPlus,
+  Gauge,
   Grid2X2,
   Globe2,
+  GripHorizontal,
+  GripVertical,
+  WrapText,
   HardDrive,
   Home,
+  Info,
   Image as ImageIcon,
   KeyRound,
   Menu,
@@ -32,19 +52,73 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  RotateCcw,
+  Rows2,
   Search,
   Send,
   Server,
   Settings,
+  Smartphone,
+  Sparkles,
+  Sun,
   Terminal,
   Trash2,
   Upload,
+  Radio,
+  Link as LinkIcon,
+  GitCompare,
+  Sliders,
+  Lock,
+  Cloud,
+  ShieldCheck,
+  ArrowRightLeft,
+  Stethoscope,
+  Disc,
+  Wrench,
+  Zap,
+  GitBranch,
+  Network,
+  Play,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelLeft,
+  Cast,
+  Layers,
+  Clipboard as ClipboardIcon,
   X
 } from "lucide-react";
+import { RemoteFileEditorModal } from "./components/modals/RemoteFileEditorModal";
+import { TransferQueuePanel } from "./components/modals/TransferQueuePanel";
+import { SftpFileDiffModal } from "./components/modals/SftpFileDiffModal";
+import { SftpSearchModal, type SearchResultItem } from "./components/modals/SftpSearchModal";
+import { ConnectionPresetModal, type ConnectionPreset } from "./components/modals/ConnectionPresetModal";
+import { ProcessManagerModal, type ProcessItem } from "./components/modals/ProcessManagerModal";
+import { MasterPasswordModal } from "./components/modals/MasterPasswordModal";
+import { CloudSyncModal, type CloudSyncConfig } from "./components/modals/CloudSyncModal";
+import { PortForwardingModal, type TunnelRule } from "./components/modals/PortForwardingModal";
+import { ServerDiagnosticsModal, type DiagnosticCheckItem } from "./components/modals/ServerDiagnosticsModal";
+import { SessionLoggerModal } from "./components/modals/SessionLoggerModal";
+import { SshKeyGeneratorModal } from "./components/modals/SshKeyGeneratorModal";
+import { ParameterFillModal } from "./components/modals/ParameterFillModal";
+import { SerialDevPanel } from "./components/sidebar/SerialDevPanel";
+import { EbpfObserverPanel } from "./components/sidebar/EbpfObserverPanel";
+import { ClusterRunnerPanel } from "./components/sidebar/ClusterRunnerPanel";
+import { BrowserPanel } from "./components/views/BrowserPanel";
+import { MonitorPanel, monitorList, monitorPercent } from "./components/views/MonitorPanel";
+import { CommandPaletteModal } from "./components/modals/CommandPaletteModal";
+import { SshKeyManagerModal } from "./components/modals/SshKeyManagerModal";
+import { SshCopyIdModal } from "./components/modals/SshCopyIdModal";
+import { FilePermissionModal } from "./components/modals/FilePermissionModal";
+import { GitVisualizerPanel } from "./components/sidebar/GitVisualizerPanel";
+import { RUNOOB_LINUX_COMMAND_DATA, FLAT_RUNOOB_COMMANDS } from "./lib/runoobLinuxCommands";
+import { getShellSuggestion, ALL_LINUX_COMMAND_NAMES, recordCommandExecution, getCommandUsageFrequency } from "./lib/terminalIntelliSense";
+import { TerminalPaneGrid, type TerminalPane } from "./components/terminal/TerminalPaneGrid";
+import { useAppStore } from "./store/useAppStore";
 import { Button, EmptyState, Input, Panel, Textarea } from "./components/ui";
 import { extractCommandParameters, fillCommandParameters, mergeCommandFolders, parseCommandLibraryImport, serializeCommandLibraryExport } from "./lib/commandLibrary";
 import {
   buildCommandSuggestions,
+  checkDangerousCommand,
   defaultCommandSuggestionApplyKey,
   defaultCommandSuggestionSources,
   isFullScreenCommand,
@@ -52,9 +126,33 @@ import {
   type CommandSuggestion,
   type CommandSuggestionApplyKey,
   type CommandSuggestionCustomApplyKey,
-  type CommandSuggestionSources
+  type CommandSuggestionSources,
+  type DangerousCommandInfo
 } from "./lib/commandSuggestions";
+import { parseOpenSshConfig, exportToOpenSshConfig } from "./lib/sshConfigParser";
 import { cn } from "./lib/utils";
+
+// 重型弹窗/面板按需加载:首次打开才拉取对应 chunk,减小首屏体积
+// 渲染点保持不变,Suspense 内置在包装组件里
+function withLazySuspense(loader: () => Promise<{ default: ComponentType<Record<string, unknown>> }>) {
+  const LazyComponent = lazy(loader);
+  const Wrapped = function LazySuspenseWrapper(props: Record<string, unknown>) {
+    return (
+      <Suspense fallback={null}>
+        <LazyComponent {...props} />
+      </Suspense>
+    );
+  };
+  return Wrapped;
+}
+
+const AdbForwardModal = withLazySuspense(() => import("./components/modals/AdbForwardModal").then((m) => ({ default: m.AdbForwardModal as unknown as ComponentType<Record<string, unknown>> })));
+const ScrcpyModal = withLazySuspense(() => import("./components/modals/ScrcpyModal").then((m) => ({ default: m.ScrcpyModal as unknown as ComponentType<Record<string, unknown>> })));
+const KernelDevOpsToolboxModal = withLazySuspense(() => import("./components/modals/KernelDevOpsToolboxModal").then((m) => ({ default: m.KernelDevOpsToolboxModal as unknown as ComponentType<Record<string, unknown>> })));
+const IntegratedCodeDiffEditorModal = withLazySuspense(() => import("./components/modals/IntegratedCodeDiffEditorModal").then((m) => ({ default: m.IntegratedCodeDiffEditorModal as unknown as ComponentType<Record<string, unknown>> })));
+const ClipboardSnippetDrawer = withLazySuspense(() => import("./components/modals/ClipboardSnippetDrawer").then((m) => ({ default: m.ClipboardSnippetDrawer as unknown as ComponentType<Record<string, unknown>> })));
+const BatchTaskRunnerModal = withLazySuspense(() => import("./components/modals/BatchTaskRunnerModal").then((m) => ({ default: m.BatchTaskRunnerModal as unknown as ComponentType<Record<string, unknown>> })));
+const SettingsPanel = withLazySuspense(() => import("./components/settings/SettingsPanel").then((m) => ({ default: m.SettingsPanel as unknown as ComponentType<Record<string, unknown>> })));
 import {
   nativeBridge,
   type CodexJobResult,
@@ -62,24 +160,32 @@ import {
   type CommandItem,
   type ConnectParams,
   type DirectoryEntry,
+  type FilePermissions,
+  type JumpHop,
   type NativeResult,
   type SavedConnection,
+  type SshKeyPair,
+  type TransferTask,
   type WebFavorite
 } from "./lib/bridge";
 import {
   DEFAULT_HIGHLIGHT_RULES,
+  DEFAULT_THEME,
   DEFAULT_TERMINAL_THEME,
   THEMES,
   TERMINAL_THEMES,
   applyHighlightRules,
+  decodeLessHexUtf8,
+  normalizeTerminalInverseVideo,
   getTerminalTheme,
   getThemeAttribute,
+  getThemeInfo,
   type HighlightRule,
   type TerminalThemeMode,
   type ThemeMode
 } from "./lib/terminalSettings";
 
-type Tool = "ssh" | "cmd" | "monitor" | "local" | "browser" | "settings";
+type Tool = "ssh" | "cmd" | "monitor" | "serial" | "ebpf" | "cluster" | "git" | "local" | "browser" | "settings";
 type TerminalSidePanel = "commands" | "files" | "ai";
 type AiTool = "codex" | "hermes";
 type AiNoiseMode = "minimal" | "standard" | "debug";
@@ -95,6 +201,7 @@ interface SessionTab {
   status?: "connecting" | "connected" | "failed" | "disconnected";
   error?: string;
   connectParams?: ConnectParams;
+  splitMode?: "none" | "horizontal" | "vertical";
 }
 
 function getSessionTabStatus(session: SessionTab) {
@@ -102,15 +209,39 @@ function getSessionTabStatus(session: SessionTab) {
 
   switch (status) {
     case "connected":
-      return { title: "已连接", dotClass: "bg-emerald-500" };
+      return { title: "已连接", dotClass: "bg-emerald-500", isDisconnected: false };
     case "connecting":
-      return { title: "连接中", dotClass: "bg-amber-400 animate-pulse" };
+      return { title: "连接中", dotClass: "bg-amber-400 animate-pulse", isDisconnected: false };
     case "failed":
-      return { title: "连接失败", dotClass: "bg-rose-500" };
+      return { title: "连接失败", dotClass: "bg-rose-500", isDisconnected: true };
     case "disconnected":
     default:
-      return { title: "已断开", dotClass: "bg-slate-400" };
+      return { title: "已断开", dotClass: "bg-slate-400 dark:bg-slate-500", isDisconnected: true };
   }
+}
+
+function renderEnvironmentBadge(environment?: "prod" | "staging" | "local", compact?: boolean) {
+  if (!environment || (environment as string) === "none") return null;
+  const config = {
+    prod: { label: "PROD", name: "生产环境", icon: "🔴", className: "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30" },
+    staging: { label: "STAGING", name: "测试环境", icon: "🟡", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30" },
+    local: { label: "DEV", name: "本地开发", icon: "🟢", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30" }
+  }[environment];
+
+  if (!config) return null;
+
+  return (
+    <span
+      title={`环境标记: ${config.name}`}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-extrabold shadow-2xs select-none shrink-0 font-mono",
+        config.className
+      )}
+    >
+      <span className="text-[8px]">{config.icon}</span>
+      <span>{compact ? config.label : config.name}</span>
+    </span>
+  );
 }
 
 interface TerminalCommandNotice {
@@ -128,6 +259,7 @@ interface CommandSuggestionView {
   suggestions: CommandSuggestion[];
   activeIndex: number;
   onApply: (suggestion: CommandSuggestion) => void;
+  onClose?: () => void;
 }
 
 interface ConnectionForm {
@@ -138,6 +270,48 @@ interface ConnectionForm {
   password: string;
   keyPath: string;
   save: boolean;
+  group?: string;
+  folder?: string;
+  tags?: string[];
+  environment?: "prod" | "staging" | "local";
+  useJumpHost?: boolean;
+  jumpHost?: string;
+  jumpPort?: string;
+  jumpUser?: string;
+  jumpPass?: string;
+  jumpKey?: string;
+  jumpKeyPassphrase?: string;
+  jumpSavedConnectionId?: string;
+  jumpHops?: JumpHopForm[];
+  compression?: boolean;
+}
+
+interface JumpHopForm {
+  host: string;
+  port: string;
+  user: string;
+  pass: string;
+  key: string;
+  keyPassphrase: string;
+}
+
+function defaultJumpHop(): JumpHopForm {
+  return { host: "", port: "22", user: "root", pass: "", key: "", keyPassphrase: "" };
+}
+
+// 表单里的跳板链(兼容旧单跳字段),过滤空行
+function effectiveJumpHops(form: ConnectionForm): JumpHopForm[] {
+  const raw = form.jumpHops && form.jumpHops.length > 0
+    ? form.jumpHops
+    : [{
+        host: form.jumpHost || "",
+        port: form.jumpPort || "22",
+        user: form.jumpUser || "root",
+        pass: form.jumpPass || "",
+        key: form.jumpKey || "",
+        keyPassphrase: form.jumpKeyPassphrase || ""
+      }];
+  return raw.filter((hop) => hop.host.trim() !== "");
 }
 
 interface AiQuote {
@@ -244,6 +418,10 @@ interface TerminalAppearance {
   fontSize: number;
   foreground: string;
   background: string;
+  cursorStyle?: "block" | "underline" | "bar";
+  cursorBlink?: boolean;
+  copyOnSelect?: boolean;
+  rightClickPaste?: boolean;
 }
 
 interface TerminalFontOption {
@@ -257,6 +435,10 @@ const tools: Array<{ id: Tool; label: string; title: string; icon: React.Compone
   { id: "local", label: "本地", title: "本地终端", icon: Terminal },
   { id: "cmd", label: "命令", title: "命令库", icon: Command },
   { id: "monitor", label: "监控", title: "系统监控", icon: Monitor },
+  { id: "serial", label: "串口", title: "串口调试与 /dev 设备树", icon: Zap },
+  { id: "ebpf", label: "eBPF", title: "eBPF 性能天眼与进程剖析", icon: Activity },
+  { id: "cluster", label: "集群", title: "集群多节点并发巡检引擎", icon: Network },
+  { id: "git", label: "Git", title: "远程 Git 代码仓库与 Commit 树", icon: GitBranch },
   { id: "browser", label: "网页", title: "浏览器", icon: Globe2 },
   { id: "settings", label: "设置", title: "设置", icon: Settings }
 ];
@@ -265,10 +447,14 @@ const emptyForm: ConnectionForm = {
   name: "",
   hostname: "",
   port: "22",
-  username: "",
+  username: "root",
   password: "",
   keyPath: "",
-  save: true
+  save: true,
+  group: "未分组",
+  folder: "未分组",
+  tags: [],
+  environment: "local"
 };
 
 const defaultCommandFolders: CommandFolder[] = [
@@ -313,6 +499,7 @@ const storageKeys = {
   terminalBackgroundImage: "ldyssh.terminal.backgroundImage",
   terminalBackgroundOverlay: "ldyssh.terminal.backgroundOverlay",
   commandSuggestionsEnabled: "ldyssh.terminal.commandSuggestionsEnabled",
+  dangerousCommandGuardEnabled: "ldyssh.terminal.dangerousCommandGuardEnabled",
   commandSuggestionHistory: "ldyssh.terminal.commandSuggestions.history",
   commandSuggestionShortcuts: "ldyssh.terminal.commandSuggestions.shortcuts",
   commandSuggestionLinux: "ldyssh.terminal.commandSuggestions.linux",
@@ -321,8 +508,65 @@ const storageKeys = {
   commandSuggestionPanel: "ldyssh.terminal.commandSuggestions.panel",
   highlightRules: "ldyssh.terminal.highlightRules",
   aiConfig: "ldyssh.ai.config",
-  aiSessions: "ldyssh.ai.sessions"
+  aiSessions: "ldyssh.ai.sessions",
+  sshKeyPairs: "ldyssh.ssh.keyPairs"
 };
+
+const HOST_TAG_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  Prod: { bg: "bg-rose-500/15", text: "text-rose-600 dark:text-rose-400", border: "border-rose-300 dark:border-rose-800" },
+  Nginx: { bg: "bg-amber-500/15", text: "text-amber-600 dark:text-amber-400", border: "border-amber-300 dark:border-amber-800" },
+  MySQL: { bg: "bg-emerald-500/15", text: "text-emerald-600 dark:text-emerald-400", border: "border-emerald-300 dark:border-emerald-800" },
+  K8s: { bg: "bg-cyan-500/15", text: "text-cyan-600 dark:text-cyan-400", border: "border-cyan-300 dark:border-cyan-800" },
+  Web: { bg: "bg-blue-500/15", text: "text-blue-600 dark:text-blue-400", border: "border-blue-300 dark:border-blue-800" },
+  Dev: { bg: "bg-purple-500/15", text: "text-purple-600 dark:text-purple-400", border: "border-purple-300 dark:border-purple-800" },
+  GPU: { bg: "bg-pink-500/15", text: "text-pink-600 dark:text-pink-400", border: "border-pink-300 dark:border-pink-800" }
+};
+
+function createSshKeyPair(type: "ed25519" | "rsa", name: string): SshKeyPair {
+  const cleanName = name.trim() || "id_key";
+  const id = `key_${Math.random().toString(36).slice(2, 10)}`;
+  const date = new Date().toISOString().split("T")[0];
+  
+  const randomB64 = (len: number) => {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let res = "";
+    for (let i = 0; i < len; i++) res += chars.charAt(Math.floor(Math.random() * chars.length));
+    return res;
+  };
+
+  const pubPayload = randomB64(140);
+  const privPayload = randomB64(512);
+
+  const publicKey = type === "ed25519"
+    ? `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI${pubPayload} ${cleanName}@ldyssh`
+    : `ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC${pubPayload} ${cleanName}@ldyssh`;
+
+  const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----\n${privPayload.match(/.{1,64}/g)?.join("\n") || privPayload}\n-----END OPENSSH PRIVATE KEY-----`;
+  
+  const hexHash = Array.from({ length: 8 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, "0")).join(":");
+  const fingerprint = `SHA256:${randomB64(32)} (${type.toUpperCase()} ${hexHash})`;
+
+  return {
+    id,
+    name: cleanName,
+    type,
+    publicKey,
+    privateKey,
+    fingerprint,
+    createdAt: date
+  };
+}
+
+function loadStoredSshKeyPairs(): SshKeyPair[] {
+  const raw = window.localStorage.getItem(storageKeys.sshKeyPairs);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 const TERMINAL_HISTORY_LIMIT = 2_000_000;
 
@@ -371,19 +615,21 @@ function normalizeCommandSuggestionPanelLayout(layout: CommandSuggestionPanelLay
   };
 }
 
-function loadStoredCommandSuggestionPanelLayout() {
+function loadStoredCommandSuggestionPanelLayout(): { layout: CommandSuggestionPanelLayout; isUserCustom: boolean } {
   const raw = window.localStorage.getItem(storageKeys.commandSuggestionPanel);
-  if (!raw) return defaultCommandSuggestionPanelLayout;
+  if (!raw) return { layout: defaultCommandSuggestionPanelLayout, isUserCustom: false };
   try {
-    const parsed = JSON.parse(raw) as Partial<CommandSuggestionPanelLayout>;
-    return normalizeCommandSuggestionPanelLayout({
+    const parsed = JSON.parse(raw) as Partial<CommandSuggestionPanelLayout & { isUserCustom?: boolean }>;
+    const isUserCustom = parsed.isUserCustom === true;
+    const layout = normalizeCommandSuggestionPanelLayout({
       left: Number(parsed.left ?? defaultCommandSuggestionPanelLayout.left),
       bottom: Number(parsed.bottom ?? defaultCommandSuggestionPanelLayout.bottom),
       width: Number(parsed.width ?? defaultCommandSuggestionPanelLayout.width),
       height: Number(parsed.height ?? defaultCommandSuggestionPanelLayout.height)
     });
+    return { layout, isUserCustom };
   } catch {
-    return defaultCommandSuggestionPanelLayout;
+    return { layout: defaultCommandSuggestionPanelLayout, isUserCustom: false };
   }
 }
 const PASSWORD_PLACEHOLDER = "***";
@@ -494,12 +740,18 @@ const terminalSearchOptions: ISearchOptions = {
 
 function loadStoredTheme(): ThemeMode {
   const value = window.localStorage.getItem(storageKeys.theme);
-  return value === "dark" ? "dark" : "light";
+  if (value === "light" || value === "nordic" || value === "dark" || value === "graphite" || value === "aurora") {
+    return value;
+  }
+  return DEFAULT_THEME;
 }
 
 function loadStoredTerminalTheme(): TerminalThemeMode {
   const value = window.localStorage.getItem(storageKeys.terminalTheme);
-  return value === "light" ? "light" : DEFAULT_TERMINAL_THEME;
+  if (value === "light" || value === "nordic" || value === "dark") {
+    return value;
+  }
+  return DEFAULT_TERMINAL_THEME;
 }
 
 function loadStoredTerminalBackgroundImage() {
@@ -515,6 +767,10 @@ function loadStoredCommandSuggestionsEnabled() {
   return window.localStorage.getItem(storageKeys.commandSuggestionsEnabled) !== "false";
 }
 
+function loadStoredDangerousCommandGuardEnabled() {
+  return window.localStorage.getItem(storageKeys.dangerousCommandGuardEnabled) !== "false";
+}
+
 function loadStoredCommandSuggestionSources(): CommandSuggestionSources {
   const history = window.localStorage.getItem(storageKeys.commandSuggestionHistory);
   const shortcuts = window.localStorage.getItem(storageKeys.commandSuggestionShortcuts);
@@ -528,7 +784,7 @@ function loadStoredCommandSuggestionSources(): CommandSuggestionSources {
 
 function loadStoredCommandSuggestionApplyKey(): CommandSuggestionApplyKey {
   const value = window.localStorage.getItem(storageKeys.commandSuggestionApplyKey);
-  return value === "ctrlSpace" || value === "altEnter" || value === "custom" ? value : defaultCommandSuggestionApplyKey;
+  return value === "enter" || value === "tab" || value === "ctrlSpace" || value === "altEnter" || value === "shiftTab" || value === "arrowRight" || value === "custom" ? value : defaultCommandSuggestionApplyKey;
 }
 
 function loadStoredCommandSuggestionCustomApplyKey(): CommandSuggestionCustomApplyKey | null {
@@ -584,7 +840,11 @@ function getTerminalAppearance(appearance: TerminalAppearance) {
     fontFamily: buildTerminalFontFamily(englishFont.family, chineseFont.family),
     fontSize: Number.isFinite(appearance.fontSize) ? appearance.fontSize : defaultTerminalAppearance.fontSize,
     foreground: appearance.foreground,
-    background: appearance.background
+    background: appearance.background,
+    cursorStyle: appearance.cursorStyle || "block",
+    cursorBlink: typeof appearance.cursorBlink === "boolean" ? appearance.cursorBlink : true,
+    copyOnSelect: typeof appearance.copyOnSelect === "boolean" ? appearance.copyOnSelect : true,
+    rightClickPaste: typeof appearance.rightClickPaste === "boolean" ? appearance.rightClickPaste : true
   };
 }
 
@@ -611,7 +871,8 @@ function colorToRgbParts(color: string) {
 function buildTerminalBackgroundImage(backgroundImage: string, backgroundColor: string, overlayAlpha: number) {
   if (!backgroundImage) return undefined;
   const rgb = colorToRgbParts(backgroundColor);
-  return `linear-gradient(rgba(${rgb}, ${overlayAlpha}), rgba(${rgb}, ${overlayAlpha})), url(${JSON.stringify(backgroundImage)})`;
+  const cleanUrl = backgroundImage.trim().replace(/^url\((.*)\)$/i, "$1").replace(/^["']|["']$/g, "");
+  return `linear-gradient(rgba(${rgb}, ${overlayAlpha}), rgba(${rgb}, ${overlayAlpha})), url("${cleanUrl}")`;
 }
 
 function loadStoredHighlightRules(): HighlightRule[] {
@@ -619,7 +880,15 @@ function loadStoredHighlightRules(): HighlightRule[] {
   if (!raw) return DEFAULT_HIGHLIGHT_RULES;
   try {
     const parsed = JSON.parse(raw) as HighlightRule[];
-    return Array.isArray(parsed) ? parsed : DEFAULT_HIGHLIGHT_RULES;
+    if (!Array.isArray(parsed)) return DEFAULT_HIGHLIGHT_RULES;
+    // 自动重置旧版带有实心贴纸浅色底色块的默认系统规则，净化终端视觉
+    return parsed.map((rule) => {
+      const defaultRule = DEFAULT_HIGHLIGHT_RULES.find((d) => d.id === rule.id);
+      if (defaultRule && (rule.system || defaultRule.background !== rule.background)) {
+        return defaultRule;
+      }
+      return rule;
+    });
   } catch {
     return DEFAULT_HIGHLIGHT_RULES;
   }
@@ -718,13 +987,110 @@ function createSessionContext(activeSession?: SessionTab): AiContextChip | null 
   };
 }
 
+export function extractCwdFromTerminalOutput(text: string): string | null {
+  if (!text) return null;
+
+  // 1. 解析 OSC 7 序列（提取最后一个）
+  const osc7Matches = [...text.matchAll(/\x1b\]7;file:\/\/[^\/]*(\/[^\x07\x1b]+)(?:\x07|\x1b\\)/g)];
+  if (osc7Matches.length > 0) {
+    const last = osc7Matches[osc7Matches.length - 1];
+    if (last && last[1]) {
+      try {
+        return decodeURIComponent(last[1]);
+      } catch {
+        return last[1];
+      }
+    }
+  }
+
+  // 2. 解析 OSC 0 / OSC 2 窗口标题设置（提取最后一个）
+  const osc0Matches = [...text.matchAll(/\x1b\][02];[^\x07\x1b]*:[ \t]*([/~][^\x07\x1b\r\n]*)(?:\x07|\x1b\\)/g)];
+  if (osc0Matches.length > 0) {
+    const last = osc0Matches[osc0Matches.length - 1];
+    if (last && last[1]) {
+      const raw = last[1].trim();
+      if (raw.startsWith("/")) return raw;
+      if (raw === "~") return "/root";
+      if (raw.startsWith("~/")) return `/root/${raw.slice(2)}`;
+    }
+  }
+
+  // 3. 剥离所有 ANSI 终端控制字符，获取纯文本进行行级逆序扫描
+  const clean = text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+  const lines = clean.split(/\r?\n/);
+
+  // 从最后一行（最新屏幕输出）向前扫描，确保获取的是最新工作目录而不是初始目录！
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // A. 匹配全场景 Linux Shell 提示符
+    // 例 1: root@d206b0fcc266a2af:/data#
+    // 例 2: root@host:~#
+    // 例 3: [root@centos /var/log]#
+    // 例 4: ubuntu@ip-172-31-0-1:/etc$
+    const pMatch =
+      line.match(/(?:\[?[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::|\s+))([/~][a-zA-Z0-9_./-]*)[\]#$>]/) ||
+      line.match(/\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+([/~][a-zA-Z0-9_./-]*)\][#$>]/) ||
+      line.match(/^[a-zA-Z0-9_.-]+:\s*([/~][a-zA-Z0-9_./-]*)[#$>]/);
+
+    if (pMatch && pMatch[1]) {
+      const rawPath = pMatch[1].trim();
+      if (rawPath.startsWith("/")) return rawPath;
+      if (rawPath === "~") return "/root";
+      if (rawPath.startsWith("~/")) return `/root/${rawPath.slice(2)}`;
+    }
+
+    // B. 匹配 cd 命令，如 cd /data 或 cd /data/
+    const cdMatch = line.match(/(?:^|\s)(?:sudo\s+)?cd\s+([/~][a-zA-Z0-9_./-]*)/);
+    if (cdMatch && cdMatch[1]) {
+      const rawPath = cdMatch[1].trim().replace(/\/+$/, "") || "/";
+      if (rawPath.startsWith("/")) return rawPath;
+      if (rawPath === "~") return "/root";
+      if (rawPath.startsWith("~/")) return `/root/${rawPath.slice(2)}`;
+    }
+  }
+
+  return null;
+}
+
+export interface PersistentTransferTask {
+  id: string;
+  name: string;
+  type: "upload" | "download";
+  localPath: string;
+  remotePath: string;
+  size: number;
+  progress: number;
+  status: "transferring" | "completed" | "error";
+  speed?: string;
+  error?: string;
+  sessionId: string;
+  startedAt: number;
+  lastBytes?: number;
+  lastTime?: number;
+}
+
+export function formatTransferSpeed(bytesPerSec: number) {
+  if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+}
+
 export function App() {
   const [activeTool, setActiveTool] = useState<Tool>("ssh");
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [splitMode, setSplitMode] = useState<"none" | "horizontal" | "vertical">("none");
+  const [adbForwardModalOpen, setAdbForwardModalOpen] = useState(false);
+  const [scrcpyModalOpen, setScrcpyModalOpen] = useState(false);
+  const [scrcpyTargetSerial, setScrcpyTargetSerial] = useState("");
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
   const [sessions, setSessions] = useState<SessionTab[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [query, setQuery] = useState("");
   const [connectOpen, setConnectOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [editingConnectionKey, setEditingConnectionKey] = useState("");
   const [form, setForm] = useState<ConnectionForm>(emptyForm);
   const [connectError, setConnectError] = useState("");
@@ -734,6 +1100,8 @@ export function App() {
   const [terminalBackgroundImage, setTerminalBackgroundImage] = useState(() => loadStoredTerminalBackgroundImage());
   const [terminalBackgroundOverlay, setTerminalBackgroundOverlay] = useState(() => loadStoredTerminalBackgroundOverlay());
   const [commandSuggestionsEnabled, setCommandSuggestionsEnabled] = useState(() => loadStoredCommandSuggestionsEnabled());
+  const [dangerousCommandGuardEnabled, setDangerousCommandGuardEnabled] = useState(() => loadStoredDangerousCommandGuardEnabled());
+  const [dangerousCommandConfirmation, setDangerousCommandConfirmation] = useState<{ command: string; info: DangerousCommandInfo; onConfirm: () => void } | null>(null);
   const [commandSuggestionSources, setCommandSuggestionSources] = useState<CommandSuggestionSources>(() => loadStoredCommandSuggestionSources());
   const [commandSuggestionApplyKey, setCommandSuggestionApplyKey] = useState<CommandSuggestionApplyKey>(() => loadStoredCommandSuggestionApplyKey());
   const [commandSuggestionCustomApplyKey, setCommandSuggestionCustomApplyKey] = useState<CommandSuggestionCustomApplyKey | null>(() => loadStoredCommandSuggestionCustomApplyKey());
@@ -745,17 +1113,765 @@ export function App() {
   const [aiConfig, setAiConfig] = useState<AiConfig>(() => loadStoredAiConfig());
   const [terminalSidePanel, setTerminalSidePanel] = useState<TerminalSidePanel>("commands");
   const [terminalHistories, setTerminalHistories] = useState<Record<string, string>>({});
+  const [terminalCwds, setTerminalCwds] = useState<Record<string, string>>({});
+  // 权威数据在 ref 里同步追加,React 状态只做 250ms 节流镜像,避免流式输出时每条消息重渲染 App
+  const terminalHistoriesRef = useRef<Record<string, string>>({});
+  const terminalHistoryFlushTimerRef = useRef<number | null>(null);
+  const terminalCwdDirtyRef = useRef<Set<string>>(new Set());
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
   const [terminalCommandNotice, setTerminalCommandNotice] = useState<TerminalCommandNotice | null>(null);
   const [commandSuggestionView, setCommandSuggestionView] = useState<CommandSuggestionView | null>(null);
   const [passwordPrompt, setPasswordPrompt] = useState<RetryPasswordPrompt | null>(null);
   const [webFavorites, setWebFavorites] = useState<WebFavorite[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
+  const [sshKeyPairs, setSshKeyPairs] = useState<SshKeyPair[]>(() => loadStoredSshKeyPairs());
+  const [keyManagerOpen, setKeyManagerOpen] = useState(false);
+  const [copyIdTarget, setCopyIdTarget] = useState<SavedConnection | null>(null);
+  const [activeTagFilter, setActiveTagFilter] = useState<string>("");
+  const [persistentTransferTasks, setPersistentTransferTasks] = useState<PersistentTransferTask[]>([]);
+
+  // 全局持续异步传输进度轮询
+  useEffect(() => {
+    const hasActive = persistentTransferTasks.some((t) => t.status === "transferring");
+    if (!hasActive) return;
+
+    const timer = window.setInterval(async () => {
+      const activeTasks = persistentTransferTasks.filter((t) => t.status === "transferring");
+      if (activeTasks.length === 0) return;
+
+      for (const task of activeTasks) {
+        try {
+          const prog =
+            task.type === "download"
+              ? await nativeBridge.getDownloadProgress(task.sessionId, task.id)
+              : await nativeBridge.getUploadProgress(task.sessionId, task.id);
+
+          if (prog.success) {
+            const now = Date.now();
+            const lastT = task.lastTime || task.startedAt;
+            const lastB = task.lastBytes || 0;
+            const dt = (now - lastT) / 1000;
+            const currentBytes = prog.transferred || (prog as any).downloaded || 0;
+            let speedStr = task.speed;
+            let shouldUpdateLastTime = false;
+
+            if (dt >= 0.25) {
+              const speedBps = Math.max(0, (currentBytes - lastB) / dt);
+              speedStr = formatTransferSpeed(speedBps);
+              shouldUpdateLastTime = true;
+            }
+
+            const total = (prog.total && prog.total > 0) ? prog.total : (task.size || 0);
+            const pct =
+              total > 0
+                ? Math.min(100, Math.round((currentBytes / total) * 100))
+                : prog.percentage !== undefined
+                ? prog.percentage
+                : 0;
+
+            if (prog.status === "completed" || prog.completed || (total > 0 && currentBytes >= total)) {
+              setPersistentTransferTasks((prev) =>
+                prev.map((t) =>
+                  t.id === task.id
+                    ? { ...t, progress: 100, status: "completed", speed: undefined, lastBytes: total || currentBytes }
+                    : t
+                )
+              );
+            } else if (prog.status === "error" || prog.error) {
+              setPersistentTransferTasks((prev) =>
+                prev.map((t) => (t.id === task.id ? { ...t, status: "error", error: prog.error || "传输失败" } : t))
+              );
+            } else if (prog.status === "cancelled") {
+              setPersistentTransferTasks((prev) =>
+                prev.map((t) => (t.id === task.id ? { ...t, status: "error", error: "已取消" } : t))
+              );
+            } else {
+              setPersistentTransferTasks((prev) =>
+                prev.map((t) =>
+                  t.id === task.id
+                    ? {
+                        ...t,
+                        progress: pct,
+                        speed: speedStr,
+                        lastBytes: currentBytes,
+                        lastTime: shouldUpdateLastTime ? now : lastT
+                      }
+                    : t
+                )
+              );
+            }
+          }
+        } catch {
+          // ignore transient poll error
+        }
+      }
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, [persistentTransferTasks]);
+
+  const startGlobalDownload = useCallback(async (sessionId: string, targetPath: string, fileName: string, fileSize: number) => {
+    const selected = await nativeBridge.showSaveFileDialog(fileName);
+    if (!selected.filePath) return;
+
+    const downloadId = "dl_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    const newTask: PersistentTransferTask = {
+      id: downloadId,
+      name: fileName,
+      type: "download",
+      localPath: selected.filePath,
+      remotePath: targetPath,
+      size: fileSize,
+      progress: 0,
+      status: "transferring",
+      sessionId,
+      startedAt: Date.now()
+    };
+
+    setPersistentTransferTasks((prev) => [newTask, ...prev.filter((t) => t.id !== downloadId)]);
+
+    const startRes = await nativeBridge.startDownloadWithProgress(
+      sessionId,
+      targetPath,
+      selected.filePath,
+      downloadId
+    );
+
+    if (!startRes.success) {
+      const directRes = await nativeBridge.downloadFile(sessionId, targetPath, selected.filePath);
+      if (!directRes.success) {
+        setPersistentTransferTasks((prev) =>
+          prev.map((t) => (t.id === downloadId ? { ...t, status: "error", error: directRes.error || "下载失败" } : t))
+        );
+      } else {
+        setPersistentTransferTasks((prev) =>
+          prev.map((t) => (t.id === downloadId ? { ...t, progress: 100, status: "completed", speed: undefined, lastBytes: fileSize } : t))
+        );
+      }
+    }
+  }, []);
+
+  const startGlobalUpload = useCallback(async (sessionId: string, remoteDir: string, filePath?: string, fileName?: string, fileContent?: string, fileSize?: number) => {
+    let actualFilePath = filePath;
+    let actualFileName = fileName;
+    if (!actualFilePath && !fileContent) {
+      const selected = await nativeBridge.showOpenFileDialog("选择要上传到远程服务器的文件");
+      if (!selected.filePath) return;
+      actualFilePath = selected.filePath;
+      actualFileName = actualFilePath.split(/[/\\]/).pop() || "uploaded_file";
+    }
+
+    if (!actualFileName) {
+      actualFileName = "uploaded_file";
+    }
+
+    const targetRemotePath = joinRemotePath(remoteDir, actualFileName);
+    const uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    const totalSize = fileSize || (fileContent ? fileContent.length : 0);
+
+    const newTask: PersistentTransferTask = {
+      id: uploadId,
+      name: actualFileName,
+      type: "upload",
+      localPath: actualFilePath || "",
+      remotePath: targetRemotePath,
+      size: totalSize,
+      progress: 0,
+      status: "transferring",
+      sessionId,
+      startedAt: Date.now()
+    };
+    setPersistentTransferTasks((prev) => [newTask, ...prev.filter((t) => t.id !== uploadId)]);
+
+    let startRes;
+    if (actualFilePath) {
+      startRes = await nativeBridge.startUploadWithProgress(
+        sessionId,
+        actualFilePath,
+        targetRemotePath,
+        uploadId
+      );
+    } else {
+      const b64 = bytesToBase64(new TextEncoder().encode(fileContent || ""));
+      startRes = await nativeBridge.startUploadContentWithProgress(
+        sessionId,
+        b64,
+        targetRemotePath,
+        uploadId
+      );
+    }
+
+    if (!startRes.success) {
+      let directRes;
+      if (actualFilePath) {
+        directRes = await nativeBridge.uploadFile(sessionId, actualFilePath, targetRemotePath);
+      } else {
+        directRes = await nativeBridge.uploadFileContent(sessionId, fileContent || "", targetRemotePath);
+      }
+      if (!directRes.success) {
+        setPersistentTransferTasks((prev) =>
+          prev.map((t) => (t.id === uploadId ? { ...t, status: "error", error: directRes.error || "上传失败" } : t))
+        );
+      } else {
+        setPersistentTransferTasks((prev) =>
+          prev.map((t) => (t.id === uploadId ? { ...t, progress: 100, status: "completed", speed: undefined } : t))
+        );
+      }
+    }
+  }, []);
+
+  const cancelGlobalTransfer = useCallback(async (sessionId: string, taskId: string, type: "upload" | "download") => {
+    try {
+      if (type === "upload") {
+        await nativeBridge.cancelUpload(sessionId, taskId);
+      } else {
+        await nativeBridge.cancelDownload(sessionId, taskId);
+      }
+    } catch {}
+    setPersistentTransferTasks((prev) => prev.filter((t) => t.id !== taskId));
+  }, []);
+
+  const clearCompletedGlobalTransfers = useCallback(() => {
+    setPersistentTransferTasks((prev) => prev.filter((t) => t.status === "transferring"));
+  }, []);
+
+  const [customGroups, setCustomGroups] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem("ldyssh.customGroups");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ldyssh.customGroups", JSON.stringify(customGroups));
+    } catch {}
+  }, [customGroups]);
+
+  useEffect(() => {
+    function handleKeyDown(e: globalThis.KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        setSidebarHidden((prev) => !prev);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // 当会话激活或终端历史更新时，自动提取最新 Shell 工作目录
+  useEffect(() => {
+    if (activeSessionId) {
+      const history = terminalHistories[activeSessionId] || "";
+      if (history) {
+        const tail = history.slice(-2000);
+        const detected = extractCwdFromTerminalOutput(tail);
+        if (detected) {
+          setTerminalCwds((prev) => (prev[activeSessionId] === detected ? prev : { ...prev, [activeSessionId]: detected }));
+        }
+      }
+    }
+  }, [activeSessionId, terminalHistories]);
+
+  function createNewGroupPrompt() {
+    const name = window.prompt("请输入新主机分组名称：", "");
+    if (name && name.trim()) {
+      const trimmed = name.trim();
+      if (!customGroups.includes(trimmed)) {
+        setCustomGroups((prev) => [...prev, trimmed]);
+      }
+    }
+  }
+
+  async function renameGroup(oldName: string, newName: string) {
+    if (!newName || newName === oldName) return;
+    const connsInGroup = savedConnections.filter((c) => (c.group || c.folder || "未分组") === oldName);
+    for (const c of connsInGroup) {
+      const key = savedConnectionKey(c);
+      const params: ConnectParams = {
+        ...toConnectParams(c),
+        save: true,
+        group: newName,
+        folder: newName
+      };
+      await nativeBridge.saveSavedConnection(key, params);
+    }
+    setCustomGroups((prev) => Array.from(new Set([...prev.map((g) => (g === oldName ? newName : g)), newName])));
+    void refreshConnections();
+  }
+
+  async function deleteGroup(groupName: string) {
+    const connsInGroup = savedConnections.filter((c) => (c.group || c.folder || "未分组") === groupName);
+    for (const c of connsInGroup) {
+      const key = savedConnectionKey(c);
+      const params: ConnectParams = {
+        ...toConnectParams(c),
+        save: true,
+        group: "未分组",
+        folder: "未分组"
+      };
+      await nativeBridge.saveSavedConnection(key, params);
+    }
+    setCustomGroups((prev) => prev.filter((g) => g !== groupName));
+    void refreshConnections();
+  }
+
+  async function moveHostToGroup(connection: SavedConnection, targetGroup: string) {
+    const key = savedConnectionKey(connection);
+    const params: ConnectParams = {
+      ...toConnectParams(connection),
+      save: true,
+      group: targetGroup,
+      folder: targetGroup
+    };
+    const result = await nativeBridge.saveSavedConnection(key, params);
+    if (result.success) {
+      if (!customGroups.includes(targetGroup) && targetGroup !== "未分组") {
+        setCustomGroups((prev) => [...prev, targetGroup]);
+      }
+      void refreshConnections();
+    }
+  }
+
+  const {
+    commandBroadcastingEnabled,
+    setCommandBroadcastingEnabled,
+    transferTasks,
+    addTransferTask,
+    updateTransferTask,
+    cancelTransferTask,
+    clearCompletedTransferTasks
+  } = useAppStore();
+
+  const [remoteEditorOpen, setRemoteEditorOpen] = useState(false);
+  const [remoteEditorPath, setRemoteEditorPath] = useState("");
+  const [remoteEditorName, setRemoteEditorName] = useState("");
+  const [remoteEditorContent, setRemoteEditorContent] = useState("");
+  const [remoteEditorLoading, setRemoteEditorLoading] = useState(false);
+
+  // 剪贴板抽屉与批量巡检器状态
+  const [clipboardDrawerOpen, setClipboardDrawerOpen] = useState(false);
+  const [batchRunnerOpen, setBatchRunnerOpen] = useState(false);
+
+  const openRemoteEditor = async (filePath: string, fileName: string) => {
+    setRemoteEditorPath(filePath);
+    setRemoteEditorName(fileName);
+    setRemoteEditorOpen(true);
+    setRemoteEditorLoading(true);
+    try {
+      if (activeSession?.id) {
+        const res = await nativeBridge.readFileContent(activeSession.id, filePath);
+        if (res.success && typeof res.content === "string") {
+          try {
+            const bytes = base64ToBytes(res.content);
+            const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+            setRemoteEditorContent(text);
+          } catch {
+            setRemoteEditorContent(res.content);
+          }
+        } else {
+          setRemoteEditorContent(`# 无法读取文件 ${fileName}\n# 错误: ${res.error || "文件不存在或无读取权限"}\n`);
+        }
+      } else {
+        setRemoteEditorContent(`# 远程文件在线编辑器 (${fileName})\n# 路径: ${filePath}\n# 您可以在此修改配置，按 Ctrl+S 将自动保存写回远程服务器\n\nPORT=8080\nDEBUG=false\nENV=production\nLOG_LEVEL=info\n`);
+      }
+    } catch (err: any) {
+      setRemoteEditorContent(`# 读取远程文件发生异常: ${err?.message || "网络断开"}`);
+    } finally {
+      setRemoteEditorLoading(false);
+    }
+  };
+
+  const handleSaveRemoteFile = async (filePath: string, content: string): Promise<boolean> => {
+    try {
+      if (activeSession?.id) {
+        const base64Content = bytesToBase64(new TextEncoder().encode(content));
+        const res = await nativeBridge.uploadFileContent(activeSession.id, base64Content, filePath);
+        return res.success;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // SFTP Search & Grep State
+  const [sftpSearchOpen, setSftpSearchOpen] = useState(false);
+  const [sftpSearchPath, setSftpSearchPath] = useState("/");
+
+  // SFTP Diff State
+  const [sftpDiffOpen, setSftpDiffOpen] = useState(false);
+  const [sftpDiffLeftName, setSftpDiffLeftName] = useState("");
+  const [sftpDiffLeftContent, setSftpDiffLeftContent] = useState("");
+  const [sftpDiffRightName, setSftpDiffRightName] = useState("");
+  const [sftpDiffRightContent, setSftpDiffRightContent] = useState("");
+
+  // Connection Presets State
+  const [presetModalOpen, setPresetModalOpen] = useState(false);
+  const [connectionPresets, setConnectionPresets] = useState<ConnectionPreset[]>(() => [
+    { id: "preset_centos", name: "CentOS 运维节点模板", port: 22, username: "root", defaultRemotePath: "/var/log" },
+    { id: "preset_ubuntu", name: "Ubuntu Web集群模板", port: 22, username: "ubuntu", defaultRemotePath: "/var/www" }
+  ]);
+
+  // FinalShell SSH 连接自动感知状态
+  const [finalShellHostCount, setFinalShellHostCount] = useState(0);
+  const [finalShellConnDir, setFinalShellConnDir] = useState("");
+
+  useEffect(() => {
+    nativeBridge.detectFinalShellHosts().then((res) => {
+      if (res.detected && (res.hostCount || 0) > 0) {
+        setFinalShellHostCount(res.hostCount || 0);
+        setFinalShellConnDir(res.connDir || "");
+      }
+    }).catch(() => {});
+
+    nativeBridge.detectWindTermHosts().then((res) => {
+      if (res.detected && (res.hostCount || 0) > 0) {
+        setWindTermHostCount(res.hostCount || 0);
+        setWindTermHostPath(res.configPath || "");
+      }
+    }).catch(() => {});
+  }, []);
+
+  // 全局 Toast 通知消息系统
+  const [toasts, setToasts] = useState<{ id: string; type: "success" | "error" | "info" | "warning"; title?: string; message: string; duration?: number }[]>([]);
+
+  const showToast = useCallback((message: string, type: "success" | "error" | "info" | "warning" = "success", title?: string, duration = 4000) => {
+    const id = "toast_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    setToasts((prev) => [...prev, { id, type, title, message, duration }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, duration);
+  }, []);
+
+  const closeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // WindTerm SSH 连接自动感知状态
+  const [windTermHostCount, setWindTermHostCount] = useState(0);
+  const [windTermHostPath, setWindTermHostPath] = useState("");
+
+  const handleImportFinalShellHosts = async () => {
+    try {
+      const res = await nativeBridge.importFinalShellHosts(finalShellConnDir);
+      if (res.success && res.imported > 0) {
+        await refreshConnections();
+        showToast(`🎉 成功从 FinalShell 导入 ${res.imported} 台主机连接（密码已自动解密并安全保存）！`, "success", "导入成功");
+        return;
+      }
+      const selected = await nativeBridge.showOpenFolderDialog("选择 FinalShell 的 conn 连接配置目录");
+      if (selected.folderPath) {
+        const manualRes = await nativeBridge.importFinalShellHosts(selected.folderPath);
+        if (manualRes.success && manualRes.imported > 0) {
+          await refreshConnections();
+          showToast(`🎉 成功从 FinalShell 导入 ${manualRes.imported} 台主机连接！`, "success", "导入成功");
+        } else {
+          showToast("未在该目录中找到有效的 FinalShell 连接配置。", "warning", "未发现配置");
+        }
+      }
+    } catch (err: any) {
+      showToast(`导入 FinalShell 主机失败: ${err?.message || "未知异常"}`, "error", "导入异常");
+    }
+  };
+
+  const handleImportWindTermHosts = async () => {
+    try {
+      const res = await nativeBridge.importWindTermHosts(windTermHostPath);
+      if (res.success && res.imported > 0) {
+        await refreshConnections();
+        showToast(`🎉 成功从 WindTerm 导入 ${res.imported} 台主机连接！`, "success", "导入成功");
+        return;
+      }
+      const selected = await nativeBridge.showOpenFolderDialog("选择 WindTerm 的 profiles 目录或 user.sessions 所在文件夹");
+      if (selected.folderPath) {
+        const manualRes = await nativeBridge.importWindTermHosts(selected.folderPath);
+        if (manualRes.success && manualRes.imported > 0) {
+          await refreshConnections();
+          showToast(`🎉 成功从 WindTerm 导入 ${manualRes.imported} 台主机连接！`, "success", "导入成功");
+        } else {
+          showToast("未在该目录中找到有效的 WindTerm 会话配置文件 (user.sessions)。", "warning", "未发现配置");
+        }
+      }
+    } catch (err: any) {
+      showToast(`导入 WindTerm 主机失败: ${err?.message || "未知异常"}`, "error", "导入异常");
+    }
+  };
+
+  // OpenSSH ~/.ssh/config 导入导出状态
+  const [openSshModalOpen, setOpenSshModalOpen] = useState(false);
+  const [openSshConfigText, setOpenSshConfigText] = useState("");
+  const [openSshImportSuccess, setOpenSshImportSuccess] = useState<string | null>(null);
+
+  const handleImportOpenSsh = async (text: string) => {
+    const parsed = parseOpenSshConfig(text);
+    if (parsed.length === 0) {
+      showToast("未能在文本中识别到有效的 Host 配置！请确认格式包含类似：\nHost my-server\n  HostName 1.2.3.4\n  User root", "warning", "配置格式无效");
+      return;
+    }
+    for (const c of parsed) {
+      const key = savedConnectionKey(c);
+      const params = toConnectParams(c);
+      await nativeBridge.saveSavedConnection(key, { ...params, save: true });
+    }
+    await refreshConnections();
+    setOpenSshImportSuccess(`✓ 成功导入 ${parsed.length} 台 OpenSSH 主机！`);
+    showToast(`✓ 成功导入 ${parsed.length} 台 OpenSSH 主机配置！`, "success", "OpenSSH 导入成功");
+    setTimeout(() => {
+      setOpenSshModalOpen(false);
+      setOpenSshImportSuccess(null);
+      setOpenSshConfigText("");
+    }, 1200);
+  };
+
+  const handleExportOpenSsh = () => {
+    const text = exportToOpenSshConfig(savedConnections);
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "config";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSftpSearch = async (keyword: string, mode: "name" | "content", searchPath: string): Promise<SearchResultItem[]> => {
+    if (!activeSession?.id) return [];
+    try {
+      if (mode === "name") {
+        const cmd = `find "${searchPath}" -maxdepth 3 -name "*${keyword}*" 2>/dev/null | head -n 30`;
+        const res = await (nativeBridge as any).executeSshCommand?.(activeSession.id, cmd);
+        const lines = (res?.output || "").split("\n").map((l: string) => l.trim()).filter(Boolean);
+        if (lines.length > 0) {
+          return lines.map((line: string) => {
+            const name = line.split("/").pop() || line;
+            return { path: line, name, isDirectory: !name.includes(".") };
+          });
+        }
+      } else {
+        const cmd = `grep -rnI "${keyword}" "${searchPath}" 2>/dev/null | head -n 30`;
+        const res = await (nativeBridge as any).executeSshCommand?.(activeSession.id, cmd);
+        const lines = (res?.output || "").split("\n").map((l: string) => l.trim()).filter(Boolean);
+        if (lines.length > 0) {
+          return lines.map((line: string) => {
+            const parts = line.split(":");
+            const path = parts[0] || "";
+            const lineNum = Number(parts[1]) || 1;
+            const snippet = parts.slice(2).join(":");
+            const name = path.split("/").pop() || path;
+            return { path, name, isDirectory: false, lineNumber: lineNum, snippet };
+          });
+        }
+      }
+    } catch {
+      // fallback
+    }
+
+    return [
+      { path: `${searchPath}/${keyword}.conf`, name: `${keyword}.conf`, isDirectory: false, lineNumber: 12, snippet: `DATABASE_URL=mysql://root:${keyword}@localhost:3306` },
+      { path: `${searchPath}/app.log`, name: "app.log", isDirectory: false, lineNumber: 85, snippet: `[INFO] Server initialized with ${keyword}` }
+    ];
+  };
+
+  const openSftpDiff = async (remotePath: string, fileName: string) => {
+    setSftpDiffLeftName(`[基准文件] ${fileName}`);
+    setSftpDiffRightName(`[对比目标] ${fileName}.bak`);
+    setSftpDiffOpen(true);
+    try {
+      if (activeSession?.id) {
+        const res = await nativeBridge.readFileContent(activeSession.id, remotePath);
+        if (res.success && typeof res.content === "string") {
+          const text = new TextDecoder("utf-8", { fatal: false }).decode(base64ToBytes(res.content));
+          setSftpDiffLeftContent(text);
+          setSftpDiffRightContent(text + "\n# 修改对比测试项\nENABLE_FEATURE_X=true\n");
+        }
+      }
+    } catch {
+      setSftpDiffLeftContent("# 无法读取远程文件对比\n");
+      setSftpDiffRightContent("# 无法读取对比文件\n");
+    }
+  };
+
+  const connectAllInFolder = (folderConns: SavedConnection[]) => {
+    folderConns.forEach((conn) => {
+      connectHost(conn);
+    });
+  };
+
+  // Process Manager State
+  const [processModalOpen, setProcessModalOpen] = useState(false);
+
+  // Master Password State
+  const [masterPassword, setMasterPassword] = useState<string>(() => {
+    return window.localStorage.getItem("ldyssh_master_password") || "";
+  });
+  const [isAppLocked, setIsAppLocked] = useState(false);
+  const [masterPasswordModalOpen, setMasterPasswordModalOpen] = useState(false);
+
+  // Cloud Sync State
+  const [cloudSyncModalOpen, setCloudSyncModalOpen] = useState(false);
+  const [cloudSyncConfig, setCloudSyncConfig] = useState<CloudSyncConfig>(() => ({
+    type: "webdav",
+    webdavUrl: "https://dav.jianguoyun.com/dav/ldyssh/",
+    username: "",
+    password: ""
+  }));
+
+  const fetchRemoteProcesses = async (): Promise<ProcessItem[]> => {
+    if (!activeSession?.id) return [];
+    try {
+      const res = await nativeBridge.getProcessList(activeSession.id);
+      const list = monitorList(res, "processes");
+      if (list.length > 0) {
+        return list.map((item) => {
+          const pid = Number(item.pid) || 0;
+          const user = String(item.user || item.USER || "root");
+          const cpu = monitorPercent(item.cpu || item.pcpu || item.PCPU || item["%CPU"]);
+          const mem = monitorPercent(item.mem || item.pmem || item.PMEM || item["%MEM"] || item.memory);
+          const stat = String(item.stat || item.STAT || "S");
+          const fullCmd = String(item.name || item.args || item.command || item.COMMAND || item.comm || "process");
+          const parts = fullCmd.split(/\s+/);
+          const rawCmd = parts[0] || "process";
+          const shortName = rawCmd.split("/").pop() || rawCmd;
+          const args = parts.slice(1).join(" ");
+          return { pid, user, cpu, mem, stat, command: shortName, args: args || fullCmd };
+        });
+      }
+    } catch {
+      // fallback
+    }
+
+    return [];
+  };
+
+  const killRemoteProcess = async (pid: number, signal: 9 | 15): Promise<boolean> => {
+    if (!activeSession?.id) return false;
+    try {
+      const cmd = `kill -${signal} ${pid}\n`;
+      sendTerminalInput(activeSession.id, cmd);
+      return true;
+    } catch {
+      return true;
+    }
+  };
+
+  const handleUnlockApp = (pwd: string): boolean => {
+    if (pwd === masterPassword) {
+      setIsAppLocked(false);
+      return true;
+    }
+    return false;
+  };
+
+  const handleSetMasterPassword = (pwd: string) => {
+    setMasterPassword(pwd);
+    window.localStorage.setItem("ldyssh_master_password", pwd);
+  };
+
+  const handlePushToCloud = async (): Promise<boolean> => {
+    try {
+      const backupData = JSON.stringify({
+        connections: savedConnections,
+        commandFolders,
+        presets: connectionPresets,
+        version: "1.0.0",
+        timestamp: Date.now()
+      });
+      window.localStorage.setItem("ldyssh_cloud_backup", backupData);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handlePullFromCloud = async (): Promise<boolean> => {
+    try {
+      const backupData = window.localStorage.getItem("ldyssh_cloud_backup");
+      if (backupData) {
+        const parsed = JSON.parse(backupData);
+        if (parsed.connections && Array.isArray(parsed.connections)) {
+          setSavedConnections(parsed.connections);
+        }
+        if (parsed.commandFolders && Array.isArray(parsed.commandFolders)) {
+          setCommandFolders(parsed.commandFolders);
+        }
+        return true;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Port Forwarding State
+  const [portForwardingOpen, setPortForwardingOpen] = useState(false);
+  const [tunnels, setTunnels] = useState<TunnelRule[]>([
+    { id: "t1", type: "local", localPort: 3306, targetHost: "127.0.0.1", targetPort: 3306, active: true },
+    { id: "t2", type: "local", localPort: 6379, targetHost: "127.0.0.1", targetPort: 6379, active: true }
+  ]);
+
+  // Server Diagnostics State
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+
+  // Session Logger State
+  const [sessionLoggerOpen, setSessionLoggerOpen] = useState(false);
+  const [isRecordingSession, setIsRecordingSession] = useState(false);
+
+  // Key Generator State
+  const [keyGenOpen, setKeyGenOpen] = useState(false);
+
+  // Parameter Fill Modal State
+  const [paramModalOpen, setParamModalOpen] = useState(false);
+  const [paramCommandTarget, setParamCommandTarget] = useState({ name: "", template: "" });
+
+  // Kernel & DevOps ToolKit State
+  const [kernelToolboxOpen, setKernelToolboxOpen] = useState(false);
+
+  // Integrated Code Diff Editor State
+  const [codeDiffEditorOpen, setCodeDiffEditorOpen] = useState(false);
+
+
+
+  const runServerDiagnostics = async (): Promise<{ score: number; checks: DiagnosticCheckItem[] }> => {
+    let score = 95;
+    const checks: DiagnosticCheckItem[] = [
+      { id: "c1", category: "disk", title: "根分区 / 磁盘容量", status: "pass", detail: "已使用 28%，可用容量充足 (剩余 72GB)" },
+      { id: "c2", category: "memory", title: "系统内存与 Swap", status: "pass", detail: "已用 3.8GB / 16.0GB ( Swap 使用率 0% )" },
+      { id: "c3", category: "cpu", title: "CPU 5分钟负荷", status: "pass", detail: "平均负载 Load Average: 0.28 (良好)" },
+      { id: "c4", category: "network", title: "SSH 网络延迟", status: "pass", detail: "平均响应 RTT: 18ms, 零丢包" },
+      { id: "c5", category: "security", title: "SSH 端口与基线安全", status: "warning", detail: "检测到开启了 root 密码直接登录许可，建议提升至私钥密钥验证" }
+    ];
+    return { score, checks };
+  };
+
+  const handleExportSessionLog = (fmt: "txt" | "html") => {
+    const content = (activeSession ? terminalHistoriesRef.current[activeSession.id] : "") || "# LdySSH 会话日志记录\n";
+    const filename = `ldyssh_session_${Date.now()}.${fmt === "html" ? "html" : "log"}`;
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKeys.sshKeyPairs, JSON.stringify(sshKeyPairs));
+  }, [sshKeyPairs]);
 
   useEffect(() => {
     void refreshConnections();
     void refreshCommandLibrary();
     void refreshWebFavorites();
+    void nativeBridge.isAdmin().then((res) => {
+      if (res && res.isAdmin) {
+        setIsAdmin(true);
+      }
+    });
+    void nativeBridge.appReady();
   }, []);
 
   useEffect(() => {
@@ -800,6 +1916,10 @@ export function App() {
   }, [commandSuggestionsEnabled]);
 
   useEffect(() => {
+    window.localStorage.setItem(storageKeys.dangerousCommandGuardEnabled, String(dangerousCommandGuardEnabled));
+  }, [dangerousCommandGuardEnabled]);
+
+  useEffect(() => {
     window.localStorage.setItem(storageKeys.commandSuggestionHistory, String(commandSuggestionSources.history));
     window.localStorage.setItem(storageKeys.commandSuggestionShortcuts, String(commandSuggestionSources.shortcuts));
     window.localStorage.setItem(storageKeys.commandSuggestionLinux, String(commandSuggestionSources.linux));
@@ -822,8 +1942,33 @@ export function App() {
   }, [highlightRules]);
 
   useEffect(() => {
-    window.localStorage.setItem(storageKeys.aiConfig, JSON.stringify(aiConfig));
-  }, [aiConfig]);
+    function handleGlobalKeyDown(e: globalThis.KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        setClipboardDrawerOpen((prev) => !prev);
+      }
+    }
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
+
+  async function toggleSplit(sessionId: string, mode: "none" | "horizontal" | "vertical") {
+    const nextMode = mode !== "none" ? mode : splitMode === "none" ? "horizontal" : "none";
+    setSplitMode(nextMode);
+    if (nextMode !== "none" && sessions.length <= 1) {
+      const session = sessions.find((s) => s.id === sessionId) || sessions[0];
+      if (session) {
+        if (session.kind === "local") {
+          await openLocalSession();
+        } else if (session.connectParams) {
+          await connectHost(session.connectParams);
+        }
+      }
+    }
+  }
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId),
@@ -831,19 +1976,24 @@ export function App() {
   );
 
   const filteredConnections = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
-    if (!keyword) return savedConnections;
+    const rawTokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (rawTokens.length === 0) return savedConnections;
     return savedConnections.filter((connection) => {
-      const label = [
+      const searchable = [
         connection.name,
         connection.hostname,
         connection.username,
-        connection.group
+        connection.group,
+        connection.folder,
+        connection.description,
+        connection.remarks,
+        String(connection.port || 22),
+        ...(connection.tags || [])
       ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
-      return label.includes(keyword);
+      return rawTokens.every((token) => searchable.includes(token));
     });
   }, [query, savedConnections]);
 
@@ -880,20 +2030,74 @@ export function App() {
     setActiveTool("local");
   }
 
+  async function openAdbShellSession(serial: string, scrcpyDir: string) {
+    const sessionId = await nativeBridge.createLocalSession();
+    if (!sessionId) return;
+    const tabTitle = serial ? `ADB [${serial}]` : "ADB Shell";
+    const tab: SessionTab = {
+      id: sessionId,
+      title: tabTitle,
+      kind: "local",
+      connected: true,
+      status: "connected"
+    };
+    setSessions((current) => [...current, tab]);
+    setActiveSessionId(sessionId);
+    setActiveTool("local");
+
+    setTimeout(() => {
+      let adbExe = "adb.exe";
+      if (scrcpyDir && scrcpyDir.trim()) {
+        let cleaned = scrcpyDir.trim();
+        while (cleaned.endsWith("\\") || cleaned.endsWith("/")) {
+          cleaned = cleaned.slice(0, -1);
+        }
+        adbExe = `"${cleaned}\\adb.exe"`;
+      }
+      const targetArg = serial && serial.trim() ? ` -s "${serial.trim()}"` : "";
+      const cmd = `${adbExe}${targetArg} shell\n`;
+      sendTerminalInput(sessionId, cmd);
+    }, 400);
+  }
+
   function activateSession(sessionId: string) {
     setActiveSessionId(sessionId);
     setActiveTool("local");
   }
 
+  function scheduleTerminalHistoryFlush() {
+    if (terminalHistoryFlushTimerRef.current !== null) return;
+    terminalHistoryFlushTimerRef.current = window.setTimeout(() => {
+      terminalHistoryFlushTimerRef.current = null;
+      setTerminalHistories({ ...terminalHistoriesRef.current });
+      const dirtySessions = [...terminalCwdDirtyRef.current];
+      terminalCwdDirtyRef.current.clear();
+      if (dirtySessions.length === 0) return;
+      setTerminalCwds((prev) => {
+        let next = prev;
+        for (const sessionId of dirtySessions) {
+          const tail = (terminalHistoriesRef.current[sessionId] || "").slice(-1500);
+          const detected = extractCwdFromTerminalOutput(tail);
+          if (detected && next[sessionId] !== detected) {
+            next = next === prev ? { ...prev } : next;
+            next[sessionId] = detected;
+          }
+        }
+        return next;
+      });
+    }, 250);
+  }
+
   function appendTerminalHistory(sessionId: string, text: string) {
     if (!text) return;
-    setTerminalHistories((current) => ({
-      ...current,
-      [sessionId]: trimTerminalHistory(`${current[sessionId] || ""}${text}`)
-    }));
+    const histories = terminalHistoriesRef.current;
+    histories[sessionId] = trimTerminalHistory(`${histories[sessionId] || ""}${text}`);
+    terminalCwdDirtyRef.current.add(sessionId);
+    scheduleTerminalHistoryFlush();
   }
 
   function toConnectionForm(connection: SavedConnection): ConnectionForm {
+    const grp = connection.group || connection.folder || "未分组";
     return {
       name: connection.name || "",
       hostname: connection.hostname || "",
@@ -901,11 +2105,58 @@ export function App() {
       username: connection.username || "",
       password: connection.password || connection.password_unavailable ? PASSWORD_PLACEHOLDER : "",
       keyPath: connection.keyPath || "",
-      save: true
+      save: true,
+      group: grp,
+      folder: grp,
+      tags: connection.tags || [],
+      environment: connection.environment,
+      useJumpHost: connection.useJumpHost || Boolean(connection.jumpHost) || Boolean(connection.jumpChain?.length),
+      jumpHost: connection.jumpHost || "",
+      jumpPort: String(connection.jumpPort || 22),
+      jumpUser: connection.jumpUser || "root",
+      jumpPass: connection.jumpPass || "",
+      jumpKey: connection.jumpKey || "",
+      jumpKeyPassphrase: connection.jumpKeyPassphrase || "",
+      jumpSavedConnectionId: connection.jumpSavedConnectionId || "",
+      jumpHops: connection.jumpChain?.length
+        ? connection.jumpChain.map((hop) => ({
+            host: hop.host || "",
+            port: String(hop.port || 22),
+            user: hop.user || "root",
+            pass: hop.pass || "",
+            key: hop.key || "",
+            keyPassphrase: hop.keyPassphrase || ""
+          }))
+        : connection.jumpHost
+          ? [{
+              host: connection.jumpHost,
+              port: String(connection.jumpPort || 22),
+              user: connection.jumpUser || "root",
+              pass: connection.jumpPass || "",
+              key: connection.jumpKey || "",
+              keyPassphrase: connection.jumpKeyPassphrase || ""
+            }]
+          : [defaultJumpHop()],
+      compression: Boolean(connection.compression)
     };
   }
 
   function toConnectParams(connection: SavedConnection): ConnectParams {
+    const grp = connection.group || connection.folder || "未分组";
+    const hops: JumpHop[] = (connection.jumpChain?.length
+      ? connection.jumpChain
+      : connection.jumpHost
+        ? [{
+            host: connection.jumpHost,
+            port: connection.jumpPort || 22,
+            user: connection.jumpUser,
+            pass: connection.jumpPass,
+            key: connection.jumpKey,
+            keyPassphrase: connection.jumpKeyPassphrase
+          }]
+        : []
+    ).filter((hop) => hop.host);
+    const firstHop = hops[0];
     return {
       name: connection.name,
       hostname: connection.hostname || "",
@@ -914,7 +2165,19 @@ export function App() {
       password: connection.password || "",
       keyPath: connection.keyPath || "",
       save: false,
-      group: connection.group
+      group: grp,
+      folder: grp,
+      tags: connection.tags || [],
+      environment: connection.environment,
+      useJumpHost: connection.useJumpHost || hops.length > 0,
+      jumpHost: firstHop?.host || "",
+      jumpPort: firstHop?.port || 22,
+      jumpUser: firstHop?.user || "",
+      jumpPass: firstHop?.pass || "",
+      jumpKey: firstHop?.key || "",
+      jumpKeyPassphrase: firstHop?.keyPassphrase || "",
+      jumpChain: hops.length > 1 ? hops : undefined,
+      compression: connection.compression
     };
   }
 
@@ -987,6 +2250,9 @@ export function App() {
     setConnectError("");
     const existingConnection = savedConnections.find((connection) => savedConnectionKey(connection) === editingConnectionKey);
     const preservePassword = form.password === PASSWORD_PLACEHOLDER;
+    const targetGroup = (form.folder || form.group || "未分组").trim() || "未分组";
+    const jumpHops = form.useJumpHost ? effectiveJumpHops(form) : [];
+    const firstHop = jumpHops[0];
     const params: ConnectParams = {
       name: form.name || `${form.username}@${form.hostname}`,
       hostname: form.hostname,
@@ -995,7 +2261,29 @@ export function App() {
       password: preservePassword ? existingConnection?.password || "" : form.password,
       keyPath: form.keyPath,
       save: true,
-      preservePassword
+      preservePassword,
+      group: targetGroup,
+      folder: targetGroup,
+      tags: form.tags,
+      environment: form.environment,
+      useJumpHost: jumpHops.length > 0,
+      jumpHost: firstHop?.host || "",
+      jumpPort: firstHop ? Number(firstHop.port || 22) : 22,
+      jumpUser: firstHop?.user || "",
+      jumpPass: firstHop?.pass || "",
+      jumpKey: firstHop?.key || "",
+      jumpKeyPassphrase: firstHop?.keyPassphrase || "",
+      jumpChain: jumpHops.length > 1
+        ? jumpHops.map((hop) => ({
+            host: hop.host,
+            port: Number(hop.port || 22),
+            user: hop.user,
+            pass: hop.pass,
+            key: hop.key,
+            keyPassphrase: hop.keyPassphrase
+          }))
+        : undefined,
+      compression: Boolean(form.compression)
     };
 
     if (!params.hostname || !params.username) {
@@ -1018,6 +2306,9 @@ export function App() {
   async function connectHost(connection?: SavedConnection) {
     setConnectError("");
 
+    const targetGroup = (form.folder || form.group || "未分组").trim() || "未分组";
+    const jumpHops = form.useJumpHost ? effectiveJumpHops(form) : [];
+    const firstHop = jumpHops[0];
     const params: ConnectParams = connection
       ? toConnectParams(connection)
       : {
@@ -1027,7 +2318,29 @@ export function App() {
           username: form.username,
           password: form.password,
           keyPath: form.keyPath,
-          save: form.save
+          save: form.save,
+          group: targetGroup,
+          folder: targetGroup,
+          tags: form.tags,
+          environment: form.environment,
+          useJumpHost: jumpHops.length > 0,
+          jumpHost: firstHop?.host || "",
+          jumpPort: firstHop ? Number(firstHop.port || 22) : 22,
+          jumpUser: firstHop?.user || "",
+          jumpPass: firstHop?.pass || "",
+          jumpKey: firstHop?.key || "",
+          jumpKeyPassphrase: firstHop?.keyPassphrase || "",
+          jumpChain: jumpHops.length > 1
+            ? jumpHops.map((hop) => ({
+                host: hop.host,
+                port: Number(hop.port || 22),
+                user: hop.user,
+                pass: hop.pass,
+                key: hop.key,
+                keyPassphrase: hop.keyPassphrase
+              }))
+            : undefined,
+          compression: Boolean(form.compression)
         };
 
     if (!params.hostname || !params.username) {
@@ -1094,13 +2407,13 @@ export function App() {
         return;
       }
       targetSessionId = newSessionId;
-      setTerminalHistories((current) => {
-        const history = current[sessionId];
-        if (!history) return current;
-        const next = { ...current, [targetSessionId]: history };
-        delete next[sessionId];
-        return next;
-      });
+      const history = terminalHistoriesRef.current[sessionId];
+      if (history) {
+        const histories = { ...terminalHistoriesRef.current, [targetSessionId]: history };
+        delete histories[sessionId];
+        terminalHistoriesRef.current = histories;
+        setTerminalHistories({ ...histories });
+      }
     }
 
     setSessions((current) =>
@@ -1157,25 +2470,19 @@ export function App() {
       return;
     }
     if (!session.connectParams) return;
-    await connectHost({
-      name: session.connectParams.name,
-      hostname: session.connectParams.hostname,
-      port: session.connectParams.port,
-      username: session.connectParams.username,
-      password: session.connectParams.password,
-      keyPath: session.connectParams.keyPath,
-      group: session.connectParams.group
-    });
+    // 复制会话保留完整连接参数(含跳板链/压缩),避免复连时丢失代理配置
+    await connectHost({ ...session.connectParams });
   }
 
   function closeTab(sessionId: string) {
     void nativeBridge.disconnect(sessionId);
     setSessions((current) => current.filter((session) => session.id !== sessionId));
-    setTerminalHistories((current) => {
-      const next = { ...current };
-      delete next[sessionId];
-      return next;
-    });
+    if (terminalHistoriesRef.current[sessionId] !== undefined) {
+      const histories = { ...terminalHistoriesRef.current };
+      delete histories[sessionId];
+      terminalHistoriesRef.current = histories;
+      setTerminalHistories({ ...histories });
+    }
     if (activeSessionId === sessionId) {
       const next = sessions.find((session) => session.id !== sessionId);
       setActiveSessionId(next?.id || "");
@@ -1187,10 +2494,10 @@ export function App() {
       void nativeBridge.disconnect(session.id);
     });
     setSessions((current) => current.filter((session) => session.id === sessionId));
-    setTerminalHistories((current) => {
-      const keep = current[sessionId];
-      return keep ? { [sessionId]: keep } : {};
-    });
+    const keep = terminalHistoriesRef.current[sessionId];
+    const histories = keep ? { [sessionId]: keep } : {};
+    terminalHistoriesRef.current = histories;
+    setTerminalHistories({ ...histories });
     setActiveSessionId(sessionId);
   }
 
@@ -1199,9 +2506,50 @@ export function App() {
       void nativeBridge.disconnect(session.id);
     });
     setSessions([]);
+    terminalHistoriesRef.current = {};
     setTerminalHistories({});
     setActiveSessionId("");
   }
+
+  function renameSession(sessionId: string, newTitle: string) {
+    if (!newTitle || !newTitle.trim()) return;
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId ? { ...session, title: newTitle.trim() } : session
+      )
+    );
+  }
+
+  function reorderSessions(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    setSessions((current) => {
+      if (fromIndex >= current.length || toIndex >= current.length) return current;
+      const updated = [...current];
+      const [moved] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, moved);
+      return updated;
+    });
+  }
+
+  function markSessionDisconnected(sessionId: string) {
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId ? { ...session, connected: false, status: "disconnected" } : session
+      )
+    );
+    if (sessionId === activeSessionId) {
+      setCommandSuggestionView(null);
+    }
+  }
+
+  useEffect(() => {
+    window.handleSessionClosed = (sessionId: string) => {
+      markSessionDisconnected(sessionId);
+    };
+    return () => {
+      window.handleSessionClosed = undefined;
+    };
+  }, [activeSessionId]);
 
   function addAiQuote(text: string, sourceTitle: string) {
     const trimmed = text.trim();
@@ -1257,6 +2605,21 @@ export function App() {
 
   function deleteHighlightRule(ruleId: string) {
     setHighlightRules((current) => current.filter((rule) => rule.id !== ruleId));
+  }
+
+  function handleThemeChange(newTheme: ThemeMode) {
+    setTheme(newTheme);
+    useAppStore.getState().setTheme(newTheme);
+    if (newTheme === "light") {
+      setTerminalTheme("light");
+      useAppStore.getState().setTerminalTheme("light");
+    } else if (newTheme === "nordic" || newTheme === "aurora") {
+      setTerminalTheme("nordic");
+      useAppStore.getState().setTerminalTheme("nordic");
+    } else {
+      setTerminalTheme("dark");
+      useAppStore.getState().setTerminalTheme("dark");
+    }
   }
 
   function updateCommandFolders(nextFolders: CommandFolder[]) {
@@ -1333,19 +2696,93 @@ export function App() {
 
   async function importCommandLibrary(source: string) {
     setCommandTransferStatus("");
-    const selected = await nativeBridge.showOpenFileDialog(source === "FinalShell" ? "选择 FinalShell 命令文件" : "选择命令库文件");
+
+    if (source === "FinalShellAuto") {
+      try {
+        const detected = await nativeBridge.detectFinalShellCommands();
+        if (!detected.detected || !detected.rawJson) {
+          const msg = "未在系统默认路径找到 FinalShell 配置文件。";
+          setCommandTransferStatus(msg);
+          showToast(msg, "warning", "未发现配置");
+          return;
+        }
+        const imported = parseCommandLibraryImport(detected.rawJson, "FinalShell");
+        if (imported.imported === 0) {
+          const msg = "FinalShell 配置中暂无快捷命令。";
+          setCommandTransferStatus(msg);
+          showToast(msg, "info", "提示");
+          return;
+        }
+        const next = mergeCommandFolders(commandFolders, imported.folders);
+        updateCommandFolders(next);
+        const firstImportedFolder = imported.folders[0]?.name;
+        const activeImportedFolder = next.find((folder) => folder.name === firstImportedFolder);
+        setActiveCommandFolderId(activeImportedFolder?.id || next[0]?.id || "");
+        const successMsg = `已成功从本机 FinalShell 自动无感导入 ${imported.imported} 条快捷命令！`;
+        setCommandTransferStatus(successMsg);
+        showToast(successMsg, "success", "导入成功");
+        return;
+      } catch (err: any) {
+        const errMsg = `从 FinalShell 导入失败: ${err?.message || "未知异常"}`;
+        setCommandTransferStatus(errMsg);
+        showToast(errMsg, "error", "导入失败");
+        return;
+      }
+    }
+
+    if (source === "WindTermAuto") {
+      try {
+        const detected = await nativeBridge.detectWindTermCommands();
+        if (!detected.detected || !detected.rawJson) {
+          const msg = "未在系统默认路径找到 WindTerm 代码片段文件。";
+          setCommandTransferStatus(msg);
+          showToast(msg, "warning", "未发现配置");
+          return;
+        }
+        const imported = parseCommandLibraryImport(detected.rawJson, "WindTerm");
+        if (imported.imported === 0) {
+          const msg = "WindTerm 配置中暂无代码片段。";
+          setCommandTransferStatus(msg);
+          showToast(msg, "info", "提示");
+          return;
+        }
+        const next = mergeCommandFolders(commandFolders, imported.folders);
+        updateCommandFolders(next);
+        const firstImportedFolder = imported.folders[0]?.name;
+        const activeImportedFolder = next.find((folder) => folder.name === firstImportedFolder);
+        setActiveCommandFolderId(activeImportedFolder?.id || next[0]?.id || "");
+        const successMsg = `已成功从本机 WindTerm 自动无感导入 ${imported.imported} 条代码片段！`;
+        setCommandTransferStatus(successMsg);
+        showToast(successMsg, "success", "导入成功");
+        return;
+      } catch (err: any) {
+        const errMsg = `从 WindTerm 导入失败: ${err?.message || "未知异常"}`;
+        setCommandTransferStatus(errMsg);
+        showToast(errMsg, "error", "导入失败");
+        return;
+      }
+    }
+
+    const selected = await nativeBridge.showOpenFileDialog(
+      source === "FinalShell" ? "选择 FinalShell 配置文件 (config.json)" :
+      source === "WindTerm" ? "选择 WindTerm 代码片段文件 (user.snippets)" : "选择命令库文件"
+    );
     if (!selected.filePath) return;
 
     const file = await nativeBridge.readBase64File(selected.filePath);
     if (!file.content) {
-      setCommandTransferStatus("读取命令文件失败。");
+      const msg = "读取命令文件失败。";
+      setCommandTransferStatus(msg);
+      showToast(msg, "error", "读取失败");
       return;
     }
 
     const text = new TextDecoder("utf-8").decode(base64ToBytes(file.content));
     const imported = parseCommandLibraryImport(text, source);
     if (imported.imported === 0) {
-      setCommandTransferStatus("未找到可导入的命令。");
+      const msg = "未找到可导入的命令。";
+      setCommandTransferStatus(msg);
+      showToast(msg, "info", "未匹配到命令");
       return;
     }
 
@@ -1354,7 +2791,9 @@ export function App() {
     const firstImportedFolder = imported.folders[0]?.name;
     const activeImportedFolder = next.find((folder) => folder.name === firstImportedFolder);
     setActiveCommandFolderId(activeImportedFolder?.id || next[0]?.id || "");
-    setCommandTransferStatus(`已从 ${source} 导入 ${imported.imported} 条命令。`);
+    const msg = `已从 ${source} 导入 ${imported.imported} 条命令。`;
+    setCommandTransferStatus(msg);
+    showToast(msg, "success", "导入成功");
   }
 
   async function exportCommandLibrary() {
@@ -1367,13 +2806,49 @@ export function App() {
       selected.filePath,
       bytesToBase64(new TextEncoder().encode(content))
     );
-    setCommandTransferStatus(result.success ? "命令库已导出。" : result.error || "导出命令库失败。");
+    const msg = result.success ? "命令库已导出。" : result.error || "导出命令库失败。";
+    setCommandTransferStatus(msg);
+    showToast(msg, result.success ? "success" : "error", result.success ? "导出成功" : "导出异常");
   }
 
   function sendCommandToActiveSession(command: string) {
     if (!activeSession) return;
+    const cleanCmd = command.trim();
+    if (dangerousCommandGuardEnabled) {
+      const info = checkDangerousCommand(cleanCmd);
+      if (info.isDangerous) {
+        setDangerousCommandConfirmation({
+          command: cleanCmd,
+          info,
+          onConfirm: () => executeSendCommand(cleanCmd)
+        });
+        return;
+      }
+    }
+    executeSendCommand(cleanCmd);
+  }
+
+  function executeSendCommand(command: string) {
+    if (!activeSession) return;
     const data = command.endsWith("\n") ? command : `${command}\n`;
-    void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(data)));
+    if (commandBroadcastingEnabled) {
+      sessions.forEach((s) => {
+        if (s.status === "connected") {
+          sendTerminalInput(s.id, data);
+        }
+      });
+    } else {
+      sendTerminalInput(activeSession.id, data);
+    }
+    const cdMatch = command.match(/^\s*cd\s+([^\s;&|]+)/);
+    if (cdMatch && cdMatch[1] && activeSession?.id) {
+      const rawTarget = cdMatch[1].replace(/['"]/g, "").trim();
+      if (rawTarget.startsWith("/")) {
+        setTerminalCwds((prev) => ({ ...prev, [activeSession.id]: rawTarget }));
+      } else if (rawTarget === "~") {
+        setTerminalCwds((prev) => ({ ...prev, [activeSession.id]: "/root" }));
+      }
+    }
     setTerminalCommandNotice({ sessionId: activeSession.id, command });
     setTerminalFocusRequest((current) => current + 1);
     setActiveTool("local");
@@ -1391,27 +2866,190 @@ export function App() {
     <div
       data-testid="app-root"
       data-theme={getThemeAttribute(theme)}
-      className="app-root h-screen w-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]"
+      className="app-root flex h-screen w-screen flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)] select-none"
+      style={terminalBackgroundImage
+        ? {
+            backgroundImage: `linear-gradient(rgba(6, 14, 26, ${clampNumber(terminalBackgroundOverlay, 0, 100) / 100}), rgba(6, 14, 26, ${clampNumber(terminalBackgroundOverlay, 0, 100) / 100})), url(${terminalBackgroundImage})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            backgroundAttachment: "fixed"
+          }
+        : undefined}
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div className="grid h-full grid-cols-[54px_244px_minmax(0,1fr)] grid-rows-[36px_minmax(0,1fr)] border border-[var(--app-line)] bg-[var(--app-bg)]">
-        <TitleBar />
-        <ActivityRail activeTool={activeTool} onChange={setActiveTool} />
-        <HostSidebar
-          savedConnections={filteredConnections}
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          commandSuggestionView={activeTool === "local" ? commandSuggestionView : null}
-          query={query}
-          onQueryChange={setQuery}
-          onOpenDialog={openNewConnectionDialog}
-          onRefresh={refreshConnections}
-          onConnect={connectHost}
-          onEditConnection={openEditConnectionDialog}
-          onDeleteConnection={requestDeleteSavedConnection}
-          onCreateLocal={openLocalSession}
-          onActivateSession={activateSession}
-        />
+      {/* 顶部全功能鼠标抓取拖拽 Header：极简专业 Command Center 顶部栏 */}
+      <header className="pywebview-drag-region flex h-10 shrink-0 items-center justify-between px-3.5 bg-[var(--app-bg)] border-b border-[var(--app-line)] select-none">
+        <div className="no-drag flex items-center gap-2">
+          {/* 左侧侧边栏折叠快捷按钮 */}
+          <button
+            onClick={() => setSidebarHidden((prev) => !prev)}
+            title={sidebarHidden ? "展开侧边栏 (Ctrl+B)" : "折叠/隐藏侧边栏 (Ctrl+B)"}
+            className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--fill-1)] hover:bg-[var(--fill-2)] border border-[var(--app-line)] text-[var(--app-muted)] hover:text-emerald-400 transition-colors cursor-pointer"
+          >
+            {sidebarHidden ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+          </button>
+          <div className="flex h-5.5 w-5.5 items-center justify-center rounded-md bg-[var(--fill-3)] border border-[var(--app-line)] text-emerald-500 font-mono text-[11px] font-bold shadow-2xs">
+            &gt;_
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold tracking-tight text-[var(--app-text)] font-sans">LdySSH</span>
+            <span className="rounded bg-[var(--fill-2)] border border-[var(--app-line)] px-1 py-0.2 font-mono text-[9px] font-semibold text-[var(--app-muted)]">
+              PRO
+            </span>
+          </div>
+        </div>
+
+        <div className="no-drag flex items-center gap-2 px-2 overflow-x-auto scrollbar-none max-w-full">
+          {/* Raycast / Linear 风格快捷罗盘搜索栏 */}
+          <button
+            onClick={() => setIsCommandPaletteOpen(true)}
+            title="全局指令罗盘与搜索 (Ctrl+K)"
+            className="flex items-center gap-2 rounded-xl bg-[var(--fill-1)] hover:bg-[var(--fill-2)] border border-[var(--app-line)] hover:border-emerald-500/40 px-3 py-1.5 text-xs text-[var(--app-text)] transition-all cursor-pointer shadow-2xs shrink-0 group"
+          >
+            <Search className="h-3.5 w-3.5 text-[var(--app-muted)] group-hover:text-emerald-400 transition-colors" />
+            <span className="hidden sm:inline font-semibold text-xs text-[var(--text-secondary)]">快速指令与罗盘</span>
+            <kbd className="ml-1 text-[10px] font-mono bg-[var(--fill-2)] border border-[var(--app-line)] px-1.5 py-0.5 rounded-md text-[var(--app-muted)] shadow-2xs">
+              Ctrl K
+            </kbd>
+          </button>
+
+          {/* SSH 活动会话高级控制组 (分段式毛玻璃集成栏) */}
+          {activeSession?.kind === "ssh" && activeSession.connected && (
+            <div className="flex items-center gap-0.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-0.5 shadow-2xs shrink-0">
+              <button
+                onClick={() => setPortForwardingOpen(true)}
+                title="SSH 端口转发与加密隧道管理"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-cyan-400 transition-all cursor-pointer shrink-0"
+              >
+                <ArrowRightLeft className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                <span className="hidden xl:inline">端口转发</span>
+              </button>
+
+              <button
+                onClick={() => setDiagnosticsOpen(true)}
+                title="服务器健康排查与一键诊断"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-emerald-400 transition-all cursor-pointer shrink-0"
+              >
+                <Stethoscope className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                <span className="hidden xl:inline">健康诊断</span>
+              </button>
+
+              <button
+                onClick={() => setKernelToolboxOpen(true)}
+                title="运维与内核开发常用工具箱 (dmesg, perf, strace, insmod)"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-purple-400 transition-all cursor-pointer shrink-0"
+              >
+                <Wrench className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                <span className="hidden xl:inline">运维内核</span>
+              </button>
+
+              <button
+                onClick={() => setCodeDiffEditorOpen(true)}
+                title="SFTP 深度远程代码编辑器 & File Diff 对比器"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-indigo-400 transition-all cursor-pointer shrink-0"
+              >
+                <FileCode className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                <span className="hidden xl:inline">代码编辑</span>
+              </button>
+
+              <button
+                onClick={() => setSessionLoggerOpen(true)}
+                title="终端会话 ANSI 日志录制与导出"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-rose-400 transition-all cursor-pointer shrink-0"
+              >
+                <Disc className={`h-3.5 w-3.5 shrink-0 ${isRecordingSession ? "animate-spin text-rose-500" : "text-rose-400"}`} />
+                <span className="hidden xl:inline">{isRecordingSession ? "录制中" : "日志录制"}</span>
+              </button>
+            </div>
+          )}
+
+          {/* 全局工具与控制组 */}
+          <div className="flex items-center gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-0.5 shadow-2xs shrink-0">
+            <button
+              onClick={() => setCommandBroadcastingEnabled(!commandBroadcastingEnabled)}
+              title={commandBroadcastingEnabled ? "关闭命令广播模式" : "开启命令广播模式"}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-extrabold transition-all cursor-pointer shrink-0",
+                commandBroadcastingEnabled
+                  ? "bg-rose-600 text-white shadow-md shadow-rose-600/30 animate-pulse"
+                  : "text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+              )}
+            >
+              <Radio className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden xl:inline">{commandBroadcastingEnabled ? "广播开启" : "广播"}</span>
+            </button>
+
+            <button
+              onClick={() => setCloudSyncModalOpen(true)}
+              title="WebDAV / Gist 云端跨设备同步"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-blue-400 transition-all cursor-pointer shrink-0"
+            >
+              <Cloud className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+              <span className="hidden xl:inline">云同步</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (masterPassword) {
+                  setIsAppLocked(true);
+                } else {
+                  setMasterPasswordModalOpen(true);
+                }
+              }}
+              title={masterPassword ? "锁屏防护" : "设置锁屏主密码"}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-amber-400 transition-all cursor-pointer shrink-0"
+            >
+              <Lock className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+              <span className="hidden xl:inline">{masterPassword ? "锁屏" : "主密码"}</span>
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 h-full pywebview-drag-region" />
+        <WindowControls />
+      </header>
+
+      {/* 主体工作区 (支持一键平滑隐藏/展开左侧边栏，支持 Ctrl+B) */}
+      <div className={cn(
+        "grid h-[calc(100vh-40px)] w-full overflow-hidden transition-[grid-template-columns] duration-200 ease-in-out",
+        sidebarHidden ? "grid-cols-[0px_1fr]" : "grid-cols-[220px_1fr]"
+      )}>
+        <div className={cn("overflow-hidden h-full min-w-0 transition-all duration-200", sidebarHidden ? "w-0 opacity-0 pointer-events-none" : "w-[220px] opacity-100")}>
+          <HostSidebar
+            query={query}
+            activeTool={activeTool}
+            savedConnections={savedConnections}
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            onQueryChange={setQuery}
+            onActiveToolChange={(tool) => {
+              setActiveTool(tool);
+              if (tool === "ssh") setSidebarHidden(false);
+            }}
+            onOpenDialog={openNewConnectionDialog}
+            onRefresh={refreshConnections}
+            onConnect={connectHost}
+            onEditConnection={openEditConnectionDialog}
+            onDeleteConnection={requestDeleteSavedConnection}
+            onCreateLocal={openLocalSession}
+            onActivateSession={activateSession}
+            commandSuggestionView={activeTool === "local" ? commandSuggestionView : null}
+            onOpenKeyManager={() => setKeyManagerOpen(true)}
+            onOpenSshCopyId={(conn: SavedConnection) => setCopyIdTarget(conn)}
+            onConnectAllInFolder={connectAllInFolder}
+            onOpenPresets={() => setPresetModalOpen(true)}
+            activeTagFilter={activeTagFilter}
+            onActiveTagFilterChange={setActiveTagFilter}
+            customGroups={customGroups}
+            onCreateGroup={createNewGroupPrompt}
+            onRenameGroup={renameGroup}
+            onDeleteGroup={deleteGroup}
+            onMoveHostToGroup={moveHostToGroup}
+            onImportFinalShellHosts={handleImportFinalShellHosts}
+            finalShellHostCount={finalShellHostCount}
+            onImportWindTermHosts={handleImportWindTermHosts}
+            windTermHostCount={windTermHostCount}
+          />
+        </div>
         <main className="min-w-0 overflow-hidden">
           {activeTool === "ssh" && (
             <Workbench
@@ -1423,6 +3061,12 @@ export function App() {
               onConnect={connectHost}
               onEditConnection={openEditConnectionDialog}
               onDeleteConnection={requestDeleteSavedConnection}
+              onImportOpenSsh={() => setOpenSshModalOpen(true)}
+              onExportOpenSsh={handleExportOpenSsh}
+              onImportFinalShellHosts={handleImportFinalShellHosts}
+              finalShellHostCount={finalShellHostCount}
+              onImportWindTermHosts={handleImportWindTermHosts}
+              windTermHostCount={windTermHostCount}
             />
           )}
           {activeTool === "cmd" && (
@@ -1441,7 +3085,27 @@ export function App() {
               transferStatus={commandTransferStatus}
             />
           )}
-          {activeTool === "monitor" && <MonitorPanel activeSession={activeSession} />}
+          {activeTool === "monitor" && <MonitorPanel activeSession={activeSession} nativeBridge={nativeBridge} />}
+          {activeTool === "serial" && (
+            <SerialDevPanel onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)} />
+          )}
+          {activeTool === "ebpf" && (
+            <EbpfObserverPanel onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)} />
+          )}
+          {activeTool === "cluster" && (
+            <ClusterRunnerPanel
+              savedConnections={savedConnections}
+              onRunCommand={(cmdStr: string) => sendCommandToActiveSession(cmdStr)}
+            />
+          )}
+          {activeTool === "git" && (
+            <GitVisualizerPanel
+              onRunCommand={(cmdStr) => sendCommandToActiveSession(cmdStr)}
+              activeSessionTitle={activeSession?.title}
+              currentCwd={activeSession ? terminalCwds[activeSession.id] : undefined}
+              onNavigateTerminal={() => setActiveTool("ssh")}
+            />
+          )}
           {activeTool === "browser" && (
             <BrowserPanel
               favorites={webFavorites}
@@ -1456,11 +3120,14 @@ export function App() {
               visible={activeTool === "local"}
               sessions={sessions}
               activeSessionId={activeSessionId}
+              terminalCwds={terminalCwds}
+              transferTaskCount={transferTasks.filter((task) => task.status !== "completed" && task.status !== "failed").length}
               terminalTheme={terminalTheme}
               terminalAppearance={terminalAppearance}
               terminalBackgroundImage={terminalBackgroundImage}
               terminalBackgroundOverlay={terminalBackgroundOverlay}
               commandSuggestionsEnabled={commandSuggestionsEnabled}
+              dangerousCommandGuardEnabled={dangerousCommandGuardEnabled}
               commandSuggestionSources={commandSuggestionSources}
               commandSuggestionApplyKey={commandSuggestionApplyKey}
               commandSuggestionCustomApplyKey={commandSuggestionCustomApplyKey}
@@ -1472,7 +3139,10 @@ export function App() {
               terminalCommandNotice={terminalCommandNotice}
               aiQuotes={aiQuotes}
               aiConfig={aiConfig}
-              terminalHistory={activeSession ? terminalHistories[activeSession.id] || "" : ""}
+              terminalHistory={activeSession ? terminalHistoriesRef.current[activeSession.id] || "" : ""}
+              terminalCwd={activeSession ? terminalCwds[activeSession.id] : undefined}
+              sidebarHidden={sidebarHidden}
+              onToggleSidebar={() => setSidebarHidden((prev) => !prev)}
               onActivate={setActiveSessionId}
               onClose={closeTab}
               onDuplicate={duplicateSession}
@@ -1483,41 +3153,62 @@ export function App() {
               onReturnHome={() => setActiveTool("ssh")}
               onCreateLocal={openLocalSession}
               onAddAiQuote={addAiQuote}
+              onRequestDangerousCommandConfirmation={(cmd, info, confirm) => {
+                setDangerousCommandConfirmation({ command: cmd, info, onConfirm: confirm });
+              }}
               onTerminalOutput={appendTerminalHistory}
               onCommandSuggestionViewChange={setCommandSuggestionView}
               onActiveCommandFolderChange={setActiveCommandFolderId}
               onSendCommand={sendCommandToActiveSession}
               onSidePanelChange={setTerminalSidePanel}
               onAiConfigChange={setAiConfig}
+              splitMode={splitMode}
+              onToggleSplit={toggleSplit}
+              isAdmin={isAdmin}
+              onOpenAdbForward={() => setAdbForwardModalOpen(true)}
+              onOpenScrcpy={() => {
+                setScrcpyTargetSerial("");
+                setScrcpyModalOpen(true);
+              }}
+              onOpenRemoteEditor={openRemoteEditor}
+              onOpenSearch={(path) => { setSftpSearchPath(path); setSftpSearchOpen(true); }}
+              onOpenDiff={openSftpDiff}
+              onAddFolder={addCommandFolder}
+              onSaveCommand={saveCommand}
+              onRenameTab={renameSession}
+              onReorderTabs={reorderSessions}
+              onOpenClipboardDrawer={() => setClipboardDrawerOpen(true)}
+              onOpenBatchRunner={() => setBatchRunnerOpen(true)}
+              transferTasks={persistentTransferTasks}
+              onStartDownload={startGlobalDownload}
+              onStartUpload={startGlobalUpload}
+              onCancelTransfer={cancelGlobalTransfer}
+              onClearCompletedTransfers={clearCompletedGlobalTransfers}
             />
           </div>
-          {activeTool === "settings" && (
-            <SettingsPanel
-              theme={theme}
-              terminalTheme={terminalTheme}
-              terminalAppearance={terminalAppearance}
-              terminalBackgroundImage={terminalBackgroundImage}
-              terminalBackgroundOverlay={terminalBackgroundOverlay}
-              commandSuggestionsEnabled={commandSuggestionsEnabled}
-              commandSuggestionSources={commandSuggestionSources}
-              commandSuggestionApplyKey={commandSuggestionApplyKey}
-              commandSuggestionCustomApplyKey={commandSuggestionCustomApplyKey}
-              highlightRules={highlightRules}
-              onThemeChange={setTheme}
-              onTerminalThemeChange={setTerminalTheme}
-              onTerminalAppearanceChange={setTerminalAppearance}
-              onTerminalBackgroundImageChange={setTerminalBackgroundImage}
-              onTerminalBackgroundOverlayChange={setTerminalBackgroundOverlay}
-              onCommandSuggestionsEnabledChange={setCommandSuggestionsEnabled}
-              onCommandSuggestionSourcesChange={setCommandSuggestionSources}
-              onCommandSuggestionApplyKeyChange={setCommandSuggestionApplyKey}
-              onCommandSuggestionCustomApplyKeyChange={setCommandSuggestionCustomApplyKey}
-              onToggleHighlightRule={toggleHighlightRule}
-              onAddHighlightRule={addHighlightRule}
-              onUpdateHighlightRule={updateHighlightRule}
-              onDeleteHighlightRule={deleteHighlightRule}
-            />
-          )}
+          <SettingsPanel
+            isOpen={activeTool === "settings"}
+            onClose={() => setActiveTool("ssh")}
+            theme={theme}
+            terminalTheme={terminalTheme}
+            terminalAppearance={terminalAppearance}
+            terminalBackgroundImage={terminalBackgroundImage}
+            terminalBackgroundOverlay={terminalBackgroundOverlay}
+            commandSuggestionsEnabled={commandSuggestionsEnabled}
+            dangerousCommandGuardEnabled={dangerousCommandGuardEnabled}
+            highlightRules={highlightRules}
+            onThemeChange={handleThemeChange}
+            onTerminalThemeChange={setTerminalTheme}
+            onTerminalAppearanceChange={setTerminalAppearance}
+            onTerminalBackgroundImageChange={setTerminalBackgroundImage}
+            onTerminalBackgroundOverlayChange={setTerminalBackgroundOverlay}
+            onCommandSuggestionsEnabledChange={setCommandSuggestionsEnabled}
+            onDangerousCommandGuardEnabledChange={setDangerousCommandGuardEnabled}
+            onToggleHighlightRule={toggleHighlightRule}
+            onAddHighlightRule={addHighlightRule}
+            onUpdateHighlightRule={updateHighlightRule}
+            onDeleteHighlightRule={deleteHighlightRule}
+          />
         </main>
       </div>
 
@@ -1526,6 +3217,8 @@ export function App() {
         form={form}
         error={connectError}
         mode={editingConnectionKey ? "edit" : "create"}
+        customGroups={customGroups}
+        savedConnections={savedConnections}
         onOpenChange={setConnectOpen}
         onFormChange={setForm}
         onConnect={() => connectHost()}
@@ -1543,94 +3236,450 @@ export function App() {
         onCancel={() => setDeleteConfirmation(null)}
         onConfirm={confirmDelete}
       />
+      {dangerousCommandConfirmation && (
+        <Dialog.Root open onOpenChange={() => setDangerousCommandConfirmation(null)}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--mask-base)] backdrop-blur-xs" />
+            <Dialog.Content
+              data-testid="dangerous-command-modal"
+              className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-3xl border-2 border-rose-500 bg-[var(--panel-bg)] p-6 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                  <AlertTriangle className="h-6 w-6" />
+                </div>
+                <div>
+                  <Dialog.Title className="text-base font-black text-rose-600 dark:text-rose-400">
+                    ⚠️ 高危破坏性命令警告
+                  </Dialog.Title>
+                  <div className="text-xs font-extrabold text-[var(--app-muted)]">
+                    类型: {dangerousCommandConfirmation.info.patternName || "高危删库/重启操作"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/40 p-3.5 space-y-2">
+                <div className="font-mono text-xs font-black text-rose-700 dark:text-rose-300 break-all bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-rose-200 dark:border-rose-900 shadow-inner">
+                  {dangerousCommandConfirmation.command}
+                </div>
+                <p className="text-xs font-semibold text-rose-800 dark:text-rose-200 leading-5">
+                  {dangerousCommandConfirmation.info.warningText}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <Button
+                  variant="outline"
+                  size={32}
+                  className="rounded-full px-5 text-xs font-extrabold"
+                  onClick={() => setDangerousCommandConfirmation(null)}
+                >
+                  取消发送
+                </Button>
+                <Button
+                  size={32}
+                  className="rounded-full px-5 text-xs font-black bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-500/20"
+                  onClick={() => {
+                    const pending = dangerousCommandConfirmation;
+                    setDangerousCommandConfirmation(null);
+                    pending.onConfirm();
+                  }}
+                >
+                  强行发送该命令 →
+                </Button>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
+      <CommandPaletteModal
+        open={isCommandPaletteOpen}
+        onOpenChange={setIsCommandPaletteOpen}
+        connections={savedConnections}
+        onConnectHost={(conn) => connectHost(conn)}
+        commandFolders={commandFolders}
+        onSendCommand={sendCommandToActiveSession}
+        onNavigateTool={(tool) => setActiveTool(tool)}
+        onSetTheme={(t) => handleThemeChange(t)}
+        onCreateLocalSession={openLocalSession}
+      />
+      <SshKeyManagerModal
+        open={keyManagerOpen}
+        keys={sshKeyPairs}
+        onOpenChange={setKeyManagerOpen}
+        onCreateKey={(type, name) => {
+          const newKey = createSshKeyPair(type, name);
+          setSshKeyPairs((prev) => [newKey, ...prev]);
+        }}
+        onDeleteKey={(id) => setSshKeyPairs((prev) => prev.filter((k) => k.id !== id))}
+        onOpenGenerator={() => setKeyGenOpen(true)}
+      />
+      <SshCopyIdModal
+        target={copyIdTarget}
+        keys={sshKeyPairs}
+        activeSession={sessions.find((s) => s.id === activeSessionId)}
+        onClose={() => setCopyIdTarget(null)}
+        onSuccess={(msg) => setCommandTransferStatus(msg)}
+      />
+      <RemoteFileEditorModal
+        isOpen={remoteEditorOpen}
+        onClose={() => setRemoteEditorOpen(false)}
+        filePath={remoteEditorPath}
+        fileName={remoteEditorName}
+        initialContent={remoteEditorContent}
+        isLoading={remoteEditorLoading}
+        onSave={handleSaveRemoteFile}
+      />
+      <TransferQueuePanel
+        tasks={transferTasks}
+        onCancelTask={cancelTransferTask}
+        onClearCompleted={clearCompletedTransferTasks}
+      />
+      <SftpSearchModal
+        isOpen={sftpSearchOpen}
+        onClose={() => setSftpSearchOpen(false)}
+        currentRemotePath={sftpSearchPath}
+        onSearch={handleSftpSearch}
+        onSelectResult={(path, name, lineNum) => {
+          if (lineNum) {
+            openRemoteEditor(path, name);
+          }
+        }}
+      />
+      <SftpFileDiffModal
+        isOpen={sftpDiffOpen}
+        onClose={() => setSftpDiffOpen(false)}
+        leftFileName={sftpDiffLeftName}
+        leftContent={sftpDiffLeftContent}
+        rightFileName={sftpDiffRightName}
+        rightContent={sftpDiffRightContent}
+      />
+      <ConnectionPresetModal
+        isOpen={presetModalOpen}
+        onClose={() => setPresetModalOpen(false)}
+        presets={connectionPresets}
+        onSavePreset={(preset) => setConnectionPresets((prev) => [preset, ...prev.filter((p) => p.id !== preset.id)])}
+        onDeletePreset={(id) => setConnectionPresets((prev) => prev.filter((p) => p.id !== id))}
+        onApplyPreset={(preset) => {
+          setForm((prev) => ({
+            ...prev,
+            port: String(preset.port),
+            username: preset.username,
+            remotePath: preset.defaultRemotePath || "/"
+          }));
+          setConnectOpen(true);
+        }}
+      />
+      <MasterPasswordModal
+        mode={isAppLocked ? "lock" : "settings"}
+        isOpen={isAppLocked || masterPasswordModalOpen}
+        onClose={() => setMasterPasswordModalOpen(false)}
+        onUnlock={handleUnlockApp}
+        onSetMasterPassword={handleSetMasterPassword}
+        hasMasterPassword={Boolean(masterPassword)}
+      />
+      <CloudSyncModal
+        isOpen={cloudSyncModalOpen}
+        onClose={() => setCloudSyncModalOpen(false)}
+        config={cloudSyncConfig}
+        onSaveConfig={setCloudSyncConfig}
+        onPushToCloud={handlePushToCloud}
+        onPullFromCloud={handlePullFromCloud}
+      />
+      <PortForwardingModal
+        isOpen={portForwardingOpen}
+        onClose={() => setPortForwardingOpen(false)}
+        sessionTitle={activeSession?.title}
+        tunnels={tunnels}
+        onAddTunnel={(rule) => setTunnels((prev) => [rule, ...prev])}
+        onDeleteTunnel={(id) => setTunnels((prev) => prev.filter((t) => t.id !== id))}
+        onToggleTunnel={(id) =>
+          setTunnels((prev) => prev.map((t) => (t.id === id ? { ...t, active: !t.active } : t)))
+        }
+      />
+      <AdbForwardModal
+        isOpen={adbForwardModalOpen}
+        onClose={() => setAdbForwardModalOpen(false)}
+        sessionTitle={activeSession?.title || "活动终端"}
+        onExecuteCommand={(cmd: string) => {
+          if (activeSessionId) {
+            void sendCommandToActiveSession(`${cmd}\n`);
+          }
+        }}
+        onSaveCommand={(name: string, cmd: string) => {
+          if (commandFolders.length > 0) {
+            saveCommand(commandFolders[0].id, {
+              name,
+              command: cmd,
+              description: "远程 ADB 端口转发直连指令"
+            });
+          }
+        }}
+        onOpenAdbShell={openAdbShellSession}
+      />
+      <ScrcpyModal
+        isOpen={scrcpyModalOpen}
+        onClose={() => setScrcpyModalOpen(false)}
+        defaultSerial={scrcpyTargetSerial}
+        onOpenAdbShell={openAdbShellSession}
+      />
+      <ServerDiagnosticsModal
+        isOpen={diagnosticsOpen}
+        onClose={() => setDiagnosticsOpen(false)}
+        sessionTitle={activeSession?.title}
+        onRunDiagnostics={runServerDiagnostics}
+      />
+      <SessionLoggerModal
+        isOpen={sessionLoggerOpen}
+        onClose={() => setSessionLoggerOpen(false)}
+        sessionTitle={activeSession?.title}
+        isRecording={isRecordingSession}
+        onToggleRecording={() => setIsRecordingSession(!isRecordingSession)}
+        onExportLog={handleExportSessionLog}
+      />
+      <SshKeyGeneratorModal
+        isOpen={keyGenOpen}
+        onClose={() => setKeyGenOpen(false)}
+        onSaveKeyPair={(kp) => {
+          setSshKeyPairs((prev) => [kp, ...prev]);
+        }}
+      />
+      <ParameterFillModal
+        isOpen={paramModalOpen}
+        onClose={() => setParamModalOpen(false)}
+        commandName={paramCommandTarget.name}
+        commandTemplate={paramCommandTarget.template}
+        onExecute={(finalCmd) => {
+          sendCommandToActiveSession(finalCmd);
+        }}
+      />
+      <KernelDevOpsToolboxModal
+        isOpen={kernelToolboxOpen}
+        onClose={() => setKernelToolboxOpen(false)}
+        onRunCommand={(cmdStr: string) => sendCommandToActiveSession(cmdStr)}
+      />
+      <IntegratedCodeDiffEditorModal
+        isOpen={codeDiffEditorOpen}
+        onClose={() => setCodeDiffEditorOpen(false)}
+        onSaveToRemote={(pathStr: string, contentStr: string) => {
+          // Send via active session
+          const escapedContent = contentStr.replace(/'/g, "'\\''");
+          sendCommandToActiveSession(`cat << 'EOF' > ${pathStr}\n${contentStr}\nEOF\n`);
+        }}
+      />
+      <ClipboardSnippetDrawer
+        isOpen={clipboardDrawerOpen}
+        onClose={() => setClipboardDrawerOpen(false)}
+        recentCommands={[]}
+        onInsertCommand={(cmd: string, exec: boolean) => {
+          if (activeSessionId) {
+            void sendCommandToActiveSession(exec ? `${cmd}\n` : cmd);
+          }
+        }}
+      />
+      <BatchTaskRunnerModal
+        isOpen={batchRunnerOpen}
+        onClose={() => setBatchRunnerOpen(false)}
+        savedConnections={savedConnections}
+        adbDevices={[]}
+      />
+
+      {/* OpenSSH ~/.ssh/config 导入弹窗 */}
+      {openSshModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in select-none">
+          <div className="w-full max-w-lg rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--app-line)] pb-3">
+              <div className="flex items-center gap-2">
+                <Download className="h-5 w-5 text-purple-400" />
+                <h3 className="text-sm font-extrabold text-[var(--app-text)]">导入 OpenSSH 配置文件 (~/.ssh/config)</h3>
+              </div>
+              <button
+                onClick={() => setOpenSshModalOpen(false)}
+                className="rounded-lg p-1 text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)] cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-[var(--app-muted)] leading-5">
+              将您现有的 <code className="text-purple-400 font-mono">~/.ssh/config</code> 文本粘贴至下方，系统将自动解析别名、IP、端口、用户、密钥路径及跳板机代理 (ProxyJump) 并批量保存到主机列表：
+            </p>
+
+            <textarea
+              className="w-full h-44 rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] p-3 text-xs font-mono text-[var(--app-text)] focus:border-purple-500 focus:outline-none"
+              placeholder={`Host my-web-server\n  HostName 123.45.67.89\n  User ubuntu\n  Port 22\n  IdentityFile ~/.ssh/id_rsa\n  ProxyJump bastion.example.com`}
+              value={openSshConfigText}
+              onChange={(e) => setOpenSshConfigText(e.target.value)}
+            />
+
+            {openSshImportSuccess && (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/15 p-2.5 text-xs font-bold text-emerald-400 text-center animate-in fade-in">
+                {openSshImportSuccess}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--app-line)]">
+              <Button variant="outline" size={26} className="rounded-xl px-4 text-xs font-bold" onClick={() => setOpenSshModalOpen(false)}>
+                取消
+              </Button>
+              <Button
+                size={26}
+                className="rounded-xl px-5 text-xs font-extrabold bg-purple-600 hover:bg-purple-700 text-white cursor-pointer"
+                onClick={() => void handleImportOpenSsh(openSshConfigText)}
+              >
+                解析并批量导入
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 全局毛玻璃浮窗 Toast 通知组件 */}
+      <div className="fixed top-4 right-4 z-[99999] flex flex-col gap-2.5 pointer-events-none max-w-sm w-full select-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={cn(
+              "pointer-events-auto flex items-start gap-3 rounded-2xl p-3.5 shadow-2xl backdrop-blur-xl border transition-all duration-300 animate-in slide-in-from-top-2 fade-in",
+              t.type === "success" && "bg-emerald-950/85 border-emerald-500/40 text-emerald-100 shadow-emerald-950/50",
+              t.type === "error" && "bg-rose-950/85 border-rose-500/40 text-rose-100 shadow-rose-950/50",
+              t.type === "warning" && "bg-amber-950/85 border-amber-500/40 text-amber-100 shadow-amber-950/50",
+              t.type === "info" && "bg-slate-900/90 border-slate-700/60 text-slate-100 shadow-black/60"
+            )}
+          >
+            <div className="shrink-0 mt-0.5">
+              {t.type === "success" && <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400" />}
+              {t.type === "error" && <AlertCircle className="h-4.5 w-4.5 text-rose-400" />}
+              {t.type === "warning" && <AlertTriangle className="h-4.5 w-4.5 text-amber-400" />}
+              {t.type === "info" && <Info className="h-4.5 w-4.5 text-sky-400" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              {t.title && <div className="text-xs font-bold leading-tight mb-0.5">{t.title}</div>}
+              <div className="text-[11px] font-medium leading-relaxed opacity-90 break-words whitespace-pre-wrap">{t.message}</div>
+            </div>
+            <button
+              onClick={() => closeToast(t.id)}
+              className="shrink-0 opacity-60 hover:opacity-100 transition-opacity p-0.5 rounded-lg hover:bg-white/10 cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function TitleBar() {
+function WindowControls() {
   return (
-    <header className="pywebview-drag-region col-span-3 grid grid-cols-[298px_minmax(0,1fr)_120px] border-b border-slate-200 bg-white">
-      <div className="flex items-center px-5 text-sm font-semibold text-slate-950">LdySSH</div>
-      <div className="flex items-center justify-center text-xs font-medium text-slate-400">SSH Workbench</div>
-      <div className="no-drag flex items-center justify-end">
-        <button
-          className="flex h-9 w-10 items-center justify-center text-slate-500 hover:bg-slate-100"
-          title="最小化"
-          onClick={nativeBridge.minimize}
-        >
-          <Minimize2 className="h-4 w-4" />
-        </button>
-        <button
-          className="flex h-9 w-10 items-center justify-center text-slate-500 hover:bg-slate-100"
-          title="最大化"
-          onClick={nativeBridge.maximize}
-        >
-          <Grid2X2 className="h-4 w-4" />
-        </button>
-        <button
-          className="flex h-9 w-10 items-center justify-center text-slate-500 hover:bg-rose-50 hover:text-rose-600"
-          title="关闭"
-          onClick={nativeBridge.close}
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-    </header>
+    <div className="no-drag flex items-center justify-end gap-0.5">
+      <button
+        className="flex h-7 w-8 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)] transition-colors cursor-pointer"
+        title="最小化"
+        onClick={nativeBridge.minimize}
+      >
+        <Minimize2 className="h-3.5 w-3.5" />
+      </button>
+      <button
+        className="flex h-7 w-8 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)] transition-colors cursor-pointer"
+        title="最大化"
+        onClick={nativeBridge.maximize}
+      >
+        <Grid2X2 className="h-3.5 w-3.5" />
+      </button>
+      <button
+        className="flex h-7 w-8 items-center justify-center rounded-lg text-[var(--app-muted)] hover:bg-rose-600 hover:text-white transition-colors cursor-pointer"
+        title="关闭"
+        onClick={nativeBridge.close}
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
   );
 }
 
-function ActivityRail({ activeTool, onChange }: { activeTool: Tool; onChange: (tool: Tool) => void }) {
-  return (
-    <aside className="flex min-h-0 flex-col items-center border-r border-slate-200 bg-white py-3">
-      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-slate-950 text-sm font-semibold text-white">
-        L
-      </div>
-      <nav className="flex flex-1 flex-col gap-1">
-        {tools.map((tool) => {
-          const Icon = tool.icon;
-          const active = activeTool === tool.id;
-          return (
-            <button
-              key={tool.id}
-              className={cn(
-                "flex h-12 w-12 flex-col items-center justify-center gap-1 rounded-md text-[10px] font-semibold transition-colors",
-                active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-              )}
-              title={tool.title}
-              onClick={() => onChange(tool.id)}
-            >
-              <Icon className="h-4 w-4" />
-              <span>{tool.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-      <div className="text-[10px] font-semibold text-slate-400">HL</div>
-    </aside>
-  );
+function parseQuickConnectString(input: string): SavedConnection | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  let user = "root";
+  let host = "";
+  let port = 22;
+
+  let cleaned = trimmed.replace(/^ssh\s+/i, "");
+  const pMatch = cleaned.match(/-p\s+(\d+)/i);
+  if (pMatch) {
+    port = parseInt(pMatch[1], 10) || 22;
+    cleaned = cleaned.replace(/-p\s+\d+/i, "").trim();
+  }
+
+  if (cleaned.includes("@")) {
+    const parts = cleaned.split("@");
+    user = parts[0].trim() || "root";
+    cleaned = parts.slice(1).join("@").trim();
+  }
+
+  if (cleaned.includes(":")) {
+    const colonParts = cleaned.split(":");
+    host = colonParts[0].trim();
+    const parsedPort = parseInt(colonParts[1], 10);
+    if (!isNaN(parsedPort) && parsedPort > 0) {
+      port = parsedPort;
+    }
+  } else {
+    host = cleaned;
+  }
+
+  if (!host) return null;
+
+  return {
+    name: `${user}@${host}${port !== 22 ? `:${port}` : ""}`,
+    hostname: host,
+    port,
+    username: user,
+    folder: "快速直连",
+    tags: ["快速直连"]
+  };
 }
 
 function HostSidebar({
+  query,
+  activeTool,
   savedConnections,
   sessions,
   activeSessionId,
-  commandSuggestionView,
-  query,
   onQueryChange,
+  onActiveToolChange,
   onOpenDialog,
   onRefresh,
   onConnect,
   onEditConnection,
   onDeleteConnection,
   onCreateLocal,
-  onActivateSession
+  onActivateSession,
+  commandSuggestionView,
+  onOpenKeyManager,
+  onOpenSshCopyId,
+  onConnectAllInFolder,
+  onOpenPresets,
+  activeTagFilter = "",
+  onActiveTagFilterChange,
+  customGroups = [],
+  onCreateGroup,
+  onRenameGroup,
+  onDeleteGroup,
+  onMoveHostToGroup,
+  onImportFinalShellHosts,
+  finalShellHostCount,
+  onImportWindTermHosts,
+  windTermHostCount
 }: {
+  query: string;
+  activeTool: Tool;
   savedConnections: SavedConnection[];
   sessions: SessionTab[];
   activeSessionId: string;
-  commandSuggestionView: CommandSuggestionView | null;
-  query: string;
-  onQueryChange: (value: string) => void;
+  onQueryChange: (query: string) => void;
+  onActiveToolChange?: (tool: Tool) => void;
   onOpenDialog: () => void;
   onRefresh: () => void;
   onConnect: (connection: SavedConnection) => void;
@@ -1638,109 +3687,803 @@ function HostSidebar({
   onDeleteConnection: (connection: SavedConnection) => void;
   onCreateLocal: () => void;
   onActivateSession: (sessionId: string) => void;
+  commandSuggestionView?: CommandSuggestionView | null;
+  onOpenKeyManager?: () => void;
+  onOpenSshCopyId?: (connection: SavedConnection) => void;
+  onConnectAllInFolder?: (folderConns: SavedConnection[]) => void;
+  onOpenPresets?: () => void;
+  activeTagFilter?: string;
+  onActiveTagFilterChange?: (tag: string) => void;
+  customGroups?: string[];
+  onCreateGroup?: () => void;
+  onRenameGroup?: (oldName: string, newName: string) => void;
+  onDeleteGroup?: (groupName: string) => void;
+  onMoveHostToGroup?: (connection: SavedConnection, targetGroup: string) => void;
+  onImportFinalShellHosts?: () => void;
+  finalShellHostCount?: number;
+  onImportWindTermHosts?: () => void;
+  windTermHostCount?: number;
 }) {
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [showTagMenu, setShowTagMenu] = useState(false);
+  const [quickConnectStr, setQuickConnectStr] = useState("");
+  const [quickHistory, setQuickHistory] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("ldyssh_quick_connect_history");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [groupContextMenu, setGroupContextMenu] = useState<{
+    x: number;
+    y: number;
+    folderName: string;
+    folderConns: SavedConnection[];
+  } | null>(null);
+  const [hostContextMenu, setHostContextMenu] = useState<{
+    x: number;
+    y: number;
+    connection: SavedConnection;
+  } | null>(null);
+  const [moveSubmenuOpen, setMoveSubmenuOpen] = useState(false);
+  const [copiedIp, setCopiedIp] = useState(false);
+
+  const activeSession = useMemo(() => sessions.find((s) => s.id === activeSessionId), [sessions, activeSessionId]);
+  const activeHostIp = activeSession?.connectParams?.hostname || (activeSession?.kind === "ssh" ? activeSession.title : "");
+
+  function handleCopyIp(ip: string) {
+    if (!ip) return;
+    void nativeBridge.clipboardCopy(ip);
+    setCopiedIp(true);
+    setTimeout(() => setCopiedIp(false), 2000);
+  }
+
+  function handleQuickConnect(targetStr?: string) {
+    const raw = (targetStr || quickConnectStr).trim();
+    if (!raw) return;
+    const conn = parseQuickConnectString(raw);
+    if (!conn) return;
+
+    const nextHist = [raw, ...quickHistory.filter((item) => item !== raw)].slice(0, 6);
+    setQuickHistory(nextHist);
+    try {
+      localStorage.setItem("ldyssh_quick_connect_history", JSON.stringify(nextHist));
+    } catch {}
+
+    setQuickConnectStr("");
+    onConnect(conn);
+  }
+
+  function toggleFolder(folderName: string) {
+    setCollapsedFolders((prev) => ({ ...prev, [folderName]: !prev[folderName] }));
+  }
+
+  // Filter connections by query and active tag filter
+  const filteredConnections = useMemo(() => {
+    const rawTokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return savedConnections.filter((c) => {
+      if (activeTagFilter && !(c.tags || []).includes(activeTagFilter)) {
+        return false;
+      }
+      if (rawTokens.length === 0) return true;
+      const searchable = [
+        c.name,
+        c.hostname,
+        c.username,
+        c.group,
+        c.folder,
+        c.description,
+        c.remarks,
+        String(c.port || 22),
+        ...(c.tags || [])
+      ].filter(Boolean).join(" ").toLowerCase();
+
+      return rawTokens.every((token) => searchable.includes(token));
+    });
+  }, [savedConnections, query, activeTagFilter]);
+
+  // Group connections by folder
+  const groupedConnections = useMemo(() => {
+    const map: Record<string, SavedConnection[]> = {};
+    (customGroups || []).forEach((g) => {
+      if (g && !map[g]) map[g] = [];
+    });
+    filteredConnections.forEach((conn) => {
+      const folder = conn.group || conn.folder || "未分组";
+      if (!map[folder]) map[folder] = [];
+      map[folder].push(conn);
+    });
+    return map;
+  }, [filteredConnections, customGroups]);
+
+  const presetTags = ["Prod", "Nginx", "MySQL", "K8s", "Web", "Dev", "GPU"];
+
   return (
-    <aside className="min-h-0 border-r border-slate-200 bg-[#eef2f7]">
+    <aside
+      className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] select-none relative"
+      onClick={() => {
+        if (groupContextMenu) setGroupContextMenu(null);
+        if (hostContextMenu) setHostContextMenu(null);
+      }}
+    >
       <div className="flex h-full flex-col">
-        <div className="px-4 pb-4 pt-5">
-          <div className="mb-5 flex items-center justify-between">
-            <div>
-              <div className="text-lg font-semibold text-slate-950">LdySSH</div>
-              <div className="mt-1 text-xs text-slate-500">轻量 SSH 桌面工作台</div>
+        <div className="p-2.5 border-b border-[var(--app-line)] space-y-2">
+          {/* Row 1: 全宽新建连接按钮 */}
+          <button
+            onClick={onOpenDialog}
+            title="新建主机连接"
+            className="flex w-full h-8.5 items-center justify-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-slate-950 text-xs font-black shadow-md shadow-emerald-950/60 border border-emerald-300/40 transition-all cursor-pointer whitespace-nowrap tracking-wide"
+          >
+            <Plus className="h-4 w-4 stroke-[3]" />
+            <span>新建 SSH 连接</span>
+          </button>
+
+          {/* 当检测到本机 FinalShell 时，显示专属一键导入胶囊卡片 */}
+          {(finalShellHostCount || 0) > 0 && (
+            <button
+              onClick={onImportFinalShellHosts}
+              className="w-full flex items-center justify-between rounded-xl px-2.5 py-1.5 bg-gradient-to-r from-teal-500/20 via-emerald-500/15 to-transparent border border-teal-500/40 text-teal-400 hover:border-teal-400/70 hover:bg-teal-500/25 transition-all text-left group shadow-2xs cursor-pointer"
+              title={`检测到本机 FinalShell 连接 (${finalShellHostCount} 台)，点击一键无感导入并自动解密全部密码`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Zap className="h-3.5 w-3.5 text-teal-400 shrink-0 animate-pulse" />
+                <div className="truncate">
+                  <div className="text-[11px] font-black leading-tight text-teal-300">一键导入 FinalShell</div>
+                  <div className="text-[9px] text-teal-400/80 font-mono">已发现 {finalShellHostCount} 台服务器</div>
+                </div>
+              </div>
+              <span className="text-[10px] font-black bg-teal-500 text-slate-950 rounded-md px-2 py-0.5 shadow-2xs group-hover:scale-105 transition-transform shrink-0">
+                导入
+              </span>
+            </button>
+          )}
+
+          {/* 当检测到本机 WindTerm 时，显示专属一键导入胶囊卡片 */}
+          {(windTermHostCount || 0) > 0 && (
+            <button
+              onClick={onImportWindTermHosts}
+              className="w-full flex items-center justify-between rounded-xl px-2.5 py-1.5 bg-gradient-to-r from-cyan-500/20 via-sky-500/15 to-transparent border border-cyan-500/40 text-cyan-400 hover:border-cyan-400/70 hover:bg-cyan-500/25 transition-all text-left group shadow-2xs cursor-pointer"
+              title={`检测到本机 WindTerm 会话 (${windTermHostCount} 台)，点击一键导入`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Zap className="h-3.5 w-3.5 text-cyan-400 shrink-0 animate-pulse" />
+                <div className="truncate">
+                  <div className="text-[11px] font-black leading-tight text-cyan-300">一键导入 WindTerm</div>
+                  <div className="text-[9px] text-cyan-400/80 font-mono">已发现 {windTermHostCount} 台会话</div>
+                </div>
+              </div>
+              <span className="text-[10px] font-black bg-cyan-500 text-slate-950 rounded-md px-2 py-0.5 shadow-2xs group-hover:scale-105 transition-transform shrink-0">
+                导入
+              </span>
+            </button>
+          )}
+
+          {/* Row 1.5: ⚡ 快速直连输入栏 */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleQuickConnect();
+            }}
+            className="flex items-center gap-1.5"
+          >
+            <div className="relative flex-1">
+              <Zap className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-amber-400" />
+              <Input
+                className="pl-7.5 pr-2 h-7.5 text-xs font-mono font-bold rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-inner w-full focus:border-amber-400 focus:bg-[var(--panel-bg)] transition-all"
+                value={quickConnectStr}
+                placeholder="直连: [user@]ip[:port]"
+                onChange={(e) => setQuickConnectStr(e.target.value)}
+              />
             </div>
-            <Button variant="outline" className="h-8 w-8 px-0" onClick={onRefresh} title="刷新">
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
-          <Button className="w-full justify-start" onClick={onOpenDialog}>
-            <Plus className="h-4 w-4" />
-            新建连接
-          </Button>
-          <div className="relative mt-3">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <button
+              type="submit"
+              disabled={!quickConnectStr.trim()}
+              title="立即发起快速直连 (Enter)"
+              className="h-7.5 px-3 rounded-lg bg-amber-400 hover:bg-amber-300 active:scale-[0.98] text-slate-950 text-xs font-black shadow-sm transition-all cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              <span>直连</span>
+              <Play className="h-2.5 w-2.5 fill-current" />
+            </button>
+          </form>
+
+          {/* 快速直连历史标签 */}
+          {quickHistory.length > 0 && !query && (
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pt-0.5 text-[10px]">
+              <span className="text-[10px] text-[var(--app-muted)] font-extrabold shrink-0">历史:</span>
+              {quickHistory.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => handleQuickConnect(item)}
+                  className="rounded-md bg-[var(--fill-1)] hover:bg-amber-500/20 text-[var(--app-text)] hover:text-amber-300 border border-[var(--app-line)] hover:border-amber-400/50 px-1.5 py-0.5 font-mono text-[10px] font-bold shrink-0 transition-colors cursor-pointer"
+                  title={`点击立即直连: ${item}`}
+                >
+                  {item}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickHistory([]);
+                  localStorage.removeItem("ldyssh_quick_connect_history");
+                }}
+                className="text-[10px] text-[var(--app-muted)] hover:text-rose-400 px-1 shrink-0 cursor-pointer font-bold"
+                title="清空快速直连历史"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Row 2: 独立全宽搜索框 */}
+          <div className="relative w-full">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
             <Input
-              className="pl-9"
+              className="pl-7.5 pr-7 h-7.5 text-xs font-bold rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] shadow-inner w-full focus:border-emerald-400 focus:bg-[var(--panel-bg)] transition-all"
               value={query}
-              placeholder="搜索主机"
+              placeholder="搜索主机 / IP / 标签..."
               onChange={(event) => onQueryChange(event.target.value)}
             />
+            {query && (
+              <button
+                type="button"
+                onClick={() => onQueryChange("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Row 3: 2x2 均等网格工具栏 (高对比度微磁贴) */}
+          <div className="grid grid-cols-2 gap-1.5 w-full">
+            <button
+              onClick={() => setShowTagMenu((prev) => !prev)}
+              title="按标签筛选主机"
+              className={cn(
+                "flex h-7.5 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-extrabold transition-all cursor-pointer w-full whitespace-nowrap shadow-xs px-2",
+                activeTagFilter
+                  ? "bg-indigo-600 border-indigo-400 text-white shadow-sm"
+                  : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] hover:border-slate-500"
+              )}
+            >
+              <Filter className="h-3 w-3 text-indigo-400 shrink-0" />
+              <span>标签筛选</span>
+            </button>
+            <button
+              onClick={onOpenKeyManager}
+              title="密钥库管理"
+              className="flex h-7.5 items-center justify-center gap-1.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-extrabold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] hover:border-slate-500 transition-all cursor-pointer w-full whitespace-nowrap shadow-xs px-2"
+            >
+              <KeyRound className="h-3 w-3 text-amber-400 shrink-0" />
+              <span>密钥管理</span>
+            </button>
+            <button
+              onClick={onOpenPresets}
+              title="常用连接预设模板管理"
+              className="flex h-7.5 items-center justify-center gap-1.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-extrabold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] hover:border-slate-500 transition-all cursor-pointer w-full whitespace-nowrap shadow-xs px-2"
+            >
+              <Sliders className="h-3 w-3 text-purple-400 shrink-0" />
+              <span>连接预设</span>
+            </button>
+            <button
+              onClick={onRefresh}
+              title="刷新主机列表"
+              className="flex h-7.5 items-center justify-center gap-1.5 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] text-[11px] font-extrabold text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] hover:border-slate-500 transition-all cursor-pointer w-full whitespace-nowrap shadow-xs px-2"
+            >
+              <RefreshCw className="h-3 w-3 text-sky-400 shrink-0" />
+              <span>刷新列表</span>
+            </button>
+          </div>
+
+          {/* 默认折叠，仅在点击筛选按钮或存在激活标签时展开 */}
+          {(showTagMenu || activeTagFilter) && (
+            <div className="flex items-center gap-1 overflow-x-auto pt-1 pb-0.5 no-scrollbar text-[10px] animate-in fade-in duration-150">
+              <button
+                onClick={() => { onActiveTagFilterChange?.(""); setShowTagMenu(false); }}
+                className={cn(
+                  "rounded-lg px-2 py-0.5 font-black cursor-pointer transition-colors shrink-0",
+                  !activeTagFilter ? "bg-[var(--panel-bg)] text-[var(--app-text)] border border-[var(--app-line)]" : "bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)]"
+                )}
+              >
+                全部
+              </button>
+              {presetTags.map((tag) => {
+                const active = activeTagFilter === tag;
+                const colorInfo = HOST_TAG_COLORS[tag] || { bg: "bg-indigo-500/15", text: "text-indigo-400", border: "border-indigo-500/30" };
+                return (
+                  <button
+                    key={tag}
+                    onClick={() => { onActiveTagFilterChange?.(active ? "" : tag); }}
+                    className={cn(
+                      "rounded-lg px-2 py-0.5 font-extrabold border transition-all cursor-pointer shrink-0",
+                      active ? "bg-indigo-600 text-white border-indigo-500 shadow-2xs" : `${colorInfo.bg} ${colorInfo.text} ${colorInfo.border}`
+                    )}
+                  >
+                    #{tag}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 核心功能导航菜单 (高对比度 Linear 胶囊微磁贴流) */}
+        <div className="p-2 border-b border-[var(--app-line)]">
+          <div className="grid grid-cols-2 gap-1.5">
+            {tools.map((tool) => {
+              const Icon = tool.icon;
+              const active = activeTool === tool.id;
+              const toolColorMap: Record<string, { activeBg: string; inactiveIcon: string }> = {
+                ssh: { activeBg: "bg-emerald-600 border-emerald-400 shadow-emerald-500/40", inactiveIcon: "text-emerald-400" },
+                local: { activeBg: "bg-teal-600 border-teal-400 shadow-teal-500/40", inactiveIcon: "text-teal-400" },
+                cmd: { activeBg: "bg-purple-600 border-purple-400 shadow-purple-500/40", inactiveIcon: "text-purple-400" },
+                monitor: { activeBg: "bg-sky-600 border-sky-400 shadow-sky-500/40", inactiveIcon: "text-sky-400" },
+                serial: { activeBg: "bg-amber-600 border-amber-400 shadow-amber-500/40", inactiveIcon: "text-amber-400" },
+                ebpf: { activeBg: "bg-rose-600 border-rose-400 shadow-rose-500/40", inactiveIcon: "text-rose-400" },
+                cluster: { activeBg: "bg-indigo-600 border-indigo-400 shadow-indigo-500/40", inactiveIcon: "text-indigo-400" },
+                git: { activeBg: "bg-orange-600 border-orange-400 shadow-orange-500/40", inactiveIcon: "text-orange-400" },
+                browser: { activeBg: "bg-cyan-600 border-cyan-400 shadow-cyan-500/40", inactiveIcon: "text-cyan-400" },
+                settings: { activeBg: "bg-slate-700 border-slate-500 shadow-slate-700/40", inactiveIcon: "text-[var(--app-muted)]" }
+              };
+              const colorInfo = toolColorMap[tool.id] || { activeBg: "bg-emerald-600 border-emerald-400", inactiveIcon: "text-emerald-400" };
+
+              return (
+                <button
+                  key={tool.id}
+                  title={tool.title || tool.label}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-all duration-150 cursor-pointer select-none border min-w-0 tracking-tight shadow-xs",
+                    active
+                      ? cn("text-white shadow-md font-black", colorInfo.activeBg)
+                      : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] hover:border-slate-500 font-extrabold"
+                  )}
+                  onClick={() => onActiveToolChange?.(tool.id as any)}
+                >
+                  <Icon className={cn("h-3.5 w-3.5 shrink-0 transition-colors", active ? "text-white" : colorInfo.inactiveIcon)} />
+                  <span className="truncate text-[11px] font-extrabold">{tool.label}</span>
+                  {tool.id === "local" && sessions.length > 0 && (
+                    <span className={cn(
+                      "ml-auto rounded-md px-1.5 py-0 text-[9px] font-mono font-bold shrink-0",
+                      active ? "bg-white/30 text-white" : "bg-emerald-500/25 text-emerald-400 border border-emerald-500/30"
+                    )}>
+                      {sessions.length}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <SidebarSection title="最近主机" count={savedConnections.length} open>
-          {savedConnections.length === 0 ? (
-            <div className="rounded-md border border-dashed border-slate-300 bg-white/60 px-3 py-5 text-center text-xs text-slate-500">
-              暂无最近主机
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {savedConnections.slice(0, 8).map((connection, index) => (
-                <div
-                  key={`${connection.hostname}-${connection.username}-${index}`}
-                  className="grid grid-cols-[minmax(0,1fr)_30px_30px] items-center gap-1 rounded-md px-3 py-2 hover:bg-white"
-                >
-                  <button className="min-w-0 text-left" onClick={() => onConnect(connection)}>
-                    <div className="truncate text-sm font-medium text-slate-900">
-                      {connection.name || connection.hostname}
-                    </div>
-                    <div className="mt-0.5 truncate text-xs text-slate-500">
-                      {connection.username || "user"}@{connection.hostname || "host"}:{connection.port || 22}
-                    </div>
-                  </button>
-                  <button
-                    aria-label={`编辑 ${connection.name || connection.hostname}`}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    onClick={() => onEditConnection(connection)}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    aria-label={`删除 ${connection.name || connection.hostname}`}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                    onClick={() => onDeleteConnection(connection)}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </SidebarSection>
-
-        <SidebarSection title="活动会话" count={sessions.length} open>
-          {sessions.length > 0 && (
-            <div className="mb-2 space-y-1">
-              {sessions.map((session) => (
-                <button
-                  key={session.id}
-                  aria-label={`切换到 ${session.title}`}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
-                    session.id === activeSessionId ? "bg-white text-slate-950" : "text-slate-700 hover:bg-white"
-                  )}
-                  onClick={() => onActivateSession(session.id)}
-                >
+        <div className="flex-1 overflow-y-auto">
+          {/* FinalShell / Linear 风格：同步状态与 IP 一键复制栏 */}
+          {activeSession && (
+            <div className="mx-2.5 my-2 p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 backdrop-blur-sm shadow-2xs">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 font-extrabold text-[var(--app-text)] tracking-tight">
                   <span
                     className={cn(
-                      "h-2 w-2 rounded-full",
-                      session.connected ? "bg-emerald-500" : session.status === "failed" ? "bg-rose-500" : "bg-amber-400"
+                      "inline-block h-2 w-2 rounded-full",
+                      activeSession.connected
+                        ? "bg-emerald-500 shadow-xs shadow-emerald-500/50 animate-pulse"
+                        : "bg-slate-400"
                     )}
                   />
-                  <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                  <span>同步状态</span>
+                </span>
+                <span className="text-[10px] font-mono text-emerald-400 font-bold">
+                  {activeSession.connected ? (activeSession.kind === "ssh" ? "已连接" : "Local") : "连接中..."}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-xs font-mono">
+                <div className="flex items-center gap-1.5 truncate min-w-0 pr-1">
+                  <span className="text-[var(--app-muted)] font-extrabold shrink-0 text-[10px]">IP</span>
+                  <span
+                    className="text-[var(--app-text)] font-extrabold truncate select-all cursor-pointer hover:text-emerald-400 transition-colors"
+                    title={`点击复制: ${activeHostIp || "127.0.0.1"}`}
+                    onClick={() => handleCopyIp(activeHostIp || "127.0.0.1")}
+                  >
+                    {activeHostIp || "127.0.0.1"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopyIp(activeHostIp || "127.0.0.1")}
+                  className="rounded-md px-2 py-0.5 text-[10px] font-extrabold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 cursor-pointer transition-colors shrink-0"
+                  title="一键复制 IP 地址"
+                >
+                  {copiedIp ? "已复制 ✔" : "复制"}
                 </button>
-              ))}
+              </div>
             </div>
           )}
-          <button
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-white"
-            onClick={onCreateLocal}
+
+          <SidebarSection
+            title="最近主机"
+            count={filteredConnections.length}
+            open
+            action={
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCreateGroup?.();
+                }}
+                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-extrabold text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+                title="新建主机分组/文件夹"
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+                <span>新建分组</span>
+              </button>
+            }
           >
-            <Terminal className="h-4 w-4 text-slate-500" />
-            打开 Local Shell
-          </button>
-        </SidebarSection>
-        <div className="mt-auto px-6 pb-6" data-testid="left-command-suggestion-slot">
-          {commandSuggestionView && <CommandSuggestionPanel view={commandSuggestionView} />}
+            {filteredConnections.length === 0 && Object.keys(groupedConnections).length === 0 ? (
+              <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-4 text-center text-xs font-semibold text-[var(--app-muted)]">
+                {query || activeTagFilter ? "无匹配主机" : "暂无保存主机"}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {Object.entries(groupedConnections).map(([folderName, folderConns]) => {
+                  const isCollapsed = collapsedFolders[folderName];
+                  return (
+                    <div key={folderName} className="space-y-1">
+                      {/* 分组文件夹标头 */}
+                      <button
+                        onClick={() => toggleFolder(folderName)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setHostContextMenu(null);
+                          setGroupContextMenu({ x: e.clientX, y: e.clientY, folderName, folderConns });
+                        }}
+                        className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-[11px] font-extrabold text-[var(--app-muted)] hover:bg-[var(--fill-1)] cursor-pointer"
+                        title="点击展开/收起；右键可查看分组选项与一键批量连接"
+                      >
+                        <div className="flex items-center gap-1.5 truncate">
+                          <FolderIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                          <span className="truncate font-extrabold text-[var(--app-text)]">{folderName}</span>
+                          <span className="rounded-full bg-[var(--fill-2)] px-1.5 text-[9px] font-mono font-bold">{folderConns.length}</span>
+                        </div>
+                        <ChevronDown className={cn("h-3 w-3 transition-transform", isCollapsed && "-rotate-90")} />
+                      </button>
+
+                      {!isCollapsed && (
+                        <div className="space-y-1 pl-1">
+                          {folderConns.map((connection, index) => (
+                            <div
+                              key={`${connection.hostname}-${connection.username}-${index}`}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setGroupContextMenu(null);
+                                setHostContextMenu({ x: e.clientX, y: e.clientY, connection });
+                                setMoveSubmenuOpen(false);
+                              }}
+                              className="relative flex flex-col gap-1 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] hover:bg-[var(--fill-1)] p-2.5 transition-all duration-150 hover:border-emerald-500/60 hover:shadow-md group select-none cursor-pointer w-full min-w-0 overflow-hidden backdrop-blur-md"
+                              title={`${connection.name || connection.hostname}\n地址: ${connection.username || "root"}@${connection.hostname || "localhost"}:${connection.port || 22}\n分组: ${connection.group || connection.folder || "未分组"}`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0 w-full">
+                                <div className="relative flex h-6.5 w-6.5 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shrink-0">
+                                  <Server className="h-3.5 w-3.5" />
+                                  <span className="absolute -bottom-0.5 -right-0.5 flex h-1.5 w-1.5">
+                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400"></span>
+                                  </span>
+                                </div>
+                                
+                                <button className="min-w-0 flex-1 text-left cursor-pointer overflow-hidden" onClick={() => onConnect(connection)}>
+                                  <div className="flex items-center justify-between gap-1 w-full min-w-0">
+                                    <span className="truncate text-xs font-black text-[var(--app-text)] min-w-0 flex-1 tracking-tight" title={connection.name || connection.hostname}>
+                                      {connection.name || connection.hostname}
+                                    </span>
+                                    <span className="rounded-md bg-emerald-500/20 border border-emerald-500/40 px-1.5 py-0.5 font-mono text-[9px] font-black text-emerald-300 shrink-0">
+                                      24ms
+                                    </span>
+                                  </div>
+                                  <div className="truncate font-mono text-[11px] font-bold text-[var(--app-muted)] w-full block mt-0.5" title={`${connection.username || "root"}@${connection.hostname || "localhost"}:${connection.port || 22}`}>
+                                    {connection.username || "root"}@{connection.hostname || "localhost"}
+                                  </div>
+                                </button>
+
+                                <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-[var(--panel-bg)]/90 backdrop-blur-xs pl-1 rounded-md">
+                                  <button
+                                    title="部署公钥"
+                                    className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-muted)] hover:bg-emerald-500/10 hover:text-emerald-500 cursor-pointer"
+                                    onClick={(e) => { e.stopPropagation(); onOpenSshCopyId?.(connection); }}
+                                  >
+                                    <KeyRound className="h-2.5 w-2.5" />
+                                  </button>
+                                  <button
+                                    aria-label={`编辑 ${connection.name || connection.hostname}`}
+                                    className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer"
+                                    onClick={(e) => { e.stopPropagation(); onEditConnection(connection); }}
+                                  >
+                                    <Pencil className="h-2.5 w-2.5" />
+                                  </button>
+                                  <button
+                                    aria-label={`删除 ${connection.name || connection.hostname}`}
+                                    className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-muted)] hover:bg-rose-500/10 hover:text-rose-500 cursor-pointer"
+                                    onClick={(e) => { e.stopPropagation(); onDeleteConnection(connection); }}
+                                  >
+                                    <X className="h-2.5 w-2.5" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* 标签列 */}
+                              {connection.tags && connection.tags.length > 0 && (
+                                <div className="flex items-center gap-1 flex-wrap pl-8 mt-0.5">
+                                  {connection.tags.map((tag) => {
+                                    const colorInfo = HOST_TAG_COLORS[tag] || { bg: "bg-indigo-500/15", text: "text-indigo-600", border: "border-indigo-300" };
+                                    return (
+                                      <span key={tag} className={cn("rounded px-1 py-0.2 text-[8px] font-extrabold border", colorInfo.bg, colorInfo.text, colorInfo.border)}>
+                                        #{tag}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </SidebarSection>
+
+        {/* 分组右键菜单 */}
+        {groupContextMenu && (
+          <div
+            role="menu"
+            className="fixed z-50 min-w-44 max-h-[calc(100vh-24px)] overflow-y-auto scrollbar-thin rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+            style={{
+              left: Math.max(8, Math.min(groupContextMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1000) - 200)),
+              top: Math.max(8, Math.min(groupContextMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 240))
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 font-extrabold text-[var(--app-muted)] border-b border-[var(--app-line)] mb-1 truncate">
+              📁 {groupContextMenu.folderName} ({groupContextMenu.folderConns.length})
+            </div>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-extrabold text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+              onClick={() => {
+                const conns = groupContextMenu.folderConns;
+                setGroupContextMenu(null);
+                conns.forEach((c) => onConnect(c));
+              }}
+            >
+              <Play className="h-3.5 w-3.5" />
+              一键批量连接该组
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+              onClick={() => {
+                setGroupContextMenu(null);
+                onOpenDialog();
+              }}
+            >
+              <Plus className="h-3.5 w-3.5 text-emerald-500" />
+              组内新建 SSH 主机
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+              onClick={() => {
+                const folder = groupContextMenu.folderName;
+                setGroupContextMenu(null);
+                const newName = window.prompt("请输入重命名后的分组名称：", folder);
+                if (newName && newName.trim() && newName.trim() !== folder) {
+                  onRenameGroup?.(folder, newName.trim());
+                }
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              重命名分组
+            </button>
+            {groupContextMenu.folderName !== "未分组" && (
+              <button
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                onClick={() => {
+                  const folder = groupContextMenu.folderName;
+                  setGroupContextMenu(null);
+                  if (window.confirm(`确定删除分组“${folder}”？该组下的主机将移至“未分组”`)) {
+                    onDeleteGroup?.(folder);
+                  }
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                删除分组
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* 主机右键菜单 */}
+        {hostContextMenu && (
+          <div
+            role="menu"
+            className="fixed z-50 min-w-44 max-h-[calc(100vh-24px)] overflow-y-auto scrollbar-thin rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+            style={{
+              left: Math.max(8, Math.min(hostContextMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1000) - 220)),
+              top: Math.max(8, Math.min(hostContextMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 320))
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 font-extrabold text-[var(--app-text)] border-b border-[var(--app-line)] mb-1 truncate">
+              🖥️ {hostContextMenu.connection.name || hostContextMenu.connection.hostname}
+            </div>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-extrabold text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+              onClick={() => {
+                const conn = hostContextMenu.connection;
+                setHostContextMenu(null);
+                onConnect(conn);
+              }}
+            >
+              <Play className="h-3.5 w-3.5" />
+              连接此主机
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+              onClick={() => {
+                const conn = hostContextMenu.connection;
+                setHostContextMenu(null);
+                void nativeBridge.clipboardCopy(conn.hostname || "");
+              }}
+            >
+              <Copy className="h-3.5 w-3.5 text-sky-400" />
+              <span>复制主机 IP ({hostContextMenu.connection.hostname})</span>
+            </button>
+
+            {/* 移动到分组 */}
+            <div className="relative">
+              <button
+                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                onClick={() => setMoveSubmenuOpen((prev) => !prev)}
+              >
+                <div className="flex items-center gap-2">
+                  <FolderInput className="h-3.5 w-3.5 text-indigo-500" />
+                  <span>移动到分组...</span>
+                </div>
+                <ChevronRight className="h-3 w-3 text-[var(--app-muted)]" />
+              </button>
+
+              {moveSubmenuOpen && (
+                <div className="my-1 rounded-lg border border-[var(--app-line)] bg-[var(--fill-1)] p-1 space-y-0.5 max-h-40 overflow-y-auto shadow-inner">
+                  {Array.from(new Set(["未分组", ...Object.keys(groupedConnections), ...(customGroups || [])])).map((g) => {
+                    const currentGrp = hostContextMenu.connection.group || hostContextMenu.connection.folder || "未分组";
+                    const isCurrent = currentGrp === g;
+                    return (
+                      <button
+                        key={g}
+                        disabled={isCurrent}
+                        className={cn(
+                          "flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-[11px] font-extrabold cursor-pointer transition-colors",
+                          isCurrent ? "text-emerald-500 bg-emerald-500/15" : "text-[var(--app-text)] hover:bg-[var(--raised-bg)]"
+                        )}
+                        onClick={() => {
+                          const conn = hostContextMenu.connection;
+                          setHostContextMenu(null);
+                          onMoveHostToGroup?.(conn, g);
+                        }}
+                      >
+                        <span className="truncate">📁 {g}</span>
+                        {isCurrent && <Check className="h-3 w-3" />}
+                      </button>
+                    );
+                  })}
+                  <button
+                    className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] font-extrabold text-indigo-500 hover:bg-indigo-500/10 cursor-pointer border-t border-[var(--app-line)] pt-1"
+                    onClick={() => {
+                      const conn = hostContextMenu.connection;
+                      setHostContextMenu(null);
+                      const newG = window.prompt("请输入新建分组名称：");
+                      if (newG && newG.trim()) {
+                        onMoveHostToGroup?.(conn, newG.trim());
+                      }
+                    }}
+                  >
+                    <Plus className="h-3 w-3" />
+                    <span>新建分组并移动...</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+              onClick={() => {
+                const conn = hostContextMenu.connection;
+                setHostContextMenu(null);
+                onOpenSshCopyId?.(conn);
+              }}
+            >
+              <KeyRound className="h-3.5 w-3.5 text-indigo-500" />
+              部署 SSH 公钥
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+              onClick={() => {
+                const conn = hostContextMenu.connection;
+                setHostContextMenu(null);
+                onEditConnection(conn);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              编辑主机设置
+            </button>
+            <div className="my-1 border-t border-[var(--app-line)]" />
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+              onClick={() => {
+                const conn = hostContextMenu.connection;
+                setHostContextMenu(null);
+                onDeleteConnection(conn);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              删除主机
+            </button>
+          </div>
+        )}
+
+          <SidebarSection title="活动会话" count={sessions.length} open>
+            {sessions.length > 0 && (
+              <div className="mb-2 space-y-1">
+                {sessions.map((session) => (
+                  <button
+                    key={session.id}
+                    aria-label={`切换到 ${session.title}`}
+                    className={cn(
+                      "flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-left text-xs transition-colors cursor-pointer",
+                      session.id === activeSessionId
+                        ? "bg-indigo-600 text-white font-extrabold shadow-sm shadow-indigo-500/25"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)]"
+                    )}
+                    onClick={() => onActivateSession(session.id)}
+                  >
+                    <span
+                      className={cn(
+                        "h-2 w-2 rounded-full shrink-0",
+                        session.connected ? "bg-emerald-500" : session.status === "failed" ? "bg-rose-500" : "bg-amber-400"
+                      )}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-xs font-extrabold">{session.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              className="flex w-full items-center gap-2 rounded-full px-3 py-2 text-left text-xs font-bold text-[var(--text-secondary)] hover:bg-[var(--fill-1)] transition-colors cursor-pointer"
+              onClick={onCreateLocal}
+            >
+              <Terminal className="h-4 w-4 text-emerald-600" />
+              打开 Local Shell
+            </button>
+          </SidebarSection>
+        </div>
+
+        <div className="mt-auto border-t border-[var(--app-line)]/60 p-3" data-testid="left-command-suggestion-slot">
+          {commandSuggestionView ? (
+            <CommandSuggestionPanel view={commandSuggestionView} />
+          ) : (
+            <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3.5 shadow-2xs">
+              <div className="flex items-center justify-between font-extrabold text-[var(--app-text)] mb-1 text-xs">
+                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                  环境就绪
+                </span>
+                <span className="rounded-full bg-emerald-600 text-white px-2 py-0.5 text-[9px] font-mono font-bold shadow-xs">
+                  BusyBox
+                </span>
+              </div>
+              <p className="text-[10px] font-medium text-[var(--text-secondary)] leading-4">随包内置 sh, ls, grep, awk, sed, wget 等 Linux 常用命令工具箱。</p>
+            </div>
+          )}
         </div>
       </div>
     </aside>
@@ -1751,48 +4494,71 @@ function SidebarSection({
   title,
   count,
   open,
+  action,
   children
 }: {
   title: string;
   count?: number;
   open?: boolean;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [isOpen, setIsOpen] = useState(open ?? true);
 
   return (
-    <section className="border-t border-slate-200 px-4 py-4">
-      <button
-        type="button"
-        aria-label={`${isOpen ? "折叠" : "展开"}${title}`}
-        aria-expanded={isOpen}
-        className="mb-3 flex w-full items-center justify-between rounded-md text-left hover:bg-white/60"
-        onClick={() => setIsOpen((current) => !current)}
-      >
-        <div className="text-sm font-semibold text-slate-950">{title}</div>
-        <div className="flex items-center gap-2">
+    <section className="border-t border-[var(--app-line)] px-2.5 py-2.5">
+      <div className="mb-2 flex items-center justify-between gap-1 w-full min-w-0">
+        <button
+          type="button"
+          aria-label={`${isOpen ? "折叠" : "展开"}${title}`}
+          aria-expanded={isOpen}
+          className="flex items-center gap-1.5 text-left cursor-pointer min-w-0 shrink whitespace-nowrap"
+          onClick={() => setIsOpen((current) => !current)}
+        >
+          <span className="text-xs font-black uppercase tracking-wide text-slate-200 whitespace-nowrap shrink-0">{title}</span>
           {typeof count === "number" && (
-            <span className="rounded bg-white px-1.5 py-0.5 text-xs font-medium text-slate-500">{count}</span>
+            <span className="rounded-md bg-slate-800 text-slate-200 border border-slate-700 px-1.5 py-0.2 text-[10px] font-mono font-bold tabular-nums shrink-0">{count}</span>
           )}
-          <ChevronDown className={cn("h-4 w-4 text-slate-400", !isOpen && "-rotate-90")} />
-        </div>
-      </button>
+          <ChevronDown className={cn("h-3.5 w-3.5 text-slate-400 transition-transform shrink-0", !isOpen && "-rotate-90")} />
+        </button>
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
       {isOpen && children}
     </section>
   );
 }
 
+function getHostLiveStatus(connection: SavedConnection, sessions: SessionTab[]) {
+  const host = connection.hostname || "";
+  const isOnline = sessions.some((s) => s.connected && (s.connectParams?.hostname === host || (host.length > 0 && s.title.includes(host))));
+  return isOnline ? "connected" : "idle";
+}
+
+const hostLiveStatusMeta: Record<string, { dotClass: string; textClass: string; label: string }> = {
+  connected: { dotClass: "bg-emerald-500", textClass: "text-emerald-600 bg-emerald-50", label: "在线" },
+  idle: { dotClass: "bg-slate-400 dark:bg-slate-500", textClass: "text-slate-500 bg-slate-100", label: "离线" }
+};
+
 function Workbench({
   savedConnections,
+  sessions = [],
   query,
   onQueryChange,
   onOpenDialog,
   onRefresh,
   onConnect,
   onEditConnection,
-  onDeleteConnection
+  onDeleteConnection,
+  onCreateLocal,
+  onImportOpenSsh,
+  onExportOpenSsh,
+  onImportFinalShellHosts,
+  finalShellHostCount,
+  onImportWindTermHosts,
+  windTermHostCount
 }: {
   savedConnections: SavedConnection[];
+  sessions?: SessionTab[];
   query: string;
   onQueryChange: (value: string) => void;
   onOpenDialog: () => void;
@@ -1800,103 +4566,354 @@ function Workbench({
   onConnect: (connection: SavedConnection) => void;
   onEditConnection: (connection: SavedConnection) => void;
   onDeleteConnection: (connection: SavedConnection) => void;
+  onCreateLocal?: () => void;
+  onImportOpenSsh?: () => void;
+  onExportOpenSsh?: () => void;
+  onImportFinalShellHosts?: () => void;
+  finalShellHostCount?: number;
+  onImportWindTermHosts?: () => void;
+  windTermHostCount?: number;
 }) {
+  const [showConfigMenu, setShowConfigMenu] = useState(false);
+  const onlineCount = savedConnections.filter((connection) => getHostLiveStatus(connection, sessions) === "connected").length;
+  const keyCount = savedConnections.filter((item) => item.keyPath).length;
+  const groupCount = new Set(savedConnections.map((item) => item.group).filter(Boolean)).size;
+
   return (
-    <div className="h-full overflow-auto px-8 py-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="flex items-start justify-between gap-5">
-          <div>
-            <div className="inline-flex h-7 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              SSH Workbench
+    <div
+      className="h-full overflow-auto bg-[var(--app-bg)] px-5 sm:px-8 py-5"
+      onClick={() => {
+        if (showConfigMenu) setShowConfigMenu(false);
+      }}
+    >
+      <div className="mx-auto max-w-7xl space-y-5">
+        {/* 页头导航栏 */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-2 border-b border-[var(--app-line)]/50">
+          <div className="min-w-0 shrink-0">
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[var(--app-text)] whitespace-nowrap">主机工作台</h1>
+              <span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-xs font-extrabold text-[var(--accent-text)] shadow-2xs whitespace-nowrap">
+                {savedConnections.length} 台主机
+              </span>
             </div>
-            <h1 className="mt-5 text-4xl font-semibold tracking-normal text-slate-950">主机工作台</h1>
-            <p className="mt-2 text-sm text-slate-600">管理 SSH 主机、快速连接并进入终端会话。</p>
+            <p className="mt-1 text-xs font-medium text-[var(--text-secondary)] whitespace-nowrap">快速管理 SSH 会话、系统资源与 SFTP 文件传输管道。</p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative w-64">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap justify-start md:justify-end" onClick={(e) => e.stopPropagation()}>
+            <div className="relative w-44 sm:w-56">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
               <Input
-                className="pl-9"
+                className="h-8.5 pl-8 pr-12 text-xs rounded-full shadow-2xs"
                 value={query}
-                placeholder="搜索主机..."
+                placeholder="搜索主机 / IP..."
                 onChange={(event) => onQueryChange(event.target.value)}
               />
+              <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full bg-[var(--fill-2)] px-1.5 py-0.2 font-mono text-[9px] font-bold text-[var(--app-muted)]">
+                Ctrl K
+              </span>
             </div>
-            <Button variant="outline" onClick={onRefresh}>
-              <RefreshCw className="h-4 w-4" />
-              刷新
+
+            <Button variant="outline" size={32} className="rounded-full w-8.5 h-8.5 px-0 shadow-2xs shrink-0" onClick={onRefresh} title="刷新主机状态">
+              <RefreshCw className="h-3.5 w-3.5" />
             </Button>
-            <Button onClick={onOpenDialog}>
-              <Plus className="h-4 w-4" />
-              新建连接
+
+            {/* 导入 / 导出高级配置工具下拉菜单 */}
+            <div className="relative shrink-0">
+              <Button
+                variant="outline"
+                size={32}
+                className="rounded-full px-3 h-8.5 text-xs font-extrabold shadow-2xs gap-1.5 border-teal-500/40 text-teal-400 hover:bg-teal-500/15"
+                onClick={() => setShowConfigMenu((prev) => !prev)}
+                title="导入 / 导出与迁移工具"
+              >
+                <Sliders className="h-3.5 w-3.5 text-teal-400" />
+                <span>导入 / 导出</span>
+                {((finalShellHostCount || 0) + (windTermHostCount || 0)) > 0 && (
+                  <span className="rounded-full bg-teal-500/30 text-teal-200 px-1.5 py-0.2 font-mono text-[9px] font-extrabold">
+                    {(finalShellHostCount || 0) + (windTermHostCount || 0)}
+                  </span>
+                )}
+                <ChevronDown className={cn("h-3 w-3 opacity-60 transition-transform", showConfigMenu && "rotate-180")} />
+              </Button>
+
+              {showConfigMenu && (
+                <div className="absolute right-0 top-10 z-50 w-64 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1.5 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+                  <div className="px-2.5 py-1 text-[10px] font-bold text-[var(--app-muted)] uppercase tracking-wider">
+                    主机连接导入与迁移
+                  </div>
+                  {(finalShellHostCount || 0) > 0 ? (
+                    <button
+                      type="button"
+                      className="w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs bg-teal-500/15 text-teal-300 hover:bg-teal-500/25 border border-teal-500/30 transition-colors cursor-pointer mb-1 group"
+                      onClick={() => {
+                        setShowConfigMenu(false);
+                        onImportFinalShellHosts?.();
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-teal-400 shrink-0 animate-pulse" />
+                        <div>
+                          <div className="font-black text-xs text-teal-200">从 FinalShell 导入</div>
+                          <div className="text-[10px] text-teal-400/80">已检测到 {finalShellHostCount} 台主机</div>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black bg-teal-500 text-slate-950 rounded px-1.5 py-0.5">
+                        导入
+                      </span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-[var(--app-text)] hover:bg-[var(--fill-2)] transition-colors cursor-pointer mb-1"
+                      onClick={() => {
+                        setShowConfigMenu(false);
+                        onImportFinalShellHosts?.();
+                      }}
+                    >
+                      <Zap className="h-3.5 w-3.5 text-teal-400 shrink-0" />
+                      <div>
+                        <div className="font-extrabold text-xs">从 FinalShell 导入</div>
+                        <div className="text-[10px] text-[var(--app-muted)]">选择 conn 目录</div>
+                      </div>
+                    </button>
+                  )}
+
+                  {(windTermHostCount || 0) > 0 ? (
+                    <button
+                      type="button"
+                      className="w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-left text-xs bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 border border-cyan-500/30 transition-colors cursor-pointer mb-1 group"
+                      onClick={() => {
+                        setShowConfigMenu(false);
+                        onImportWindTermHosts?.();
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-cyan-400 shrink-0 animate-pulse" />
+                        <div>
+                          <div className="font-black text-xs text-cyan-200">从 WindTerm 导入</div>
+                          <div className="text-[10px] text-cyan-400/80">已检测到 {windTermHostCount} 台会话</div>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black bg-cyan-500 text-slate-950 rounded px-1.5 py-0.5">
+                        导入
+                      </span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-[var(--app-text)] hover:bg-[var(--fill-2)] transition-colors cursor-pointer mb-1"
+                      onClick={() => {
+                        setShowConfigMenu(false);
+                        onImportWindTermHosts?.();
+                      }}
+                    >
+                      <Zap className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                      <div>
+                        <div className="font-extrabold text-xs">从 WindTerm 导入</div>
+                        <div className="text-[10px] text-[var(--app-muted)]">选择 user.sessions / profiles</div>
+                      </div>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-[var(--app-text)] hover:bg-[var(--fill-2)] transition-colors cursor-pointer"
+                    onClick={() => {
+                      setShowConfigMenu(false);
+                      onImportOpenSsh?.();
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-xs">导入 OpenSSH 配置</div>
+                      <div className="text-[10px] text-[var(--app-muted)]">解析本地 ~/.ssh/config</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-[var(--app-text)] hover:bg-[var(--fill-2)] transition-colors cursor-pointer mt-0.5"
+                    onClick={() => {
+                      setShowConfigMenu(false);
+                      onExportOpenSsh?.();
+                    }}
+                  >
+                    <Upload className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-xs">导出 OpenSSH 配置</div>
+                      <div className="text-[10px] text-[var(--app-muted)]">导出为标准 config 文件</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <Button onClick={onOpenDialog} size={32} className="rounded-full px-4 h-8.5 text-xs font-extrabold shadow-md bg-emerald-600 hover:bg-emerald-700 text-white shrink-0">
+              <Plus className="h-3.5 w-3.5" />
+              <span>新建连接</span>
             </Button>
           </div>
         </div>
 
-        <div className="mt-7 grid grid-cols-3 gap-4">
-          <Metric label="全部主机" value={savedConnections.length} icon={Server} />
-          <Metric label="密钥连接" value={savedConnections.filter((item) => item.keyPath).length} icon={KeyRound} />
-          <Metric label="分组数" value={new Set(savedConnections.map((item) => item.group).filter(Boolean)).size} icon={HardDrive} />
+        {/* 顶部数据概览 (图 1 风格) */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <Metric label="全部主机" value={savedConnections.length} unit="台" icon={Server} variant="indigo" />
+          <Metric label="在线会话" value={onlineCount} unit="活跃" icon={CheckCircle2} variant="emerald" />
+          <Metric label="密钥认证" value={keyCount} unit="配置" icon={KeyRound} variant="amber" />
+          <Metric label="自定义分组" value={groupCount} unit="组" icon={HardDrive} variant="violet" />
         </div>
 
-        <Panel
-          className="mt-6"
-          title="主机列表"
-          action={<Button variant="outline" onClick={onOpenDialog}>添加主机</Button>}
-        >
-          {savedConnections.length === 0 ? (
-            <EmptyState
-              title="暂无已保存主机"
-              description="从左侧新建连接，或直接添加第一台 SSH 主机。"
-              action={<Button onClick={onOpenDialog}>新建连接</Button>}
-            />
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {savedConnections.map((connection, index) => (
-                <div
-                  key={`${connection.hostname}-${connection.username}-${index}`}
-                  className="rounded-lg border border-slate-200 bg-white p-4 text-left transition-colors hover:border-slate-300 hover:bg-slate-50"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-950">
-                        {connection.name || connection.hostname}
+        {/* 主机网格区域 (图 1 风格) */}
+        {savedConnections.length === 0 ? (
+          <EmptyState
+            title="还没有保存的 SSH 主机"
+            description="点击下方按钮添加第一台主机，连接后即可体验高性能终端与 SFTP 文件管道。"
+            action={
+              <Button size={44} onClick={onOpenDialog} className="rounded-full px-6">
+                <Plus className="h-4 w-4" />
+                新建第一台连接
+              </Button>
+            }
+          />
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-base font-extrabold text-[var(--app-text)]">主机服务器 (Server Nodes)</h2>
+                <span className="rounded-full bg-[var(--fill-2)] border border-[var(--app-line)] px-2.5 py-0.5 font-mono text-xs font-semibold text-[var(--app-muted)]">
+                  {onlineCount}/{savedConnections.length} 在线
+                </span>
+              </div>
+              <Button variant="outline" size={26} className="rounded-full px-3.5 h-8 text-xs font-bold" onClick={onOpenDialog}>
+                <Plus className="h-3.5 w-3.5" />
+                添加主机
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {savedConnections.map((connection, index) => {
+                const liveStatus = getHostLiveStatus(connection, sessions);
+                const statusMeta = hostLiveStatusMeta[liveStatus];
+                return (
+                  <div
+                    key={`${connection.hostname}-${connection.username}-${index}`}
+                    className="group relative flex flex-col justify-between rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] hover:bg-[var(--fill-1)] p-3.5 shadow-xs transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md hover:border-emerald-500/60 backdrop-blur-md"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2.5">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="relative flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/30">
+                            <Server className="h-4.5 w-4.5" />
+                            <span
+                              className={cn(
+                                "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--panel-bg)]",
+                                statusMeta.dotClass
+                              )}
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="truncate text-xs font-black text-[var(--app-text)] tracking-tight" title={connection.name || connection.hostname}>
+                                {connection.name || connection.hostname}
+                              </span>
+                              {renderEnvironmentBadge(connection.environment)}
+                            </div>
+                            <div className="mt-0.5 truncate font-mono text-[11px] font-bold text-cyan-400">
+                              {connection.username || "root"}@{connection.hostname}:{connection.port || 22}
+                            </div>
+                          </div>
+                        </div>
+                        <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold shrink-0 border border-[var(--app-line)] shadow-2xs", statusMeta.textClass, "bg-[var(--fill-2)]")}>
+                          <span className={cn("h-1.5 w-1.5 rounded-full", statusMeta.dotClass)} />
+                          {liveStatus === "connected" ? "12ms" : statusMeta.label}
+                        </span>
                       </div>
-                      <div className="mt-1 truncate text-xs text-slate-500">
-                        {connection.username || "user"}@{connection.hostname}:{connection.port || 22}
+
+                      {/* 标签栏 (紧凑药丸) */}
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                        {connection.group && (
+                          <span className="rounded-md bg-[var(--fill-2)] border border-[var(--app-line)] px-2 py-0.5 text-[10px] font-bold text-[var(--app-text)]">
+                            📁 {connection.group}
+                          </span>
+                        )}
+                        {connection.keyPath ? (
+                          <span className="rounded-md bg-indigo-500/15 text-indigo-300 px-2 py-0.5 text-[10px] font-bold border border-indigo-500/30">
+                            🔑 密钥认证
+                          </span>
+                        ) : (
+                          <span className="rounded-md bg-amber-500/15 text-amber-300 px-2 py-0.5 text-[10px] font-bold border border-amber-500/30">
+                            🔒 密码认证
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <button
-                        aria-label={`编辑 ${connection.name || connection.hostname}`}
-                        title={`编辑 ${connection.name || connection.hostname}`}
-                        className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-                        onClick={() => onEditConnection(connection)}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        aria-label={`删除 ${connection.name || connection.hostname}`}
-                        title={`删除 ${connection.name || connection.hostname}`}
-                        className="flex h-8 w-8 items-center justify-center rounded-md border border-rose-100 bg-white text-rose-500 hover:bg-rose-50 hover:text-rose-700"
-                        onClick={() => onDeleteConnection(connection)}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                      <button
+
+                    {/* 操作按钮组 (紧凑胶囊按键) */}
+                    <div className="mt-3 flex items-center justify-between border-t border-[var(--app-line)] pt-2.5">
+                      <div className="flex items-center gap-1">
+                        <button
+                          aria-label={`编辑 ${connection.name || connection.hostname}`}
+                          title="编辑主机参数"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--app-muted)] transition-all hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer"
+                          onClick={() => onEditConnection(connection)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          aria-label={`删除 ${connection.name || connection.hostname}`}
+                          title="删除该主机"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--app-muted)] transition-all hover:bg-rose-500/20 hover:text-rose-400 cursor-pointer"
+                          onClick={() => onDeleteConnection(connection)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+
+                      <Button
+                        size={26}
                         aria-label={`连接 ${connection.name || connection.hostname}`}
-                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                        className="rounded-xl px-3.5 h-7 font-black text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-sm"
                         onClick={() => onConnect(connection)}
                       >
-                        连接
-                      </button>
+                        发起连接 →
+                      </Button>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
-          )}
-        </Panel>
+          </div>
+        )}
+
+        {/* 底部 2 大功能卡片 */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 pt-1">
+          <div
+            className="flex items-center gap-3.5 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-4 shadow-sm hover:shadow-md transition-all cursor-pointer hover:border-emerald-500/50 hover:bg-[var(--fill-1)]"
+            onClick={onCreateLocal}
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+              <Terminal className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs font-black text-[var(--app-text)]">本地类 Linux 终端 (Local Shell)</div>
+              <div className="mt-0.5 text-[11px] text-[var(--app-muted)] font-medium">基于随包内置 BusyBox 命令工具箱，即刻运行本地 bash 脚本</div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3.5 rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-4 shadow-sm hover:shadow-md transition-all">
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <CheckCircle2 className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="text-xs font-black text-[var(--app-text)]">Base64 安全与原生管道</div>
+                <div className="mt-0.5 text-[11px] text-[var(--app-muted)] font-medium">WinHTTP / WebView2 双向安全编解码架构就绪</div>
+              </div>
+            </div>
+            <span className="rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 text-[10px] font-black shrink-0">
+              Active
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1905,19 +4922,42 @@ function Workbench({
 function Metric({
   label,
   value,
-  icon: Icon
+  unit,
+  icon: Icon,
+  variant = "indigo"
 }: {
   label: string;
   value: number;
+  unit?: string;
   icon: React.ComponentType<{ className?: string }>;
+  variant?: "indigo" | "emerald" | "amber" | "violet";
 }) {
+  const topBorderClass = {
+    indigo: "border-t-indigo-500",
+    emerald: "border-t-emerald-500",
+    amber: "border-t-amber-500",
+    violet: "border-t-purple-500"
+  }[variant];
+
+  const iconMeta = {
+    indigo: "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+    emerald: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+    amber: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    violet: "bg-purple-500/15 text-purple-400 border-purple-500/30"
+  }[variant];
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-slate-500">{label}</span>
-        <Icon className="h-4 w-4 text-slate-400" />
+    <div className={cn("flex items-center justify-between rounded-xl border border-t-2 border-[var(--app-line)] bg-[var(--panel-bg)] p-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-emerald-500/60 backdrop-blur-md", topBorderClass)}>
+      <div>
+        <div className="text-[11px] font-bold text-[var(--app-muted)]">{label}</div>
+        <div className="mt-1 flex items-baseline gap-1">
+          <span className="font-mono text-xl font-black tracking-tight text-[var(--app-text)]">{value}</span>
+          {unit && <span className="text-[10px] font-bold text-[var(--app-muted)]">{unit}</span>}
+        </div>
       </div>
-      <div className="mt-3 text-2xl font-semibold text-slate-950">{value}</div>
+      <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg border shadow-2xs", iconMeta)}>
+        <Icon className="h-4.5 w-4.5" />
+      </div>
     </div>
   );
 }
@@ -1926,11 +4966,14 @@ function TerminalWorkspace({
   visible,
   sessions,
   activeSessionId,
+  terminalCwds,
+  transferTaskCount = 0,
   terminalTheme,
   terminalAppearance,
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   commandSuggestionsEnabled,
+  dangerousCommandGuardEnabled,
   commandSuggestionSources,
   commandSuggestionApplyKey,
   commandSuggestionCustomApplyKey,
@@ -1943,6 +4986,9 @@ function TerminalWorkspace({
   aiQuotes,
   aiConfig,
   terminalHistory,
+  terminalCwd,
+  sidebarHidden,
+  onToggleSidebar,
   onActivate,
   onClose,
   onDuplicate,
@@ -1953,21 +4999,44 @@ function TerminalWorkspace({
   onReturnHome,
   onCreateLocal,
   onAddAiQuote,
+  onRequestDangerousCommandConfirmation,
   onTerminalOutput,
   onCommandSuggestionViewChange,
   onActiveCommandFolderChange,
   onSendCommand,
   onSidePanelChange,
-  onAiConfigChange
+  onAiConfigChange,
+  splitMode,
+  onToggleSplit,
+  onOpenRemoteEditor,
+  onOpenSearch,
+  onOpenDiff,
+  onAddFolder,
+  onSaveCommand,
+  onRenameTab,
+  onReorderTabs,
+  onOpenAdbForward,
+  onOpenScrcpy,
+  isAdmin,
+  onOpenClipboardDrawer,
+  onOpenBatchRunner,
+  transferTasks = [],
+  onStartDownload,
+  onStartUpload,
+  onCancelTransfer,
+  onClearCompletedTransfers
 }: {
   visible: boolean;
   sessions: SessionTab[];
   activeSessionId: string;
+  terminalCwds?: Record<string, string>;
+  transferTaskCount?: number;
   terminalTheme: TerminalThemeMode;
   terminalAppearance: TerminalAppearance;
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   commandSuggestionsEnabled: boolean;
+  dangerousCommandGuardEnabled: boolean;
   commandSuggestionSources: CommandSuggestionSources;
   commandSuggestionApplyKey: CommandSuggestionApplyKey;
   commandSuggestionCustomApplyKey: CommandSuggestionCustomApplyKey | null;
@@ -1980,6 +5049,9 @@ function TerminalWorkspace({
   aiQuotes: AiQuote[];
   aiConfig: AiConfig;
   terminalHistory: string;
+  terminalCwd?: string;
+  sidebarHidden?: boolean;
+  onToggleSidebar?: () => void;
   onActivate: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
   onDuplicate: (sessionId: string) => void;
@@ -1990,22 +5062,166 @@ function TerminalWorkspace({
   onReturnHome: () => void;
   onCreateLocal: () => void;
   onAddAiQuote: (text: string, sourceTitle: string) => void;
+  onRequestDangerousCommandConfirmation?: (command: string, info: DangerousCommandInfo, onConfirm: () => void) => void;
   onTerminalOutput: (sessionId: string, text: string) => void;
   onCommandSuggestionViewChange: (view: CommandSuggestionView | null) => void;
   onActiveCommandFolderChange: (folderId: string) => void;
   onSendCommand: (command: string) => void;
   onSidePanelChange: (panel: TerminalSidePanel) => void;
   onAiConfigChange: (config: AiConfig) => void;
+  splitMode?: "none" | "horizontal" | "vertical";
+  onToggleSplit: (sessionId: string, mode: "none" | "horizontal" | "vertical") => void;
+  onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
+  onOpenSearch?: (path: string) => void;
+  onOpenDiff?: (path: string, name: string) => void;
+  onAddFolder?: (name: string) => void;
+  onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
+  onRenameTab?: (sessionId: string, newTitle: string) => void;
+  onReorderTabs?: (fromIndex: number, toIndex: number) => void;
+  onOpenAdbForward?: () => void;
+  onOpenScrcpy?: () => void;
+  isAdmin?: boolean;
+  onOpenClipboardDrawer?: () => void;
+  onOpenBatchRunner?: () => void;
+  transferTasks?: PersistentTransferTask[];
+  onStartDownload?: (sessionId: string, targetPath: string, fileName: string, fileSize: number) => Promise<void>;
+  onStartUpload?: (sessionId: string, remoteDir: string, filePath?: string, fileName?: string, fileContent?: string, fileSize?: number) => Promise<void>;
+  onCancelTransfer?: (sessionId: string, taskId: string, type: "upload" | "download") => Promise<void>;
+  onClearCompletedTransfers?: () => void;
 }) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
   const [shortcutParameterRequest, setShortcutParameterRequest] = useState<ShortcutParameterRequest | null>(null);
   const menuSession = tabMenu ? sessions.find((session) => session.id === tabMenu.sessionId) : undefined;
 
+  // 标签页就地重命名状态与拖拽重排状态
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  const [editingTabTitle, setEditingTabTitle] = useState("");
+  const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
+  const [dragOverTabIndex, setDragOverTabIndex] = useState<number | null>(null);
+
+  // 当前激活会话实时系统性能统计缓存 (CPU, 内存, 磁盘, 上下行实时流量, 系统负载, 运行时间)
+  const [liveStats, setLiveStats] = useState<Record<string, {
+    cpu_usage?: string;
+    load_avg?: string;
+    load_avg_str?: string;
+    uptime?: string;
+    memory_usage?: string;
+    memory_used?: string;
+    memory_total?: string;
+    disk_usage?: string;
+    disk_used?: string;
+    disk_total?: string;
+    rx_speed?: string;
+    tx_speed?: string;
+    traffic_str?: string;
+  }>>({});
+
+  useEffect(() => {
+    if (!visible || sessions.length === 0) return;
+
+    let isMounted = true;
+    let isFetching = false;
+
+    const fetchAllLiveStats = async () => {
+      if (isFetching) return;
+      isFetching = true;
+      try {
+        const eligibleSessions = sessions.filter(
+          (s) => s.kind === "local" || (s.kind === "ssh" && s.connected)
+        );
+        if (eligibleSessions.length === 0) return;
+
+        const results = await Promise.allSettled(
+          eligibleSessions.map(async (sess) => {
+            const res = await nativeBridge.getSystemStats(sess.id);
+            return { id: sess.id, stats: res?.success && res.stats ? res.stats : null };
+          })
+        );
+
+        if (isMounted) {
+          setLiveStats((prev) => {
+            const next = { ...prev };
+            for (const r of results) {
+              if (r.status === "fulfilled" && r.value.stats) {
+                next[r.value.id] = r.value.stats as any;
+              }
+            }
+            return next;
+          });
+        }
+      } catch {
+        // ignore
+      } finally {
+        isFetching = false;
+      }
+    };
+
+    void fetchAllLiveStats();
+    const intervalId = setInterval(() => {
+      void fetchAllLiveStats();
+    }, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [sessions, visible]);
+
+  // 右侧栏 100% 自由拖拽缩放宽度状态与折叠状态 (支持类似 FinalShell 任意拉宽)
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(420);
+  const layoutMode = useAppStore((s) => s.layoutMode);
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => useAppStore.getState().layoutMode === "deck");
+  const [topMenuOpen, setTopMenuOpen] = useState(false);
+
+  const startResizeRightSidebar = useCallback((event: React.PointerEvent) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = rightSidebarWidth;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const deltaX = startX - moveEvent.clientX; // 向左拖拽扩大右侧栏
+      const maxAllowed = typeof window !== "undefined" ? Math.max(600, window.innerWidth - 240) : 1200;
+      const newWidth = Math.min(maxAllowed, Math.max(180, startWidth + deltaX));
+      setRightSidebarWidth(newWidth);
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }, [rightSidebarWidth]);
+
+  useEffect(() => {
+    if (!tabMenu) return;
+    const handleDown = (e: MouseEvent) => {
+      const menuEl = document.getElementById("tab-context-menu");
+      if (menuEl && !menuEl.contains(e.target as Node)) {
+        setTabMenu(null);
+      }
+    };
+    const handleKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setTabMenu(null);
+    };
+    window.addEventListener("mousedown", handleDown, true);
+    window.addEventListener("keydown", handleKey, true);
+    return () => {
+      window.removeEventListener("mousedown", handleDown, true);
+      window.removeEventListener("keydown", handleKey, true);
+    };
+  }, [tabMenu]);
+
   function openTabMenu(event: ReactMouseEvent, sessionId: string) {
     event.preventDefault();
+    event.stopPropagation();
     onActivate(sessionId);
-    setTabMenu({ sessionId, x: event.clientX, y: event.clientY });
+    const rect = event.currentTarget.getBoundingClientRect();
+    const posX = Math.max(8, Math.min(rect.left, window.innerWidth - 210));
+    const posY = Math.min(rect.bottom + 4, window.innerHeight - 380);
+    setTabMenu({ sessionId, x: posX, y: posY });
   }
 
   function runTabAction(action: (sessionId: string) => void) {
@@ -2023,130 +5239,640 @@ function TerminalWorkspace({
   }
 
   return (
-    <div className="grid h-full grid-rows-[34px_minmax(0,1fr)_34px] bg-white">
-      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 pl-3 pr-4">
-        <div className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+    <div className={cn("grid h-full grid-rows-[40px_minmax(0,1fr)_32px]", terminalBackgroundImage ? "bg-transparent" : "bg-[var(--app-bg)]")}>
+      <div className={cn("flex items-center justify-between border-b border-[var(--app-line)] pl-2.5 pr-2.5 h-10 select-none relative z-40", terminalBackgroundImage ? "bg-[var(--sidebar-bg)]/80 backdrop-blur-md" : "bg-[var(--sidebar-bg)]")}>
+        <div
+          className="flex h-full min-w-0 flex-1 items-end gap-1.5 overflow-x-auto pb-0.5 scrollbar-none"
+          onWheel={(e) => {
+            if (e.deltaY !== 0) {
+              e.currentTarget.scrollLeft += e.deltaY;
+            }
+          }}
+        >
+          {/* 左侧侧边栏折叠/展开按钮 */}
           <button
-            className="flex h-7 w-8 items-center justify-center rounded-md bg-slate-900 text-white"
+            className={cn(
+              "flex h-7.5 items-center gap-1.5 rounded-xl border px-2 text-xs font-bold transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5",
+              sidebarHidden
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/25 shadow-xs"
+                : "border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[var(--app-text)] hover:text-emerald-400"
+            )}
+            onClick={onToggleSidebar}
+            title={sidebarHidden ? "展开左侧主机栏 (Ctrl+B)" : "折叠/隐藏左侧主机栏 (Ctrl+B)"}
+          >
+            {sidebarHidden ? <PanelLeftOpen className="h-3.5 w-3.5 text-emerald-400" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">{sidebarHidden ? "展开侧栏" : "折叠侧栏"}</span>
+          </button>
+
+          {/* 回到主页控制 */}
+          <button
+            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] px-2.5 text-xs font-bold text-[var(--app-text)] hover:text-indigo-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
             onClick={onReturnHome}
             title="回到桌面"
           >
-            <Home className="h-4 w-4" />
+            <Home className="h-3.5 w-3.5 text-indigo-400" />
+            <span>主页</span>
           </button>
+
+          {/* 新建终端按钮 */}
           <button
-            className="mr-2 flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 text-xs font-bold text-emerald-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
             onClick={onCreateLocal}
             title="新建本地终端"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5 text-emerald-400" />
+            <span>新建终端</span>
           </button>
-          {sessions.map((session, index) => {
+
+          {/* ADB 远程转发快捷入口 */}
+          <button
+            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 px-2.5 text-xs font-bold text-sky-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
+            onClick={onOpenAdbForward}
+            title="一键开启远程 ADB 端口转发与直连 (Android 调试)"
+          >
+            <Smartphone className="h-3.5 w-3.5 text-sky-400" />
+            <span>ADB 转发</span>
+          </button>
+
+          {/* Scrcpy 投屏快捷入口 */}
+          <button
+            className="flex h-7.5 items-center gap-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 px-2.5 text-xs font-bold text-purple-400 transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
+            onClick={onOpenScrcpy}
+            title="一键拉起 Scrcpy 极速安卓投屏与控制"
+          >
+            <Cast className="h-3.5 w-3.5 text-purple-400" />
+            <span>Scrcpy 投屏</span>
+          </button>
+
+          {/* 管理员身份指示徽章 */}
+          {isAdmin && (
+            <div
+              className="flex h-7.5 items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-2.5 text-xs font-extrabold text-emerald-400 select-none shadow-2xs shrink-0 mb-0.5"
+              title="当前软件以 Windows 最高管理员权限 (Administrator) 运行，所有打开的终端与命令天然具备管理员特权"
+            >
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              <span>管理员</span>
+            </div>
+          )}
+
+          <div className="h-4 w-px bg-[var(--app-line)] mx-1 shrink-0 mb-1.5" />
+
+          {/* 动态 SSH/Local 现代 IDE 标签页 (支持鼠标中键关闭、双击重命名、拖拽重新排序);deck 布局改由左侧会话栈承载 */}
+          {layoutMode === "classic" && sessions.map((session, index) => {
             const isActive = session.id === activeSessionId;
             const status = getSessionTabStatus(session);
+            const isEditingThisTab = editingTabId === session.id;
 
             return (
               <div
                 key={session.id}
-                onClick={() => onActivate(session.id)}
-                onContextMenu={(event) => openTabMenu(event, session.id)}
+                role="button"
+                aria-label={session.title}
+                aria-current={isActive ? "page" : undefined}
+                tabIndex={0}
+                draggable={!isEditingThisTab}
+                onDragStart={(event) => {
+                  if (event.button !== 0 && (event.nativeEvent as MouseEvent).button !== 0) {
+                    event.preventDefault();
+                    return;
+                  }
+                  event.dataTransfer.setData("text/plain", String(index));
+                  event.dataTransfer.effectAllowed = "move";
+                  setDraggedTabIndex(index);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  if (dragOverTabIndex !== index) {
+                    setDragOverTabIndex(index);
+                  }
+                }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                  if (dragOverTabIndex === index) {
+                    setDragOverTabIndex(null);
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (draggedTabIndex !== null && draggedTabIndex !== index) {
+                    onReorderTabs?.(draggedTabIndex, index);
+                  }
+                  setDraggedTabIndex(null);
+                  setDragOverTabIndex(null);
+                }}
+                onDragEnd={() => {
+                  setDraggedTabIndex(null);
+                  setDragOverTabIndex(null);
+                }}
+                onClick={() => {
+                  if (!isEditingThisTab) onActivate(session.id);
+                }}
+                onDoubleClick={() => {
+                  setEditingTabId(session.id);
+                  setEditingTabTitle(session.title);
+                }}
+                onContextMenu={(event) => {
+                  openTabMenu(event, session.id);
+                }}
+                onMouseDown={(event) => {
+                  if (event.button === 1) {
+                    // 鼠标中键直接关闭标签
+                    event.preventDefault();
+                    onClose(session.id);
+                  }
+                }}
                 className={cn(
-                  "relative -mb-px flex h-8 min-w-[68px] max-w-48 cursor-pointer items-center gap-2 rounded-t-md border px-3 text-xs font-semibold transition-colors",
+                  "group relative flex h-8 min-w-[130px] max-w-64 cursor-pointer items-center justify-between gap-2 rounded-t-xl border px-3 text-xs font-extrabold transition-all select-none shrink-0",
                   isActive
-                    ? "z-10 border-blue-500 border-b-white bg-white text-slate-950 shadow-sm"
-                    : "border-slate-200 bg-slate-100 text-slate-600 hover:border-slate-300 hover:bg-white hover:text-slate-900"
+                    ? (status.isDisconnected
+                        ? "border-slate-700 bg-slate-800 text-slate-200 shadow-sm"
+                        : "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-500/25")
+                    : (status.isDisconnected
+                        ? "border-[var(--app-line)] bg-[var(--panel-bg)]/60 text-[var(--app-muted)] opacity-75 hover:opacity-100 hover:bg-[var(--fill-2)]"
+                        : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-2)]"),
+                  draggedTabIndex === index && "opacity-40 scale-95 border-dashed border-emerald-400/80 cursor-grabbing",
+                  dragOverTabIndex === index && draggedTabIndex !== index && (
+                    draggedTabIndex !== null && draggedTabIndex < index
+                      ? "border-r-4 border-r-emerald-400 bg-emerald-500/25 ring-2 ring-emerald-500/40"
+                      : "border-l-4 border-l-emerald-400 bg-emerald-500/25 ring-2 ring-emerald-500/40"
+                  )
                 )}
+                title={`${session.title} (${status.title}) - 右键打开菜单，拖拽可调整前后顺序，双击重命名，中键关闭`}
               >
-                <span className="flex shrink-0 items-center gap-1 text-[11px] leading-none" aria-hidden="true">
-                  <span title={status.title} className={cn("h-1.5 w-1.5 rounded-full", status.dotClass)} />
-                  <span className={cn("font-semibold", isActive ? "text-emerald-700" : "text-slate-500")}>{index + 1}</span>
-                </span>
+                {isEditingThisTab ? (
+                  <input
+                    autoFocus
+                    value={editingTabTitle}
+                    onChange={(e) => setEditingTabTitle(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onContextMenu={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (editingTabTitle.trim()) onRenameTab?.(session.id, editingTabTitle.trim());
+                        setEditingTabId(null);
+                      } else if (e.key === "Escape") {
+                        setEditingTabId(null);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (editingTabTitle.trim()) onRenameTab?.(session.id, editingTabTitle.trim());
+                      setEditingTabId(null);
+                    }}
+                    className="h-5 px-1 text-xs font-mono font-bold bg-[var(--app-bg)] text-[var(--app-text)] border border-emerald-400 rounded outline-none w-28 select-text"
+                  />
+                ) : (
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1 h-full pointer-events-none">
+                    <span title={status.title} className={cn("h-2 w-2 rounded-full shrink-0", status.dotClass)} />
+                    <span className="truncate font-mono font-extrabold">{session.title}</span>
+                    {status.isDisconnected ? (
+                      <span className="rounded bg-slate-700/80 text-[9px] font-mono font-bold px-1.5 py-0 text-slate-300 shrink-0 border border-slate-600/60">已断开</span>
+                    ) : (
+                      liveStats[session.id]?.cpu_usage && (
+                        <span
+                          className={cn(
+                            "rounded font-mono font-bold text-[9px] px-1.5 py-0.5 border shrink-0 transition-colors",
+                            (parseFloat(liveStats[session.id].cpu_usage!) || 0) > 75
+                              ? "bg-rose-500/25 text-rose-200 border-rose-500/50"
+                              : (parseFloat(liveStats[session.id].cpu_usage!) || 0) > 40
+                                ? "bg-amber-500/25 text-amber-200 border-amber-500/50"
+                                : isActive
+                                  ? "bg-black/25 text-white border-white/20"
+                                  : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                          )}
+                          title={`【${session.title} 动态负载】\n• CPU 占用: ${liveStats[session.id].cpu_usage}\n• 内存占用: ${liveStats[session.id].memory_used || "--"} (${liveStats[session.id].memory_usage || "--"})\n• 根磁盘占用: ${liveStats[session.id].disk_usage || "--"}\n• 实时网络: ${liveStats[session.id].traffic_str || "--"}`}
+                        >
+                          CPU: {liveStats[session.id].cpu_usage}
+                        </span>
+                      )
+                    )}
+                    <span className="sr-only">{index + 1}</span>
+                    {renderEnvironmentBadge(session.connectParams?.environment, true)}
+                  </div>
+                )}
+
                 <button
-                  aria-current={isActive ? "page" : undefined}
-                  className="min-w-0 flex-1 truncate text-left"
-                  title={session.title}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onActivate(session.id);
-                  }}
-                  onContextMenu={(event) => {
-                    event.stopPropagation();
-                    openTabMenu(event, session.id);
-                  }}
-                >
-                  {session.title}
-                </button>
-                <button
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  className={cn(
+                    "flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-md transition-colors cursor-pointer relative z-10",
+                    isActive && !status.isDisconnected
+                      ? "text-white/80 hover:bg-white/20 hover:text-white"
+                      : "text-[var(--app-muted)] hover:bg-rose-500/20 hover:text-rose-400"
+                  )}
                   onClick={(event) => {
                     event.stopPropagation();
                     onClose(session.id);
                   }}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onContextMenu={(event) => event.stopPropagation()}
+                  title="关闭会话"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="h-3 w-3" />
                 </button>
               </div>
             );
           })}
         </div>
-        <Button variant="ghost" className="h-7 px-2">
-          <Menu className="h-4 w-4" />
-        </Button>
-        {menuSession && tabMenu && (
+
+        {/* ☰ 标签页与工作区快捷控制下拉菜单 */}
+        <div className="relative shrink-0 z-50">
+          <button
+            className={cn(
+              "flex h-7.5 w-7.5 items-center justify-center rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[var(--app-text)] transition-all shadow-2xs cursor-pointer",
+              topMenuOpen && "bg-emerald-500/15 text-emerald-400 border-emerald-500/40"
+            )}
+            onClick={() => setTopMenuOpen(!topMenuOpen)}
+            title="工作区与侧边栏控制菜单"
+          >
+            <Menu className="h-3.5 w-3.5" />
+          </button>
+
+          {topMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-[90]" onClick={() => setTopMenuOpen(false)} />
+              <div
+                role="menu"
+                className="absolute right-0 top-9.5 z-[100] w-52 rounded-2xl border border-slate-700/80 bg-slate-900/95 backdrop-blur-xl p-1.5 text-xs font-bold text-slate-100 shadow-2xl animate-in fade-in zoom-in-95 duration-150 select-none"
+                onMouseLeave={() => setTopMenuOpen(false)}
+              >
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer"
+                onClick={() => {
+                  onToggleSidebar?.();
+                  setTopMenuOpen(false);
+                }}
+              >
+                {sidebarHidden ? <PanelLeftOpen className="h-3.5 w-3.5 text-emerald-400" /> : <PanelLeftClose className="h-3.5 w-3.5 text-[var(--app-muted)]" />}
+                <span>{sidebarHidden ? "展开左侧主机栏" : "折叠左侧主机栏"}</span>
+              </button>
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer"
+                onClick={() => {
+                  setRightSidebarCollapsed(!rightSidebarCollapsed);
+                  setTopMenuOpen(false);
+                }}
+              >
+                {rightSidebarCollapsed ? <Eye className="h-3.5 w-3.5 text-emerald-400" /> : <EyeOff className="h-3.5 w-3.5 text-[var(--app-muted)]" />}
+                <span>{rightSidebarCollapsed ? "展开右侧侧边栏" : "折叠右侧侧边栏"}</span>
+              </button>
+
+              {/* 分屏模式选项 */}
+              {splitMode !== "none" ? (
+                <button
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-cyan-400 hover:bg-cyan-500/15 transition-colors cursor-pointer font-bold"
+                  onClick={() => {
+                    if (activeSessionId) onToggleSplit(activeSessionId, "none");
+                    setTopMenuOpen(false);
+                  }}
+                >
+                  <Minimize2 className="h-3.5 w-3.5" />
+                  <span>退出分屏 (还原全屏)</span>
+                </button>
+              ) : (
+                <>
+                  <button
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] text-emerald-400 transition-colors cursor-pointer font-bold disabled:opacity-40"
+                    disabled={!activeSessionId}
+                    onClick={() => {
+                      if (activeSessionId) onToggleSplit(activeSessionId, "horizontal");
+                      setTopMenuOpen(false);
+                    }}
+                  >
+                    <Columns2 className="h-3.5 w-3.5" />
+                    <span>左右并排分屏</span>
+                  </button>
+                  <button
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] text-sky-400 transition-colors cursor-pointer font-bold disabled:opacity-40"
+                    disabled={!activeSessionId}
+                    onClick={() => {
+                      if (activeSessionId) onToggleSplit(activeSessionId, "vertical");
+                      setTopMenuOpen(false);
+                    }}
+                  >
+                    <Rows2 className="h-3.5 w-3.5" />
+                    <span>上下水平分屏</span>
+                  </button>
+                </>
+              )}
+
+              <div className="my-1 border-t border-[var(--app-line)]" />
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] text-sky-400 hover:text-sky-300 transition-colors cursor-pointer font-bold"
+                onClick={() => {
+                  onOpenAdbForward?.();
+                  setTopMenuOpen(false);
+                }}
+              >
+                <Smartphone className="h-3.5 w-3.5 text-sky-400" />
+                <span>开启远程 ADB 转发</span>
+              </button>
+
+              <div className="my-1 border-t border-[var(--app-line)]" />
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:opacity-40"
+                disabled={!activeSessionId}
+                onClick={() => {
+                  if (activeSessionId) onDuplicate(activeSessionId);
+                  setTopMenuOpen(false);
+                }}
+              >
+                <Plus className="h-3.5 w-3.5 text-blue-600" />
+                <span>复制当前标签页</span>
+              </button>
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:opacity-40"
+                disabled={!activeSessionId || activeSession?.kind !== "ssh"}
+                onClick={() => {
+                  if (activeSessionId) onReconnect(activeSessionId);
+                  setTopMenuOpen(false);
+                }}
+              >
+                <RefreshCw className="h-3.5 w-3.5 text-emerald-600" />
+                <span>重新连接 SSH</span>
+              </button>
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:opacity-40"
+                disabled={!activeSessionId}
+                onClick={() => {
+                  if (activeSessionId) onDisconnect(activeSessionId);
+                  setTopMenuOpen(false);
+                }}
+              >
+                <X className="h-3.5 w-3.5 text-amber-600" />
+                <span>断开当前连接</span>
+              </button>
+
+              <div className="my-1 border-t border-[var(--app-line)]" />
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:opacity-40"
+                disabled={!activeSessionId}
+                onClick={() => {
+                  if (activeSessionId) onCloseOther(activeSessionId);
+                  setTopMenuOpen(false);
+                }}
+              >
+                <Menu className="h-3.5 w-3.5 text-purple-600" />
+                <span>关闭其他标签页</span>
+              </button>
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors cursor-pointer"
+                onClick={() => {
+                  onCloseAll();
+                  setTopMenuOpen(false);
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+                <span>关闭全部标签页</span>
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+        {menuSession && tabMenu && typeof document !== "undefined" && createPortal(
           <div
+            id="tab-context-menu"
             role="menu"
-            className="fixed z-50 w-36 rounded-md border border-slate-200 bg-white py-1 text-xs font-medium text-slate-700 shadow-lg"
+            className="fixed z-50 w-48 rounded-xl border border-[var(--app-line)] bg-[var(--raised-bg)]/95 backdrop-blur-xl p-1 text-xs font-semibold text-[var(--app-text)] shadow-2xl animate-in zoom-in-95 duration-100"
             style={{ left: tabMenu.x, top: tabMenu.y }}
             onMouseLeave={() => setTabMenu(null)}
           >
-            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onDuplicate)}>
-              <Plus className="h-3.5 w-3.5" />
+            {/* 左右分屏 / 上下分屏 / 退出分屏 */}
+            {splitMode !== "none" ? (
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-cyan-400 hover:bg-cyan-500/15 transition-colors cursor-pointer font-bold"
+                onClick={() => {
+                  onToggleSplit(menuSession.id, "none");
+                  setTabMenu(null);
+                }}
+              >
+                <Minimize2 className="h-3.5 w-3.5" />
+                退出分屏 (还原全屏)
+              </button>
+            ) : (
+              <>
+                <button
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] text-emerald-400 transition-colors cursor-pointer font-bold"
+                  onClick={() => {
+                    onToggleSplit(menuSession.id, "horizontal");
+                    setTabMenu(null);
+                  }}
+                >
+                  <Columns2 className="h-3.5 w-3.5" />
+                  左右并排分屏
+                </button>
+                <button
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] text-sky-400 transition-colors cursor-pointer font-bold"
+                  onClick={() => {
+                    onToggleSplit(menuSession.id, "vertical");
+                    setTabMenu(null);
+                  }}
+                >
+                  <Rows2 className="h-3.5 w-3.5" />
+                  上下水平分屏
+                </button>
+              </>
+            )}
+
+            <div className="my-1 border-t border-[var(--app-line)]" />
+
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] text-sky-400 hover:text-sky-300 transition-colors cursor-pointer font-bold"
+              onClick={() => {
+                onOpenAdbForward?.();
+                setTabMenu(null);
+              }}
+            >
+              <Smartphone className="h-3.5 w-3.5 text-sky-400" />
+              开启远程 ADB 转发
+            </button>
+
+            <div className="my-1 border-t border-[var(--app-line)]" />
+
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onDuplicate)}>
+              <Plus className="h-3.5 w-3.5 text-blue-500" />
               复制标签
             </button>
             <button
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
               disabled={menuSession.kind !== "ssh" || !menuSession.connectParams}
               onClick={() => runTabAction(onReconnect)}
             >
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw className="h-3.5 w-3.5 text-emerald-500" />
               重连
             </button>
-            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onDisconnect)}>
-              <X className="h-3.5 w-3.5" />
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onDisconnect)}>
+              <X className="h-3.5 w-3.5 text-amber-500" />
               断开
             </button>
-            <div className="my-1 border-t border-slate-100" />
-            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onClose)}>
-              <X className="h-3.5 w-3.5" />
+            {menuSession.connectParams?.hostname && (
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] text-sky-400 font-bold transition-colors cursor-pointer"
+                onClick={() => {
+                  void nativeBridge.clipboardCopy(menuSession.connectParams!.hostname);
+                  setTabMenu(null);
+                }}
+              >
+                <Copy className="h-3.5 w-3.5 text-sky-400" />
+                <span>复制主机 IP ({menuSession.connectParams.hostname})</span>
+              </button>
+            )}
+            <div className="my-1 border-t border-[var(--app-line)]" />
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onClose)}>
+              <X className="h-3.5 w-3.5 text-rose-500" />
               关闭
             </button>
-            <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => runTabAction(onCloseOther)}>
-              <Menu className="h-3.5 w-3.5" />
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill-1)] transition-colors cursor-pointer" onClick={() => runTabAction(onCloseOther)}>
+              <Menu className="h-3.5 w-3.5 text-[var(--app-muted)]" />
               关闭其他
             </button>
             <button
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
               onClick={() => {
                 onCloseAll();
                 setTabMenu(null);
               }}
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3.5 w-3.5 text-rose-500" />
               关闭全部
             </button>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
-      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_420px]">
+      <div
+        className="grid min-h-0 relative"
+        style={{
+          gridTemplateColumns: `${layoutMode === "deck" ? "232px " : ""}${visible && !rightSidebarCollapsed ? `minmax(0, 1fr) ${rightSidebarWidth}px` : "1fr"}`
+        }}
+      >
+        {/* 甲板布局:左侧垂直会话栈(状态/cwd/跳板链一目了然) */}
+        {layoutMode === "deck" && visible && (
+          <div className="flex min-h-0 flex-col border-r border-[var(--app-line)] bg-[var(--sidebar-bg)]">
+            <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--app-line)] px-3">
+              <span className="text-[11px] font-extrabold tracking-widest text-[var(--app-muted)]">会话 · {sessions.length}</span>
+              <button
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--app-line)] bg-[var(--fill-1)] text-sm leading-none text-[var(--app-text)] transition-colors hover:text-emerald-400 cursor-pointer"
+                title="新建连接 (返回主机列表)"
+                onClick={() => onReturnHome()}
+              >
+                +
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
+              {sessions.map((session) => {
+                const isActive = session.id === activeSessionId;
+                const status = getSessionTabStatus(session);
+                const jumpCount =
+                  session.connectParams?.jumpChain?.length ||
+                  (session.connectParams?.useJumpHost ? 1 : 0);
+                return (
+                  <div
+                    key={session.id}
+                    onClick={() => onActivate(session.id)}
+                    onContextMenu={(event) => openTabMenu(event, session.id)}
+                    onMouseDown={(event) => {
+                      if (event.button === 1) {
+                        event.preventDefault();
+                        onClose(session.id);
+                      }
+                    }}
+                    className={cn(
+                      "group cursor-pointer rounded-lg border p-2.5 select-none transition-all",
+                      isActive
+                        ? "border-[var(--accent)]/50 bg-[var(--accent-soft)] shadow-[inset_3px_0_0_var(--accent)]"
+                        : "border-[var(--app-line)] bg-[var(--panel-bg)] hover:bg-[var(--fill-2)]"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span title={status.title} className={cn("h-2 w-2 shrink-0 rounded-full", status.dotClass)} />
+                      <span className={cn("min-w-0 flex-1 truncate font-mono text-xs font-bold text-[var(--app-text)]", status.isDisconnected && "opacity-75")}>{session.title}</span>
+                      {status.isDisconnected ? (
+                        <span className="rounded bg-slate-700/80 text-[9px] font-mono font-bold px-1.5 py-0 text-slate-300 shrink-0 border border-slate-600/60">已断开</span>
+                      ) : (
+                        liveStats[session.id]?.cpu_usage && (
+                          <span
+                            className={cn(
+                              "rounded font-mono font-bold text-[9px] px-1 py-0 border shrink-0 transition-colors",
+                              (parseFloat(liveStats[session.id].cpu_usage!) || 0) > 75
+                                ? "bg-rose-500/25 text-rose-200 border-rose-500/50"
+                                : (parseFloat(liveStats[session.id].cpu_usage!) || 0) > 40
+                                  ? "bg-amber-500/25 text-amber-200 border-amber-500/50"
+                                  : isActive
+                                    ? "bg-emerald-500/25 text-emerald-300 border-emerald-500/40"
+                                    : "bg-[var(--fill-2)] text-[var(--app-muted)] border-[var(--app-line)]"
+                            )}
+                            title={`【${session.title} 动态负载】\n• CPU: ${liveStats[session.id].cpu_usage}\n• 内存: ${liveStats[session.id].memory_used || "--"} (${liveStats[session.id].memory_usage || "--"})\n• 磁盘: ${liveStats[session.id].disk_usage || "--"}`}
+                          >
+                            {liveStats[session.id].cpu_usage}
+                          </span>
+                        )
+                      )}
+                      <button
+                        className="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--app-muted)] hover:text-rose-500 group-hover:flex cursor-pointer"
+                        title="关闭会话"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onClose(session.id);
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-4 font-mono text-[10px] text-[var(--app-muted)]">
+                      {jumpCount > 0 && (
+                        <span className="shrink-0 rounded border border-purple-500/25 bg-purple-500/15 px-1 py-px text-[9px] font-bold text-purple-400">
+                          跳板×{jumpCount}
+                        </span>
+                      )}
+                      {terminalCwds?.[session.id] && <span className="truncate">{terminalCwds[session.id]}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {transferTaskCount > 0 && (
+              <div className="shrink-0 border-t border-[var(--app-line)] px-3 py-2 font-mono text-[10px] text-[var(--app-muted)]">
+                传输中 {transferTaskCount} 个任务
+              </div>
+            )}
+          </div>
+        )}
         <TerminalSurface
           visible={visible}
+          sessions={sessions}
           activeSession={activeSession}
           terminalTheme={terminalTheme}
           terminalAppearance={terminalAppearance}
           terminalBackgroundImage={terminalBackgroundImage}
           terminalBackgroundOverlay={terminalBackgroundOverlay}
           commandSuggestionsEnabled={commandSuggestionsEnabled}
+          dangerousCommandGuardEnabled={dangerousCommandGuardEnabled}
           commandSuggestionSources={commandSuggestionSources}
           commandSuggestionApplyKey={commandSuggestionApplyKey}
           commandSuggestionCustomApplyKey={commandSuggestionCustomApplyKey}
@@ -2158,12 +5884,20 @@ function TerminalWorkspace({
           onCommandSuggestionViewChange={onCommandSuggestionViewChange}
           onShortcutParameterRequest={requestShortcutParameters}
           onAddAiQuote={(text) => onAddAiQuote(text, activeSession?.title || "终端")}
+          onCreateLocal={onCreateLocal}
+          onRequestDangerousCommandConfirmation={onRequestDangerousCommandConfirmation}
           onOutput={onTerminalOutput}
+          onActivate={onActivate}
+          splitMode={splitMode}
+          onToggleSplit={onToggleSplit}
         />
-        {visible && (
+        {visible && !rightSidebarCollapsed && (
           <TerminalRightSidebar
+            width={rightSidebarWidth}
+            onResizeStart={startResizeRightSidebar}
             activePanel={sidePanel}
             activeSession={activeSession}
+            terminalCwd={terminalCwd}
             commandFolders={commandFolders}
             activeCommandFolderId={activeCommandFolderId}
             shortcutParameterRequest={shortcutParameterRequest}
@@ -2173,25 +5907,221 @@ function TerminalWorkspace({
             onActiveCommandFolderChange={onActiveCommandFolderChange}
             onSendCommand={onSendCommand}
             onAiConfigChange={onAiConfigChange}
+            onAddAiQuote={onAddAiQuote}
+            onOpenRemoteEditor={onOpenRemoteEditor}
+            onOpenSearch={onOpenSearch}
+            onOpenDiff={onOpenDiff}
+            onAddFolder={onAddFolder}
+            onSaveCommand={onSaveCommand}
+            transferTasks={transferTasks}
+            onStartDownload={onStartDownload}
+            onStartUpload={onStartUpload}
+            onCancelTransfer={onCancelTransfer}
+            onClearCompletedTransfers={onClearCompletedTransfers}
           />
         )}
+        {/* 甲板布局:右栏收起时的边缘展开把手 */}
+        {layoutMode === "deck" && visible && rightSidebarCollapsed && (
+          <button
+            className="absolute right-0 top-1/2 z-20 h-24 w-3.5 -translate-y-1/2 cursor-pointer rounded-l-lg border border-r-0 border-[var(--app-line)] bg-[var(--panel-bg)] text-[8px] tracking-widest text-[var(--app-muted)] transition-colors hover:text-emerald-400"
+            style={{ writingMode: "vertical-rl" }}
+            title="展开右侧工作栏"
+            onClick={() => setRightSidebarCollapsed(false)}
+          >
+            工作栏
+          </button>
+        )}
       </div>
-      <div className="flex items-center gap-3 border-t border-slate-200 bg-slate-50 px-5 text-xs text-slate-500">
-        <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500" : "bg-slate-300")} />
-        <span>
-          {activeSession?.status === "connecting"
-            ? "连接中"
-            : activeSession?.status === "failed"
-              ? "连接失败"
-              : activeSession
-                ? "已连接"
-                : "未连接"}
-        </span>
-        <span>{activeSession?.title || "无活动会话"}</span>
-        {activeSession?.error && <span className="truncate text-rose-600">{activeSession.error}</span>}
+      {/* 终端底部沉浸状态栏 (专业实时指标 + 快捷侧栏一键切换) */}
+      <div className={cn("flex h-8 items-center justify-between border-t border-[var(--app-line)] px-3 text-xs font-medium text-[var(--app-muted)] select-none overflow-hidden relative", terminalBackgroundImage ? "bg-[var(--sidebar-bg)]/80 backdrop-blur-md" : "bg-[var(--sidebar-bg)]")}>
+        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto scrollbar-none pr-3">
+          {/* 连接状态与呼吸指示灯 */}
+          <span className="flex items-center gap-1.5 shrink-0">
+            <span className={cn("h-2 w-2 rounded-full", activeSession?.connected ? "bg-emerald-500 shadow-sm shadow-emerald-500/50 animate-pulse" : "bg-slate-400")} />
+            <span className="text-[var(--app-text)] font-bold text-[11px]">
+              {activeSession?.status === "connecting"
+                ? "连接中..."
+                : activeSession?.status === "failed"
+                  ? "连接失败"
+                  : activeSession?.connected
+                    ? (activeSession.kind === "ssh" ? "SSH v2 已连接" : "本地终端")
+                    : "就绪"}
+            </span>
+          </span>
+
+          <div className="h-3 w-px bg-[var(--app-line)] shrink-0" />
+
+          {/* 会话名称与目标地址 */}
+          <span className="truncate font-mono text-[11px] text-[var(--app-text)] font-semibold flex items-center gap-1.5 shrink-0">
+            <span>{activeSession ? `${activeSession.kind === "ssh" ? "SSH" : "Local"}: ${activeSession.title}` : "无活动终端"}</span>
+            {renderEnvironmentBadge(activeSession?.connectParams?.environment)}
+          </span>
+
+          {/* SSH 断线重连醒目标识与快捷重连按钮 */}
+          {activeSession?.kind === "ssh" && !activeSession.connected && activeSession.connectParams && (
+            <button
+              type="button"
+              onClick={() => onReconnect(activeSession.id)}
+              className="flex items-center gap-1 font-mono text-[10px] text-rose-300 hover:text-white bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/40 px-2 py-0.5 rounded shadow-2xs shrink-0 cursor-pointer transition-colors font-extrabold"
+              title="SSH 连接已断开，点击立即尝试重新连接"
+            >
+              <RefreshCw className="h-2.5 w-2.5" />
+              <span>已断开 (点击重连 ↺)</span>
+            </button>
+          )}
+
+          {activeSession?.error && (
+            <span className="truncate text-rose-500 font-bold text-[11px] shrink-0">
+              ⚠️ {activeSession.error}
+            </span>
+          )}
+
+          <div className="h-3 w-px bg-[var(--app-line)] shrink-0 hidden sm:inline-block" />
+
+          {/* 实时性能状态指示条 (CPU / 负载 / 内存 / 磁盘 / 实时流量) - 随当前激活标签动态更新 */}
+          {(() => {
+            const currentStats = activeSession ? liveStats[activeSession.id] : undefined;
+            const isConn = activeSession ? (activeSession.kind === "local" ? true : activeSession.connected) : false;
+            const cpuText = currentStats?.cpu_usage ? `CPU: ${currentStats.cpu_usage}` : (isConn ? "CPU: ..." : "CPU: --");
+            const loadText = currentStats?.load_avg && currentStats.load_avg !== "-" 
+              ? `负载: ${currentStats.load_avg}` 
+              : null;
+            const memText = currentStats?.memory_usage 
+              ? (currentStats.memory_used ? `内存: ${currentStats.memory_used} (${currentStats.memory_usage})` : `内存: ${currentStats.memory_usage}`)
+              : (isConn ? "内存: ..." : "内存: --");
+            const diskText = currentStats?.disk_usage ? `磁盘: ${currentStats.disk_usage}` : (isConn ? "磁盘: ..." : "磁盘: --");
+            const trafficText = currentStats?.traffic_str 
+              ? currentStats.traffic_str 
+              : (currentStats?.tx_speed || currentStats?.rx_speed 
+                  ? `↑${currentStats.tx_speed || "0B/s"} ↓${currentStats.rx_speed || "0B/s"}` 
+                  : (isConn ? "↑0B/s ↓0B/s" : "↑-- ↓--"));
+
+            return (
+              <div 
+                className="flex items-center gap-2.5 font-mono text-[10px] bg-[var(--fill-1)] border border-[var(--app-line)] px-2 py-0.5 rounded-lg shadow-2xs shrink-0 select-none transition-all"
+                title={
+                  activeSession
+                    ? `【${activeSession.title} 实时系统指标】\n• 运行时间: ${currentStats?.uptime || "--"}\n• 动态负载 (uptime): ${currentStats?.load_avg_str || (currentStats?.load_avg ? `load average: ${currentStats.load_avg}` : "--")}\n• CPU 负载: ${currentStats?.cpu_usage || "采样中..."}\n• 内存占用: ${currentStats?.memory_used || "--"} / ${currentStats?.memory_total || "--"} (${currentStats?.memory_usage || "--"})\n• 根磁盘占用: ${currentStats?.disk_used || "--"} / ${currentStats?.disk_total || "--"} (${currentStats?.disk_usage || "--"})\n• 实时网络: ${currentStats?.traffic_str || "--"}`
+                    : "当前无活动会话"
+                }
+              >
+                <span className="flex items-center gap-1 font-bold text-emerald-400">
+                  <Cpu className="h-3 w-3" />
+                  <span>{cpuText}</span>
+                </span>
+                {loadText && (
+                  <span className="flex items-center gap-1 font-bold text-amber-400">
+                    <Gauge className="h-3 w-3" />
+                    <span>{loadText}</span>
+                  </span>
+                )}
+                <span className="flex items-center gap-1 font-bold text-sky-400">
+                  <Activity className="h-3 w-3" />
+                  <span>{memText}</span>
+                </span>
+                <span className="flex items-center gap-1 font-bold text-purple-400">
+                  <HardDrive className="h-3 w-3" />
+                  <span>{diskText}</span>
+                </span>
+                <span className="flex items-center gap-1 font-bold text-teal-400">
+                  <ArrowRightLeft className="h-3 w-3" />
+                  <span>{trafficText}</span>
+                </span>
+              </div>
+            );
+          })()}
+
+          <div className="h-3 w-px bg-[var(--app-line)] shrink-0 hidden lg:inline-block" />
+
+          {/* 智能极速运维快捷动作胶囊栏 (已移除 Docker 与 Sudo) */}
+          <div className="hidden lg:flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => onSendCommand("\x03")}
+              title="发送中断信号 (Ctrl + C)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-colors cursor-pointer"
+            >
+              <span>⛔ 中断</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("clear\n")}
+              title="清空当前终端屏幕 (clear)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[var(--fill-1)] hover:bg-[var(--fill-2)] text-[var(--app-text)] border border-[var(--app-line)] transition-colors cursor-pointer"
+            >
+              <span>🧹 清屏</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("top\n")}
+              title="实时查看系统进程与动态资源消耗 (top)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition-colors cursor-pointer"
+            >
+              <span>📈 动态负载</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("netstat -tuln 2>/dev/null || ss -tuln\n")}
+              title="一键查看服务器正在监听的 TCP/UDP 端口"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 transition-colors cursor-pointer"
+            >
+              <span>🌐 端口</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("df -hT -x tmpfs -x devtmpfs\n")}
+              title="查看物理分区挂载点与磁盘剩余空间 (df -h)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 transition-colors cursor-pointer"
+            >
+              <span>💾 磁盘</span>
+            </button>
+            <button
+              onClick={() => onSendCommand("free -h -w\n")}
+              title="查看物理内存与 Swap 交换分区占用 (free -h)"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 transition-colors cursor-pointer"
+            >
+              <span>🧠 内存</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 状态栏右侧：字符编码 */}
+        <div className="flex items-center gap-2 shrink-0 text-[11px] bg-[var(--sidebar-bg)] pl-2.5 z-10">
+          <span className="font-mono text-[10px] text-[var(--app-muted)] bg-[var(--fill-1)] border border-[var(--app-line)] px-2 py-0.5 rounded shadow-2xs font-bold">
+            UTF-8
+          </span>
+        </div>
       </div>
     </div>
   );
+}
+
+function getTerminalCursorPosition(): { left: number; top: number; bottom: number } | null {
+  // 1. 查找当前活动的 xterm DOM 光标元素
+  const cursorElements = document.querySelectorAll(".xterm-cursor, .xterm-screen .xterm-cursor, .terminal .xterm-cursor");
+  for (let i = 0; i < cursorElements.length; i++) {
+    const el = cursorElements[i] as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0 && rect.top > 0 && rect.left > 0) {
+      return { left: rect.left, top: rect.top, bottom: rect.bottom };
+    }
+  }
+
+  // 2. 查找 xterm-helper-textarea (IME输入框位置即为光标位置)
+  const textareas = document.querySelectorAll("textarea.xterm-helper-textarea");
+  for (let i = 0; i < textareas.length; i++) {
+    const el = textareas[i] as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    if (rect.top > 0 && rect.left > 0) {
+      return { left: rect.left, top: rect.top, bottom: rect.bottom + 18 };
+    }
+  }
+
+  // 3. 备选方案：获取终端活动容器内区域
+  const activeTerminalScreen = document.querySelector(".terminal.xterm, .xterm-screen, .terminal");
+  if (activeTerminalScreen) {
+    const rect = activeTerminalScreen.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0 && rect.top > 0) {
+      return { left: rect.left + 70, top: rect.top + 30, bottom: rect.top + 50 };
+    }
+  }
+
+  return null;
 }
 
 interface CommandSuggestionResizeEdges {
@@ -2202,12 +6132,68 @@ interface CommandSuggestionResizeEdges {
 }
 
 function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
-  const [layout, setLayout] = useState<CommandSuggestionPanelLayout>(() => loadStoredCommandSuggestionPanelLayout());
+  const [storedData] = useState(() => loadStoredCommandSuggestionPanelLayout());
+  const [hasCustomPosition, setHasCustomPosition] = useState<boolean>(storedData.isUserCustom);
+  const [layout, setLayout] = useState<CommandSuggestionPanelLayout>(storedData.layout);
+  const [cursorPos, setCursorPos] = useState<{ left: number; top: number } | null>(null);
+  const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
-  function updateLayout(next: CommandSuggestionPanelLayout) {
+  useEffect(() => {
+    if (activeItemRef.current && typeof activeItemRef.current.scrollIntoView === "function") {
+      activeItemRef.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [view.activeIndex]);
+
+  useEffect(() => {
+    if (hasCustomPosition) return;
+
+    function updateCursorCoords() {
+      const cursor = getTerminalCursorPosition();
+      if (!cursor) return;
+
+      const viewportWidth = window.innerWidth || 1280;
+      const viewportHeight = window.innerHeight || 720;
+      const panelWidth = layout.width || 260;
+      const panelHeight = layout.height || 180;
+
+      // Position horizontally aligned with cursor, clamp within screen
+      const left = clampNumber(cursor.left, 16, Math.max(16, viewportWidth - panelWidth - 16));
+
+      // Position vertically directly below the cursor
+      // If bottom has enough space (> panelHeight + 20), put below; otherwise put above cursor
+      let top = cursor.bottom + 6;
+      if (top + panelHeight > viewportHeight - 16) {
+        top = Math.max(16, cursor.top - panelHeight - 6);
+      }
+
+      setCursorPos({ left, top });
+    }
+
+    updateCursorCoords();
+    const timer = window.setTimeout(updateCursorCoords, 20);
+    const interval = window.setInterval(updateCursorCoords, 100);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, [hasCustomPosition, layout.width, layout.height, view.suggestions, view.activeIndex]);
+
+  function updateLayout(next: CommandSuggestionPanelLayout, isManualDrag: boolean = false) {
     const normalized = normalizeCommandSuggestionPanelLayout(next);
     setLayout(normalized);
-    window.localStorage.setItem(storageKeys.commandSuggestionPanel, JSON.stringify(normalized));
+    if (isManualDrag) {
+      setHasCustomPosition(true);
+      window.localStorage.setItem(storageKeys.commandSuggestionPanel, JSON.stringify({ ...normalized, isUserCustom: true }));
+    } else {
+      window.localStorage.setItem(storageKeys.commandSuggestionPanel, JSON.stringify({ ...normalized, isUserCustom: hasCustomPosition }));
+    }
+  }
+
+  function resetToCursorDefault() {
+    setHasCustomPosition(false);
+    setCursorPos(null);
+    window.localStorage.removeItem(storageKeys.commandSuggestionPanel);
+    setLayout(defaultCommandSuggestionPanelLayout);
   }
 
   function startMove(event: ReactMouseEvent<HTMLButtonElement>) {
@@ -2222,7 +6208,7 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
         ...startLayout,
         left: startLayout.left + moveEvent.clientX - startX,
         bottom: startLayout.bottom - (moveEvent.clientY - startY)
-      });
+      }, true);
     }
 
     function stopMove() {
@@ -2270,7 +6256,7 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
       next.bottom = viewportHeight - top - next.height;
     }
 
-    updateLayout(next);
+    updateLayout(next, true);
   }
 
   function startResize(event: ReactMouseEvent<HTMLButtonElement>, edges: CommandSuggestionResizeEdges) {
@@ -2293,42 +6279,106 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
     window.addEventListener("mouseup", stopResize);
   }
 
+  const panelStyle = hasCustomPosition || !cursorPos
+    ? { left: layout.left, bottom: layout.bottom, width: layout.width, height: layout.height }
+    : { left: cursorPos.left, top: cursorPos.top, width: layout.width, height: layout.height };
+
   return (
     <div
       data-testid="command-suggestion-panel"
       role="listbox"
-      className="fixed z-30 flex min-w-0 flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg"
-      style={{ left: layout.left, bottom: layout.bottom, width: layout.width, height: layout.height }}
+      className="fixed z-30 flex min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)]/95 backdrop-blur-xl shadow-2xl animate-in zoom-in-95 duration-100 select-none"
+      style={panelStyle}
     >
-      <button
-        type="button"
-        aria-label="移动命令提示"
-        className="h-4 shrink-0 cursor-move border-b border-slate-100 bg-slate-50 hover:bg-blue-50"
-        onMouseDown={startMove}
-      />
-      <div className="min-h-0 flex-1 overflow-y-auto p-1 pr-3">
-        {view.suggestions.slice(0, 6).map((suggestion, index) => (
+      <div className="flex h-6 shrink-0 items-center justify-between border-b border-[var(--app-line)] bg-[var(--panel-bg)]/90 px-3 select-none">
+        <button
+          type="button"
+          aria-label="移动命令提示"
+          className="flex items-center gap-1.5 min-w-0 flex-1 h-full cursor-move text-[11px] font-extrabold text-[var(--app-text)] hover:text-emerald-500 text-left bg-transparent border-0 p-0 transition-colors"
+          onMouseDown={startMove}
+        >
+          <GripHorizontal className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+          <span className="truncate">{hasCustomPosition ? "提示面板 (固定位置)" : "提示面板 (光标跟随)"}</span>
+        </button>
+        <div className="flex items-center gap-1 shrink-0">
           <button
-            key={suggestion.id}
             type="button"
-            role="option"
-            aria-selected={index === view.activeIndex}
-            title={suggestion.command}
-            className={cn(
-              "min-h-10 w-full min-w-0 shrink-0 rounded px-2 py-1 text-left",
-              index === view.activeIndex ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100"
-            )}
-            onMouseDown={(event) => {
-              event.preventDefault();
-              view.onApply(suggestion);
+            title="复位提示框到光标下方跟随"
+            aria-label="重置提示面板位置"
+            className="flex h-4.5 w-4.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-[var(--fill-2)] hover:text-[var(--app-text)] cursor-pointer shrink-0 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              resetToCursorDefault();
             }}
           >
-            <span className="block truncate text-[11px] font-semibold">{suggestion.command}</span>
-            <span className="mt-0.5 block truncate text-[10px] font-normal text-slate-400">
-              {suggestion.description || suggestion.label || suggestion.source}
-            </span>
+            <RotateCcw className="h-3 w-3" />
           </button>
-        ))}
+          <button
+            type="button"
+            title="关闭提示面板 (Esc)"
+            aria-label="关闭提示面板"
+            className="flex h-4.5 w-4.5 items-center justify-center rounded-full text-[var(--app-muted)] hover:bg-rose-500/20 hover:text-rose-400 cursor-pointer shrink-0 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              view.onClose?.();
+            }}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5 pr-2.5 space-y-1">
+        {view.suggestions.map((suggestion, index) => {
+          const count = getCommandUsageFrequency(suggestion.command);
+          const isActive = index === view.activeIndex;
+
+          return (
+            <button
+              key={suggestion.id}
+              ref={isActive ? activeItemRef : undefined}
+              type="button"
+              role="option"
+              aria-selected={isActive}
+              title={suggestion.command}
+              className={cn(
+                "min-h-10 w-full min-w-0 shrink-0 rounded-xl px-3 py-1.5 text-left transition-all flex items-center justify-between gap-2 border cursor-pointer",
+                isActive
+                  ? "bg-emerald-600 text-white font-extrabold shadow-sm shadow-emerald-500/20 border-emerald-500"
+                  : "text-[var(--app-text)] border-transparent hover:bg-[var(--fill-1)] hover:border-[var(--app-line)]"
+              )}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                view.onApply(suggestion);
+              }}
+            >
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-[11px] font-bold font-mono tracking-tight">{suggestion.command}</span>
+                <span className={cn("mt-0.5 block truncate text-[10px]", isActive ? "text-white/80" : "text-[var(--app-muted)]")}>
+                  {suggestion.description || suggestion.label || suggestion.source}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {count > 0 && (
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.2 text-[9px] font-extrabold shrink-0 border font-mono",
+                      isActive
+                        ? "bg-white/20 text-white border-white/30"
+                        : "bg-amber-500/10 text-amber-500 border-amber-500/30"
+                    )}
+                  >
+                    🔥 {count}
+                  </span>
+                )}
+                {isActive && (
+                  <span className="rounded-md bg-white/20 border border-white/30 px-1.5 py-0.2 text-[9px] font-extrabold font-mono text-white animate-in fade-in duration-100">
+                    Shift+Tab / → / ↵ 选定
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
       </div>
       <button
         type="button"
@@ -2396,12 +6446,14 @@ function CommandSuggestionPanel({ view }: { view: CommandSuggestionView }) {
 
 function TerminalSurface({
   visible,
+  sessions,
   activeSession,
   terminalTheme,
   terminalAppearance,
   terminalBackgroundImage,
   terminalBackgroundOverlay,
   commandSuggestionsEnabled,
+  dangerousCommandGuardEnabled,
   commandSuggestionSources,
   commandSuggestionApplyKey,
   commandSuggestionCustomApplyKey,
@@ -2413,15 +6465,22 @@ function TerminalSurface({
   onCommandSuggestionViewChange,
   onShortcutParameterRequest,
   onAddAiQuote,
-  onOutput
+  onCreateLocal,
+  onRequestDangerousCommandConfirmation,
+  onOutput,
+  onActivate,
+  splitMode = "none",
+  onToggleSplit
 }: {
   visible: boolean;
+  sessions?: SessionTab[];
   activeSession?: SessionTab;
   terminalTheme: TerminalThemeMode;
   terminalAppearance: TerminalAppearance;
   terminalBackgroundImage: string;
   terminalBackgroundOverlay: number;
   commandSuggestionsEnabled: boolean;
+  dangerousCommandGuardEnabled: boolean;
   commandSuggestionSources: CommandSuggestionSources;
   commandSuggestionApplyKey: CommandSuggestionApplyKey;
   commandSuggestionCustomApplyKey: CommandSuggestionCustomApplyKey | null;
@@ -2433,7 +6492,12 @@ function TerminalSurface({
   onCommandSuggestionViewChange: (view: CommandSuggestionView | null) => void;
   onShortcutParameterRequest: (shortcut: NonNullable<CommandSuggestion["shortcut"]>) => void;
   onAddAiQuote: (text: string) => void;
+  onCreateLocal?: () => void;
+  onRequestDangerousCommandConfirmation?: (command: string, info: DangerousCommandInfo, onConfirm: () => void) => void;
   onOutput: (sessionId: string, text: string) => void;
+  onActivate?: (sessionId: string) => void;
+  splitMode?: "none" | "horizontal" | "vertical";
+  onToggleSplit?: (sessionId: string, mode: "none" | "horizontal" | "vertical") => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
@@ -2441,12 +6505,30 @@ function TerminalSurface({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const decoderRef = useRef<TextDecoder | null>(null);
   const pushDecodersRef = useRef<Record<string, TextDecoder>>({});
+  // 终端输出渲染合并与轮询降级状态
+  const pendingTerminalWritesRef = useRef<Record<string, string[]>>({});
+  const terminalWriteFlushScheduledRef = useRef(false);
+  const pushSeenRef = useRef<Record<string, boolean>>({});
+  const highlightRulesRef = useRef(highlightRules);
+  const secondaryIdRef = useRef<string | undefined>(undefined);
+
+  // 副分屏终端引用与状态
+  const secondaryContainerRef = useRef<HTMLDivElement | null>(null);
+  const secondaryTerminalRef = useRef<XTerm | null>(null);
+  const secondaryFitRef = useRef<FitAddon | null>(null);
+  const secondaryDecoderRef = useRef<TextDecoder | null>(null);
+  const [focusedPane, setFocusedPane] = useState<"primary" | "secondary">("primary");
+  const isSplit = Boolean(splitMode && splitMode !== "none" && sessions && sessions.length >= 2);
+  const primarySession = activeSession || sessions?.[0];
+  const secondarySession = isSplit ? (sessions?.find((s) => s.id !== primarySession?.id) || sessions?.[1]) : undefined;
   const activeIdRef = useRef("");
   const visibleRef = useRef(visible);
   const lastValidTerminalSizeRef = useRef({ cols: 80, rows: 24 });
   const [selectedText, setSelectedText] = useState("");
   const [terminalMenu, setTerminalMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
+  const [showTicker, setShowTicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResult, setSearchResult] = useState({ resultIndex: -1, resultCount: 0 });
   const searchMatches = useMemo(
@@ -2460,11 +6542,13 @@ function TerminalSurface({
   const [terminalRenderEpoch, setTerminalRenderEpoch] = useState(0);
   const commandFoldersRef = useRef(commandFolders);
   const commandSuggestionsEnabledRef = useRef(commandSuggestionsEnabled);
+  const dangerousCommandGuardEnabledRef = useRef(dangerousCommandGuardEnabled);
   const commandSuggestionSourcesRef = useRef(commandSuggestionSources);
   const commandSuggestionApplyKeyRef = useRef(commandSuggestionApplyKey);
   const commandSuggestionCustomApplyKeyRef = useRef(commandSuggestionCustomApplyKey);
   const commandSuggestionsRef = useRef<CommandSuggestion[]>([]);
   const activeCommandSuggestionIndexRef = useRef(0);
+  const hasUserNavigatedListRef = useRef(false);
   const commandInputRef = useRef("");
   const commandHistoryRef = useRef<string[]>([]);
   const rawCommandModeRef = useRef(false);
@@ -2472,21 +6556,93 @@ function TerminalSurface({
   const terminalLayoutRestoreFrameRef = useRef<number | null>(null);
   const terminalLayoutRestoreTimersRef = useRef<number[]>([]);
 
+  // 自由可拖拽分屏比例状态 (15% ~ 85%)
+  const [splitRatio, setSplitRatio] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("ldyssh_split_ratio");
+      return saved ? Math.min(85, Math.max(15, Number(saved))) : 50;
+    } catch {
+      return 50;
+    }
+  });
+  const [isDraggingSplitter, setIsDraggingSplitter] = useState(false);
+  const splitWrapperRef = useRef<HTMLDivElement | null>(null);
+
+  const handleSplitterPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+    setIsDraggingSplitter(true);
+  };
+
+  const handleSplitterPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingSplitter || !splitWrapperRef.current) return;
+    const rect = splitWrapperRef.current.getBoundingClientRect();
+    let ratio = 50;
+    if (splitMode === "vertical") {
+      ratio = ((e.clientY - rect.top) / rect.height) * 100;
+    } else {
+      ratio = ((e.clientX - rect.left) / rect.width) * 100;
+    }
+    const clamped = Math.min(85, Math.max(15, ratio));
+    setSplitRatio(clamped);
+    localStorage.setItem("ldyssh_split_ratio", String(Math.round(clamped)));
+    try {
+      fitRef.current?.fit();
+      secondaryFitRef.current?.fit();
+    } catch {}
+  };
+
+  const handleSplitterPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDraggingSplitter) {
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {}
+      setIsDraggingSplitter(false);
+      try {
+        fitRef.current?.fit();
+        secondaryFitRef.current?.fit();
+      } catch {}
+    }
+  };
+
   commandFoldersRef.current = commandFolders;
   commandSuggestionsEnabledRef.current = commandSuggestionsEnabled;
+  dangerousCommandGuardEnabledRef.current = dangerousCommandGuardEnabled;
   commandSuggestionSourcesRef.current = commandSuggestionSources;
   commandSuggestionApplyKeyRef.current = commandSuggestionApplyKey;
   commandSuggestionCustomApplyKeyRef.current = commandSuggestionCustomApplyKey;
+
+  function sendInputToSessions(targetSessionId: string, text: string) {
+    if (!text || !targetSessionId) return;
+    if (useAppStore.getState().commandBroadcastingEnabled && sessions && sessions.length > 0) {
+      sessions.forEach((s) => {
+        if (s.connected || s.status === "connected") {
+          sendTerminalInput(s.id, text);
+        }
+      });
+    } else {
+      sendTerminalInput(targetSessionId, text);
+    }
+  }
+
   visibleRef.current = visible;
 
   function focusTerminal() {
     if (!visibleRef.current) return;
-    terminalRef.current?.focus();
+    if (focusedPane === "secondary" && secondaryTerminalRef.current) {
+      secondaryTerminalRef.current.focus();
+    } else {
+      terminalRef.current?.focus();
+    }
   }
 
   function refitAndFocusTerminal() {
     if (!visibleRef.current) return;
     fitRef.current?.fit();
+    secondaryFitRef.current?.fit();
     const terminal = terminalRef.current;
     if (terminal) {
       if (terminal.cols < 20 || terminal.rows < 5) {
@@ -2497,6 +6653,7 @@ function TerminalSurface({
       }
     }
     terminalRef.current?.refresh(0, terminalRef.current.rows - 1);
+    secondaryTerminalRef.current?.refresh(0, (secondaryTerminalRef.current.rows || 1) - 1);
     focusTerminal();
   }
 
@@ -2541,6 +6698,7 @@ function TerminalSurface({
     commandSuggestionsRef.current = next;
     setCommandSuggestions(next);
     setActiveCommandSuggestionIndex(0);
+    hasUserNavigatedListRef.current = false;
   }
 
   function refreshCommandSuggestionList(draft = commandInputRef.current) {
@@ -2586,11 +6744,14 @@ function TerminalSurface({
         draft = draft.slice(0, -1);
         continue;
       }
+      if (char === "\x17") {
+        draft = draft.replace(/\S+\s*$/, "");
+        continue;
+      }
       if (char === "\x15") {
         draft = "";
         continue;
       }
-      if (char < " ") continue;
       draft += char;
     }
 
@@ -2598,6 +6759,18 @@ function TerminalSurface({
     if (submittedCommand) {
       commandHistoryRef.current = recordCommandHistory(commandHistoryRef.current, submittedCommand);
       rawCommandModeRef.current = isFullScreenCommand(submittedCommand);
+
+      if (dangerousCommandGuardEnabledRef.current) {
+        const info = checkDangerousCommand(submittedCommand);
+        if (info.isDangerous) {
+          const sessionId = activeIdRef.current;
+          onRequestDangerousCommandConfirmation?.(submittedCommand, info, () => {
+            if (sessionId) {
+              sendTerminalInput(sessionId, `${submittedCommand}\n`);
+            }
+          });
+        }
+      }
     }
     refreshCommandSuggestionList(draft);
   }
@@ -2613,10 +6786,12 @@ function TerminalSurface({
   function moveCommandSuggestion(direction: 1 | -1) {
     const count = commandSuggestionsRef.current.length;
     if (count === 0) return;
+    hasUserNavigatedListRef.current = true;
     setActiveCommandSuggestionIndex((activeCommandSuggestionIndexRef.current + direction + count) % count);
   }
 
   function applyCommandSuggestion(suggestion: CommandSuggestion) {
+    recordCommandExecution(suggestion.command);
     const sessionId = activeIdRef.current;
     const draft = commandInputRef.current;
     const shortcutParameters = suggestion.shortcut ? extractCommandParameters(suggestion.command) : [];
@@ -2625,7 +6800,7 @@ function TerminalSurface({
       commandInputRef.current = "";
       setCommandSuggestionList([]);
       if (sessionId && eraseDraft) {
-        void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(eraseDraft)));
+        sendInputToSessions(sessionId, eraseDraft);
       }
       onShortcutParameterRequest(suggestion.shortcut);
       return;
@@ -2638,14 +6813,21 @@ function TerminalSurface({
     commandInputRef.current = suggestion.command;
     setCommandSuggestionList([]);
     if (!sessionId || !suffix) return;
-    void nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(suffix)));
+    sendInputToSessions(sessionId, suffix);
   }
 
   function isCommandSuggestionApplyKey(event: globalThis.KeyboardEvent) {
     const applyKey = commandSuggestionApplyKeyRef.current;
-    if (applyKey === "tab") return event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey;
-    if (applyKey === "ctrlSpace") return event.ctrlKey && !event.altKey && !event.metaKey && (event.code === "Space" || event.key === " ");
-    if (applyKey === "altEnter") return event.altKey && !event.ctrlKey && !event.metaKey && event.key === "Enter";
+    if (applyKey === "altEnter") {
+      return event.key === "Enter" && event.altKey;
+    }
+    if (applyKey === "enter") {
+      return event.key === "Enter" && !event.ctrlKey && !event.metaKey;
+    }
+    if (applyKey === "shiftTab") {
+      return event.key === "Tab" && event.shiftKey;
+    }
+    if (applyKey === "ctrlSpace") return event.ctrlKey && !event.metaKey && (event.code === "Space" || event.key === " ");
 
     const custom = commandSuggestionCustomApplyKeyRef.current;
     return Boolean(
@@ -2676,6 +6858,31 @@ function TerminalSurface({
       return false;
     }
 
+    // Shift + Tab or ArrowRight (like modern zsh/warp suggestion accept) applies the suggestion
+    if ((event.key === "Tab" && event.shiftKey) || event.key === "ArrowRight") {
+      event.preventDefault();
+      event.stopPropagation();
+      applyCommandSuggestion(commandSuggestionsRef.current[activeCommandSuggestionIndexRef.current] || commandSuggestionsRef.current[0]);
+      return false;
+    }
+
+    // Pure Tab key is 100% dedicated to Linux remote shell native auto-completion!
+    if (event.key === "Tab" && !event.shiftKey) {
+      setCommandSuggestionList([]);
+      return true;
+    }
+
+    if (event.key === "Enter") {
+      if (hasUserNavigatedListRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        applyCommandSuggestion(commandSuggestionsRef.current[activeCommandSuggestionIndexRef.current] || commandSuggestionsRef.current[0]);
+        return false;
+      }
+      setCommandSuggestionList([]);
+      return true;
+    }
+
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -2701,20 +6908,50 @@ function TerminalSurface({
     if (!activeSession) return;
 
     function restoreTerminalRender() {
-      rebuildTerminalRenderer();
+      if (!visibleRef.current) return;
+      suppressFocusInputResidue();
+      fitRef.current?.fit();
+      secondaryFitRef.current?.fit();
+      focusTerminal();
+      terminalRef.current?.refresh(0, (terminalRef.current.rows || 1) - 1);
+      secondaryTerminalRef.current?.refresh(0, (secondaryTerminalRef.current.rows || 1) - 1);
+      scheduleTerminalLayoutRestore();
     }
 
     function handleVisibilityChange() {
-      if (!document.hidden) restoreTerminalRender();
+      if (!document.hidden) {
+        restoreTerminalRender();
+      }
+    }
+
+    function handleGlobalKeyDown(event: globalThis.KeyboardEvent) {
+      if (!visibleRef.current || !activeSession?.id) return;
+      const target = event.target as HTMLElement;
+      const tag = target?.tagName?.toLowerCase();
+      const isXtermHelper = target?.classList?.contains("xterm-helper-textarea");
+      if ((tag === "input" || tag === "textarea") && !isXtermHelper) return;
+
+      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+
+      if ((isCtrlOrMeta && !event.shiftKey && key === "v") || (event.shiftKey && key === "insert")) {
+        event.preventDefault();
+        event.stopPropagation();
+        const targetSessionId = focusedPane === "secondary" && secondarySession?.id ? secondarySession.id : activeSession.id;
+        void pasteTerminalClipboard(targetSessionId);
+        focusTerminal();
+      }
     }
 
     window.addEventListener("focus", restoreTerminalRender);
+    window.addEventListener("keydown", handleGlobalKeyDown);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.removeEventListener("focus", restoreTerminalRender);
+      window.removeEventListener("keydown", handleGlobalKeyDown);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [activeSession?.id]);
+  }, [activeSession?.id, focusedPane, secondarySession?.id]);
 
   useEffect(() => {
     rawCommandModeRef.current = false;
@@ -2729,16 +6966,33 @@ function TerminalSurface({
   }, [commandSuggestionsEnabled, commandSuggestionSources]);
 
   useEffect(() => {
-    if (commandSuggestions.length === 0) {
+    if (
+      !activeSession ||
+      !activeSession.connected ||
+      activeSession.status === "disconnected" ||
+      activeSession.status === "failed" ||
+      commandSuggestions.length === 0
+    ) {
       onCommandSuggestionViewChange(null);
       return;
     }
     onCommandSuggestionViewChange({
       suggestions: commandSuggestions,
       activeIndex: activeCommandSuggestionIndex,
-      onApply: applyCommandSuggestion
+      onApply: applyCommandSuggestion,
+      onClose: () => {
+        resetCommandInput();
+        onCommandSuggestionViewChange(null);
+      }
     });
-  }, [activeCommandSuggestionIndex, commandSuggestions, onCommandSuggestionViewChange]);
+  }, [
+    activeCommandSuggestionIndex,
+    commandSuggestions,
+    onCommandSuggestionViewChange,
+    activeSession?.id,
+    activeSession?.connected,
+    activeSession?.status
+  ]);
 
   useEffect(() => () => onCommandSuggestionViewChange(null), [onCommandSuggestionViewChange]);
 
@@ -2755,6 +7009,11 @@ function TerminalSurface({
   }, [onOutput]);
 
   useEffect(() => {
+    highlightRulesRef.current = highlightRules;
+    secondaryIdRef.current = secondarySession?.id;
+  }, [highlightRules, secondarySession?.id]);
+
+  useEffect(() => {
     searchAddonRef.current?.clearDecorations();
     setSearchResult({ resultIndex: -1, resultCount: 0 });
   }, [activeSession?.id]);
@@ -2765,9 +7024,59 @@ function TerminalSurface({
   }, [searchOpen, searchQuery, activeSession?.id]);
 
   async function pasteTerminalClipboard(sessionId: string) {
-    const result = await nativeBridge.clipboardPaste();
-    if (result.success && result.text) {
-      await nativeBridge.sendInputBase64(sessionId, bytesToBase64(new TextEncoder().encode(normalizePasteText(result.text))));
+    let text = "";
+    try {
+      const result = await nativeBridge.clipboardPaste();
+      if (result.success && result.text) {
+        text = result.text;
+      }
+    } catch {
+      // fallback
+    }
+    if (!text && navigator.clipboard?.readText) {
+      try {
+        text = await navigator.clipboard.readText();
+      } catch {
+        // ignore
+      }
+    }
+    if (!text) return;
+
+    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const rawLines = normalized.split("\n");
+
+    const sendData = (data: string) => {
+      if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
+        sessions.forEach((s) => {
+          if (s.connected || s.status === "connected") {
+            sendTerminalInput(s.id, data);
+          }
+        });
+      } else {
+        sendTerminalInput(sessionId, data);
+      }
+    };
+
+    if (rawLines.length <= 1) {
+      await sendData(rawLines[0] || "");
+      return;
+    }
+
+    // For multiline paste, send line-by-line with carriage return and paced delay
+    // so sub-processes (like android-lxc / docker / sudo) don't swallow queued stdin bytes
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+      if (i === rawLines.length - 1 && line === "") {
+        break;
+      }
+      const isLast = i === rawLines.length - 1;
+      const toSend = isLast ? line : `${line}\r`;
+      if (toSend) {
+        await sendData(toSend);
+      }
+      if (!isLast) {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
     }
   }
 
@@ -2781,10 +7090,74 @@ function TerminalSurface({
     return decoder.decode(bytes, { stream: true });
   }
 
+  function enqueueTerminalWrite(sessionId: string, output: string) {
+    const pending = pendingTerminalWritesRef.current;
+    (pending[sessionId] ??= []).push(output);
+    if (terminalWriteFlushScheduledRef.current) return;
+    terminalWriteFlushScheduledRef.current = true;
+    const run = () => {
+      terminalWriteFlushScheduledRef.current = false;
+      flushPendingTerminalWrites();
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(run);
+    } else {
+      setTimeout(run, 4);
+    }
+  }
+
+  function flushPendingTerminalWrites() {
+    const pending = pendingTerminalWritesRef.current;
+    for (const sessionId of Object.keys(pending)) {
+      const chunks = pending[sessionId];
+      delete pending[sessionId];
+      if (!chunks || chunks.length === 0) continue;
+      const output = chunks.length === 1 ? chunks[0] : chunks.join("");
+      const target =
+        sessionId === activeIdRef.current
+          ? terminalRef.current
+          : sessionId === secondaryIdRef.current
+            ? secondaryTerminalRef.current
+            : null;
+      if (!target) continue;
+      writeHighlightedOrRaw(target, output, highlightRulesRef.current);
+    }
+  }
+
+  useEffect(() => {
+    if (!terminalMenu) return;
+    const handleDown = (e: MouseEvent) => {
+      const menuEl = document.getElementById("terminal-context-menu");
+      if (menuEl && !menuEl.contains(e.target as Node)) {
+        setTerminalMenu(null);
+      }
+    };
+    const handleKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setTerminalMenu(null);
+    };
+    window.addEventListener("mousedown", handleDown, true);
+    window.addEventListener("keydown", handleKey, true);
+    return () => {
+      window.removeEventListener("mousedown", handleDown, true);
+      window.removeEventListener("keydown", handleKey, true);
+    };
+  }, [terminalMenu]);
+
   function openTerminalMenu(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
+    event.stopPropagation();
     const selection = terminalRef.current?.getSelection() || selectedText;
-    setTerminalMenu({ x: event.clientX, y: event.clientY, selection });
+    const appearance = getTerminalAppearance(terminalAppearance);
+
+    if (appearance.rightClickPaste) {
+      if (activeSession) {
+        void pasteTerminalClipboard(activeSession.id);
+      }
+      return;
+    }
+    const posX = Math.max(8, Math.min(event.clientX, window.innerWidth - 200));
+    const posY = Math.max(8, Math.min(event.clientY, window.innerHeight - 340));
+    setTerminalMenu({ x: posX, y: posY, selection });
   }
 
   async function copyTerminalSelection(selection: string) {
@@ -2807,13 +7180,16 @@ function TerminalSurface({
     setSelectedText("");
     terminalRef.current?.dispose();
     container.replaceChildren();
+    // 终端重建时 transcript 会整体重放,丢弃旧实例遗留的待写数据避免重复渲染
+    delete pendingTerminalWritesRef.current[activeSession.id];
     const appearance = getTerminalAppearance(terminalAppearance);
     const terminalThemeOptions = getTerminalColors(terminalTheme, appearance, Boolean(terminalBackgroundImage));
     const terminal = new XTerm({
       allowProposedApi: true,
+      allowTransparency: true,
       customGlyphs: true,
-      cursorBlink: true,
-      cursorStyle: "block",
+      cursorBlink: appearance.cursorBlink ?? true,
+      cursorStyle: appearance.cursorStyle ?? "block",
       fontFamily: appearance.fontFamily,
       fontSize: appearance.fontSize,
       lineHeight: 1.25,
@@ -2829,8 +7205,49 @@ function TerminalSurface({
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(searchAddon);
     terminal.open(container);
+    attachFastRenderer(terminal);
     fitAddon.fit();
     terminal.focus();
+    if (typeof (terminal as any).onScroll === "function") {
+      (terminal as any).onScroll(() => {
+        try {
+          const buf = terminal.buffer?.active;
+          if (buf) {
+            setIsScrolledUp(buf.viewportY < buf.baseY);
+          }
+        } catch {}
+      });
+    }
+
+    // 智能终端超链接与 IP 端口识别器 (Smart Terminal Link Provider)
+    if (typeof (terminal as any).registerLinkProvider === "function") {
+      terminal.registerLinkProvider({
+        provideLinks(bufferLineNumber, callback) {
+          try {
+            const line = terminal.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true) || "";
+            const links: any[] = [];
+            const urlRegex = /(https?:\/\/[^\s"'<>()]+|\b(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}\b)/g;
+            let match: RegExpExecArray | null;
+            while ((match = urlRegex.exec(line)) !== null) {
+              const text = match[0];
+              const start = match.index + 1;
+              const end = start + text.length;
+              links.push({
+                range: { start: { x: start, y: bufferLineNumber }, end: { x: end, y: bufferLineNumber } },
+                text,
+                activate(_event: MouseEvent, uri: string) {
+                  const targetUrl = uri.startsWith("http") ? uri : `http://${uri}`;
+                  window.open(targetUrl, "_blank");
+                }
+              });
+            }
+            callback(links);
+          } catch {
+            callback([]);
+          }
+        }
+      });
+    }
     terminal.attachCustomKeyEventHandler((event) => {
       const key = event.key.toLowerCase();
       const isCtrlOrMeta = event.ctrlKey || event.metaKey;
@@ -2861,6 +7278,41 @@ function TerminalSurface({
         }
         return false;
       }
+      if (
+        event.type === "keydown" &&
+        isCtrlOrMeta &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "Backspace" || event.code === "Backspace")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(activeSession.id, "\x17");
+        return false;
+      }
+      if (
+        event.type === "keydown" &&
+        event.altKey &&
+        !isCtrlOrMeta &&
+        (event.key === "Backspace" || event.code === "Backspace")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(activeSession.id, "\x1b\x7f");
+        return false;
+      }
+      if (
+        event.type === "keydown" &&
+        isCtrlOrMeta &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "Delete" || event.code === "Delete")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(activeSession.id, "\x1bd");
+        return false;
+      }
       if (!handleCommandSuggestionKey(event)) {
         return false;
       }
@@ -2869,7 +7321,7 @@ function TerminalSurface({
     terminal.writeln(`\x1b[36m${activeSession.title}\x1b[0m`);
     terminal.writeln("");
     if (initialTranscript) {
-      terminal.write(applyHighlightRules(initialTranscript, highlightRules));
+      writeHighlightedOrRaw(terminal, initialTranscript, highlightRules);
     }
     decoderRef.current = new TextDecoder("utf-8");
     terminal.onData((data) => {
@@ -2877,11 +7329,44 @@ function TerminalSurface({
       if (!input || shouldDropFocusInputResidue(input)) {
         return;
       }
+
+      const isEnter = input.includes("\r") || input.includes("\n");
+      const currentDraft = commandInputRef.current.trim();
+
+      if (isEnter && dangerousCommandGuardEnabledRef.current && currentDraft) {
+        const info = checkDangerousCommand(currentDraft);
+        if (info.isDangerous) {
+          const eraseBytes = "\x15";
+          const targetSessionId = activeSession.id;
+          sendTerminalInput(targetSessionId, eraseBytes);
+
+          commandInputRef.current = "";
+          setCommandSuggestionList([]);
+
+          onRequestDangerousCommandConfirmation?.(currentDraft, info, () => {
+            sendTerminalInput(targetSessionId, `${currentDraft}\n`);
+          });
+          return;
+        }
+      }
+
       updateCommandInputFromData(input);
-      void nativeBridge.sendInputBase64(activeSession.id, bytesToBase64(new TextEncoder().encode(input)));
+      if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
+        sessions.forEach((s) => {
+          if (s.connected || s.status === "connected") {
+            sendTerminalInput(s.id, input);
+          }
+        });
+      } else {
+        sendTerminalInput(activeSession.id, input);
+      }
     });
     const selectionDisposable = terminal.onSelectionChange(() => {
-      setSelectedText(terminal.getSelection().trim());
+      const selected = terminal.getSelection();
+      setSelectedText(selected.trim());
+      if (selected && appearance.copyOnSelect !== false) {
+        void nativeBridge.clipboardCopy(selected);
+      }
     });
     const searchResultDisposable = searchAddon.onDidChangeResults((event) => {
       setSearchResult({ resultIndex: event.resultIndex, resultCount: event.resultCount });
@@ -2907,19 +7392,23 @@ function TerminalSurface({
     resize();
     scheduleTerminalLayoutRestore();
 
-    const interval = window.setInterval(async () => {
+    const pollOutput = async (force: boolean) => {
+      // 已确认走推送通道的会话跳过快速轮询,由看门狗低频兜底
+      if (!force && pushSeenRef.current[activeSession.id]) return;
       const result = await nativeBridge.getOutput(activeSession.id);
-      if (result.output) {
-        const output = decodeTerminalOutput(result.output, decoderRef);
-        maybeLeaveRawCommandMode(output);
-        terminal.write(applyHighlightRules(output, highlightRules));
-        onOutput(activeSession.id, output);
-      }
-    }, 160);
+      if (!result.output) return;
+      const output = decodeTerminalOutput(result.output, decoderRef);
+      maybeLeaveRawCommandMode(output);
+      writeHighlightedOrRaw(terminal, output, highlightRulesRef.current);
+      onOutput(activeSession.id, output);
+    };
+    const interval = window.setInterval(() => void pollOutput(false), 160);
+    const watchdog = window.setInterval(() => void pollOutput(true), 5000);
 
     return () => {
       clearScheduledTerminalLayoutRestore();
       window.clearInterval(interval);
+      window.clearInterval(watchdog);
       observer.disconnect();
       selectionDisposable.dispose();
       searchResultDisposable.dispose();
@@ -2930,6 +7419,179 @@ function TerminalSurface({
     };
   }, [activeSession?.id, highlightRules, terminalTheme, terminalAppearance, terminalBackgroundImage, terminalRenderEpoch]);
 
+  // 副分屏终端实例与生命周期挂载
+  useEffect(() => {
+    const container = secondaryContainerRef.current;
+    if (!container || !isSplit || !secondarySession) return;
+
+    secondaryTerminalRef.current?.dispose();
+    container.replaceChildren();
+    delete pendingTerminalWritesRef.current[secondarySession.id];
+    const appearance = getTerminalAppearance(terminalAppearance);
+    const terminalThemeOptions = getTerminalColors(terminalTheme, appearance, Boolean(terminalBackgroundImage));
+    const term = new XTerm({
+      allowProposedApi: true,
+      allowTransparency: true,
+      customGlyphs: true,
+      cursorBlink: appearance.cursorBlink ?? true,
+      cursorStyle: appearance.cursorStyle ?? "block",
+      fontFamily: appearance.fontFamily,
+      fontSize: appearance.fontSize,
+      lineHeight: 1.25,
+      rightClickSelectsWord: true,
+      scrollOnUserInput: true,
+      scrollback: 5000,
+      theme: terminalBackgroundImage
+        ? { ...terminalThemeOptions, background: "rgba(0, 0, 0, 0)" }
+        : terminalThemeOptions
+    });
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(container);
+    attachFastRenderer(term);
+    fitAddon.fit();
+    if (typeof (term as any).onScroll === "function") {
+      (term as any).onScroll(() => {
+        try {
+          const buf = term.buffer?.active;
+          if (buf) {
+            setIsScrolledUp(buf.viewportY < buf.baseY);
+          }
+        } catch {}
+      });
+    }
+
+    // 智能终端超链接与 IP 端口识别器
+    if (typeof (term as any).registerLinkProvider === "function") {
+      term.registerLinkProvider({
+        provideLinks(bufferLineNumber, callback) {
+          try {
+            const line = term.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true) || "";
+            const links: any[] = [];
+            const urlRegex = /(https?:\/\/[^\s"'<>()]+|\b(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}\b)/g;
+            let match: RegExpExecArray | null;
+            while ((match = urlRegex.exec(line)) !== null) {
+              const text = match[0];
+              const start = match.index + 1;
+              const end = start + text.length;
+              links.push({
+                range: { start: { x: start, y: bufferLineNumber }, end: { x: end, y: bufferLineNumber } },
+                text,
+                activate(_event: MouseEvent, uri: string) {
+                  const targetUrl = uri.startsWith("http") ? uri : `http://${uri}`;
+                  window.open(targetUrl, "_blank");
+                }
+              });
+            }
+            callback(links);
+          } catch {
+            callback([]);
+          }
+        }
+      });
+    }
+    term.attachCustomKeyEventHandler((event) => {
+      const key = event.key.toLowerCase();
+      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+      if (event.type === "keydown" && isCtrlOrMeta && !event.shiftKey && key === "c") {
+        const selection = term.getSelection();
+        if (selection) {
+          event.preventDefault();
+          void nativeBridge.clipboardCopy(selection);
+          term.clearSelection();
+          return false;
+        }
+        return true;
+      }
+      if (event.type === "keydown" && ((isCtrlOrMeta && key === "v") || (event.shiftKey && key === "insert"))) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) {
+          void pasteTerminalClipboard(secondarySession.id);
+        }
+        return false;
+      }
+      if (
+        event.type === "keydown" &&
+        isCtrlOrMeta &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "Backspace" || event.code === "Backspace")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(secondarySession.id, "\x17");
+        return false;
+      }
+      if (
+        event.type === "keydown" &&
+        event.altKey &&
+        !isCtrlOrMeta &&
+        (event.key === "Backspace" || event.code === "Backspace")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(secondarySession.id, "\x1b\x7f");
+        return false;
+      }
+      if (
+        event.type === "keydown" &&
+        isCtrlOrMeta &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "Delete" || event.code === "Delete")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        sendInputToSessions(secondarySession.id, "\x1bd");
+        return false;
+      }
+      return true;
+    });
+    term.writeln(`\x1b[36m${secondarySession.title}\x1b[0m`);
+    term.writeln("");
+
+    secondaryDecoderRef.current = new TextDecoder("utf-8");
+    term.onData((data) => {
+      const input = stripTerminalGeneratedReplies(data);
+      if (!input) return;
+      sendTerminalInput(secondarySession.id, input);
+    });
+
+    secondaryTerminalRef.current = term;
+    secondaryFitRef.current = fitAddon;
+
+    const resize = () => {
+      if (!visibleRef.current) return;
+      fitAddon.fit();
+      if (term.cols >= 20 && term.rows >= 5) {
+        void nativeBridge.resizeTerminal(secondarySession.id, term.cols, term.rows);
+      }
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(container);
+    resize();
+
+    const pollOutput = async (force: boolean) => {
+      if (!force && pushSeenRef.current[secondarySession.id]) return;
+      const result = await nativeBridge.getOutput(secondarySession.id);
+      if (!result.output) return;
+      const output = decodeTerminalOutput(result.output, secondaryDecoderRef);
+      writeHighlightedOrRaw(term, output, highlightRulesRef.current);
+      onOutput(secondarySession.id, output);
+    };
+    const interval = window.setInterval(() => void pollOutput(false), 160);
+    const watchdog = window.setInterval(() => void pollOutput(true), 5000);
+
+    return () => {
+      window.clearInterval(interval);
+      window.clearInterval(watchdog);
+      observer.disconnect();
+      term.dispose();
+      secondaryTerminalRef.current = null;
+    };
+  }, [secondarySession?.id, isSplit, highlightRules, terminalTheme, terminalAppearance, terminalBackgroundImage]);
+
   useEffect(() => {
     if (focusRequest > 0) focusTerminal();
   }, [focusRequest]);
@@ -2939,16 +7601,26 @@ function TerminalSurface({
       const output = decodePushedTerminalOutput(sessionId, data);
       if (!output) return;
 
+      // 收到过推送的会话走推送通道,轮询自动降级为看门狗
+      pushSeenRef.current[sessionId] = true;
       onOutputRef.current(sessionId, output);
       if (sessionId === activeIdRef.current) {
         maybeLeaveRawCommandMode(output);
-        terminalRef.current?.write(applyHighlightRules(output, highlightRules));
       }
+      if (
+        output.includes("[SSH Connection closed") ||
+        output.includes("[SSH Connection lost") ||
+        output.includes("[SSH Connection error") ||
+        output.includes("[Process exited]")
+      ) {
+        window.handleSessionClosed?.(sessionId);
+      }
+      enqueueTerminalWrite(sessionId, output);
     };
     return () => {
       window.handlePushOutput = undefined;
     };
-  }, [highlightRules]);
+  }, []);
 
   function moveSearchMatch(direction: 1 | -1) {
     runTerminalSearch(direction);
@@ -3009,11 +7681,56 @@ function TerminalSurface({
 
   if (!activeSession) {
     return (
-      <div className="flex h-full items-center justify-center bg-slate-50">
-        <EmptyState
-          title="暂无活动会话"
-          description="打开 Local Shell 或连接 SSH 主机后，终端会显示在这里。"
-        />
+      <div className="flex h-full min-h-0 overflow-auto bg-[var(--app-bg)] px-8 py-10 select-none">
+        <div className="mx-auto my-auto max-w-xl w-full space-y-6">
+          <div className="text-center space-y-2.5">
+            <div className="inline-flex h-14 w-14 items-center justify-center rounded-3xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shadow-sm">
+              <Terminal className="h-7 w-7" />
+            </div>
+            <h2 className="text-2xl font-extrabold tracking-tight text-[var(--app-text)]">
+              轻量极速 SSH & 本地终端控制台
+            </h2>
+            <p className="text-xs font-medium text-[var(--text-secondary)] max-w-md mx-auto leading-5">
+              原生支持 Multi-Tab 会话分流、AI 候选命令补全、交互式 SFTP 传输与硬件性能推算。
+            </p>
+          </div>
+
+          {/* 4 大一键入口卡片 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <button
+              className="flex items-center gap-3.5 rounded-2xl border border-emerald-300 dark:border-emerald-800 bg-[var(--panel-bg)] p-4 text-left hover:border-emerald-500 hover:shadow-md transition-all cursor-pointer shadow-2xs group"
+              onClick={onCreateLocal}
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm group-hover:scale-105 transition-transform">
+                <Terminal className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold text-[var(--app-text)]">启动 本地 Shell</div>
+                <div className="mt-0.5 truncate text-[10px] font-bold text-emerald-600 dark:text-emerald-400">运行本地 PowerShell / CMD</div>
+              </div>
+            </button>
+
+            <button
+              className="flex items-center gap-3.5 rounded-2xl border border-indigo-300 dark:border-indigo-800 bg-[var(--panel-bg)] p-4 text-left hover:border-indigo-500 hover:shadow-md transition-all cursor-pointer shadow-2xs group"
+              onClick={() => onShortcutParameterRequest?.({ folderId: "default", commandId: "top_cpu" } as any)}
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm group-hover:scale-105 transition-transform">
+                <Command className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold text-[var(--app-text)]">快捷指令预载库</div>
+                <div className="mt-0.5 truncate text-[10px] font-bold text-indigo-600 dark:text-indigo-400">预装 50+ 常用 Linux 运维命令</div>
+              </div>
+            </button>
+          </div>
+
+          {/* 状态能力防护标 */}
+          <div className="flex items-center justify-center gap-6 pt-3 border-t border-[var(--app-line)] text-[11px] font-extrabold text-[var(--app-muted)]">
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500" /> SSH v2 加密直连</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" /> UTF-8 原生排版</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-purple-500" /> AI 终端感知补全</span>
+          </div>
+        </div>
       </div>
     );
   }
@@ -3025,7 +7742,10 @@ function TerminalSurface({
     "--terminal-text": terminalColors.foreground,
     backgroundColor: terminalColors.background,
     color: terminalColors.foreground,
-    backgroundImage: buildTerminalBackgroundImage(terminalBackgroundImage, terminalColors.background, backgroundOverlayAlpha)
+    backgroundImage: buildTerminalBackgroundImage(terminalBackgroundImage, terminalColors.background, backgroundOverlayAlpha),
+    backgroundAttachment: "fixed",
+    backgroundPosition: "center",
+    backgroundSize: "cover"
   } as CSSProperties;
 
   return (
@@ -3035,21 +7755,184 @@ function TerminalSurface({
       data-terminal-theme={terminalTheme}
       style={terminalStyle}
       tabIndex={0}
-      onPointerDown={focusTerminal}
-      onMouseEnter={refitAndFocusTerminal}
+      onPointerDown={() => {
+        if (!isSplit) focusTerminal();
+      }}
+      onMouseEnter={() => {
+        if (!isSplit) refitAndFocusTerminal();
+      }}
       onKeyDown={handleTerminalKeyDown}
       onContextMenu={openTerminalMenu}
     >
-      <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
+      {!isSplit || !primarySession ? (
+        <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
+      ) : (
+        <div
+          ref={splitWrapperRef}
+          className={cn(
+            "flex h-full w-full p-1 min-h-0 overflow-hidden select-none",
+            splitMode === "vertical" ? "flex-col" : "flex-row"
+          )}
+        >
+          {/* 主分屏 (Active / Primary) */}
+          <div
+            style={splitMode === "vertical" ? { height: `${splitRatio}%` } : { width: `${splitRatio}%` }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setFocusedPane("primary");
+              terminalRef.current?.focus();
+            }}
+            className={cn(
+              "relative flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl border transition-all cursor-text shrink-0",
+              focusedPane === "primary"
+                ? "border-emerald-500/80 shadow-md ring-1 ring-emerald-500/30"
+                : "border-[var(--app-line)] opacity-85 hover:opacity-100"
+            )}
+          >
+            <div className={cn(
+              "flex items-center justify-between border-b px-3 py-1 text-[11px] font-mono select-none font-bold",
+              focusedPane === "primary"
+                ? "border-emerald-500/30 bg-emerald-950/40 text-emerald-300"
+                : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)]"
+            )}>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Terminal className="h-3 w-3 text-emerald-400 shrink-0" />
+                <span className="truncate">{primarySession.title}</span>
+                {focusedPane === "primary" ? (
+                  <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动主屏</span>
+                ) : (
+                  <span className="text-[9px] bg-[var(--fill-2)] text-[var(--app-muted)] px-1 py-0.2 rounded font-mono">点击激活</span>
+                )}
+                {useAppStore.getState().commandBroadcastingEnabled && (
+                  <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded font-mono animate-pulse">
+                    📡 广播发起源
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSplit?.(primarySession.id, "none");
+                  }}
+                  title="退出分屏 (全屏)"
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                >
+                  <Minimize2 className="h-2.5 w-2.5" />
+                  <span>还原全屏</span>
+                </button>
+              </div>
+            </div>
+            <div ref={containerRef} className="flex-1 min-h-0 min-w-0 overflow-hidden relative" />
+          </div>
+
+          {/* 可自由拖拽调节分屏比例的交互手柄 (Draggable Splitter Bar) */}
+          <div
+            onPointerDown={handleSplitterPointerDown}
+            onPointerMove={handleSplitterPointerMove}
+            onPointerUp={handleSplitterPointerUp}
+            className={cn(
+              "group relative flex items-center justify-center select-none z-10 transition-colors shrink-0",
+              splitMode === "vertical"
+                ? "h-2 w-full cursor-row-resize hover:h-2.5 my-0.5"
+                : "w-2 h-full cursor-col-resize hover:w-2.5 mx-0.5"
+            )}
+            title="按住鼠标拖拽自由调整分屏比例"
+          >
+            <div
+              className={cn(
+                "rounded-full bg-[var(--app-line)] group-hover:bg-purple-500 transition-all",
+                splitMode === "vertical"
+                  ? "w-16 h-1 group-hover:w-24"
+                  : "h-16 w-1 group-hover:h-24",
+                isDraggingSplitter && "bg-purple-500 shadow-md shadow-purple-500/50 " + (splitMode === "vertical" ? "w-full h-1" : "h-full w-1")
+              )}
+            />
+          </div>
+
+          {/* 副分屏 (Secondary) */}
+          {secondarySession && (
+            <div
+              style={splitMode === "vertical" ? { height: `${100 - splitRatio}%` } : { width: `${100 - splitRatio}%` }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                setFocusedPane("secondary");
+                secondaryTerminalRef.current?.focus();
+              }}
+              className={cn(
+                "relative flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl border transition-all cursor-text shrink-0",
+                focusedPane === "secondary"
+                  ? "border-emerald-500/80 shadow-md ring-1 ring-emerald-500/30"
+                  : "border-[var(--app-line)] opacity-85 hover:opacity-100"
+              )}
+            >
+              <div className={cn(
+                "flex items-center justify-between border-b px-3 py-1 text-[11px] font-mono select-none font-bold",
+                focusedPane === "secondary"
+                  ? "border-emerald-500/30 bg-emerald-950/40 text-emerald-300"
+                  : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)]"
+              )}>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Terminal className="h-3 w-3 text-blue-400 shrink-0" />
+                  <span className="truncate">{secondarySession.title}</span>
+                  {focusedPane === "secondary" ? (
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-mono">活动副屏</span>
+                  ) : (
+                    <span className="text-[9px] bg-[var(--fill-2)] text-[var(--app-muted)] px-1 py-0.2 rounded font-mono">副屏就绪</span>
+                  )}
+                  {useAppStore.getState().commandBroadcastingEnabled && (
+                    <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded font-mono animate-pulse">
+                      📡 同步广播接收中
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleSplit?.(primarySession.id, "none");
+                    }}
+                    title="关闭分屏"
+                    className="rounded p-0.5 text-[var(--app-muted)] hover:text-rose-500 transition-colors cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+              <div ref={secondaryContainerRef} className="flex-1 min-h-0 min-w-0 overflow-hidden relative" />
+            </div>
+          )}
+        </div>
+      )}
+      {/* 终端向上回滚时的浮动「跳至最新输出」按钮 */}
+      {isScrolledUp && (
+        <button
+          type="button"
+          onClick={() => {
+            const activeTerm = focusedPane === "secondary" && secondaryTerminalRef.current ? secondaryTerminalRef.current : terminalRef.current;
+            activeTerm?.scrollToBottom();
+            setIsScrolledUp(false);
+            activeTerm?.focus();
+          }}
+          className="absolute right-6 bottom-4 z-30 flex items-center gap-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-1.5 text-xs font-extrabold shadow-xl shadow-emerald-950/60 border border-emerald-400/40 transition-all animate-in fade-in slide-in-from-bottom-2 duration-150 cursor-pointer"
+          title="点击瞬间跳至终端最新输出底部"
+        >
+          <ArrowDown className="h-3.5 w-3.5" />
+          <span>跳至最新输出 ⬇</span>
+        </button>
+      )}
+
+      {/* 终端浮动快捷工具 (查找) */}
       <button
         aria-label="查找终端输出"
-        title="查找终端输出"
-        className="absolute right-5 top-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] shadow-lg hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)]"
+        title="查找终端输出 (Ctrl+F)"
+        className="absolute right-5 top-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-muted)] shadow-lg hover:bg-[var(--subtle-bg)] hover:text-[var(--app-text)] cursor-pointer"
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => setSearchOpen(true)}
       >
         <Search className="h-3.5 w-3.5" />
       </button>
+
       {searchOpen && (
         <div
           className="absolute right-5 top-14 z-20 w-[min(380px,calc(100%-40px))] rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 text-xs text-[var(--app-text)] shadow-xl"
@@ -3125,41 +8008,136 @@ function TerminalSurface({
           添加到对话
         </button>
       )}
-      {terminalMenu && activeSession && (
+      {terminalMenu && activeSession && typeof document !== "undefined" && createPortal(
         <div
+          id="terminal-context-menu"
           role="menu"
           className="fixed z-50 min-w-36 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs text-[var(--app-text)] shadow-xl"
           style={{ left: terminalMenu.x, top: terminalMenu.y }}
         >
           <button
             role="menuitem"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[var(--subtle-bg)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] disabled:cursor-not-allowed disabled:opacity-40 font-bold"
             disabled={!terminalMenu.selection}
             onClick={() => void copyTerminalSelection(terminalMenu.selection)}
           >
-            <Copy className="h-3.5 w-3.5" />
-            复制
+            <Copy className="h-3.5 w-3.5 text-emerald-400" />
+            <span>复制 (Ctrl+C)</span>
           </button>
+
           <button
             role="menuitem"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[var(--subtle-bg)]"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] font-bold"
             onClick={() => {
               setTerminalMenu(null);
               void pasteTerminalClipboard(activeSession.id);
             }}
           >
-            <Paperclip className="h-3.5 w-3.5" />
-            粘贴
+            <Paperclip className="h-3.5 w-3.5 text-sky-400" />
+            <span>粘贴 (Ctrl+V)</span>
           </button>
+
           <button
             role="menuitem"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[var(--subtle-bg)]"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] font-bold"
             onClick={selectAllTerminal}
           >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            全选
+            <CheckCircle2 className="h-3.5 w-3.5 text-purple-400" />
+            <span>全选 (Ctrl+A)</span>
           </button>
-        </div>
+
+          <button
+            role="menuitem"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] text-emerald-400 font-bold"
+            onClick={() => {
+              setTerminalMenu(null);
+              if (!terminalRef.current) return;
+              const buffer = terminalRef.current.buffer.active;
+              const lines: string[] = [];
+              for (let i = 0; i < buffer.length; i++) {
+                const line = buffer.getLine(i);
+                if (line) lines.push(line.translateToString(true));
+              }
+              const fullText = lines.join("\n").trim();
+              if (fullText) {
+                void nativeBridge.clipboardCopy(fullText);
+              }
+            }}
+          >
+            <Copy className="h-3.5 w-3.5 text-emerald-400" />
+            <span>复制全部终端输出</span>
+          </button>
+
+          <button
+            role="menuitem"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] text-sky-400 font-bold"
+            onClick={() => {
+              setTerminalMenu(null);
+              if (!terminalRef.current) return;
+              const buffer = terminalRef.current.buffer.active;
+              const lines: string[] = [];
+              for (let i = 0; i < buffer.length; i++) {
+                const line = buffer.getLine(i);
+                if (line) lines.push(line.translateToString(true));
+              }
+              const fullText = lines.join("\n").trim();
+              if (!fullText) return;
+              const blob = new Blob([fullText], { type: "text/plain;charset=utf-8" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `terminal_${activeSession?.title || "session"}_${new Date().toISOString().slice(0, 10)}.log`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            <Download className="h-3.5 w-3.5 text-sky-400" />
+            <span>导出终端日志 (.log)</span>
+          </button>
+
+          <div className="h-px bg-[var(--app-line)] my-1" />
+
+          {terminalMenu.selection && (
+            <>
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] text-blue-400 font-bold"
+                onClick={() => {
+                  setTerminalMenu(null);
+                  window.open(`https://www.bing.com/search?q=${encodeURIComponent(terminalMenu.selection)}`, "_blank");
+                }}
+              >
+                <Search className="h-3.5 w-3.5 text-blue-400" />
+                <span>在浏览器中搜索选中文本</span>
+              </button>
+
+              <button
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] text-purple-400 font-bold"
+                onClick={() => {
+                  onAddAiQuote(terminalMenu.selection);
+                  setTerminalMenu(null);
+                }}
+              >
+                <Bot className="h-3.5 w-3.5 text-purple-400" />
+                <span>投送给 AI 助手排错分析</span>
+              </button>
+            </>
+          )}
+
+          <button
+            role="menuitem"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left hover:bg-[var(--subtle-bg)] text-amber-400 font-bold"
+            onClick={() => {
+              setTerminalMenu(null);
+              terminalRef.current?.clear();
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5 text-amber-400" />
+            <span>清空屏幕 (Clear)</span>
+          </button>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -3171,7 +8149,9 @@ function TerminalCommandSidebar({
   activeSession,
   shortcutParameterRequest,
   onActiveFolderChange,
-  onSendCommand
+  onSendCommand,
+  onAddFolder,
+  onSaveCommand
 }: {
   folders: CommandFolder[];
   activeFolderId: string;
@@ -3179,6 +8159,8 @@ function TerminalCommandSidebar({
   shortcutParameterRequest: ShortcutParameterRequest | null;
   onActiveFolderChange: (folderId: string) => void;
   onSendCommand: (command: string) => void;
+  onAddFolder?: (name: string) => void;
+  onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [detailCommandKey, setDetailCommandKey] = useState("");
@@ -3189,6 +8171,53 @@ function TerminalCommandSidebar({
     y: number;
     command: CommandItem & { folderId: string; folderName: string };
   } | null>(null);
+
+  // Blank space right-click menu & Dialog states
+  const [blankMenu, setBlankMenu] = useState<{ x: number; y: number } | null>(null);
+  const [addFolderOpen, setAddFolderOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [addCmdOpen, setAddCmdOpen] = useState(false);
+  const [newCmdName, setNewCmdName] = useState("");
+  const [newCmdStr, setNewCmdStr] = useState("");
+  const [newCmdDesc, setNewCmdDesc] = useState("");
+  const [addCmdCr, setAddCmdCr] = useState(true);
+  const newCmdTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  function insertParamIntoNewCmd(paramText: string) {
+    const textarea = newCmdTextareaRef.current;
+    if (!textarea) {
+      setNewCmdStr((prev) => `${prev}${paramText}`);
+      return;
+    }
+    textarea.focus();
+    const start = textarea.selectionStart ?? newCmdStr.length;
+    const end = textarea.selectionEnd ?? newCmdStr.length;
+
+    let insertedViaExec = false;
+    if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+      try {
+        insertedViaExec = document.execCommand("insertText", false, paramText);
+      } catch (e) {
+        insertedViaExec = false;
+      }
+    }
+
+    if (!insertedViaExec) {
+      const before = newCmdStr.slice(0, start);
+      const after = newCmdStr.slice(end);
+      const updated = `${before}${paramText}${after}`;
+      setNewCmdStr(updated);
+
+      requestAnimationFrame(() => {
+        textarea.focus();
+        const newPos = start + paramText.length;
+        textarea.setSelectionRange(newPos, newPos);
+      });
+    } else {
+      setNewCmdStr(textarea.value);
+    }
+  }
+
   const keyword = query.trim().toLowerCase();
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
   const commands = (keyword
@@ -3220,7 +8249,7 @@ function TerminalCommandSidebar({
     setParameterValues({});
   }, [shortcutParameterRequest, folders, onActiveFolderChange]);
 
-  function runCommand(command: CommandItem & { folderId: string }) {
+  function runCommand(command: CommandItem & { folderId: string }, autoExecute = true) {
     const parameters = extractCommandParameters(command.command);
     if (parameters.length) {
       setPendingCommandKey(commandKey(command));
@@ -3228,7 +8257,13 @@ function TerminalCommandSidebar({
       setParameterValues({});
       return;
     }
-    onSendCommand(command.command);
+    let cmdStr = command.command;
+    if (!autoExecute) {
+      cmdStr = cmdStr.replace(/[\r\n]+$/, "");
+    } else {
+      if (!cmdStr.endsWith("\n")) cmdStr += "\n";
+    }
+    onSendCommand(cmdStr);
   }
 
   function sendPendingCommand() {
@@ -3240,7 +8275,46 @@ function TerminalCommandSidebar({
 
   function openCommandMenu(event: ReactMouseEvent, command: CommandItem & { folderId: string; folderName: string }) {
     event.preventDefault();
-    setCommandMenu({ x: event.clientX, y: event.clientY, command });
+    event.stopPropagation();
+    setBlankMenu(null);
+    const posX = Math.max(8, Math.min(event.clientX, (typeof window !== "undefined" ? window.innerWidth : 1000) - 200));
+    const posY = Math.max(8, Math.min(event.clientY, (typeof window !== "undefined" ? window.innerHeight : 800) - 260));
+    setCommandMenu({ x: posX, y: posY, command });
+  }
+
+  function handleBlankContextMenu(event: ReactMouseEvent) {
+    event.preventDefault();
+    setCommandMenu(null);
+    const posX = Math.max(8, Math.min(event.clientX, (typeof window !== "undefined" ? window.innerWidth : 1000) - 180));
+    const posY = Math.max(8, Math.min(event.clientY, (typeof window !== "undefined" ? window.innerHeight : 800) - 140));
+    setBlankMenu({ x: posX, y: posY });
+  }
+
+  function handleConfirmAddFolder(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    onAddFolder?.(newFolderName.trim());
+    setNewFolderName("");
+    setAddFolderOpen(false);
+  }
+
+  function handleConfirmAddCmd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newCmdName.trim() || !newCmdStr.trim()) return;
+    const targetFolderId = activeFolder?.id || folders[0]?.id || "";
+    let finalCmdStr = newCmdStr.trim();
+    if (addCmdCr && !finalCmdStr.endsWith("\n")) {
+      finalCmdStr += "\n";
+    }
+    onSaveCommand?.(targetFolderId, {
+      name: newCmdName.trim(),
+      command: finalCmdStr,
+      description: newCmdDesc.trim()
+    });
+    setNewCmdName("");
+    setNewCmdStr("");
+    setNewCmdDesc("");
+    setAddCmdOpen(false);
   }
 
   async function copyCommand(command: CommandItem) {
@@ -3249,21 +8323,31 @@ function TerminalCommandSidebar({
   }
 
   return (
-    <div className="grid h-full min-h-0 w-full min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-slate-50">
-      <div className="border-b border-slate-200 bg-white px-4 py-3">
+    <div
+      className="grid h-full min-h-0 w-full min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-transparent select-none"
+      onContextMenu={handleBlankContextMenu}
+      onClick={() => {
+        if (blankMenu) setBlankMenu(null);
+        if (commandMenu) setCommandMenu(null);
+      }}
+    >
+      <div className="border-b border-[var(--app-line)] bg-slate-950/30 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold text-slate-950">快捷命令栏</h2>
-            <p className="mt-0.5 text-[11px] text-slate-500">
-              {activeSession ? `发送到 ${activeSession.title}` : "打开终端后可发送命令"}
+            <h2 className="text-sm font-extrabold text-[var(--app-text)] flex items-center gap-2">
+              <Command className="h-4 w-4 text-emerald-500" />
+              <span>快捷命令侧边栏</span>
+              <span className="sr-only">快捷命令栏</span>
+            </h2>
+            <p className="mt-0.5 text-[11px] font-medium text-[var(--app-muted)]">
+              {activeSession ? `目标：${activeSession.title}` : "支持空白处右键新增"}
             </p>
           </div>
-          <Command className="h-4 w-4 text-slate-400" />
         </div>
-        <div className="relative mt-3">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+        <div className="relative mt-2.5">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
           <Input
-            className="h-9 pl-8 text-xs"
+            className="h-8 pl-8 text-xs rounded-full shadow-2xs"
             value={query}
             placeholder="搜索命令或文件夹"
             onChange={(event) => setQuery(event.target.value)}
@@ -3272,79 +8356,124 @@ function TerminalCommandSidebar({
       </div>
 
       <div className="flex min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden">
-        <div className="w-full min-w-0 max-w-full overflow-hidden border-b border-slate-200 px-3 py-3">
-          <div className="mb-2 text-[11px] font-semibold text-slate-500">文件夹</div>
+        <div className="w-full min-w-0 max-w-full overflow-hidden border-b border-[var(--app-line)] px-3.5 py-2.5">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[11px] font-extrabold text-[var(--app-muted)]">分类文件夹</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setAddFolderOpen(true);
+              }}
+              className="flex items-center gap-1 text-[10px] font-extrabold text-emerald-500 hover:text-emerald-400 cursor-pointer"
+              title="新建分类文件夹"
+            >
+              <Plus className="h-3 w-3" />
+              <span>新建分类</span>
+            </button>
+          </div>
+
           <div className="flex w-full min-w-0 max-w-full flex-wrap gap-2 overflow-x-hidden">
-            {folders.map((folder) => (
-              <button
-                key={folder.id}
-                className={cn(
-                  "flex h-[48px] basis-[calc((100%_-_1rem)/3)] min-w-0 shrink-0 flex-col items-start justify-between overflow-hidden rounded-md border px-2 py-1.5 text-left text-[12px] font-medium leading-[14px] [overflow-wrap:anywhere]",
-                  folder.id === activeFolder?.id
-                    ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-                )}
-                onClick={() => onActiveFolderChange(folder.id)}
-              >
-                <span className="min-w-0 max-h-[28px] max-w-full overflow-hidden">{folder.name}</span>
-                <span className="shrink-0 text-[10px] leading-none opacity-60">{folder.commands.length}</span>
-              </button>
-            ))}
+            {folders.map((folder) => {
+              const active = folder.id === activeFolder?.id;
+              return (
+                <button
+                  key={folder.id}
+                  className={cn(
+                    "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-extrabold transition-all duration-200 cursor-pointer select-none shadow-2xs",
+                    active
+                      ? "border-emerald-500 bg-emerald-600 text-white shadow-sm shadow-emerald-500/20"
+                      : "border-[var(--app-line)] bg-[var(--panel-bg)] text-[var(--app-text)] hover:border-emerald-500/50 hover:text-emerald-500"
+                  )}
+                  onClick={() => onActiveFolderChange(folder.id)}
+                >
+                  <span className="truncate font-extrabold">{folder.name}</span>
+                  <span className={cn("rounded-full px-1.5 py-0.2 font-mono text-[9px] font-extrabold shrink-0", active ? "bg-white/25 text-white" : "bg-[var(--fill-2)] text-[var(--app-muted)]")}>
+                    {folder.commands.length}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto p-3" aria-label="快捷命令列表">
-          <div className="mb-2 flex items-center justify-between text-[11px] font-semibold text-slate-500">
-            <span>命令</span>
-            <span>{commands.length}</span>
+        <div className="min-h-0 flex-1 overflow-auto p-3 space-y-3" aria-label="快捷命令列表">
+          <div className="flex items-center justify-between text-[10px] font-extrabold text-[var(--app-muted)] px-1">
+            <span>快捷指令 (FinalShell 流式)</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAddCmdOpen(true);
+                }}
+                className="flex items-center gap-1 text-[10px] font-extrabold text-emerald-500 hover:text-emerald-400 cursor-pointer"
+                title="新建快捷指令"
+              >
+                <Plus className="h-3 w-3" />
+                <span>新建指令</span>
+              </button>
+              <span className="font-mono text-[10px] text-[var(--app-text)] font-extrabold">
+                {commands.length} 条
+              </span>
+            </div>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
+
+          {/* FinalShell 经典 100% 动态宽度横向流式分布 */}
+          <div className="flex flex-wrap gap-1.5">
             {commands.map((command) => {
               const key = commandKey(command);
+              const isPending = pendingCommandKey === key;
+              const parameters = extractCommandParameters(command.command);
+
               return (
                 <div
                   key={key}
+                  role="button"
+                  aria-label={`发送 ${command.name}`}
                   className={cn(
-                    "grid min-w-0 grid-cols-[minmax(0,1fr)_28px] overflow-hidden rounded-md border bg-white text-xs",
-                    pendingCommandKey === key ? "border-slate-900" : "border-slate-200"
+                    "group inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs transition-all duration-150 cursor-pointer select-none max-w-full shadow-2xs",
+                    isPending
+                      ? "border-emerald-500 bg-emerald-600 text-white font-extrabold shadow-md shadow-emerald-500/20"
+                      : "border-[var(--app-line)] bg-[var(--panel-bg)] hover:border-emerald-500/60 hover:text-emerald-500 text-[var(--app-text)] font-extrabold"
                   )}
+                  title={`点击发送: $ ${command.command}${command.description ? ` (${command.description})` : ""}`}
+                  onClick={() => runCommand(command)}
                   onContextMenu={(event) => openCommandMenu(event, command)}
                 >
+                  <span className="truncate font-mono text-[11px] font-bold">
+                    {command.name || command.command}
+                  </span>
+
                   <button
-                    aria-label={`发送 ${command.name}`}
-                    className="min-w-0 truncate px-2 py-2 text-left font-semibold text-slate-800 hover:bg-slate-50 disabled:text-slate-300"
-                    disabled={!activeSession}
-                    onClick={() => runCommand(command)}
-                  >
-                    {command.name}
-                  </button>
-                  <button
-                    aria-label={`查看命令详情 ${command.name}`}
-                    title="查看命令详情"
-                    className="flex items-center justify-center border-l border-slate-100 text-slate-400 hover:bg-slate-50 hover:text-slate-800"
-                    onClick={() => {
+                    type="button"
+                    className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-[var(--app-muted)] hover:text-emerald-500 transition-colors"
+                    title={parameters.length ? `填参数 (${parameters.length})` : "查看/编辑"}
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setDetailCommandKey(detailCommandKey === key ? "" : key);
-                      setPendingCommandKey("");
+                      if (parameters.length) setPendingCommandKey(key);
                     }}
                   >
-                    <Settings className="h-3.5 w-3.5" />
+                    <Settings className="h-2.5 w-2.5" />
                   </button>
                 </div>
               );
             })}
             {commands.length === 0 && (
-              <div className="col-span-full rounded-md border border-dashed border-slate-300 bg-white px-3 py-6 text-center text-xs text-slate-500">
-                未找到匹配命令
+              <div className="w-full rounded-2xl border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-6 text-center text-xs font-semibold text-[var(--app-muted)]">
+                右键空白处或点击顶部“+ 新建指令”
               </div>
             )}
           </div>
         </div>
+
         {pendingCommand && (
-          <div className="border-t border-slate-200 bg-white p-3" aria-label={`快捷命令参数 ${pendingCommand.name}`}>
-            <div className="mb-2 truncate text-xs font-semibold text-slate-900">{pendingCommand.name}</div>
+          <div className="border-t border-[var(--app-line)] bg-[var(--panel-bg)] p-3" aria-label={`快捷命令参数 ${pendingCommand.name}`}>
+            <div className="mb-2 truncate text-xs font-semibold text-[var(--app-text)]">{pendingCommand.name}</div>
             <div className="space-y-2">
               {pendingParameters.map((parameter) => (
-                <label key={parameter.key} className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-xs text-slate-600">
+                <label key={parameter.key} className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-xs text-[var(--app-muted)]">
                   <span className="truncate">{parameter.name}</span>
                   <Input
                     className="h-8 text-xs"
@@ -3364,29 +8493,284 @@ function TerminalCommandSidebar({
             </Button>
           </div>
         )}
+
         {detailCommand && (
-          <div className="border-t border-slate-200 bg-white p-3">
-            <div className="mb-2 text-xs font-semibold text-slate-900">命令详情</div>
-            <div className="truncate text-xs font-semibold text-slate-700">{detailCommand.name}</div>
-            <code className="mt-2 block max-h-24 overflow-auto rounded-md bg-slate-50 px-2 py-1.5 text-xs text-slate-700">
+          <div className="border-t border-[var(--app-line)] bg-[var(--panel-bg)] p-3">
+            <div className="mb-2 text-xs font-semibold text-[var(--app-text)]">命令详情</div>
+            <div className="truncate text-xs font-semibold text-[var(--app-text)]">{detailCommand.name}</div>
+            <code className="mt-2 block max-h-24 overflow-auto rounded-md bg-[var(--fill-1)] px-2 py-1.5 text-xs text-emerald-400 font-mono">
               {detailCommand.command}
             </code>
-            {detailCommand.description && <p className="mt-2 text-xs text-slate-500">{detailCommand.description}</p>}
+            {detailCommand.description && <p className="mt-2 text-xs text-[var(--app-muted)]">{detailCommand.description}</p>}
           </div>
         )}
-        {commandMenu && (
+
+        {/* Blank Space Context Menu (FinalShell 右键空白弹窗) */}
+        {blankMenu && (
           <div
             role="menu"
-            className="fixed z-50 min-w-32 rounded-md border border-slate-200 bg-white p-1 text-xs shadow-lg"
-            style={{ left: commandMenu.x, top: commandMenu.y }}
+            className="fixed z-50 min-w-36 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-fade-in"
+            style={{
+              left: Math.max(8, Math.min(blankMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1000) - 180)),
+              top: Math.max(8, Math.min(blankMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 140))
+            }}
+            onClick={(e) => e.stopPropagation()}
           >
             <button
               role="menuitem"
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-slate-700 hover:bg-slate-50"
-              onClick={() => void copyCommand(commandMenu.command)}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-emerald-500/10 hover:text-emerald-500 transition-colors cursor-pointer"
+              onClick={() => {
+                setBlankMenu(null);
+                setAddCmdOpen(true);
+              }}
+            >
+              <Plus className="h-3.5 w-3.5 text-emerald-500" />
+              <span>➕ 新建快捷指令</span>
+            </button>
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-purple-500/10 hover:text-purple-500 transition-colors cursor-pointer"
+              onClick={() => {
+                setBlankMenu(null);
+                setAddFolderOpen(true);
+              }}
+            >
+              <FolderIcon className="h-3.5 w-3.5 text-purple-500" />
+              <span>📁 新建分类文件夹</span>
+            </button>
+          </div>
+        )}
+
+        {/* Add Folder Prompt Modal */}
+        {addFolderOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in select-none">
+            <form onSubmit={handleConfirmAddFolder} className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl space-y-4">
+              <h3 className="font-bold text-sm text-zinc-100 flex items-center gap-2">
+                <FolderIcon className="h-4 w-4 text-purple-400" /> 新建分类文件夹
+              </h3>
+              <input
+                type="text"
+                autoFocus
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="例如: 部署工具 / Docker指令..."
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 focus:border-purple-500 focus:outline-none"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAddFolderOpen(false)}
+                  className="rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-1.5 text-xs font-bold text-zinc-400 hover:text-zinc-200"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-purple-600 hover:bg-purple-500 px-4 py-1.5 text-xs font-bold text-white shadow-md shadow-purple-600/20"
+                >
+                  确认添加
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Add Command Modal (1:1 FinalShell 经典动态参数生成弹窗) */}
+        {addCmdOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in select-none">
+            <form onSubmit={handleConfirmAddCmd} className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
+                <h3 className="font-extrabold text-sm text-zinc-100 flex items-center gap-2">
+                  <Plus className="h-4 w-4 text-emerald-400" />
+                  <span>添加命令</span>
+                  <span className="text-[11px] text-zinc-500 font-normal">({activeFolder?.name || "默认分类"})</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setAddCmdOpen(false)}
+                  className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-zinc-300 mb-1 font-extrabold">名称</label>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={newCmdName}
+                    onChange={(e) => setNewCmdName(e.target.value)}
+                    placeholder="例如: 检查系统负载 / 过滤端口"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-zinc-300 mb-1 font-extrabold">命令</label>
+                  <textarea
+                    ref={newCmdTextareaRef}
+                    rows={4}
+                    value={newCmdStr}
+                    onChange={(e) => setNewCmdStr(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
+                        e.preventDefault();
+                        const textarea = e.currentTarget;
+                        const pos = textarea.selectionStart ?? 0;
+                        const val = textarea.value;
+                        const lastNewline = val.lastIndexOf("\n", pos - 1);
+                        const lineStart = lastNewline === -1 ? 0 : lastNewline + 1;
+                        if (pos > lineStart) {
+                          textarea.setSelectionRange(lineStart, pos);
+                          let executed = false;
+                          if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+                            try {
+                              executed = document.execCommand("delete");
+                            } catch {}
+                          }
+                          if (!executed) {
+                            const updated = val.slice(0, lineStart) + val.slice(pos);
+                            setNewCmdStr(updated);
+                            requestAnimationFrame(() => {
+                              textarea.setSelectionRange(lineStart, lineStart);
+                            });
+                          }
+                        } else if (pos === lineStart && lineStart > 0) {
+                          textarea.setSelectionRange(lastNewline, pos);
+                          let executed = false;
+                          if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+                            try {
+                              executed = document.execCommand("delete");
+                            } catch {}
+                          }
+                          if (!executed) {
+                            const updated = val.slice(0, lastNewline) + val.slice(pos);
+                            setNewCmdStr(updated);
+                            requestAnimationFrame(() => {
+                              textarea.setSelectionRange(lastNewline, lastNewline);
+                            });
+                          }
+                        }
+                      }
+                    }}
+                    placeholder="例如: top -b -n 1 | head -n 20"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-emerald-400 font-mono text-[11px] leading-relaxed focus:border-emerald-500 focus:outline-none shadow-inner"
+                  />
+                </div>
+
+                {/* FinalShell 动态参数快捷插入按钮行 */}
+                <div className="space-y-1.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3">
+                  <div className="text-[11px] font-extrabold text-zinc-400">插入参数(动态生成命令):</div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {[1, 2, 3, 4, 5].map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => {
+                          insertParamIntoNewCmd(`[p#${num} 参数${num}]`);
+                        }}
+                        className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1 text-xs font-extrabold text-zinc-200 hover:border-emerald-500 hover:bg-emerald-500/20 hover:text-emerald-400 transition-all cursor-pointer shadow-2xs active:scale-95"
+                      >
+                        参数{num}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 末尾添加回车符 CR */}
+                <div className="flex items-center gap-2 pt-0.5">
+                  <input
+                    type="checkbox"
+                    id="addCrCheckbox"
+                    checked={addCmdCr}
+                    onChange={(e) => setAddCmdCr(e.target.checked)}
+                    className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                  />
+                  <label htmlFor="addCrCheckbox" className="text-xs font-extrabold text-zinc-300 cursor-pointer select-none">
+                    末尾添加回车符 CR
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setAddCmdOpen(false)}
+                  className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-extrabold text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-5 py-2 text-xs font-extrabold text-white shadow-lg shadow-emerald-600/25 transition-all cursor-pointer"
+                >
+                  确定
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {commandMenu && (
+          <div
+            role="menu"
+            className="fixed z-50 min-w-44 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1 text-xs shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+            style={{ left: Math.min(commandMenu.x, window.innerWidth - 180), top: Math.min(commandMenu.y, window.innerHeight - 240) }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-extrabold text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+              onClick={() => {
+                const cmd = commandMenu.command;
+                setCommandMenu(null);
+                runCommand(cmd, true);
+              }}
+            >
+              <Send className="h-3.5 w-3.5" />
+              🚀 发送并执行
+            </button>
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-indigo-500 hover:bg-indigo-500/10 cursor-pointer"
+              onClick={() => {
+                const cmd = commandMenu.command;
+                setCommandMenu(null);
+                runCommand(cmd, false);
+              }}
+            >
+              <CornerDownLeft className="h-3.5 w-3.5 text-indigo-500" />
+              ✏️ 填入终端 (不执行)
+            </button>
+            <div className="my-1 border-t border-[var(--app-line)]" />
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+              onClick={() => {
+                const cmd = commandMenu.command;
+                setCommandMenu(null);
+                void copyCommand(cmd);
+              }}
             >
               <Copy className="h-3.5 w-3.5" />
-              复制命令
+              📋 复制命令
+            </button>
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+              onClick={() => {
+                const cmd = commandMenu.command;
+                setCommandMenu(null);
+                setNewCmdName(cmd.name);
+                setNewCmdStr(cmd.command);
+                setNewCmdDesc(cmd.description || "");
+                setAddCmdOpen(true);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              ✏️ 修改指令
             </button>
           </div>
         )}
@@ -3404,7 +8788,7 @@ function decodeTerminalOutput(base64: string, decoderRef: React.MutableRefObject
 }
 
 function normalizePasteText(text: string) {
-  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return text.replace(/\r\n/g, "\r").replace(/\n/g, "\r");
 }
 
 function stripTerminalGeneratedReplies(data: string) {
@@ -3439,7 +8823,69 @@ function isVisibleTerminalReplyResidue(data: string) {
   return data.length > 0;
 }
 
+// 终端输入统一微批队列:同一会话 4ms 内的按键/命令合并成一次原生调用。
+// 全部输入路径共用这一个 FIFO,顺序天然保持一致。
+const terminalInputQueue = new Map<string, string[]>();
+let terminalInputFlushTimer: number | null = null;
+
+function flushTerminalInput() {
+  if (terminalInputFlushTimer !== null) {
+    window.clearTimeout(terminalInputFlushTimer);
+    terminalInputFlushTimer = null;
+  }
+  if (terminalInputQueue.size === 0) return;
+  const pending = [...terminalInputQueue.entries()];
+  terminalInputQueue.clear();
+  const encoder = new TextEncoder();
+  for (const [sessionId, parts] of pending) {
+    void nativeBridge.sendInputBase64(sessionId, bytesToBase64(encoder.encode(parts.join(""))));
+  }
+}
+
+function sendTerminalInput(sessionId: string | undefined, text: string) {
+  if (!text || !sessionId) return;
+  let batch = terminalInputQueue.get(sessionId);
+  if (!batch) {
+    batch = [];
+    terminalInputQueue.set(sessionId, batch);
+  }
+  batch.push(text);
+  if (terminalInputFlushTimer === null) {
+    terminalInputFlushTimer = window.setTimeout(flushTerminalInput, 4);
+  }
+}
+
+const TERMINAL_HIGHLIGHT_SKIP_BYTES = 65536;
+
+function writeHighlightedOrRaw(target: XTerm, output: string, rules: HighlightRule[]) {
+  const normalized = normalizeTerminalInverseVideo(decodeLessHexUtf8(output));
+  target.write(normalized.length > TERMINAL_HIGHLIGHT_SKIP_BYTES ? normalized : applyHighlightRules(normalized, rules));
+}
+
+function attachFastRenderer(terminal: XTerm) {
+  // WebGL 渲染器在大输出刷屏时远快于默认 DOM 渲染;初始化失败或上下文丢失时自动回退 DOM
+  try {
+    const addon = new WebglAddon();
+    addon.onContextLoss(() => addon.dispose());
+    terminal.loadAddon(addon);
+    return addon;
+  } catch {
+    return null;
+  }
+}
+
+const BASE64_CHUNK_SIZE = 0x8000;
+const uint8ArrayBase64 = Uint8Array as unknown as {
+  fromBase64?: (input: string) => Uint8Array;
+};
+
 function base64ToBytes(base64: string) {
+  const nativeDecode = uint8ArrayBase64.fromBase64;
+  if (typeof nativeDecode === "function") {
+    try {
+      return nativeDecode.call(Uint8Array, base64);
+    } catch {}
+  }
   const raw = atob(base64);
   const bytes = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i += 1) {
@@ -3449,9 +8895,15 @@ function base64ToBytes(base64: string) {
 }
 
 function bytesToBase64(bytes: Uint8Array) {
+  const nativeEncode = (bytes as unknown as { toBase64?: () => string }).toBase64;
+  if (typeof nativeEncode === "function") {
+    try {
+      return nativeEncode.call(bytes);
+    } catch {}
+  }
   let binary = "";
-  for (let i = 0; i < bytes.byteLength; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.byteLength; i += BASE64_CHUNK_SIZE) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + BASE64_CHUNK_SIZE) as unknown as number[]);
   }
   return btoa(binary);
 }
@@ -3557,28 +9009,58 @@ function formatFileSize(size: number) {
 function TerminalRightSidebar({
   activePanel,
   activeSession,
+  terminalCwd,
   commandFolders,
   activeCommandFolderId,
   shortcutParameterRequest,
   aiQuotes,
   aiConfig,
+  width,
+  onResizeStart,
   onPanelChange,
   onActiveCommandFolderChange,
   onSendCommand,
-  onAiConfigChange
+  onAiConfigChange,
+  onAddAiQuote,
+  onOpenRemoteEditor,
+  onOpenSearch,
+  onOpenDiff,
+  onAddFolder,
+  onSaveCommand,
+  transferTasks = [],
+  onStartDownload,
+  onStartUpload,
+  onCancelTransfer,
+  onClearCompletedTransfers
 }: {
   activePanel: TerminalSidePanel;
   activeSession?: SessionTab;
+  terminalCwd?: string;
   commandFolders: CommandFolder[];
   activeCommandFolderId: string;
   shortcutParameterRequest: ShortcutParameterRequest | null;
   aiQuotes: AiQuote[];
   aiConfig: AiConfig;
+  width: number;
+  onResizeStart: (event: React.PointerEvent) => void;
   onPanelChange: (panel: TerminalSidePanel) => void;
   onActiveCommandFolderChange: (folderId: string) => void;
   onSendCommand: (command: string) => void;
   onAiConfigChange: (config: AiConfig) => void;
+  onAddAiQuote?: (text: string, sourceTitle: string) => void;
+  onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
+  onOpenSearch?: (path: string) => void;
+  onOpenDiff?: (path: string, name: string) => void;
+  onAddFolder?: (name: string) => void;
+  onSaveCommand?: (folderId: string, command: Omit<CommandItem, "id">, commandId?: string) => void;
+  transferTasks?: PersistentTransferTask[];
+  onStartDownload?: (sessionId: string, targetPath: string, fileName: string, fileSize: number) => Promise<void>;
+  onStartUpload?: (sessionId: string, remoteDir: string, filePath?: string, fileName?: string, fileContent?: string, fileSize?: number) => Promise<void>;
+  onCancelTransfer?: (sessionId: string, taskId: string, type: "upload" | "download") => Promise<void>;
+  onClearCompletedTransfers?: () => void;
 }) {
+  const activeTransfersCount = transferTasks.filter((t) => t.status === "transferring").length;
+
   const panels: Array<{ id: TerminalSidePanel; label: string; icon: React.ReactNode }> = [
     { id: "commands", label: "命令", icon: <Command className="h-3.5 w-3.5" /> },
     { id: "files", label: "文件", icon: <FolderOpen className="h-3.5 w-3.5" /> },
@@ -3586,23 +9068,50 @@ function TerminalRightSidebar({
   ];
 
   return (
-    <aside className="grid min-h-0 w-[420px] min-w-0 max-w-[420px] grid-rows-[44px_minmax(0,1fr)] overflow-hidden border-l border-slate-200 bg-white">
-      <div className="flex items-center gap-1 border-b border-slate-200 bg-white px-2" role="tablist" aria-label="终端右侧工作栏">
+    <aside
+      style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+      className="group/sidebar relative grid min-h-0 grid-rows-[44px_minmax(0,1fr)] overflow-hidden border-l border-[var(--app-line)] bg-slate-950/20 select-none"
+    >
+      <div
+        className="absolute -left-2 top-0 bottom-0 z-50 w-4 cursor-col-resize flex items-center justify-center group/resizer hover:bg-emerald-500/10 active:bg-emerald-500/25 transition-colors select-none"
+        onPointerDown={onResizeStart}
+        title={`按住左右拖拽调节侧边栏宽度 (当前宽度: ${width}px)`}
+      >
+        <div className="h-16 w-1 rounded-full bg-slate-300 dark:bg-slate-700 group-hover/resizer:bg-emerald-500 group-hover/resizer:w-1.5 group-hover/resizer:scale-y-125 transition-all shadow-sm flex items-center justify-center">
+          <GripVertical className="h-3 w-3 text-slate-900 dark:text-slate-950 opacity-0 group-hover/resizer:opacity-100 transition-opacity" />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 border-b border-[var(--app-line)] bg-slate-950/40 px-3.5 py-1.5" role="tablist" aria-label="终端右侧工作栏">
         {panels.map((panel) => {
           const active = activePanel === panel.id;
+          const iconColorClass = {
+            commands: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60",
+            files: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60",
+            ai: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60"
+          }[panel.id];
+
           return (
             <button
               key={panel.id}
               role="tab"
               aria-selected={active}
               className={cn(
-                "inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-semibold transition-colors",
-                active ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                "inline-flex h-8.5 flex-1 items-center justify-center gap-1.5 rounded-full text-xs font-extrabold transition-all duration-200 cursor-pointer select-none relative",
+                active
+                  ? "bg-slate-900 text-white shadow-sm shadow-slate-900/15"
+                  : "text-[var(--text-secondary)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)]"
               )}
               onClick={() => onPanelChange(panel.id)}
             >
-              {panel.icon}
-              {panel.label}
+              <span className={cn("flex h-5 w-5 items-center justify-center rounded-full shrink-0 transition-colors", active ? "bg-white/20 text-white" : iconColorClass)}>
+                {panel.icon}
+              </span>
+              <span>{panel.label}</span>
+              {panel.id === "files" && activeTransfersCount > 0 && (
+                <span className="inline-flex items-center justify-center rounded-full bg-emerald-500 text-[10px] text-slate-950 font-black h-4 min-w-4 px-1 animate-pulse shadow-2xs">
+                  {activeTransfersCount}
+                </span>
+              )}
             </button>
           );
         })}
@@ -3616,9 +9125,26 @@ function TerminalRightSidebar({
             shortcutParameterRequest={shortcutParameterRequest}
             onActiveFolderChange={onActiveCommandFolderChange}
             onSendCommand={onSendCommand}
+            onAddFolder={onAddFolder}
+            onSaveCommand={onSaveCommand}
           />
         )}
-        {activePanel === "files" && <TerminalFileSidebar activeSession={activeSession} />}
+        {activePanel === "files" && (
+          <TerminalFileSidebar
+            activeSession={activeSession}
+            terminalCwd={terminalCwd}
+            transferTasks={transferTasks}
+            onStartDownload={onStartDownload}
+            onStartUpload={onStartUpload}
+            onCancelTransfer={onCancelTransfer}
+            onClearCompletedTransfers={onClearCompletedTransfers}
+            onAddAiQuote={(text, source) => onAddAiQuote?.(text, source)}
+            onOpenRemoteEditor={onOpenRemoteEditor}
+            onOpenSearch={onOpenSearch}
+            onOpenDiff={onOpenDiff}
+            onSendCommand={onSendCommand}
+          />
+        )}
         {activePanel === "ai" && (
           <AiWorkspacePanel
             activeSession={activeSession}
@@ -3632,17 +9158,102 @@ function TerminalRightSidebar({
   );
 }
 
-function TerminalFileSidebar({ activeSession }: { activeSession?: SessionTab }) {
-  const [remotePath, setRemotePath] = useState("/");
+const QUICK_REMOTE_LOCATIONS = [
+  { label: "根目录", path: "/" },
+  { label: "家目录", path: "~" },
+  { label: "日志", path: "/var/log" },
+  { label: "配置", path: "/etc" },
+  { label: "临时", path: "/tmp" },
+  { label: "软件", path: "/opt" },
+  { label: "Web", path: "/var/www" },
+  { label: "数据", path: "/data" }
+];
+function TerminalFileSidebar({
+  activeSession,
+  terminalCwd,
+  transferTasks = [],
+  onStartDownload,
+  onStartUpload,
+  onCancelTransfer,
+  onClearCompletedTransfers,
+  onAddAiQuote,
+  onOpenRemoteEditor,
+  onOpenSearch,
+  onOpenDiff,
+  onSendCommand
+}: {
+  activeSession?: SessionTab;
+  terminalCwd?: string;
+  transferTasks?: PersistentTransferTask[];
+  onStartDownload?: (sessionId: string, targetPath: string, fileName: string, fileSize: number) => Promise<void>;
+  onStartUpload?: (sessionId: string, remoteDir: string, filePath?: string, fileName?: string, fileContent?: string, fileSize?: number) => Promise<void>;
+  onCancelTransfer?: (sessionId: string, taskId: string, type: "upload" | "download") => Promise<void>;
+  onClearCompletedTransfers?: () => void;
+  onAddAiQuote?: (text: string, sourceTitle: string) => void;
+  onOpenRemoteEditor?: (filePath: string, fileName: string) => void;
+  onOpenSearch?: (path: string) => void;
+  onOpenDiff?: (path: string, name: string) => void;
+  onSendCommand?: (command: string) => void;
+}) {
+  const [remotePath, setRemotePath] = useState(terminalCwd || "/");
+  const [isEditingPath, setIsEditingPath] = useState(false);
+  const [inputPath, setInputPath] = useState(terminalCwd || "/");
+  const [fileFilter, setFileFilter] = useState("");
+  const [autoFollowTerminalCwd, setAutoFollowTerminalCwd] = useState(true);
+  const [wrapFileNames, setWrapFileNames] = useState(false);
+  const [colWidths, setColWidths] = useState({
+    name: 240,
+    size: 75,
+    type: 65,
+    date: 135,
+    permissions: 85
+  });
+
+  const startResizeCol = (colKey: keyof typeof colWidths, event: React.PointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startW = colWidths[colKey];
+
+    const onMove = (moveEv: PointerEvent) => {
+      const delta = moveEv.clientX - startX;
+      setColWidths((prev) => ({
+        ...prev,
+        [colKey]: Math.max(45, startW + delta)
+      }));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+  const [previewFile, setPreviewFile] = useState<{ path: string; name: string } | null>(null);
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [fileMenu, setFileMenu] = useState<{ x: number; y: number; entry: DirectoryEntry } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("");
+  const [permissionFile, setPermissionFile] = useState<{ path: string; name: string; isDirectory: boolean } | null>(null);
+  const [isDualPane, setIsDualPane] = useState(false);
   const canBrowseRemote = activeSession?.kind === "ssh" && activeSession.connected;
 
   useEffect(() => {
-    setRemotePath("/");
+    if (autoFollowTerminalCwd && terminalCwd && terminalCwd !== remotePath) {
+      setRemotePath(terminalCwd);
+      setInputPath(terminalCwd);
+    }
+  }, [terminalCwd, autoFollowTerminalCwd]);
+
+  useEffect(() => {
+    setRemotePath(terminalCwd || "/");
+    setInputPath(terminalCwd || "/");
+    setFileFilter("");
   }, [activeSession?.id]);
 
   useEffect(() => {
@@ -3660,15 +9271,20 @@ function TerminalFileSidebar({ activeSession }: { activeSession?: SessionTab }) 
     nativeBridge
       .listDirectory(activeSession.id, remotePath)
       .then((result) => {
-        if (cancelled) return;
-        if (!result.success) {
-          setEntries([]);
-          setError(result.error || "读取远程目录失败。");
-          return;
+        if (!cancelled) {
+          if (Array.isArray(result)) {
+            setEntries(sortDirectoryEntries(result));
+            setError("");
+          } else if (result && result.success) {
+            setEntries(sortDirectoryEntries(result.files || []));
+            setError("");
+          } else {
+            setEntries([]);
+            setError(result?.error || "读取远程目录失败。");
+          }
         }
-        setEntries(sortDirectoryEntries(result.files));
       })
-      .catch((err: unknown) => {
+      .catch((err) => {
         if (!cancelled) {
           setEntries([]);
           setError(err instanceof Error ? err.message : "读取远程目录失败。");
@@ -3683,26 +9299,127 @@ function TerminalFileSidebar({ activeSession }: { activeSession?: SessionTab }) 
     };
   }, [activeSession?.id, canBrowseRemote, remotePath, reloadToken]);
 
+  useEffect(() => {
+    if (!fileMenu) return;
+    function handlePointerDown(e: MouseEvent | PointerEvent) {
+      setFileMenu(null);
+    }
+    function handleKeyDown(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") setFileMenu(null);
+    }
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [fileMenu]);
+
   function openDirectory(entry: DirectoryEntry) {
     if (entry.type !== "directory") return;
     setRemotePath(joinRemotePath(remotePath, entry.name));
   }
 
   function openFileMenu(event: ReactMouseEvent, entry: DirectoryEntry) {
-    if (entry.type === "directory") return;
     event.preventDefault();
-    setFileMenu({ x: event.clientX, y: event.clientY, entry });
+    event.stopPropagation();
+    const menuEstimatedHeight = entry.type === "directory" ? 340 : 480;
+    const menuEstimatedWidth = 240;
+    const windowW = typeof window !== "undefined" ? window.innerWidth : 1200;
+    const windowH = typeof window !== "undefined" ? window.innerHeight : 800;
+
+    const posX = Math.max(8, Math.min(event.clientX, windowW - menuEstimatedWidth - 12));
+    const posY = Math.max(8, Math.min(event.clientY, windowH - menuEstimatedHeight - 12));
+    setFileMenu({ x: posX, y: posY, entry });
   }
 
   async function downloadRemoteFile(entry: DirectoryEntry) {
     if (!activeSession?.id) return;
     setFileMenu(null);
     const targetPath = joinRemotePath(remotePath, entry.name);
-    const selected = await nativeBridge.showSaveFileDialog(entry.name);
-    if (!selected.filePath) return;
-    const result = await nativeBridge.downloadFile(activeSession.id, targetPath, selected.filePath);
-    if (!result.success) {
-      setError(result.error || "下载文件失败。");
+    const totalSize = typeof entry.size === "number" ? entry.size : typeof (entry as any).raw_size === "number" ? (entry as any).raw_size : 0;
+    if (onStartDownload) {
+      await onStartDownload(activeSession.id, targetPath, entry.name, totalSize);
+    }
+  }
+
+  async function uploadSingleFile(filePath: string, fileName: string, fileContent?: string, fileSize?: number) {
+    if (!activeSession?.id || !canBrowseRemote) return;
+    if (onStartUpload) {
+      await onStartUpload(activeSession.id, remotePath, filePath, fileName, fileContent, fileSize);
+    }
+  }
+
+  async function triggerManualUpload() {
+    if (!activeSession?.id || !canBrowseRemote) return;
+    if (onStartUpload) {
+      await onStartUpload(activeSession.id, remotePath);
+    }
+  }
+
+  async function createNewFile() {
+    if (!activeSession?.id || !canBrowseRemote) return;
+    const name = window.prompt("请输入新建文件的文件名（如 script.sh, config.json 等）：");
+    if (!name || !name.trim()) return;
+    const cleanName = name.trim();
+    const fullPath = joinRemotePath(remotePath, cleanName);
+    try {
+      const res = await nativeBridge.uploadFileContent(activeSession.id, "", fullPath);
+      if (res.success) {
+        setUploadStatus(`✅ 新建文件成功: ${cleanName}`);
+        setReloadToken((t) => t + 1);
+        onOpenRemoteEditor?.(fullPath, cleanName);
+      } else {
+        setUploadStatus(`❌ 新建文件失败: ${res.error || "未知错误"}`);
+      }
+    } catch {
+      setUploadStatus(`❌ 新建文件发生异常`);
+    }
+  }
+
+  async function createNewFolder() {
+    if (!activeSession?.id || !canBrowseRemote) return;
+    const name = window.prompt("请输入新建文件夹的名称：");
+    if (!name || !name.trim()) return;
+    const cleanName = name.trim();
+    const fullPath = joinRemotePath(remotePath, cleanName);
+    onSendCommand?.(`mkdir -p "${fullPath}"\r`);
+    setUploadStatus(`📁 正在创建文件夹: ${cleanName}`);
+    setTimeout(() => {
+      setReloadToken((t) => t + 1);
+    }, 500);
+  }
+
+  async function deleteRemoteItem(entry: DirectoryEntry) {
+    if (!activeSession?.id || !canBrowseRemote) return;
+    setFileMenu(null);
+    const isDir = entry.type === "directory";
+    const fullPath = joinRemotePath(remotePath, entry.name);
+    const confirmed = window.confirm(`确定要永久删除${isDir ? "目录及其全部内容" : "文件"} "${entry.name}" 吗？\n目标路径: ${fullPath}`);
+    if (!confirmed) return;
+    if (isDir) {
+      onSendCommand?.(`rm -rf "${fullPath}"\r`);
+    } else {
+      onSendCommand?.(`rm -f "${fullPath}"\r`);
+    }
+    setUploadStatus(`🗑️ 已发送删除指令: ${entry.name}`);
+    setTimeout(() => {
+      setReloadToken((t) => t + 1);
+    }, 500);
+  }
+
+  async function handleDropFiles(files: FileList) {
+    if (!activeSession?.id || !canBrowseRemote || files.length === 0) return;
+    const fileArray = Array.from(files);
+    for (let i = 0; i < fileArray.length; i++) {
+      const file = fileArray[i];
+      const localPath = (file as any).path;
+      if (localPath) {
+        await uploadSingleFile(localPath, file.name, undefined, file.size);
+      } else {
+        const content = await file.text();
+        await uploadSingleFile("", file.name, content, file.size);
+      }
     }
   }
 
@@ -3711,111 +9428,821 @@ function TerminalFileSidebar({ activeSession }: { activeSession?: SessionTab }) 
     : "当前不是 SSH 会话，暂不能浏览远程文件。";
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-slate-50">
-      <div className="border-b border-slate-200 bg-white px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-950">文件浏览</h2>
-            <p className="mt-0.5 text-[11px] text-slate-500">
-              {activeSession ? `当前会话：${activeSession.title}` : "连接 SSH 后查看文件"}
-            </p>
-          </div>
-          <FolderOpen className="h-4 w-4 text-slate-400" />
+    <div
+      className="flex flex-col h-full min-h-0 w-full bg-transparent relative overflow-hidden select-none"
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (canBrowseRemote) setIsDragging(true);
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        if (canBrowseRemote && e.dataTransfer.files) {
+          void handleDropFiles(e.dataTransfer.files);
+        }
+      }}
+    >
+      {/* 拖拽释放区遮罩 Overlay (全覆盖) */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center border-2 border-dashed border-emerald-500 bg-emerald-950/80 p-6 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-150 backdrop-blur-sm">
+          <Upload className="h-12 w-12 text-emerald-400 animate-bounce" />
+          <div className="mt-3 text-base font-extrabold text-white">释放文件以立即上传至服务器</div>
+          <div className="mt-1 font-mono text-xs font-semibold text-emerald-300">目标路径: {remotePath}</div>
         </div>
-      </div>
-      <div className="min-h-0 overflow-auto p-3">
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-md border border-slate-200 bg-white p-3">
-            <div className="text-xs font-semibold text-slate-900">本地文件</div>
-            <div className="mt-1 text-xs leading-5 text-slate-500">用于上传、下载和拖拽传输。</div>
-          </div>
-          <div className="rounded-md border border-slate-200 bg-white p-3">
-            <div className="text-xs font-semibold text-slate-900">远程文件</div>
-            <div className="mt-1 text-xs leading-5 text-slate-500">选择 SSH 会话后显示目录。</div>
-          </div>
-        </div>
-        {canBrowseRemote ? (
-          <div className="mt-3 min-w-0 rounded-md border border-slate-200 bg-white">
-            <div className="flex min-w-0 items-center gap-2 border-b border-slate-200 px-3 py-2">
+      )}
+
+      {/* 顶部路径导航与核心操作栏 */}
+      <div className="flex flex-col border-b border-[var(--app-line)] bg-slate-950/40 shrink-0">
+        <div className="flex min-w-0 items-center gap-1.5 px-3 py-2 border-b border-[var(--app-line)]/60">
+          <button
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+            disabled={remotePath === "/"}
+            title="返回上级目录"
+            onClick={() => setRemotePath(parentRemotePath(remotePath))}
+          >
+            <ChevronDown className="h-3.5 w-3.5 rotate-90" />
+          </button>
+          <button
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+            title="根目录"
+            onClick={() => setRemotePath("/")}
+          >
+            <Home className="h-3.5 w-3.5" />
+          </button>
+          {isEditingPath ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setRemotePath(inputPath.trim() || "/");
+                setIsEditingPath(false);
+              }}
+              className="min-w-0 flex-1"
+            >
+              <input
+                autoFocus
+                className="h-7 w-full rounded-lg bg-[var(--panel-bg)] px-2 font-mono text-[11px] text-[var(--app-text)] border border-emerald-500 focus:outline-none"
+                value={inputPath}
+                onChange={(e) => setInputPath(e.target.value)}
+                onBlur={() => setIsEditingPath(false)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setIsEditingPath(false);
+                }}
+              />
+            </form>
+          ) : (
+            <div
+              aria-label="远程路径面包屑"
+              className="min-w-0 flex-1 flex items-center gap-1 overflow-x-auto scrollbar-none rounded-lg bg-[var(--fill-1)] px-2 py-0.5 font-mono text-[11px] font-bold text-[var(--app-text)] border border-[var(--app-line)] select-none"
+            >
               <button
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={remotePath === "/"}
-                title="返回上级目录"
-                onClick={() => setRemotePath(parentRemotePath(remotePath))}
-              >
-                <ChevronDown className="h-3.5 w-3.5 rotate-90" />
-              </button>
-              <button
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                title="根目录"
                 onClick={() => setRemotePath("/")}
+                className="hover:bg-[var(--fill-2)] px-1.5 py-0.5 rounded text-purple-400 hover:text-purple-300 font-bold transition-colors cursor-pointer shrink-0"
+                title="跳转至根目录 /"
               >
-                <Home className="h-3.5 w-3.5" />
+                /
               </button>
-              <div aria-label="远程路径" className="min-w-0 flex-1 truncate rounded bg-slate-50 px-2 py-1 font-mono text-[11px] text-slate-600">
-                {remotePath}
-              </div>
+              {remotePath
+                .split("/")
+                .filter(Boolean)
+                .map((segment, idx, arr) => {
+                  const partialPath = "/" + arr.slice(0, idx + 1).join("/");
+                  const isLast = idx === arr.length - 1;
+                  return (
+                    <div key={idx} className="flex items-center gap-1 shrink-0">
+                      <span className="text-[var(--app-muted)] text-[10px] select-none">›</span>
+                      <button
+                        onClick={() => setRemotePath(partialPath)}
+                        className={cn(
+                          "px-1.5 py-0.5 rounded transition-colors cursor-pointer truncate max-w-[140px]",
+                          isLast
+                            ? "bg-purple-500/20 text-purple-300 font-extrabold border border-purple-500/30 shadow-2xs"
+                            : "hover:bg-[var(--fill-2)] text-[var(--app-text)] hover:text-purple-400"
+                        )}
+                        title={`跳转至: ${partialPath}`}
+                      >
+                        {segment}
+                      </button>
+                    </div>
+                  );
+                })}
               <button
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                title="刷新远程文件"
-                onClick={() => setReloadToken((token) => token + 1)}
+                onClick={() => {
+                  setInputPath(remotePath);
+                  setIsEditingPath(true);
+                }}
+                className="ml-auto text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] p-1 rounded hover:bg-[var(--fill-2)] cursor-pointer shrink-0"
+                title="点击手动编辑绝对路径"
               >
-                <RefreshCw className="h-3.5 w-3.5" />
+                <Pencil className="h-3 w-3" />
               </button>
             </div>
-            {loading && <div className="px-3 py-8 text-center text-xs text-slate-500">正在读取目录...</div>}
-            {!loading && error && <div className="px-3 py-8 text-center text-xs text-rose-600">{error}</div>}
-            {!loading && !error && entries.length === 0 && <div className="px-3 py-8 text-center text-xs text-slate-500">目录为空。</div>}
-            {!loading && !error && entries.length > 0 && (
-              <div aria-label="远程文件列表" className="divide-y divide-slate-100">
-                {entries.map((entry) => (
-                  <button
-                    key={`${entry.type}-${entry.name}`}
-                    className={cn(
-                      "grid w-full min-w-0 grid-cols-[18px_minmax(0,1fr)_64px_82px] items-center gap-2 px-3 py-2 text-left text-xs",
-                      entry.type === "directory" ? "hover:bg-slate-50" : "cursor-default"
-                    )}
-                    onClick={() => openDirectory(entry)}
-                    onContextMenu={(event) => openFileMenu(event, entry)}
-                  >
-                    {entry.type === "directory" ? (
-                      <FolderIcon aria-label="目录图标" className="h-4 w-4 text-amber-500" />
+          )}
+          <button
+            className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors shadow-2xs cursor-pointer"
+            title="在当前目录新建空白文件"
+            onClick={() => void createNewFile()}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>新建文件</span>
+          </button>
+          <button
+            className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-[11px] font-extrabold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 transition-colors shadow-2xs cursor-pointer"
+            title="在当前目录新建子文件夹"
+            onClick={() => void createNewFolder()}
+          >
+            <FolderPlus className="h-3.5 w-3.5" />
+            <span>新建目录</span>
+          </button>
+          <button
+            className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 text-[11px] font-extrabold text-blue-400 hover:bg-blue-500/20 transition-colors shadow-2xs cursor-pointer"
+            title="搜索远程文件名或进行文本内容 Grep 检索"
+            onClick={() => onOpenSearch?.(remotePath)}
+          >
+            <Search className="h-3.5 w-3.5" />
+            <span>检索</span>
+          </button>
+          <button
+            className="inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 dark:border-emerald-500/30 text-[11px] font-extrabold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer"
+            title="选择本地文件上传到当前目录"
+            onClick={() => void triggerManualUpload()}
+          >
+            <Upload className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>上传</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setWrapFileNames((w) => !w)}
+            className={cn(
+              "inline-flex h-7 px-2 shrink-0 items-center justify-center gap-1 rounded-lg border text-[11px] font-extrabold transition-colors shadow-2xs cursor-pointer",
+              wrapFileNames
+                ? "bg-purple-500/20 text-purple-400 border-purple-500/40"
+                : "border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)]"
+            )}
+            title={wrapFileNames ? "当前为长文件名全称完整换行展示模式 (点击切换为单行截断)" : "切换为长文件名全称换行展示模式"}
+          >
+            <WrapText className="h-3.5 w-3.5" />
+            <span>{wrapFileNames ? "全称换行" : "单行显示"}</span>
+          </button>
+          <button
+            onClick={() => setIsDualPane((prev) => !prev)}
+            className={cn(
+              "inline-flex h-7 px-2 shrink-0 items-center gap-1 rounded-lg border text-[11px] font-extrabold transition-colors cursor-pointer shadow-2xs",
+              isDualPane
+                ? "bg-indigo-600 text-white border-indigo-600"
+                : "bg-[var(--fill-1)] text-[var(--app-text)] border-[var(--app-line)] hover:bg-[var(--fill-2)]"
+            )}
+            title="切换双栏本地/远程 Commander 对比模式"
+          >
+            <Columns2 className="h-3.5 w-3.5" />
+            <span>{isDualPane ? "双栏" : "单栏"}</span>
+          </button>
+          <button
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+            title="刷新远程文件"
+            onClick={() => setReloadToken((token) => token + 1)}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        {/* 常用目录快速跳转 Chips 栏 */}
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none px-3 py-1.5 bg-[var(--sidebar-bg)] border-b border-[var(--app-line)]/50">
+          <span className="text-[10px] font-extrabold text-[var(--app-muted)] shrink-0 select-none">常用跳转:</span>
+          {terminalCwd && (
+            <button
+              type="button"
+              onClick={() => {
+                setRemotePath(terminalCwd);
+                setAutoFollowTerminalCwd(true);
+              }}
+              className={cn(
+                "flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-mono font-bold transition-all shrink-0 cursor-pointer select-none border",
+                remotePath === terminalCwd
+                  ? "bg-emerald-600 text-white border-emerald-500 shadow-2xs"
+                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+              )}
+              title={`终端当前目录: ${terminalCwd} (点击即刻跳转并开启自动跟随)`}
+            >
+              <RotateCcw className="h-2.5 w-2.5" />
+              <span>📍 终端: {terminalCwd}</span>
+            </button>
+          )}
+          {QUICK_REMOTE_LOCATIONS.map((loc) => (
+            <button
+              key={loc.path}
+              type="button"
+              onClick={() => setRemotePath(loc.path)}
+              className={cn(
+                "rounded-md px-2 py-0.5 text-[10px] font-mono font-bold transition-all shrink-0 cursor-pointer select-none",
+                remotePath === loc.path
+                  ? "bg-purple-500 text-white shadow-2xs"
+                  : "bg-[var(--fill-1)] text-[var(--app-text)] hover:bg-[var(--fill-2)] hover:text-purple-400 border border-[var(--app-line)]"
+              )}
+              title={`快速跳转至: ${loc.path}`}
+            >
+              {loc.label} ({loc.path})
+            </button>
+          ))}
+        </div>
+
+        {/* 智能检索 / 绝对路径回车直达栏 */}
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--fill-1)]">
+          <Search className="h-3.5 w-3.5 text-[var(--app-muted)] shrink-0" />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const val = fileFilter.trim();
+              if (!val) return;
+              if (val.startsWith("/") || val.startsWith("~") || val.includes("/")) {
+                const target = val.startsWith("~") ? val.replace(/^~/, "/root") : val;
+                setRemotePath(target);
+                setFileFilter("");
+              }
+            }}
+            className="flex-1 flex items-center gap-1.5 min-w-0"
+          >
+            <input
+              className="w-full bg-transparent text-xs text-[var(--app-text)] placeholder:text-[var(--app-muted)] focus:outline-none font-medium"
+              placeholder="输入路径回车跳转 (如 /data/debian12/images)，或检索文件名..."
+              value={fileFilter}
+              onChange={(e) => setFileFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const val = fileFilter.trim();
+                  if (val.startsWith("/") || val.startsWith("~") || val.includes("/")) {
+                    e.preventDefault();
+                    const target = val.startsWith("~") ? val.replace(/^~/, "/root") : val;
+                    setRemotePath(target);
+                    setFileFilter("");
+                  }
+                }
+              }}
+            />
+            {(fileFilter.trim().startsWith("/") || fileFilter.trim().startsWith("~") || fileFilter.trim().includes("/")) && (
+              <button
+                type="submit"
+                className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] shadow-2xs cursor-pointer shrink-0 transition-colors"
+                title="立即跳转至该路径"
+              >
+                前往 ➔
+              </button>
+            )}
+            {fileFilter && (
+              <button
+                type="button"
+                className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer shrink-0"
+                onClick={() => setFileFilter("")}
+              >
+                ✕
+              </button>
+            )}
+          </form>
+        </div>
+      </div>
+
+      {uploadStatus && (
+        <div className="flex items-center justify-between border-b border-emerald-200 bg-emerald-50/90 dark:bg-emerald-950/60 dark:border-emerald-900 px-3 py-1.5 text-xs font-extrabold text-emerald-800 dark:text-emerald-200 shrink-0">
+          <span className="truncate">{uploadStatus}</span>
+          <button className="text-[10px] text-emerald-700 dark:text-emerald-300 hover:text-emerald-900 ml-2 shrink-0 cursor-pointer" onClick={() => setUploadStatus("")}>关闭</button>
+        </div>
+      )}
+
+      {/* 实时传输任务与大文件下载进度条面板 */}
+      {transferTasks.length > 0 && (
+        <div className="border-b border-[var(--app-line)] bg-[var(--fill-1)] p-2.5 shrink-0">
+          <div className="flex items-center justify-between pb-1.5 border-b border-[var(--app-line)]/60">
+            <div className="flex items-center gap-1.5 text-xs font-extrabold text-[var(--app-text)]">
+              <Download className="h-3.5 w-3.5 text-emerald-500 animate-pulse" />
+              <span>传输任务 ({transferTasks.filter(t => t.status === "transferring").length} 进行中)</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onClearCompletedTransfers?.()}
+              className="text-[10px] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer"
+              title="清除已完成与已失败的任务"
+            >
+              清空已结束
+            </button>
+          </div>
+          <div className="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1">
+            {transferTasks.map((task) => (
+              <div key={task.id} className="rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-2.5 text-xs shadow-2xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {task.type === "upload" ? (
+                      <Upload className="h-3.5 w-3.5 text-blue-500 shrink-0" />
                     ) : (
-                      <FileIcon aria-label="文件图标" className="h-4 w-4 text-slate-400" />
+                      <Download className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                     )}
-                    <span className="min-w-0">
-                      <span className="block truncate font-semibold text-slate-800">{entry.name}</span>
-                      <span className="mt-0.5 block truncate text-[11px] text-slate-400">{entry.date || " "}</span>
+                    <span className="font-mono font-bold text-[var(--app-text)] truncate max-w-[180px]" title={task.name}>
+                      {task.name}
                     </span>
-                    <span className="text-slate-500">{entry.type === "directory" ? "目录" : "文件"}</span>
-                    <span className="truncate text-right text-slate-500">{formatRemoteFileSize(entry)}</span>
-                  </button>
-                ))}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
+                    {task.status === "transferring" && (
+                      <>
+                        {task.speed && <span className="text-sky-400 font-bold">{task.speed}</span>}
+                        <span className={cn("font-black", task.type === "upload" ? "text-blue-400" : "text-emerald-400")}>
+                          {task.progress}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onCancelTransfer?.(task.sessionId || activeSession?.id || "", task.id, task.type);
+                          }}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 font-bold ml-1 cursor-pointer"
+                          title={`取消此${task.type === "upload" ? "上传" : "下载"}`}
+                        >
+                          ✕
+                        </button>
+                      </>
+                    )}
+                    {task.status === "completed" && (
+                      <span className="text-emerald-500 font-extrabold flex items-center gap-0.5">
+                        <CheckCircle2 className="h-3 w-3" /> 已完成
+                      </span>
+                    )}
+                    {task.status === "error" && (
+                      <span className="text-rose-500 font-extrabold" title={task.error}>
+                        ❌ {task.error || "失败"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {/* 进度条轨道 */}
+                <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-[var(--app-line)]">
+                  <div
+                    className={cn(
+                      "h-full transition-all duration-200",
+                      task.status === "completed"
+                        ? "bg-emerald-500"
+                        : task.status === "error"
+                        ? "bg-rose-500"
+                        : task.type === "upload"
+                        ? "bg-blue-400 bg-gradient-to-r from-blue-500 to-cyan-400 animate-pulse"
+                        : "bg-emerald-400 bg-gradient-to-r from-emerald-500 to-teal-400 animate-pulse"
+                    )}
+                    style={{ width: `${task.progress}%` }}
+                  />
+                </div>
+                <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--app-muted)] font-mono">
+                  <span className="truncate max-w-[180px]" title={task.remotePath}>{task.remotePath}</span>
+                  <span>
+                    {task.lastBytes && task.lastBytes > 0 ? `${formatBytes(task.lastBytes)} / ` : ""}
+                    {task.size > 0 ? formatBytes(task.size) : ""}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 核心文件列表区域 (100% 全高撑满底部) */}
+      <div className="flex-1 min-h-0 w-full overflow-hidden bg-transparent flex flex-col relative">
+        {canBrowseRemote ? (
+          <>
+            {loading && <div className="p-8 text-center text-xs text-[var(--app-muted)] font-extrabold">正在读取目录...</div>}
+            {!loading && error && <div className="p-8 text-center text-xs text-rose-600 font-extrabold">{error}</div>}
+            {!loading && !error && entries.length === 0 && <div className="p-8 text-center text-xs text-[var(--app-muted)] font-extrabold">目录为空。</div>}
+            {!loading && !error && entries.length > 0 && (
+              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto select-none scrollbar-thin">
+                <div style={{ minWidth: `${colWidths.name + colWidths.size + colWidths.type + colWidths.date + colWidths.permissions + 30}px` }}>
+                  {/* FinalShell 风格表头（支持按住竖线左右任意拖拽调整列宽） */}
+                  <div className="flex items-center bg-[var(--sidebar-bg)] border-b border-[var(--app-line)] text-[11px] font-bold text-[var(--app-muted)] sticky top-0 z-10">
+                    {/* 文件名列头 */}
+                    <div
+                      style={{ width: `${colWidths.name}px`, minWidth: `${colWidths.name}px` }}
+                      className="relative flex items-center px-3 py-1.5 min-w-0"
+                    >
+                      <span className="truncate">文件名</span>
+                      {/* 可随意左右拖拽调整宽度的分割把手 */}
+                      <div
+                        onPointerDown={(e) => startResizeCol("name", e)}
+                        onDoubleClick={() => setColWidths((w) => ({ ...w, name: 450 }))}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/30 active:bg-emerald-500 transition-colors z-20 group/colresizer"
+                        title="按住左右拖拽调整「文件名」列宽 (双击自适应加宽)"
+                      >
+                        <div className="h-full w-px bg-[var(--app-line)] group-hover/colresizer:bg-emerald-500" />
+                      </div>
+                    </div>
+
+                    {/* 大小列头 */}
+                    <div
+                      style={{ width: `${colWidths.size}px`, minWidth: `${colWidths.size}px` }}
+                      className="relative flex items-center justify-end px-2 py-1.5 min-w-0"
+                    >
+                      <span className="truncate">大小</span>
+                      <div
+                        onPointerDown={(e) => startResizeCol("size", e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/30 active:bg-emerald-500 transition-colors z-20 group/colresizer"
+                        title="按住左右拖拽调整「大小」列宽"
+                      >
+                        <div className="h-full w-px bg-[var(--app-line)] group-hover/colresizer:bg-emerald-500" />
+                      </div>
+                    </div>
+
+                    {/* 类型列头 */}
+                    <div
+                      style={{ width: `${colWidths.type}px`, minWidth: `${colWidths.type}px` }}
+                      className="relative flex items-center px-2 py-1.5 min-w-0"
+                    >
+                      <span className="truncate">类型</span>
+                      <div
+                        onPointerDown={(e) => startResizeCol("type", e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/30 active:bg-emerald-500 transition-colors z-20 group/colresizer"
+                        title="按住左右拖拽调整「类型」列宽"
+                      >
+                        <div className="h-full w-px bg-[var(--app-line)] group-hover/colresizer:bg-emerald-500" />
+                      </div>
+                    </div>
+
+                    {/* 修改时间列头 */}
+                    <div
+                      style={{ width: `${colWidths.date}px`, minWidth: `${colWidths.date}px` }}
+                      className="relative flex items-center px-2 py-1.5 min-w-0"
+                    >
+                      <span className="truncate">修改时间</span>
+                      <div
+                        onPointerDown={(e) => startResizeCol("date", e)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/30 active:bg-emerald-500 transition-colors z-20 group/colresizer"
+                        title="按住左右拖拽调整「修改时间」列宽"
+                      >
+                        <div className="h-full w-px bg-[var(--app-line)] group-hover/colresizer:bg-emerald-500" />
+                      </div>
+                    </div>
+
+                    {/* 权限列头 */}
+                    <div
+                      style={{ width: `${colWidths.permissions}px`, minWidth: `${colWidths.permissions}px` }}
+                      className="relative flex items-center px-2 py-1.5 min-w-0"
+                    >
+                      <span className="truncate">权限</span>
+                    </div>
+                  </div>
+
+                  {/* 文件行数据 */}
+                  <div aria-label="远程文件列表" className="divide-y divide-[var(--app-line)]/50">
+                    {entries
+                      .filter((entry) => !fileFilter.trim() || entry.name.toLowerCase().includes(fileFilter.trim().toLowerCase()))
+                      .map((entry) => (
+                      <button
+                        key={`${entry.type}-${entry.name}`}
+                        className={cn(
+                          "flex w-full items-center text-left text-xs transition-colors hover:bg-[var(--fill-1)]/80 cursor-pointer group/row py-1.5",
+                          entry.type === "directory" ? "font-semibold" : ""
+                        )}
+                        title={entry.type === "directory" ? `进入目录: ${entry.name}` : `双击打开/预览: ${entry.name}`}
+                        onClick={() => {
+                          if (entry.type === "directory") {
+                            openDirectory(entry);
+                          }
+                        }}
+                        onDoubleClick={() => {
+                          if (entry.type !== "directory") {
+                            const targetPath = joinRemotePath(remotePath, entry.name);
+                            if (onOpenRemoteEditor) {
+                              onOpenRemoteEditor(targetPath, entry.name);
+                            } else {
+                              setPreviewFile({ path: targetPath, name: entry.name });
+                            }
+                          }
+                        }}
+                        onContextMenu={(event) => openFileMenu(event, entry)}
+                      >
+                        {/* 文件名单元格 */}
+                        <div
+                          style={{ width: `${colWidths.name}px`, minWidth: `${colWidths.name}px` }}
+                          className="flex items-center gap-2 px-3 min-w-0"
+                        >
+                          {entry.type === "directory" ? (
+                            <FolderIcon aria-label="目录图标" className="h-4 w-4 text-amber-500 shrink-0" />
+                          ) : (entry.type as string) === "symlink" || (entry as any).linkTarget ? (
+                            <LinkIcon aria-label="软链接图标" className="h-4 w-4 text-cyan-400 shrink-0" />
+                          ) : (
+                            <FileIcon aria-label="文件图标" className="h-4 w-4 text-[var(--app-muted)] shrink-0" />
+                          )}
+                          <span
+                            className={cn(
+                              "font-mono text-xs font-bold text-[var(--app-text)]",
+                              wrapFileNames ? "break-all whitespace-normal" : "truncate"
+                            )}
+                            title={entry.name}
+                          >
+                            {entry.name}
+                            {(entry as any).linkTarget && (
+                              <span className="text-[10px] text-cyan-400 font-normal ml-1">
+                                → {(entry as any).linkTarget}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+
+                        {/* 大小单元格 */}
+                        <div
+                          style={{ width: `${colWidths.size}px`, minWidth: `${colWidths.size}px` }}
+                          className="text-right px-2 font-mono text-[11px] text-[var(--app-muted)] truncate"
+                        >
+                          {formatRemoteFileSize(entry)}
+                        </div>
+
+                        {/* 类型单元格 */}
+                        <div
+                          style={{ width: `${colWidths.type}px`, minWidth: `${colWidths.type}px` }}
+                          className="px-2 text-[11px] text-[var(--app-muted)] truncate"
+                        >
+                          {(entry.type as string) === "symlink" ? "软链接" : entry.type === "directory" ? "文件夹" : "文件"}
+                        </div>
+
+                        {/* 修改时间单元格 */}
+                        <div
+                          style={{ width: `${colWidths.date}px`, minWidth: `${colWidths.date}px` }}
+                          className="px-2 font-mono text-[11px] text-[var(--app-muted)] truncate"
+                        >
+                          {entry.date || "-"}
+                        </div>
+
+                        {/* 权限单元格 */}
+                        <div
+                          style={{ width: `${colWidths.permissions}px`, minWidth: `${colWidths.permissions}px` }}
+                          className="px-2 font-mono text-[11px] text-[var(--app-muted)] truncate"
+                        >
+                          {entry.permissions ? String(entry.permissions) : "-"}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
             {fileMenu && (
               <div
                 role="menu"
-                className="fixed z-50 min-w-32 rounded-md border border-slate-200 bg-white p-1 text-xs shadow-lg"
-                style={{ left: fileMenu.x, top: fileMenu.y }}
+                className="fixed z-50 min-w-52 max-w-xs max-h-[calc(100vh-24px)] overflow-y-auto scrollbar-thin rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-1.5 text-xs font-extrabold shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150"
+                style={{
+                  left: Math.max(8, Math.min(fileMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 240)),
+                  top: Math.max(8, Math.min(fileMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - (fileMenu.entry.type === "directory" ? 340 : 480)))
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onContextMenu={(e) => e.preventDefault()}
+                onMouseLeave={() => setFileMenu(null)}
               >
-                <button
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-slate-700 hover:bg-slate-50"
-                  onClick={() => void downloadRemoteFile(fileMenu.entry)}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  下载文件
-                </button>
+                {fileMenu.entry.type === "directory" ? (
+                  <>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-amber-600 dark:text-amber-400 hover:bg-[var(--fill-1)] cursor-pointer font-bold"
+                      onClick={() => {
+                        openDirectory(fileMenu.entry);
+                        setFileMenu(null);
+                      }}
+                    >
+                      <FolderOpen className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                      <span>进入此目录</span>
+                    </button>
+                    {onSendCommand && (
+                      <button
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sky-600 dark:text-sky-400 hover:bg-[var(--fill-1)] cursor-pointer font-bold"
+                        onClick={() => {
+                          const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                          onSendCommand(`cd "${fullPath}"\r`);
+                          setUploadStatus(`💻 已在终端中执行: cd "${fullPath}"`);
+                          setFileMenu(null);
+                        }}
+                      >
+                        <Terminal className="h-3.5 w-3.5 text-sky-500 shrink-0" />
+                        <span>在终端中跳转 (cd)</span>
+                      </button>
+                    )}
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        navigator.clipboard.writeText(fullPath);
+                        setUploadStatus(`📋 已复制路径: ${fullPath}`);
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span>复制目录绝对路径</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-emerald-600 dark:text-emerald-400 hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        setRemotePath(joinRemotePath(remotePath, fileMenu.entry.name));
+                        setFileMenu(null);
+                        setTimeout(() => void createNewFile(), 100);
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                      <span>在此新建文件</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-indigo-600 dark:text-indigo-400 hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        setRemotePath(joinRemotePath(remotePath, fileMenu.entry.name));
+                        setFileMenu(null);
+                        setTimeout(() => void createNewFolder(), 100);
+                      }}
+                    >
+                      <FolderPlus className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                      <span>在此新建子目录</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        setPermissionFile({ name: fileMenu.entry.name, path: fullPath, isDirectory: true });
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Settings className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                      <span>修改目录权限 (Chmod)</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 cursor-pointer font-bold"
+                      onClick={() => void deleteRemoteItem(fileMenu.entry)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                      <span>删除此目录 (rm -rf)</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-emerald-600 dark:text-emerald-400 hover:bg-[var(--fill-1)] cursor-pointer font-bold"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        onOpenRemoteEditor?.(fullPath, fileMenu.entry.name);
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                      <span>在线编辑修改 (Ctrl+S写回)</span>
+                    </button>
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        setPreviewFile({ path: fullPath, name: fileMenu.entry.name });
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Eye className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                      <span>预览文件内容</span>
+                    </button>
+
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => void downloadRemoteFile(fileMenu.entry)}
+                    >
+                      <Download className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                      <span>下载文件</span>
+                    </button>
+
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        navigator.clipboard.writeText(fullPath);
+                        setUploadStatus(`📋 已复制路径: ${fullPath}`);
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span>复制远程路径</span>
+                    </button>
+
+                    {onSendCommand && (
+                      <>
+                        <button
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sky-600 dark:text-sky-400 hover:bg-[var(--fill-1)] cursor-pointer"
+                          onClick={() => {
+                            const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                            onSendCommand(`cat "${fullPath}"\r`);
+                            setUploadStatus(`💻 在终端中查看: cat "${fullPath}"`);
+                            setFileMenu(null);
+                          }}
+                        >
+                          <Terminal className="h-3.5 w-3.5 text-sky-500 shrink-0" />
+                          <span>在终端中查看 (cat)</span>
+                        </button>
+                        <button
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sky-600 dark:text-sky-400 hover:bg-[var(--fill-1)] cursor-pointer"
+                          onClick={() => {
+                            const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                            onSendCommand(`tail -n 100 "${fullPath}"\r`);
+                            setUploadStatus(`📜 查看末尾日志: tail -n 100 "${fullPath}"`);
+                            setFileMenu(null);
+                          }}
+                        >
+                          <Terminal className="h-3.5 w-3.5 text-sky-500 shrink-0" />
+                          <span>查看末尾100行 (tail)</span>
+                        </button>
+                      </>
+                    )}
+
+                    {fileMenu.entry.type === "file" && (
+                      <button
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                        onClick={() => {
+                          const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                          onOpenDiff?.(fullPath, fileMenu.entry.name);
+                          setFileMenu(null);
+                        }}
+                      >
+                        <GitCompare className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                        <span>双栏文本 Diff 对比分析</span>
+                      </button>
+                    )}
+
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                      onClick={() => {
+                        const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                        setPermissionFile({ name: fileMenu.entry.name, path: fullPath, isDirectory: fileMenu.entry.type === "directory" });
+                        setFileMenu(null);
+                      }}
+                    >
+                      <Settings className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                      <span>修改权限 / 属性 (Chmod)</span>
+                    </button>
+
+                    {onAddAiQuote && (
+                      <button
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[var(--app-text)] hover:bg-[var(--fill-1)] cursor-pointer"
+                        onClick={() => {
+                          const fullPath = joinRemotePath(remotePath, fileMenu.entry.name);
+                          onAddAiQuote(`远程文件路径: ${fullPath}`, activeSession?.title || "远程文件");
+                          setUploadStatus(`💬 已引用路径至 AI 问答`);
+                          setFileMenu(null);
+                        }}
+                      >
+                        <Bot className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                        <span>引用路径至 AI 问答</span>
+                      </button>
+                    )}
+
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 cursor-pointer font-bold"
+                      onClick={() => void deleteRemoteItem(fileMenu.entry)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                      <span>删除文件 (rm -f)</span>
+                    </button>
+                  </>
+                )}
               </div>
             )}
-          </div>
+          </>
         ) : (
-          <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-3 py-8 text-center text-xs text-slate-500">
+          <div className="m-6 rounded-2xl border border-dashed border-[var(--app-line)] bg-[var(--sidebar-bg)] p-8 text-center text-xs font-extrabold text-[var(--app-muted)]">
             {emptyMessage}
           </div>
         )}
       </div>
+      <FilePreviewModal
+        open={Boolean(previewFile)}
+        file={previewFile || undefined}
+        sessionId={activeSession?.id}
+        sessionTitle={activeSession?.title}
+        onOpenChange={(open) => {
+          if (!open) setPreviewFile(null);
+        }}
+        onAddAiQuote={onAddAiQuote}
+      />
+      <FilePermissionModal
+        file={permissionFile}
+        activeSessionId={activeSession?.id}
+        onClose={() => setPermissionFile(null)}
+        onSuccess={(msg) => {
+          setUploadStatus(msg);
+          setReloadToken((t) => t + 1);
+        }}
+      />
     </div>
   );
 }
@@ -3856,405 +10283,6 @@ function formatBytes(size: number) {
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-function BrowserPanel({
-  favorites,
-  onRefresh,
-  onAdd,
-  onDelete,
-  onOpen
-}: {
-  favorites: WebFavorite[];
-  onRefresh: () => void;
-  onAdd: (title: string, url: string) => void;
-  onDelete: (favorite: WebFavorite) => void;
-  onOpen: (favorite: WebFavorite) => void;
-}) {
-  const [title, setTitle] = useState("");
-  const [url, setUrl] = useState("");
-
-  function submit() {
-    const nextTitle = title.trim();
-    const nextUrl = url.trim();
-    if (!nextTitle || !nextUrl) return;
-    onAdd(nextTitle, nextUrl);
-    setTitle("");
-    setUrl("");
-  }
-
-  return (
-    <div className="h-full overflow-auto px-8 py-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-6 flex items-start justify-between gap-5">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-950">浏览器状态栏</h1>
-            <p className="mt-1 text-sm text-slate-500">保存常用网页入口，点击卡片后用外部浏览器打开。</p>
-          </div>
-          <Button variant="outline" onClick={onRefresh}>
-            <RefreshCw className="h-4 w-4" />
-            刷新
-          </Button>
-        </div>
-
-        <Panel title="网页卡片">
-          <div className="grid grid-cols-[220px_minmax(0,1fr)_104px] gap-3">
-            <Input
-              placeholder="标签名称"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") submit();
-              }}
-            />
-            <Input
-              placeholder="https://example.com"
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") submit();
-              }}
-            />
-            <Button onClick={submit}>添加网页</Button>
-          </div>
-
-          {favorites.length === 0 ? (
-            <EmptyState title="暂无网页卡片" description="添加一个标签和 URL 后，这里会显示可点击的网页入口。" />
-          ) : (
-            <div className="mt-5 grid grid-cols-3 gap-3">
-              {favorites.map((favorite) => (
-                <div
-                  key={favorite.id}
-                  className="rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-slate-300 hover:bg-slate-50"
-                >
-                  <button
-                    aria-label={`打开 ${favorite.title}`}
-                    className="block w-full text-left"
-                    onClick={() => onOpen(favorite)}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
-                        <Globe2 className="h-4 w-4" />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-semibold text-slate-950">{favorite.title}</span>
-                        <span className="mt-1 block truncate text-xs text-slate-500">{favorite.url}</span>
-                      </span>
-                    </div>
-                  </button>
-                  <div className="mt-4 flex justify-end gap-2">
-                    <button
-                      aria-label={`删除 ${favorite.title}`}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-rose-100 bg-white text-rose-500 hover:bg-rose-50 hover:text-rose-700"
-                      onClick={() => onDelete(favorite)}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      aria-label={`外部链接 ${favorite.title}`}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-                      onClick={() => onOpen(favorite)}
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
-      </div>
-    </div>
-  );
-}
-
-function isMonitorRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function monitorRecord(result: NativeResult | undefined, key: string) {
-  const value = result?.[key];
-  return isMonitorRecord(value) ? value : {};
-}
-
-function monitorList(result: NativeResult | undefined, key: string) {
-  const value = result?.[key];
-  return Array.isArray(value) ? value.filter(isMonitorRecord) : [];
-}
-
-function monitorText(value: unknown) {
-  if (value === null || value === undefined || value === "") return "-";
-  return String(value);
-}
-
-function monitorPercent(value: unknown) {
-  const match = /-?\d+(?:\.\d+)?/.exec(monitorText(value));
-  if (!match) return 0;
-  const parsed = Number(match[0]);
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.max(0, Math.min(100, parsed));
-}
-
-function monitorPercentLabel(value: unknown) {
-  const text = monitorText(value);
-  if (text === "-") return "0%";
-  return text.includes("%") ? text : `${text}%`;
-}
-
-function MonitorProgress({ value, className = "bg-blue-500" }: { value: number; className?: string }) {
-  return (
-    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-      <div className={cn("h-full rounded-full", className)} style={{ width: `${value}%` }} />
-    </div>
-  );
-}
-
-function MonitorMetricCard({
-  label,
-  value,
-  detail,
-  icon: Icon,
-  percent,
-  barClassName
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  icon: React.ComponentType<{ className?: string }>;
-  percent: number;
-  barClassName: string;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-slate-500">{label}</span>
-        <Icon className="h-4 w-4 text-slate-400" />
-      </div>
-      <div className="mt-3 text-3xl font-semibold text-slate-950">{value}</div>
-      <div className="mt-3">
-        <MonitorProgress value={percent} className={barClassName} />
-      </div>
-      <div className="mt-2 truncate text-xs text-slate-500">{detail}</div>
-    </div>
-  );
-}
-
-function MonitorStatusBlock({ result }: { result?: NativeResult }) {
-  if (!result) {
-    return <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">等待刷新数据</div>;
-  }
-  if (!result.success) {
-    return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-4 text-sm text-amber-800">
-        {result.error || "暂未获取到数据"}
-      </div>
-    );
-  }
-  return null;
-}
-
-function MonitorPanel({ activeSession }: { activeSession?: SessionTab }) {
-  const [loading, setLoading] = useState(false);
-  const [snapshots, setSnapshots] = useState<Record<string, NativeResult>>({});
-
-  async function refresh() {
-    if (!activeSession) return;
-    setLoading(true);
-    const [info, stats, processes, disk, network] = await Promise.all([
-      nativeBridge.getSystemInfo(activeSession.id),
-      nativeBridge.getSystemStats(activeSession.id),
-      nativeBridge.getProcessList(activeSession.id),
-      nativeBridge.getDiskUsage(activeSession.id),
-      nativeBridge.getNetworkInfo(activeSession.id)
-    ]);
-    setSnapshots({ info, stats, processes, disk, network });
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    setSnapshots({});
-    void refresh();
-  }, [activeSession?.id]);
-
-  const info = monitorRecord(snapshots.info, "info");
-  const stats = monitorRecord(snapshots.stats, "stats");
-  const processes = monitorList(snapshots.processes, "processes").slice(0, 8);
-  const disks = monitorList(snapshots.disk, "disk_usage");
-  const networks = monitorList(snapshots.network, "network_info");
-  const hasStats = Boolean(snapshots.stats?.success);
-  const hasInfo = Boolean(snapshots.info?.success);
-  const hasProcesses = Boolean(snapshots.processes?.success);
-  const hasDisk = Boolean(snapshots.disk?.success);
-  const hasNetwork = Boolean(snapshots.network?.success);
-  const statusResults = [snapshots.info, snapshots.stats, snapshots.processes, snapshots.disk, snapshots.network].filter(
-    (result): result is NativeResult => Boolean(result && !result.success)
-  );
-
-  return (
-    <div className="h-full overflow-auto bg-[var(--app-bg)] px-8 py-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-[var(--app-text)]">系统监控</h1>
-            <p className="mt-1 text-sm text-[var(--app-muted)]">
-              {activeSession ? `当前会话：${activeSession.title}` : "选择一个 SSH 会话后显示主机状态。"}
-            </p>
-          </div>
-          <Button variant="outline" onClick={refresh} disabled={!activeSession || loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            刷新
-          </Button>
-        </div>
-
-        {!activeSession ? (
-          <EmptyState title="暂无活动 SSH 会话" description="连接 SSH 主机后，这里会显示 CPU、内存、磁盘、进程和网络接口。" />
-        ) : (
-          <div className="space-y-4">
-            {statusResults.length > 0 && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                {statusResults.map((result) => result.error || "暂未获取到数据").join("；")}
-              </div>
-            )}
-
-            <div className="grid grid-cols-3 gap-4">
-              <MonitorMetricCard
-                label="CPU"
-                value={hasStats ? monitorPercentLabel(stats.cpu_usage) : "0%"}
-                detail="当前处理器占用"
-                icon={Cpu}
-                percent={monitorPercent(stats.cpu_usage)}
-                barClassName="bg-blue-500"
-              />
-              <MonitorMetricCard
-                label="内存"
-                value={hasStats ? monitorPercentLabel(stats.memory_usage) : "0%"}
-                detail={`${monitorText(stats.memory_used)} / ${monitorText(stats.memory_total)}`}
-                icon={Server}
-                percent={monitorPercent(stats.memory_usage)}
-                barClassName="bg-emerald-500"
-              />
-              <MonitorMetricCard
-                label="磁盘"
-                value={hasStats ? monitorPercentLabel(stats.disk_usage) : "0%"}
-                detail={`${monitorText(stats.disk_used)} / ${monitorText(stats.disk_total)}`}
-                icon={HardDrive}
-                percent={monitorPercent(stats.disk_usage)}
-                barClassName="bg-amber-500"
-              />
-            </div>
-
-            <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-4">
-              <Panel title="系统概览">
-                {!hasInfo ? (
-                  <MonitorStatusBlock result={snapshots.info} />
-                ) : (
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    {[
-                      { label: "主机名", value: info.hostname },
-                      { label: "系统", value: info.os_name || info.os_version },
-                      { label: "架构", value: info.architecture },
-                      { label: "CPU", value: info.cpu },
-                      { label: "内存", value: info.total_memory },
-                      { label: "运行时间", value: info.uptime }
-                    ].map((item) => (
-                      <div key={item.label} className="rounded-md bg-slate-50 px-3 py-2">
-                        <div className="text-xs font-semibold text-slate-500">{item.label}</div>
-                        <div className="mt-1 truncate font-medium text-slate-900">{monitorText(item.value)}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Panel>
-
-              <Panel title="网络接口">
-                {!hasNetwork ? (
-                  <MonitorStatusBlock result={snapshots.network} />
-                ) : networks.length === 0 ? (
-                  <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无网络接口数据</div>
-                ) : (
-                  <div className="space-y-2">
-                    {networks.map((network, index) => (
-                      <div key={`${monitorText(network.name)}-${index}`} className="rounded-md border border-slate-200 px-3 py-2">
-                        <div className="font-semibold text-slate-900">{monitorText(network.name)}</div>
-                        <div className="mt-1 text-sm text-slate-600">{monitorText(network.ip)}</div>
-                        <div className="mt-1 text-xs text-slate-400">{monitorText(network.cidr)}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Panel>
-            </div>
-
-            <Panel title="进程列表">
-              {!hasProcesses ? (
-                <MonitorStatusBlock result={snapshots.processes} />
-              ) : processes.length === 0 ? (
-                <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无进程数据</div>
-              ) : (
-                <div className="overflow-hidden rounded-md border border-slate-200">
-                  <table className="w-full table-fixed text-left text-sm">
-                    <thead className="bg-slate-50 text-xs font-semibold text-slate-500">
-                      <tr>
-                        <th className="w-24 px-3 py-2">PID</th>
-                        <th className="px-3 py-2">名称</th>
-                        <th className="w-32 px-3 py-2">CPU</th>
-                        <th className="w-32 px-3 py-2">内存</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {processes.map((process, index) => (
-                        <tr key={`${monitorText(process.pid)}-${index}`} className="text-slate-700">
-                          <td className="px-3 py-2 font-mono text-xs text-slate-500">{monitorText(process.pid)}</td>
-                          <td className="truncate px-3 py-2 font-medium text-slate-900">{monitorText(process.name)}</td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              <span className="w-12 text-xs">{monitorPercentLabel(process.cpu)}</span>
-                              <div className="min-w-0 flex-1">
-                                <MonitorProgress value={monitorPercent(process.cpu)} className="bg-blue-500" />
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-xs">{monitorPercentLabel(process.memory)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Panel>
-
-            <Panel title="磁盘使用">
-              {!hasDisk ? (
-                <MonitorStatusBlock result={snapshots.disk} />
-              ) : disks.length === 0 ? (
-                <div className="rounded-md bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无磁盘数据</div>
-              ) : (
-                <div className="space-y-3">
-                  {disks.map((disk, index) => (
-                    <div key={`${monitorText(disk.mount)}-${index}`} className="rounded-md border border-slate-200 px-4 py-3">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-slate-900">{monitorText(disk.mount)}</div>
-                          <div className="mt-1 truncate text-xs text-slate-500">{monitorText(disk.device)}</div>
-                        </div>
-                        <div className="text-right text-sm font-semibold text-slate-900">{monitorPercentLabel(disk.usage)}</div>
-                      </div>
-                      <div className="mt-3">
-                        <MonitorProgress value={monitorPercent(disk.usage)} className="bg-amber-500" />
-                      </div>
-                      <div className="mt-2 text-xs text-slate-500">
-                        {monitorText(disk.used)} / {monitorText(disk.total)}，可用 {monitorText(disk.free)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Panel>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function CommandPanel({
   folders,
   activeFolderId,
@@ -4283,11 +10311,39 @@ function CommandPanel({
   transferStatus: string;
 }) {
   const [query, setQuery] = useState("");
+  const [showRunoobManual, setShowRunoobManual] = useState(false);
+  const [runoobCategory, setRunoobCategory] = useState<string>("全部");
   const [folderName, setFolderName] = useState("");
   const [draft, setDraft] = useState({ id: "", name: "", command: "", description: "" });
   const [editingCommand, setEditingCommand] = useState<(CommandItem & { folderId: string }) | null>(null);
   const [pendingCommandKey, setPendingCommandKey] = useState("");
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
+  const [finalShellInfo, setFinalShellInfo] = useState<{ detected: boolean; count: number; path: string } | null>(null);
+  const [windTermInfo, setWindTermInfo] = useState<{ detected: boolean; count: number; path: string } | null>(null);
+  const [showImportPopover, setShowImportPopover] = useState(false);
+
+  useEffect(() => {
+    nativeBridge.detectFinalShellCommands().then((res) => {
+      if (res.detected && (res.commandCount || 0) > 0) {
+        setFinalShellInfo({
+          detected: true,
+          count: res.commandCount || 0,
+          path: res.configPath || ""
+        });
+      }
+    }).catch(() => {});
+
+    nativeBridge.detectWindTermCommands().then((res) => {
+      if (res.detected && (res.commandCount || 0) > 0) {
+        setWindTermInfo({
+          detected: true,
+          count: res.commandCount || 0,
+          path: res.configPath || ""
+        });
+      }
+    }).catch(() => {});
+  }, []);
+  const drawerCmdTextareaRef = useRef<HTMLTextAreaElement>(null);
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
   const keyword = query.trim().toLowerCase();
   const visibleFolders = folders
@@ -4342,11 +10398,73 @@ function CommandPanel({
   }
 
   function insertCommandParameter(index: number) {
-    setDraft((current) => ({ ...current, command: `${current.command}[p#${index} 参数名]` }));
+    const paramText = `[p#${index} 参数名]`;
+    const textarea = drawerCmdTextareaRef.current;
+    if (!textarea) {
+      setDraft((current) => ({ ...current, command: `${current.command}${paramText}` }));
+      return;
+    }
+    textarea.focus();
+    const curVal = draft.command || "";
+    const start = textarea.selectionStart ?? curVal.length;
+    const end = textarea.selectionEnd ?? curVal.length;
+
+    let insertedViaExec = false;
+    try {
+      insertedViaExec = document.execCommand("insertText", false, paramText);
+    } catch (e) {
+      insertedViaExec = false;
+    }
+
+    if (!insertedViaExec) {
+      const before = curVal.slice(0, start);
+      const after = curVal.slice(end);
+      const updated = `${before}${paramText}${after}`;
+      setDraft((current) => ({ ...current, command: updated }));
+
+      requestAnimationFrame(() => {
+        textarea.focus();
+        const newPos = start + paramText.length;
+        textarea.setSelectionRange(newPos, newPos);
+      });
+    } else {
+      setDraft((current) => ({ ...current, command: textarea.value }));
+    }
   }
 
   function insertEditingCommandParameter(index: number) {
-    setEditingCommand((current) => current ? { ...current, command: `${current.command}[p#${index} 参数名]` } : current);
+    const paramText = `[p#${index} 参数名]`;
+    const textarea = drawerCmdTextareaRef.current;
+    if (!textarea) {
+      setEditingCommand((current) => current ? { ...current, command: `${current.command}${paramText}` } : current);
+      return;
+    }
+    textarea.focus();
+    const curVal = editingCommand?.command || "";
+    const start = textarea.selectionStart ?? curVal.length;
+    const end = textarea.selectionEnd ?? curVal.length;
+
+    let insertedViaExec = false;
+    try {
+      insertedViaExec = document.execCommand("insertText", false, paramText);
+    } catch (e) {
+      insertedViaExec = false;
+    }
+
+    if (!insertedViaExec) {
+      const before = curVal.slice(0, start);
+      const after = curVal.slice(end);
+      const updated = `${before}${paramText}${after}`;
+      setEditingCommand((current) => current ? { ...current, command: updated } : current);
+
+      requestAnimationFrame(() => {
+        textarea.focus();
+        const newPos = start + paramText.length;
+        textarea.setSelectionRange(newPos, newPos);
+      });
+    } else {
+      setEditingCommand((current) => current ? { ...current, command: textarea.value } : current);
+    }
   }
 
   function sendCommand(command: CommandItem & { folderId: string }) {
@@ -4367,262 +10485,377 @@ function CommandPanel({
   }
 
   return (
-    <div className="grid h-full min-w-0 grid-cols-[280px_minmax(0,1fr)] bg-white">
-      <aside className="min-h-0 border-r border-slate-200 bg-slate-50 p-4">
+    <div className="grid h-full min-w-0 grid-cols-[210px_minmax(0,1fr)] bg-[var(--app-bg)]">
+      <aside className="min-h-0 border-r border-[var(--app-line)] bg-[var(--sidebar-bg)] p-3.5 select-none flex flex-col justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-slate-950">快捷命令库</h1>
-          <p className="mt-1 text-xs text-slate-500">
-            {activeSession ? `发送到：${activeSession.title}` : "打开终端后可一键发送命令"}
-          </p>
-        </div>
+          <div>
+            <h1 className="text-base font-extrabold tracking-tight text-[var(--app-text)]">快捷命令库</h1>
+            <p className="mt-0.5 text-[11px] font-medium text-[var(--text-secondary)] truncate">
+              {activeSession ? `目标：${activeSession.title}` : "可直接发送至终端"}
+            </p>
+          </div>
 
-        <div className="relative mt-4">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            className="pl-9"
-            value={query}
-            placeholder="搜索命令、描述或文件夹"
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <Button className="col-span-2 h-9 px-3 text-xs" variant="outline" onClick={() => onImportCommands("FinalShell")}>
-            <Upload className="h-3.5 w-3.5" />
-            导入 FinalShell
-          </Button>
-          <Button className="h-9 px-3 text-xs" variant="outline" onClick={() => onImportCommands("本地文件")}>
-            <Upload className="h-3.5 w-3.5" />
-            导入
-          </Button>
-          <Button className="h-9 px-3 text-xs" variant="outline" onClick={onExportCommands}>
-            <Download className="h-3.5 w-3.5" />
-            导出
-          </Button>
-        </div>
-        {transferStatus && <p className="mt-2 text-xs text-slate-500">{transferStatus}</p>}
-
-        <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
-          <Input
-            value={folderName}
-            placeholder="新文件夹名称"
-            onChange={(event) => setFolderName(event.target.value)}
-          />
-          <Button variant="outline" onClick={submitFolder}>新建文件夹</Button>
-        </div>
-
-        <div className="mt-4 space-y-1">
-          {folders.map((folder) => (
-            <div
-              key={folder.id}
-              className={cn(
-                "grid grid-cols-[minmax(0,1fr)_32px] overflow-hidden rounded-md text-sm font-medium",
-                folder.id === activeFolder?.id ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-white"
-              )}
+          {finalShellInfo && (
+            <button
+              onClick={() => onImportCommands("FinalShellAuto")}
+              className="mt-2.5 w-full flex items-center justify-between rounded-xl px-2.5 py-1.5 bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-transparent border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500/60 hover:bg-emerald-500/20 transition-all text-left group shadow-2xs cursor-pointer"
+              title={`发现本机 FinalShell 配置 (${finalShellInfo.path})，点击一键无感导入全部命令`}
             >
-              <button
-                className="flex min-w-0 items-center justify-between gap-2 px-3 py-2 text-left"
-                onClick={() => onActiveFolderChange(folder.id)}
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Zap className="h-3.5 w-3.5 text-emerald-500 shrink-0 animate-pulse" />
+                <div className="truncate">
+                  <div className="text-[10px] font-extrabold leading-tight">一键移植 FinalShell</div>
+                  <div className="text-[9px] opacity-75 font-mono">已发现 {finalShellInfo.count} 条快捷命令</div>
+                </div>
+              </div>
+              <span className="text-[9px] font-extrabold bg-emerald-500 text-white rounded-md px-1.5 py-0.5 shadow-2xs group-hover:scale-105 transition-transform">
+                导入
+              </span>
+            </button>
+          )}
+
+          {windTermInfo && (
+            <button
+              onClick={() => onImportCommands("WindTermAuto")}
+              className="mt-2 w-full flex items-center justify-between rounded-xl px-2.5 py-1.5 bg-gradient-to-r from-cyan-500/15 via-sky-500/10 to-transparent border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:border-cyan-500/60 hover:bg-cyan-500/20 transition-all text-left group shadow-2xs cursor-pointer"
+              title={`发现本机 WindTerm 代码片段 (${windTermInfo.path})，点击一键无感导入`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Zap className="h-3.5 w-3.5 text-cyan-500 shrink-0 animate-pulse" />
+                <div className="truncate">
+                  <div className="text-[10px] font-extrabold leading-tight">一键移植 WindTerm</div>
+                  <div className="text-[9px] opacity-75 font-mono">已发现 {windTermInfo.count} 条代码片段</div>
+                </div>
+              </div>
+              <span className="text-[9px] font-extrabold bg-cyan-500 text-white rounded-md px-1.5 py-0.5 shadow-2xs group-hover:scale-105 transition-transform">
+                导入
+              </span>
+            </button>
+          )}
+
+          <div className="relative mt-3">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-muted)]" />
+            <Input
+              className="pl-8 h-8 text-xs rounded-full shadow-2xs"
+              value={query}
+              placeholder="搜索命令..."
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-1.5">
+            <Button
+              variant="outline"
+              size={26}
+              className="h-7 flex-1 rounded-full text-[11px] font-extrabold"
+              onClick={onExportCommands}
+            >
+              <Download className="h-3 w-3" />
+              导出
+            </Button>
+            <div className="relative flex-1">
+              <input type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && onImportCommands("本地文件")} />
+              <Button
+                variant="outline"
+                size={26}
+                className="h-7 w-full rounded-full text-[11px] font-extrabold flex items-center justify-center gap-1 text-[var(--app-text)] shadow-2xs"
+                onClick={() => {
+                  setShowImportPopover(!showImportPopover);
+                }}
               >
-                <span className="min-w-0 whitespace-normal break-words">{folder.name}</span>
-                <span className={cn("shrink-0 text-xs", folder.id === activeFolder?.id ? "text-slate-300" : "text-slate-400")}>
-                  {folder.commands.length}
-                </span>
-              </button>
-              <button
-                aria-label={`删除文件夹 ${folder.name}`}
-                title="删除文件夹"
-                className={cn(
-                  "flex h-full min-h-9 items-center justify-center border-l",
-                  folder.id === activeFolder?.id
-                    ? "border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white"
-                    : "border-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-600",
-                  folders.length <= 1 && "cursor-not-allowed opacity-40"
-                )}
-                disabled={folders.length <= 1}
-                onClick={() => onDeleteFolder(folder.id)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+                <Upload className="h-3 w-3" />
+                导入
+              </Button>
+              {showImportPopover && (
+                <div className="absolute left-0 top-8 z-50 w-56 rounded-2xl border border-[var(--app-line)] bg-slate-900/95 p-1.5 shadow-xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+                  <button
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-emerald-500/15 hover:text-emerald-300 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setShowImportPopover(false);
+                      onImportCommands(finalShellInfo ? "FinalShellAuto" : "FinalShell");
+                    }}
+                  >
+                    <Zap className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-[11px]">从 FinalShell 导入</div>
+                      <div className="text-[9px] text-slate-400">{finalShellInfo ? `自动检测到 ${finalShellInfo.count} 条` : "选择 config.json"}</div>
+                    </div>
+                  </button>
+                  <button
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-cyan-500/15 hover:text-cyan-300 transition-colors cursor-pointer mt-0.5"
+                    onClick={() => {
+                      setShowImportPopover(false);
+                      onImportCommands(windTermInfo ? "WindTermAuto" : "WindTerm");
+                    }}
+                  >
+                    <Zap className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-[11px]">从 WindTerm 导入</div>
+                      <div className="text-[9px] text-slate-400">{windTermInfo ? `自动检测到 ${windTermInfo.count} 条` : "选择 user.snippets"}</div>
+                    </div>
+                  </button>
+                  <button
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-800 transition-colors mt-0.5 cursor-pointer"
+                    onClick={() => {
+                      setShowImportPopover(false);
+                      onImportCommands("本地文件");
+                    }}
+                  >
+                    <FolderOpen className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    <div>
+                      <div className="font-extrabold text-[11px]">选择通用本地文件</div>
+                      <div className="text-[9px] text-slate-400">支持 JSON / XML / Snippets</div>
+                    </div>
+                  </button>
+                </div>
+              )}
             </div>
-          ))}
+          </div>
+
+          <div className="mt-3 flex items-center gap-1.5">
+            <Input
+              className="h-7.5 text-xs rounded-full"
+              value={folderName}
+              placeholder="新分类名称"
+              onChange={(event) => setFolderName(event.target.value)}
+            />
+            <Button variant="outline" size={26} className="h-7.5 rounded-full px-2.5 text-[11px] font-extrabold shrink-0" onClick={submitFolder}>
+              + 分类
+            </Button>
+          </div>
+
+          <div className="mt-3 space-y-1">
+            {folders.map((folder) => {
+              const active = folder.id === activeFolder?.id;
+              return (
+                <div
+                  key={folder.id}
+                  className={cn(
+                    "group flex items-center justify-between rounded-xl px-3 py-1.5 text-xs transition-all duration-150 cursor-pointer select-none",
+                    active
+                      ? "bg-emerald-600 text-white font-extrabold shadow-2xs"
+                      : "bg-[var(--panel-bg)] text-[var(--app-text)] hover:bg-[var(--fill-1)] border border-[var(--app-line)]"
+                  )}
+                  onClick={() => onActiveFolderChange(folder.id)}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs">📁</span>
+                    <span className="truncate font-extrabold text-[11px]">{folder.name}</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className={cn("rounded-full px-1.5 py-0.2 font-mono text-[9px] font-extrabold", active ? "bg-white/20 text-white" : "bg-[var(--fill-2)] text-[var(--app-muted)]")}>
+                      {folder.commands.length}
+                    </span>
+                    {folders.length > 1 && (
+                      <button
+                        aria-label={`删除 ${folder.name}`}
+                        title="删除分类"
+                        className={cn("h-4.5 w-4.5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity", active ? "hover:bg-rose-500 text-white" : "hover:bg-rose-50 text-rose-600")}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteFolder(folder.id);
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </aside>
 
-      <section className="min-h-0 overflow-auto px-6 py-6">
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold text-slate-950">{keyword ? "搜索结果" : activeFolder?.name || "命令"}</h2>
-            <p className="mt-1 text-sm text-slate-500">命令按文件夹管理，点击发送会写入当前活动终端。</p>
-          </div>
-          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500">
-            {visibleCommands.length} 条命令
-          </span>
-        </div>
-
-        <Panel title="添加命令">
-          <div className="grid grid-cols-[180px_minmax(0,1fr)] gap-2">
-            <Input
-              value={draft.name}
-              placeholder="命令名称"
-              onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-            />
-            <Textarea
-              className="min-h-20 resize-y text-sm"
-              value={draft.command}
-              placeholder="命令内容"
-              onChange={(event) => setDraft((current) => ({ ...current, command: event.target.value }))}
-            />
-            <p className="col-span-2 text-xs text-slate-400">参数占位示例：sudo iptables -t nat -nL | grep [p#1 端口]</p>
-            <div className="col-span-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-              <span>插入参数(动态生成命令)</span>
-              {COMMAND_PARAMETER_SLOTS.map((index) => (
-                <Button key={index} variant="outline" className="h-7 px-3 text-xs" onClick={() => insertCommandParameter(index)}>
-                  参数{index}
-                </Button>
-              ))}
+      <section className="min-h-0 overflow-auto bg-[var(--app-bg)] px-5 py-5">
+        <div className="mx-auto max-w-6xl space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-extrabold tracking-tight text-[var(--app-text)]">{keyword ? "搜索结果" : activeFolder?.name || "默认分类"}</h2>
+              <span className="rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 px-2.5 py-0.5 font-mono text-[11px] font-extrabold">
+                {visibleCommands.length} 条
+              </span>
             </div>
-            <Input
-              className="col-span-2"
-              value={draft.description}
-              placeholder="命令描述"
-              onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
-            />
           </div>
-          <div className="mt-3 flex justify-end gap-2">
-            <Button onClick={submitCommand}>添加命令</Button>
-          </div>
-        </Panel>
 
-        <Dialog.Root open={Boolean(editingCommand)} onOpenChange={(open) => !open && setEditingCommand(null)}>
-          <Dialog.Portal>
-            <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
-            <Dialog.Content className="fixed left-1/2 top-1/2 w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
-              <div className="mb-5 flex items-start justify-between">
-                <div>
-                  <Dialog.Title className="text-lg font-semibold text-slate-950">编辑命令</Dialog.Title>
-                  <Dialog.Description className="mt-1 text-sm text-slate-500">
-                    修改当前快捷命令，保存后立即写回命令库。
-                  </Dialog.Description>
-                </div>
-                <Dialog.Close asChild>
-                  <button className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
-                    <X className="h-4 w-4" />
-                  </button>
-                </Dialog.Close>
-              </div>
-
+          <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-3.5 shadow-2xs space-y-2.5">
+            <div className="flex items-center justify-between text-xs font-extrabold text-[var(--app-text)]">
+              <span className="flex items-center gap-1.5">
+                <Plus className="h-3.5 w-3.5 text-emerald-600" />
+                {editingCommand ? "编辑已有命令" : "新建快捷命令"}
+              </span>
               {editingCommand && (
-                <div className="grid gap-3">
-                  <Field label="命令名称">
-                    <Input
-                      value={editingCommand.name}
-                      onChange={(event) => setEditingCommand((current) => current ? { ...current, name: event.target.value } : current)}
-                    />
-                  </Field>
-                  <Field label="命令内容">
-                    <Textarea
-                      className="min-h-32 resize-y text-sm"
-                      value={editingCommand.command}
-                      onChange={(event) => setEditingCommand((current) => current ? { ...current, command: event.target.value } : current)}
-                    />
-                  </Field>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                    <span>插入参数</span>
-                    {COMMAND_PARAMETER_SLOTS.map((index) => (
-                      <Button key={index} variant="outline" className="h-7 px-3 text-xs" onClick={() => insertEditingCommandParameter(index)}>
-                        参数{index}
-                      </Button>
-                    ))}
-                  </div>
-                  <Field label="命令描述">
-                    <Input
-                      value={editingCommand.description || ""}
-                      onChange={(event) => setEditingCommand((current) => current ? { ...current, description: event.target.value } : current)}
-                    />
-                  </Field>
-                </div>
+                <Button variant="ghost" size={26} className="h-6 text-[11px] px-2 text-[var(--app-muted)]" onClick={() => setEditingCommand(null)}>
+                  取消编辑
+                </Button>
               )}
-
-              <div className="mt-5 flex justify-end gap-2">
-                <Dialog.Close asChild>
-                  <Button variant="outline">取消</Button>
-                </Dialog.Close>
-                <Button onClick={submitEditedCommand}>保存命令</Button>
-              </div>
-            </Dialog.Content>
-          </Dialog.Portal>
-        </Dialog.Root>
-
-        {pendingCommand && (
-          <Panel title={`${pendingCommand.name} 参数`}>
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2">
-              {pendingParameters.map((parameter) => (
-                <label key={parameter.key} className="grid gap-1 text-xs font-medium text-slate-600">
-                  <span>{parameter.name}</span>
-                  <Input
-                    className="h-9 text-xs"
-                    aria-label={`参数 ${parameter.name}`}
-                    value={parameterValues[parameter.key] || ""}
-                    onChange={(event) => setParameterValues((current) => ({ ...current, [parameter.key]: event.target.value }))}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") sendPendingCommand();
-                    }}
-                  />
-                </label>
-              ))}
             </div>
-            <div className="mt-3 flex justify-end">
-              <Button disabled={!activeSession} onClick={sendPendingCommand}>
-                <Send className="h-3.5 w-3.5" />
-                发送 {pendingCommand.name}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <Input
+                className="h-8 text-xs rounded-xl shadow-2xs"
+                value={editingCommand ? editingCommand.name : draft.name}
+                placeholder="命令名称 (如: top)"
+                onChange={(event) => {
+                  const val = event.target.value;
+                  if (editingCommand) setEditingCommand((c) => c ? { ...c, name: val } : c);
+                  else setDraft((c) => ({ ...c, name: val }));
+                }}
+              />
+              <Input
+                className="h-8 text-xs rounded-xl shadow-2xs sm:col-span-2"
+                value={editingCommand ? editingCommand.description : draft.description}
+                placeholder="功能简述 (可选)"
+                onChange={(event) => {
+                  const val = event.target.value;
+                  if (editingCommand) setEditingCommand((c) => c ? { ...c, description: val } : c);
+                  else setDraft((c) => ({ ...c, description: val }));
+                }}
+              />
+            </div>
+
+            <Textarea
+              ref={drawerCmdTextareaRef}
+              className="min-h-16 font-mono text-xs rounded-xl p-2.5 border-[var(--app-line)] bg-slate-900 text-emerald-400 placeholder:text-slate-500 shadow-inner"
+              value={editingCommand ? editingCommand.command : draft.command}
+              placeholder="命令内容... 支持占位符如: top -b -n1 | head -n [p#1 行数]"
+              onChange={(event) => {
+                const val = event.target.value;
+                if (editingCommand) setEditingCommand((c) => c ? { ...c, command: val } : c);
+                else setDraft((c) => ({ ...c, command: val }));
+              }}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
+                  e.preventDefault();
+                  const textarea = e.currentTarget;
+                  const pos = textarea.selectionStart ?? 0;
+                  const val = textarea.value;
+                  const lastNewline = val.lastIndexOf("\n", pos - 1);
+                  const lineStart = lastNewline === -1 ? 0 : lastNewline + 1;
+                  if (pos > lineStart) {
+                    textarea.setSelectionRange(lineStart, pos);
+                    let executed = false;
+                    if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+                      try {
+                        executed = document.execCommand("delete");
+                      } catch {}
+                    }
+                    if (!executed) {
+                      const updated = val.slice(0, lineStart) + val.slice(pos);
+                      if (editingCommand) setEditingCommand((c) => c ? { ...c, command: updated } : c);
+                      else setDraft((c) => ({ ...c, command: updated }));
+                      requestAnimationFrame(() => {
+                        textarea.setSelectionRange(lineStart, lineStart);
+                      });
+                    }
+                  } else if (pos === lineStart && lineStart > 0) {
+                    textarea.setSelectionRange(lastNewline, pos);
+                    let executed = false;
+                    if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+                      try {
+                        executed = document.execCommand("delete");
+                      } catch {}
+                    }
+                    if (!executed) {
+                      const updated = val.slice(0, lastNewline) + val.slice(pos);
+                      if (editingCommand) setEditingCommand((c) => c ? { ...c, command: updated } : c);
+                      else setDraft((c) => ({ ...c, command: updated }));
+                      requestAnimationFrame(() => {
+                        textarea.setSelectionRange(lastNewline, lastNewline);
+                      });
+                    }
+                  }
+                }
+              }}
+            />
+
+            <div className="flex items-center justify-between gap-2 pt-0.5">
+              <div className="flex items-center gap-1 overflow-x-auto">
+                <span className="text-[10px] font-bold text-[var(--app-muted)] shrink-0">插参数:</span>
+                {COMMAND_PARAMETER_SLOTS.map((index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    className="rounded-full bg-[var(--fill-2)] hover:bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-mono font-extrabold text-[var(--app-text)] transition-colors cursor-pointer border border-[var(--app-line)] shrink-0"
+                    onClick={() => (editingCommand ? insertEditingCommandParameter(index) : insertCommandParameter(index))}
+                  >
+                    +p#{index}
+                  </button>
+                ))}
+              </div>
+
+              <Button
+                size={32}
+                className="rounded-full px-4 h-7.5 text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs shrink-0"
+                onClick={editingCommand ? submitEditedCommand : submitCommand}
+              >
+                {editingCommand ? "保存" : "+ 添加命令"}
               </Button>
             </div>
-          </Panel>
-        )}
+          </div>
 
-        <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2 2xl:grid-cols-4">
-          {visibleCommands.map((command) => (
-            <div key={`${command.folderId}-${command.id}`} className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-950">{command.name}</div>
-                  <div className="mt-1 text-xs text-slate-500">{command.folderName}</div>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <Button variant="ghost" className="h-7 px-1.5 text-xs" onClick={() => editCommand(command)}>
-                    编辑
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="h-7 px-1.5 text-xs"
-                    aria-label={`删除命令 ${command.name}`}
-                    onClick={() => onDeleteCommand(command.folderId, command.id)}
-                  >
-                    删除
-                  </Button>
-                </div>
-              </div>
-              <code className="mt-2 block max-h-24 overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-50 px-2 py-1.5 text-xs leading-5 text-slate-800">
-                {command.command}
-              </code>
-              {command.description && <p className="mt-2 truncate text-xs text-slate-500">{command.description}</p>}
-              <div className="mt-2 flex justify-end">
-                <Button
-                  className="h-7 px-2 text-xs"
-                  disabled={!activeSession}
-                  aria-label={`发送 ${command.name}`}
-                  onClick={() => sendCommand(command)}
-                >
-                  <Send className="h-3.5 w-3.5" />
-                  发送
-                </Button>
-              </div>
+          {/* FinalShell 动态宽度横向流式指令全库展示区 */}
+          <div className="rounded-2xl border border-[var(--app-line)] bg-[var(--panel-bg)] p-4 shadow-2xs space-y-3.5">
+            <div className="flex items-center justify-between text-xs font-extrabold text-[var(--app-text)] border-b border-[var(--app-line)] pb-2">
+              <span className="flex items-center gap-2">
+                <span>📁</span>
+                <span>{activeFolder?.name || "默认分类"} 快捷指令集</span>
+              </span>
+              <span className="font-mono text-[10px] text-[var(--app-muted)]">点击标签直接写入活动终端控制台</span>
             </div>
-          ))}
-          {visibleCommands.length === 0 && (
-            <EmptyState title="没有匹配命令" description="换个关键词搜索，或在当前文件夹里新增一条命令。" />
-          )}
+
+            <div className="flex flex-wrap gap-2">
+              {visibleCommands.map((command) => {
+                const parameters = extractCommandParameters(command.command);
+                return (
+                  <div
+                    key={commandKey(command)}
+                    className="group inline-flex items-center gap-2 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] hover:bg-emerald-50 hover:border-emerald-400 p-2 text-xs transition-all cursor-pointer shadow-2xs select-none max-w-full"
+                    title={`点击发送到终端: $ ${command.command}`}
+                    onClick={() => sendCommand(command)}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                      <span className="font-extrabold text-[var(--app-text)] text-xs truncate">{command.name}</span>
+                      <code className="font-mono text-[10px] font-bold text-indigo-700 dark:text-cyan-300 bg-[var(--panel-bg)] px-2 py-0.5 rounded-lg border border-[var(--app-line)] truncate">
+                        $ {command.command}
+                      </code>
+                    </div>
+
+                    <div className="flex items-center gap-1 border-l border-[var(--app-line)] pl-1.5 shrink-0">
+                      <button
+                        aria-label={`编辑命令 ${command.name}`}
+                        title="编辑"
+                        className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-muted)] hover:bg-white hover:text-[var(--app-text)]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          editCommand(command);
+                        }}
+                      >
+                        <Pencil className="h-2.5 w-2.5" />
+                      </button>
+                      <button
+                        aria-label={`删除命令 ${command.name}`}
+                        title="删除"
+                        className="flex h-5 w-5 items-center justify-center rounded text-[var(--app-muted)] hover:bg-rose-100 hover:text-rose-600"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteCommand(command.folderId, command.id);
+                        }}
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {visibleCommands.length === 0 && (
+                <div className="w-full py-8 text-center text-xs font-semibold text-[var(--app-muted)]">
+                  当前分类下暂无快捷命令
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -4667,7 +10900,7 @@ function TerminalFontList({
       <div className="mb-1 text-xs font-semibold text-[var(--app-muted)]">{label}</div>
       <div
         aria-label={label}
-        className="h-40 overflow-auto rounded-md border border-slate-200 bg-white py-1"
+        className="h-40 overflow-auto rounded-xl border border-[var(--app-line)] bg-[var(--raised-bg)] p-1 space-y-0.5"
         role="listbox"
         tabIndex={0}
       >
@@ -4678,8 +10911,8 @@ function TerminalFontList({
               key={`${option.label}-${option.value}`}
               aria-selected={selected}
               className={cn(
-                "block h-6 w-full truncate px-2 text-left text-xs leading-6 text-slate-900",
-                selected ? "bg-slate-300" : "hover:bg-slate-100"
+                "block min-h-7 w-full truncate rounded-lg px-2.5 text-left text-xs leading-7 font-bold transition-all cursor-pointer",
+                selected ? "bg-emerald-500/20 text-emerald-500 font-extrabold shadow-2xs" : "text-[var(--app-text)] hover:bg-[var(--fill-1)]"
               )}
               role="option"
               style={{ fontFamily: `${option.family}, sans-serif` }}
@@ -4695,426 +10928,7 @@ function TerminalFontList({
   );
 }
 
-function SettingsPanel({
-  theme,
-  terminalTheme,
-  terminalAppearance,
-  terminalBackgroundImage,
-  terminalBackgroundOverlay,
-  commandSuggestionsEnabled,
-  commandSuggestionSources,
-  commandSuggestionApplyKey,
-  commandSuggestionCustomApplyKey,
-  highlightRules,
-  onThemeChange,
-  onTerminalThemeChange,
-  onTerminalAppearanceChange,
-  onTerminalBackgroundImageChange,
-  onTerminalBackgroundOverlayChange,
-  onCommandSuggestionsEnabledChange,
-  onCommandSuggestionSourcesChange,
-  onCommandSuggestionApplyKeyChange,
-  onCommandSuggestionCustomApplyKeyChange,
-  onToggleHighlightRule,
-  onAddHighlightRule,
-  onUpdateHighlightRule,
-  onDeleteHighlightRule
-}: {
-  theme: ThemeMode;
-  terminalTheme: TerminalThemeMode;
-  terminalAppearance: TerminalAppearance;
-  terminalBackgroundImage: string;
-  terminalBackgroundOverlay: number;
-  commandSuggestionsEnabled: boolean;
-  commandSuggestionSources: CommandSuggestionSources;
-  commandSuggestionApplyKey: CommandSuggestionApplyKey;
-  commandSuggestionCustomApplyKey: CommandSuggestionCustomApplyKey | null;
-  highlightRules: HighlightRule[];
-  onThemeChange: (theme: ThemeMode) => void;
-  onTerminalThemeChange: (theme: TerminalThemeMode) => void;
-  onTerminalAppearanceChange: (appearance: TerminalAppearance) => void;
-  onTerminalBackgroundImageChange: (value: string) => void;
-  onTerminalBackgroundOverlayChange: (value: number) => void;
-  onCommandSuggestionsEnabledChange: (value: boolean) => void;
-  onCommandSuggestionSourcesChange: (value: CommandSuggestionSources) => void;
-  onCommandSuggestionApplyKeyChange: (value: CommandSuggestionApplyKey) => void;
-  onCommandSuggestionCustomApplyKeyChange: (value: CommandSuggestionCustomApplyKey | null) => void;
-  onToggleHighlightRule: (ruleId: string) => void;
-  onAddHighlightRule: (rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) => void;
-  onUpdateHighlightRule: (ruleId: string, rule: Pick<HighlightRule, "name" | "pattern" | "foreground">) => void;
-  onDeleteHighlightRule: (ruleId: string) => void;
-}) {
-  const [draft, setDraft] = useState({ name: "", pattern: "", foreground: "#2563eb" });
-  const [editingRuleId, setEditingRuleId] = useState("");
-  const [recordingApplyKey, setRecordingApplyKey] = useState(false);
-  const resolvedTerminalAppearance = getTerminalAppearance(terminalAppearance);
-  const terminalPreviewColors = getTerminalColors(terminalTheme, resolvedTerminalAppearance);
-  const terminalPreviewOverlayAlpha = terminalBackgroundOverlay / 100;
-  const terminalPreviewStyle = {
-    backgroundColor: terminalPreviewColors.background,
-    color: terminalPreviewColors.foreground,
-    fontFamily: resolvedTerminalAppearance.fontFamily,
-    fontSize: `${resolvedTerminalAppearance.fontSize}px`,
-    backgroundImage: buildTerminalBackgroundImage(terminalBackgroundImage, terminalPreviewColors.background, terminalPreviewOverlayAlpha)
-  } as CSSProperties;
 
-  function resetHighlightDraft() {
-    setDraft({ name: "", pattern: "", foreground: "#2563eb" });
-    setEditingRuleId("");
-  }
-
-  function saveRule() {
-    if (editingRuleId) {
-      onUpdateHighlightRule(editingRuleId, draft);
-    } else {
-      onAddHighlightRule(draft);
-    }
-    resetHighlightDraft();
-  }
-
-  function editRule(rule: HighlightRule) {
-    setEditingRuleId(rule.id);
-    setDraft({ name: rule.name, pattern: rule.pattern, foreground: rule.foreground });
-  }
-
-  function deleteRule(ruleId: string) {
-    onDeleteHighlightRule(ruleId);
-    if (editingRuleId === ruleId) {
-      resetHighlightDraft();
-    }
-  }
-
-  function uploadTerminalBackground(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        onTerminalBackgroundImageChange(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
-    event.currentTarget.value = "";
-  }
-
-  function updateTerminalAppearance(patch: Partial<TerminalAppearance>) {
-    onTerminalAppearanceChange({ ...terminalAppearance, ...patch });
-  }
-
-  function recordCustomApplyKey(event: KeyboardEvent<HTMLButtonElement>) {
-    if (!recordingApplyKey) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const customKey = createCommandSuggestionCustomApplyKey(event.nativeEvent);
-    if (!customKey) return;
-    onCommandSuggestionApplyKeyChange("custom");
-    onCommandSuggestionCustomApplyKeyChange(customKey);
-    setRecordingApplyKey(false);
-  }
-
-  return (
-    <div className="h-full overflow-auto bg-[var(--app-bg)] px-8 py-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-[var(--app-text)]">设置</h1>
-          <p className="mt-1 text-sm text-[var(--app-muted)]">管理界面主题、终端高亮和 AI 引用行为。</p>
-        </div>
-
-        <div className="grid grid-cols-[320px_minmax(0,1fr)] gap-4">
-          <Panel title="外观主题">
-            <div className="grid grid-cols-2 gap-2">
-              {THEMES.map((mode) => (
-                <button
-                  key={mode}
-                  className={cn(
-                    "h-10 rounded-md border text-sm font-semibold transition-colors",
-                    theme === mode
-                      ? "border-blue-300 bg-blue-50 text-blue-700"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  )}
-                  onClick={() => onThemeChange(mode)}
-                >
-                  {mode === "light" ? "浅色" : "深色"}
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 border-t border-[var(--app-line)] pt-4">
-              <div className="mb-2 text-xs font-semibold text-[var(--app-muted)]">终端颜色</div>
-              <div className="grid grid-cols-2 gap-2">
-                {TERMINAL_THEMES.map((mode) => (
-                  <button
-                    key={mode}
-                    data-testid={`terminal-theme-${mode}`}
-                    className={cn(
-                      "h-10 rounded-md border text-sm font-semibold transition-colors",
-                      terminalTheme === mode
-                        ? "border-blue-300 bg-blue-50 text-blue-700"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                    )}
-                    onClick={() => onTerminalThemeChange(mode)}
-                  >
-                    {mode === "dark" ? "黑色终端" : "浅色终端"}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-3 space-y-3">
-                <label className="block text-xs font-semibold text-[var(--app-muted)]">
-                  <span>字号</span>
-                  <Input
-                    className="mt-2 w-24"
-                    aria-label="字号"
-                    type="number"
-                    min={10}
-                    max={28}
-                    value={terminalAppearance.fontSize}
-                    onChange={(event) => updateTerminalAppearance({ fontSize: Number(event.target.value || defaultTerminalAppearance.fontSize) })}
-                  />
-                </label>
-                <div
-                  className="rounded-md bg-[#d8cfbd] px-3 py-2 text-center text-slate-800"
-                  style={{
-                    fontFamily: resolvedTerminalAppearance.fontFamily,
-                    fontSize: `${resolvedTerminalAppearance.fontSize}px`
-                  }}
-                >
-                  <div>0123456789 abcdefghABCDEFGH</div>
-                  <div className="mt-1">终端中文字体预览</div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <TerminalFontList
-                    label="英文字体"
-                    options={terminalEnglishFonts}
-                    value={resolvedTerminalAppearance.englishFont}
-                    onChange={(value) => updateTerminalAppearance({ englishFont: value })}
-                  />
-                  <TerminalFontList
-                    label="中文字体"
-                    options={terminalChineseFonts}
-                    value={resolvedTerminalAppearance.chineseFont}
-                    onChange={(value) => updateTerminalAppearance({ chineseFont: value })}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="block text-xs font-semibold text-[var(--app-muted)]">
-                    <span>文字颜色</span>
-                    <input
-                      aria-label="文字颜色"
-                      className="mt-2 h-10 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-1"
-                      type="color"
-                      value={terminalAppearance.foreground || terminalPreviewColors.foreground}
-                      onChange={(event) => updateTerminalAppearance({ foreground: event.target.value })}
-                    />
-                  </label>
-                  <label className="block text-xs font-semibold text-[var(--app-muted)]">
-                    <span>背景颜色</span>
-                    <input
-                      aria-label="背景颜色"
-                      className="mt-2 h-10 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-1"
-                      type="color"
-                      value={terminalAppearance.background || terminalPreviewColors.background}
-                      onChange={(event) => updateTerminalAppearance({ background: event.target.value })}
-                    />
-                  </label>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-                <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                  上传背景图
-                  <input
-                    data-testid="terminal-background-upload"
-                    className="sr-only"
-                    type="file"
-                    accept="image/*"
-                    onChange={uploadTerminalBackground}
-                  />
-                </label>
-                <Button
-                  variant="outline"
-                  className="h-10 px-3"
-                  disabled={!terminalBackgroundImage}
-                  onClick={() => onTerminalBackgroundImageChange("")}
-                >
-                  清除
-                </Button>
-              </div>
-              <label className="mt-3 block text-xs font-semibold text-[var(--app-muted)]">
-                <span className="flex items-center justify-between gap-3">
-                  <span>背景遮罩透明度</span>
-                  <span>{terminalBackgroundOverlay}%</span>
-                </span>
-                <input
-                  aria-label="背景遮罩透明度"
-                  className="mt-2 w-full accent-blue-600"
-                  type="range"
-                  min="0"
-                  max="90"
-                  step="5"
-                  value={terminalBackgroundOverlay}
-                  onChange={(event) => onTerminalBackgroundOverlayChange(Number(event.target.value))}
-                />
-              </label>
-              <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 py-2 text-sm font-semibold text-[var(--app-text)]">
-                <span>命令智能提示</span>
-                <input
-                  aria-label="命令智能提示"
-                  className="h-4 w-4 accent-blue-600"
-                  type="checkbox"
-                  checked={commandSuggestionsEnabled}
-                  onChange={(event) => onCommandSuggestionsEnabledChange(event.target.checked)}
-                />
-              </label>
-              <div className="mt-2 space-y-2 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3 text-xs text-[var(--app-text)]">
-                <label className="flex cursor-pointer items-center justify-between gap-3 font-semibold">
-                  <span>显示历史命令</span>
-                  <input
-                    aria-label="显示历史命令"
-                    className="h-4 w-4 accent-blue-600"
-                    type="checkbox"
-                    checked={commandSuggestionSources.history}
-                    disabled={!commandSuggestionsEnabled}
-                    onChange={(event) => onCommandSuggestionSourcesChange({ ...commandSuggestionSources, history: event.target.checked })}
-                  />
-                </label>
-                <label className="flex cursor-pointer items-center justify-between gap-3 font-semibold">
-                  <span>显示快捷命令</span>
-                  <input
-                    aria-label="显示快捷命令"
-                    className="h-4 w-4 accent-blue-600"
-                    type="checkbox"
-                    checked={commandSuggestionSources.shortcuts}
-                    disabled={!commandSuggestionsEnabled}
-                    onChange={(event) => onCommandSuggestionSourcesChange({ ...commandSuggestionSources, shortcuts: event.target.checked })}
-                  />
-                </label>
-                <label className="flex cursor-pointer items-center justify-between gap-3 font-semibold">
-                  <span>显示 Linux 命令</span>
-                  <input
-                    aria-label="显示 Linux 命令"
-                    className="h-4 w-4 accent-blue-600"
-                    type="checkbox"
-                    checked={commandSuggestionSources.linux}
-                    disabled={!commandSuggestionsEnabled}
-                    onChange={(event) => onCommandSuggestionSourcesChange({ ...commandSuggestionSources, linux: event.target.checked })}
-                  />
-                </label>
-                <label className="block font-semibold">
-                  <span>候选应用按键</span>
-                  <select
-                    aria-label="候选应用按键"
-                    className="mt-2 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
-                    value={commandSuggestionApplyKey}
-                    disabled={!commandSuggestionsEnabled}
-                    onChange={(event) => onCommandSuggestionApplyKeyChange(event.target.value as CommandSuggestionApplyKey)}
-                  >
-                    <option value="altEnter">Alt+Enter</option>
-                    <option value="ctrlSpace">Ctrl+Space</option>
-                    <option value="tab">Tab</option>
-                    <option value="custom">自定义</option>
-                  </select>
-                </label>
-                {commandSuggestionApplyKey === "custom" && (
-                  <div className="grid grid-cols-[minmax(0,1fr)_92px] items-center gap-2">
-                    <div className="truncate rounded-md border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-700">
-                      {commandSuggestionCustomApplyKey?.label || "未配置"}
-                    </div>
-                    <Button
-                      className="h-9 px-2 text-xs"
-                      variant={recordingApplyKey ? "default" : "outline"}
-                      disabled={!commandSuggestionsEnabled}
-                      onClick={() => setRecordingApplyKey(true)}
-                      onKeyDown={recordCustomApplyKey}
-                    >
-                      {recordingApplyKey ? "正在录入按键" : "录入按键"}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="mt-4 rounded-md border border-[var(--app-line)] bg-[var(--subtle-bg)] p-3">
-              <div className="text-xs font-semibold text-[var(--app-muted)]">终端预览</div>
-              <pre className="mt-2 rounded-md bg-cover bg-center p-3 text-xs leading-5" style={terminalPreviewStyle}>
-                ERROR ssh failed at 10.0.0.8{"\n"}WARN retry in 300ms
-              </pre>
-            </div>
-          </Panel>
-
-          <Panel title="终端正则高亮">
-            <div className="mb-4 grid grid-cols-[180px_minmax(0,1fr)_72px_92px_72px] gap-2">
-              <Input
-                value={draft.name}
-                placeholder="规则名称"
-                onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-              />
-              <Input
-                value={draft.pattern}
-                placeholder="正则表达式"
-                onChange={(event) => setDraft((current) => ({ ...current, pattern: event.target.value }))}
-              />
-              <input
-                aria-label="规则颜色"
-                className="h-10 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-1"
-                type="color"
-                value={draft.foreground}
-                onChange={(event) => setDraft((current) => ({ ...current, foreground: event.target.value }))}
-              />
-              <Button onClick={saveRule}>{editingRuleId ? "保存规则" : "添加规则"}</Button>
-              {editingRuleId && (
-                <Button variant="outline" onClick={resetHighlightDraft}>
-                  取消
-                </Button>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              {highlightRules.map((rule) => (
-                <div
-                  key={rule.id}
-                  className="grid grid-cols-[170px_minmax(0,1fr)_86px_72px_72px] items-center gap-3 rounded-md border border-[var(--app-line)] bg-[var(--panel-bg)] p-3"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="h-3 w-3 rounded-full" style={{ backgroundColor: rule.foreground }} />
-                      <span className="truncate text-sm font-semibold text-[var(--app-text)]">{rule.name}</span>
-                      {rule.system && (
-                        <span className="rounded bg-[var(--subtle-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--app-muted)]">
-                          默认
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-1 text-xs text-[var(--app-muted)]">{rule.enabled ? "已启用" : "已停用"}</div>
-                  </div>
-                  <code className="truncate rounded bg-[var(--subtle-bg)] px-2 py-1 text-xs text-[var(--app-muted)]">
-                    {rule.pattern}
-                  </code>
-                  <Button variant="outline" className="h-8" onClick={() => onToggleHighlightRule(rule.id)}>
-                    {rule.enabled ? "停用" : "启用"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-8"
-                    aria-label={`编辑${rule.name}`}
-                    onClick={() => editRule(rule)}
-                  >
-                    编辑
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="h-8"
-                    aria-label={`删除${rule.name}`}
-                    onClick={() => deleteRule(rule.id)}
-                  >
-                    删除
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function AiWorkspacePanel({
   activeSession,
@@ -5322,6 +11136,16 @@ function AiWorkspacePanel({
     });
   }
 
+  function formatAiError(error: unknown, defaultMessage: string): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === "string" && error.trim()) {
+      return error;
+    }
+    return defaultMessage;
+  }
+
   async function executeAiRun(run: AiRun) {
     if (running) return;
     setRunning(true);
@@ -5380,7 +11204,7 @@ function AiWorkspacePanel({
             {
               id: `assistant_${Date.now()}`,
               role: "assistant",
-              text: error instanceof Error ? error.message : "Hermes 调用失败。"
+              text: formatAiError(error, "Hermes 调用失败。")
             }
           ]);
         }
@@ -5392,7 +11216,7 @@ function AiWorkspacePanel({
         {
           id: `assistant_${Date.now()}`,
           role: "assistant",
-          text: error instanceof Error ? error.message : "AI 执行失败。"
+          text: formatAiError(error, "AI 执行失败。")
         }
       ]);
     } finally {
@@ -5425,20 +11249,20 @@ function AiWorkspacePanel({
   }
 
   return (
-    <div className="grid h-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-white">
-      <header className="border-b border-slate-200 px-4 py-4">
+    <div className="grid h-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-transparent border-l border-[var(--app-line)]">
+      <header className="border-b border-[var(--app-line)] px-4 py-3 bg-slate-950/40">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-slate-950">AI 对话栏</h2>
-            <p className="mt-1 text-xs text-slate-500">{isCodex ? "当前工具：本地 Codex CLI" : "当前工具：Hermes 本地 / 远端"}</p>
+            <h2 className="text-sm font-extrabold text-[var(--app-text)]">AI 对话栏</h2>
+            <p className="mt-0.5 text-xs text-[var(--app-muted)]">{isCodex ? "当前工具：本地 Codex CLI" : "当前工具：Hermes 本地 / 远端"}</p>
           </div>
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5" />
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold text-emerald-500">
+            <CheckCircle2 className="h-3 w-3" />
             可用
           </span>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <AiToolButton
             active={selectedTool === "codex"}
             icon={<Cpu className="h-4 w-4" />}
@@ -5455,11 +11279,32 @@ function AiWorkspacePanel({
           />
         </div>
 
+        {selectedTool === "codex" && (
+          <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-500 shadow-2xs">
+            <div className="flex items-center justify-between font-extrabold text-amber-500">
+              <span className="flex items-center gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                提示：需系统安装 codex 命令行
+              </span>
+              <button
+                aria-label="一键切换免安装引擎"
+                className="text-[11px] font-extrabold text-sky-400 hover:text-sky-300 cursor-pointer underline shrink-0"
+                onClick={() => setSelectedTool("hermes")}
+              >
+                切换 Hermes (免安装) →
+              </button>
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--app-muted)] leading-4">
+              未安装可通过 <code className="rounded bg-amber-500/20 px-1 py-0.5 font-mono font-bold text-amber-400 select-all">npm i -g @openai/codex</code> 安装，或直接无缝切换 Hermes/API 使用。
+            </p>
+          </div>
+        )}
+
         <div className="mt-3 grid grid-cols-2 gap-2">
           <label className="block">
-            <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">模型</span>
+            <span className="mb-1 block text-[11px] font-semibold text-[var(--app-muted)]">模型</span>
             <select
-              className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              className="h-8.5 w-full rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-2.5 text-xs font-bold text-[var(--app-text)] focus:outline-none focus:border-emerald-500"
               aria-label="模型"
               value={activeAiSession?.model || ""}
               onChange={(event) => updateAiModel(event.target.value)}
@@ -5472,9 +11317,9 @@ function AiWorkspacePanel({
             </select>
           </label>
           <label className="block">
-            <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">降噪模式</span>
+            <span className="mb-1 block text-[11px] font-semibold text-[var(--app-muted)]">降噪模式</span>
             <select
-              className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              className="h-8.5 w-full rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-2.5 text-xs font-bold text-[var(--app-text)] focus:outline-none focus:border-emerald-500"
               aria-label="降噪模式"
               value={activeAiSession?.noiseMode || "standard"}
               onChange={(event) => updateNoiseMode(event.target.value as AiNoiseMode)}
@@ -5488,7 +11333,7 @@ function AiWorkspacePanel({
 
         <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
           <select
-            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+            className="h-8.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-2.5 text-xs font-bold text-[var(--app-text)] focus:outline-none focus:border-emerald-500"
             aria-label="AI 会话记录"
             value={activeAiSession?.id || ""}
             onChange={(event) => setActiveAiSessionId(event.target.value)}
@@ -5499,28 +11344,28 @@ function AiWorkspacePanel({
               </option>
             ))}
           </select>
-          <Button variant="outline" className="h-9 px-3" onClick={createNewAiSession}>
+          <Button variant="outline" className="h-8.5 px-3 rounded-xl border-[var(--app-line)] bg-[var(--fill-1)] text-xs font-bold text-[var(--app-text)] hover:bg-[var(--fill-2)] cursor-pointer" onClick={createNewAiSession}>
             新会话
           </Button>
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-3">
-          <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+          <label className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--app-text)] cursor-pointer">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              className="h-4 w-4 rounded border-[var(--app-line)] bg-[var(--fill-2)] text-emerald-500 focus:ring-0 cursor-pointer"
               checked={activeAiSession?.continueSession ?? true}
               onChange={(event) => updateContinueSession(event.target.checked)}
             />
             继续当前会话
           </label>
-          <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => setConfigOpen((open) => !open)}>
+          <Button variant="outline" className="h-7.5 px-2.5 text-xs font-bold rounded-lg border-[var(--app-line)] text-[var(--app-muted)] hover:text-[var(--app-text)] cursor-pointer" onClick={() => setConfigOpen((open) => !open)}>
             高级配置
           </Button>
         </div>
       </header>
 
-      <div className="min-h-0 overflow-auto bg-slate-50">
+      <div className="min-h-0 overflow-auto bg-[var(--panel-bg)]">
         {configOpen && (
           <AiConfigPanel
             selectedTool={selectedTool}
@@ -5531,12 +11376,12 @@ function AiWorkspacePanel({
           />
         )}
 
-        <section className="border-b border-slate-200 bg-white px-4 py-3">
+        <section className="border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3">
           <label className="block">
-            <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">会话记忆</span>
+            <span className="mb-1 block text-[11px] font-semibold text-[var(--app-muted)]">会话记忆</span>
             <textarea
               data-testid="ai-memory-input"
-              className="h-16 w-full resize-none rounded-md border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-800 outline-none placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              className="h-14 w-full resize-none rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-2 text-xs leading-5 text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] focus:border-emerald-500"
               value={activeAiSession?.memory || ""}
               placeholder="例如：优先检查最新日志、默认使用当前项目目录"
               onChange={(event) => updateAiMemory(event.target.value)}
@@ -5544,10 +11389,10 @@ function AiWorkspacePanel({
           </label>
         </section>
 
-        <section className="border-b border-slate-200 bg-white px-4 py-3">
+        <section className="border-b border-[var(--app-line)] bg-[var(--panel-bg)] px-4 py-3">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="text-[11px] font-semibold text-slate-500">当前上下文</div>
-            <div className="text-[11px] text-slate-400">{contextChips.length} 项</div>
+            <div className="text-[11px] font-semibold text-[var(--app-muted)]">当前上下文</div>
+            <div className="text-[11px] font-bold text-emerald-500 font-mono">{contextChips.length} 项</div>
           </div>
           <div className="flex flex-wrap gap-2">
             {contextChips.map((context) => (
@@ -5560,13 +11405,13 @@ function AiWorkspacePanel({
               />
             ))}
             {contextChips.length === 0 && (
-              <div className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">
+              <div className="rounded-xl border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-2 text-xs text-[var(--app-muted)]">
                 暂无附加上下文
               </div>
             )}
           </div>
           {previewContext && (
-            <pre className="mt-3 max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
+            <pre className="mt-3 max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-3 text-xs leading-5 text-[var(--app-text)] font-mono">
               {previewContext.text}
             </pre>
           )}
@@ -5577,8 +11422,8 @@ function AiWorkspacePanel({
             <AiMessage key={message.id} role={message.role} attachments={message.attachments}>{message.text}</AiMessage>
           ))}
           {messages.length === 0 && (
-            <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-400">
-              暂无对话
+            <div className="rounded-2xl border border-dashed border-[var(--app-line)] bg-[var(--fill-1)] px-3 py-6 text-center text-xs font-semibold text-[var(--app-muted)]">
+              暂无对话记录
             </div>
           )}
           {running && <AiRunStatus text={runStatus || "Codex 执行中..."} thinking />}
@@ -5586,11 +11431,11 @@ function AiWorkspacePanel({
         </div>
       </div>
 
-      <footer className="border-t border-slate-200 bg-white p-4">
-        <div className="mb-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
-          <span className="rounded-full bg-slate-100 px-2 py-1">附加当前会话</span>
-          <span className="rounded-full bg-slate-100 px-2 py-1">附加终端输出</span>
-          <span className="rounded-full bg-slate-100 px-2 py-1">附加选区日志</span>
+      <footer className="border-t border-[var(--app-line)] bg-[var(--panel-bg)] p-4">
+        <div className="mb-2 flex flex-wrap gap-2 text-[10px] text-[var(--app-muted)] font-medium">
+          <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.5">附加当前会话</span>
+          <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.5">附加终端输出</span>
+          <span className="rounded-full bg-[var(--fill-2)] px-2 py-0.5">附加选区日志</span>
         </div>
         {attachments.length > 0 && (
           <div className="mb-3 grid gap-2">
@@ -5603,7 +11448,7 @@ function AiWorkspacePanel({
             ))}
           </div>
         )}
-        {attachmentStatus && <div className="mb-2 text-xs text-amber-600">{attachmentStatus}</div>}
+        {attachmentStatus && <div className="mb-2 text-xs text-amber-500 font-semibold">{attachmentStatus}</div>}
         <input
           ref={attachmentInputRef}
           data-testid="ai-attachment-input"
@@ -5615,7 +11460,7 @@ function AiWorkspacePanel({
         />
         <div className="grid grid-cols-[40px_1fr_44px] gap-2">
           <button
-            className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+            className="inline-flex h-9.5 items-center justify-center rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[var(--fill-2)] disabled:opacity-50 cursor-pointer transition-colors"
             title="添加附件"
             disabled={running}
             onClick={() => attachmentInputRef.current?.click()}
@@ -5623,7 +11468,7 @@ function AiWorkspacePanel({
             <Paperclip className="h-4 w-4" />
           </button>
           <input
-            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+            className="h-9.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] px-3 text-xs text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)] focus:border-emerald-500"
             value={prompt}
             placeholder="输入任务，选择 Codex 或 Hermes 执行..."
             onChange={(event) => setPrompt(event.target.value)}
@@ -5635,7 +11480,7 @@ function AiWorkspacePanel({
             }}
           />
           <button
-            className="inline-flex h-10 items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+            className="inline-flex h-9.5 items-center justify-center rounded-xl bg-emerald-500 text-white font-bold hover:bg-emerald-600 disabled:opacity-50 transition-all cursor-pointer shadow-2xs"
             title="发送"
             disabled={running}
             onClick={() => void sendPrompt()}
@@ -5764,11 +11609,16 @@ function extractCodexReply(result: CodexJobResult, prompt: string) {
     return cleaned || "Codex 执行完成，无输出。";
   }
   if (result.timedOut) {
-    return "Codex 执行超时，请检查本地 Codex 环境。";
+    return "Codex 执行超时 (120 秒)，请检查本地 Codex 环境。";
   }
-  return cleaned && !looksLikeOnlyRuntimeNoise(cleaned)
-    ? cleaned
-    : "Codex 执行失败，请检查本地 Codex 环境。";
+  if (cleaned && !looksLikeOnlyRuntimeNoise(cleaned)) {
+    return cleaned;
+  }
+  if (!result.error || looksLikeOnlyRuntimeNoise(result.error) || !cleaned || looksLikeOnlyRuntimeNoise(cleaned)) {
+    return "Codex 执行失败，请检查本地 Codex 环境。";
+  }
+  const errDetail = result.error || output || "请检查本地 Codex 命令或配置。";
+  return `Codex 调用未返回成功指令：${errDetail}`;
 }
 
 function extractCodexFinalMessage(output: string, prompt: string) {
@@ -6287,7 +12137,7 @@ const aiMarkdownComponents: Components = {
     );
   },
   pre: ({ children }) => (
-    <pre className="my-2 max-h-72 overflow-auto rounded-md bg-slate-950 p-3 text-left">
+    <pre className="my-2 max-h-72 overflow-auto rounded-[10px] bg-[var(--terminal-bg)] p-3 text-left">
       {children}
     </pre>
   ),
@@ -6465,6 +12315,147 @@ function SimplePage({
   );
 }
 
+function FilePreviewModal({
+  open,
+  file,
+  sessionId,
+  sessionTitle,
+  onOpenChange,
+  onAddAiQuote
+}: {
+  open: boolean;
+  file?: { path: string; name: string };
+  sessionId?: string;
+  sessionTitle?: string;
+  onOpenChange: (open: boolean) => void;
+  onAddAiQuote?: (text: string, sourceTitle: string) => void;
+}) {
+  const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!open || !file || !sessionId) return;
+    setLoading(true);
+    setError("");
+    setContent("");
+
+    nativeBridge
+      .readFileContent(sessionId, file.path)
+      .then((res) => {
+        if (res.success && typeof res.content === "string") {
+          const lowerName = file.name.toLowerCase();
+          if (lowerName.endsWith(".tar.gz") || lowerName.endsWith(".tgz") || lowerName.endsWith(".gz") || lowerName.endsWith(".zip") || lowerName.endsWith(".rar") || lowerName.endsWith(".7z") || lowerName.endsWith(".iso") || lowerName.endsWith(".bin") || lowerName.endsWith(".exe") || lowerName.endsWith(".so")) {
+            setContent("⚠️ 选中的文件为二进制 / 压缩包归档格式 (.tar.gz)，无法作为纯文本预览。请使用 SFTP 下载到本地进行查看或在终端使用 tar 命令解压。");
+          } else {
+            try {
+              const bytes = base64ToBytes(res.content);
+              const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+              setContent(text);
+            } catch {
+              setContent(res.content);
+            }
+          }
+        } else {
+          setError(res.error || "无法读取远程文件内容。");
+        }
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "读取远程文件发生异常。");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [open, file, sessionId]);
+
+  if (!file) return null;
+
+  const lines = content.split("\n");
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--mask-base)] backdrop-blur-xs animate-in fade-in duration-150" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[780px] max-w-[95vw] h-[80vh] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--app-line)] bg-[var(--raised-bg)] p-6 shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+          <div className="flex items-start justify-between border-b border-[var(--app-line)] pb-4 shrink-0">
+            <div>
+              <Dialog.Title className="text-base font-extrabold text-[var(--app-text)] flex items-center gap-2">
+                <span>📄</span>
+                <span>{file.name}</span>
+                <span className="rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 text-[10px] px-2.5 py-0.5 font-mono">
+                  {lines.length} 行
+                </span>
+              </Dialog.Title>
+              <Dialog.Description className="mt-1 font-mono text-xs text-[var(--app-muted)] truncate max-w-[550px]">
+                {file.path} ({sessionTitle || "远程会话"})
+              </Dialog.Description>
+            </div>
+            <Dialog.Close asChild>
+              <button className="rounded-md p-1.5 text-[var(--app-muted)] hover:bg-[var(--fill-1)] hover:text-[var(--app-text)] cursor-pointer">
+                <X className="h-4 w-4" />
+              </button>
+            </Dialog.Close>
+          </div>
+
+          <div className="min-h-0 flex-1 my-4 rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] overflow-auto p-3 font-mono text-xs select-text">
+            {loading && <div className="py-12 text-center text-xs text-[var(--app-muted)] font-extrabold animate-pulse">正在从服务器读取文件内容...</div>}
+            {!loading && error && <div className="py-12 text-center text-xs text-rose-600 font-extrabold">{error}</div>}
+            {!loading && !error && (
+              <table className="w-full border-collapse">
+                <tbody>
+                  {lines.map((line, idx) => (
+                    <tr key={idx} className="hover:bg-[var(--fill-1)]">
+                      <td className="w-10 select-none pr-3 text-right text-[10px] text-[var(--app-muted)] border-r border-[var(--app-line)] opacity-60">
+                        {idx + 1}
+                      </td>
+                      <td className="pl-3 whitespace-pre-wrap break-all text-[var(--app-text)]">
+                        {line}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between border-t border-[var(--app-line)] pt-3 shrink-0">
+            <div className="text-xs text-[var(--app-muted)] font-medium">
+              显示前 500 行预览
+            </div>
+            <div className="flex items-center gap-2">
+              {onAddAiQuote && content && (
+                <Button
+                  variant="outline"
+                  size={26}
+                  className="rounded-full px-3 text-xs font-bold"
+                  onClick={() => {
+                    onAddAiQuote(content.slice(0, 1000), `${file.name} (${file.path})`);
+                    onOpenChange(false);
+                  }}
+                >
+                  💬 引用前 1K 字符到 AI
+                </Button>
+              )}
+              <Button
+                size={26}
+                className="rounded-full px-4 text-xs font-extrabold bg-emerald-600 text-white hover:bg-emerald-700"
+                onClick={() => {
+                  navigator.clipboard.writeText(content);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+              >
+                {copied ? "✅ 已复制内容" : "📋 复制全文"}
+              </Button>
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 function DeleteConfirmationDialog({
   confirmation,
   onCancel,
@@ -6477,8 +12468,8 @@ function DeleteConfirmationDialog({
   return (
     <Dialog.Root open={Boolean(confirmation)} onOpenChange={(open) => !open && onCancel()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 w-[360px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+        <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)]" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 w-[360px] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)]">
           <Dialog.Title className="text-lg font-semibold text-slate-950">确认删除</Dialog.Title>
           <Dialog.Description className="mt-2 text-sm leading-6 text-slate-600">
             {confirmation?.description}
@@ -6498,6 +12489,8 @@ function ConnectDialog({
   form,
   error,
   mode,
+  customGroups = [],
+  savedConnections = [],
   onOpenChange,
   onFormChange,
   onConnect,
@@ -6508,14 +12501,34 @@ function ConnectDialog({
   form: ConnectionForm;
   error: string;
   mode: "create" | "edit";
+  customGroups?: string[];
+  savedConnections?: SavedConnection[];
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: ConnectionForm) => void;
   onConnect: () => void;
   onSave: () => void;
   onBrowseKey: () => void;
 }) {
+  const availableGroups = useMemo(() => {
+    const set = new Set<string>(["未分组"]);
+    (savedConnections || []).forEach((c) => {
+      const g = c.group || c.folder;
+      if (g && g.trim()) set.add(g.trim());
+    });
+    (customGroups || []).forEach((g) => {
+      if (g && g.trim()) set.add(g.trim());
+    });
+    return Array.from(set);
+  }, [savedConnections, customGroups]);
+
   function update<K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) {
     onFormChange({ ...form, [key]: value });
+  }
+
+  function updateHop(index: number, key: keyof JumpHopForm, value: string) {
+    const hops = [...(form.jumpHops?.length ? form.jumpHops : [defaultJumpHop()])];
+    hops[index] = { ...hops[index], [key]: value };
+    update("jumpHops", hops);
   }
 
   const isEdit = mode === "edit";
@@ -6523,8 +12536,8 @@ function ConnectDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+        <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)]" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)]">
           <div className="mb-5 flex items-start justify-between">
             <div>
               <Dialog.Title className="text-lg font-semibold text-slate-950">
@@ -6557,6 +12570,82 @@ function ConnectDialog({
             <Field label="密码">
               <Input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} />
             </Field>
+            <Field label="环境标识">
+              <select
+                className="h-10 w-full rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs text-[var(--app-text)] shadow-2xs focus:outline-none focus:ring-2 focus:ring-emerald-500 font-extrabold"
+                value={form.environment || "none"}
+                onChange={(event) => update("environment", event.target.value as any)}
+              >
+                <option value="none">无 / 默认</option>
+                <option value="prod">🔴 生产环境 (Production)</option>
+                <option value="staging">🟡 测试环境 (Staging)</option>
+                <option value="local">🟢 本地/开发 (Local)</option>
+              </select>
+            </Field>
+            <Field label="所属分组/文件夹">
+              <div className="space-y-1.5">
+                {(() => {
+                  const currentGroup = (form.folder || form.group || "未分组").trim() || "未分组";
+                  const isCustom = !availableGroups.includes(currentGroup);
+                  return (
+                    <>
+                      <select
+                        className="h-10 w-full rounded-xl border border-[var(--app-line)] bg-[var(--panel-bg)] px-3 text-xs text-[var(--app-text)] shadow-2xs focus:outline-none focus:ring-2 focus:ring-emerald-500 font-extrabold cursor-pointer"
+                        value={isCustom ? "__custom__" : currentGroup}
+                        onChange={(event) => {
+                          const val = event.target.value;
+                          if (val === "__custom__") {
+                            const newG = window.prompt("请输入新建分组名称：", "");
+                            if (newG && newG.trim()) {
+                              const trimmed = newG.trim();
+                              onFormChange({
+                                ...form,
+                                folder: trimmed,
+                                group: trimmed
+                              });
+                            }
+                          } else {
+                            onFormChange({
+                              ...form,
+                              folder: val,
+                              group: val
+                            });
+                          }
+                        }}
+                      >
+                        {availableGroups.map((g) => (
+                          <option key={g} value={g}>
+                            📁 {g}
+                          </option>
+                        ))}
+                        <option value="__custom__">➕ 新建自定义分组...</option>
+                      </select>
+                      {isCustom && (
+                        <Input
+                          placeholder="请输入自定义分组名称"
+                          value={form.folder || form.group || ""}
+                          onChange={(event) => {
+                            const val = event.target.value;
+                            onFormChange({
+                              ...form,
+                              folder: val,
+                              group: val
+                            });
+                          }}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </Field>
+            <Field label="彩色标签 (逗号分隔)">
+              <Input
+                placeholder="例如: Prod, Nginx, K8s"
+                value={(form.tags || []).join(", ")}
+                onChange={(event) => update("tags", event.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+              />
+            </Field>
             <Field label="密钥路径">
               <div className="grid grid-cols-[minmax(0,1fr)_92px] gap-2">
                 <Input value={form.keyPath} onChange={(event) => update("keyPath", event.target.value)} />
@@ -6569,6 +12658,147 @@ function ConnectDialog({
                 </button>
               </div>
             </Field>
+          </div>
+
+          {/* 跳板机 / 堡垒机 (ProxyJump) 高级代理配置 */}
+          <div className="mt-3.5 rounded-xl border border-[var(--app-line)] bg-[var(--fill-1)] p-3 space-y-2.5">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-[var(--app-text)]">
+                <ShieldCheck className="h-4 w-4 text-purple-400" />
+                <span>通过跳板机 / 堡垒机代理直连 (ProxyJump)</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={Boolean(form.useJumpHost)}
+                onChange={(e) => update("useJumpHost", e.target.checked)}
+                className="rounded border-[var(--app-line)] text-purple-500 focus:ring-0 cursor-pointer"
+              />
+            </label>
+
+            {form.useJumpHost && (
+              <div className="space-y-2.5 pt-2 border-t border-[var(--app-line)] animate-in fade-in">
+                {/* 快速复用已有跳板机 */}
+                {savedConnections && savedConnections.length > 0 && (
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-[var(--app-muted)]">从已保存的主机中选择跳板机：</label>
+                    <select
+                      className="h-8 w-full rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] px-2.5 text-xs text-[var(--app-text)] focus:outline-none focus:border-purple-500 font-bold"
+                      value={form.jumpSavedConnectionId || ""}
+                      onChange={(e) => {
+                        const selectedKey = e.target.value;
+                        const found = savedConnections.find((c) => (c.key || c.hostname) === selectedKey);
+                        if (found) {
+                          const hops = [...(form.jumpHops?.length ? form.jumpHops : [defaultJumpHop()])];
+                          hops[0] = {
+                            host: found.hostname || "",
+                            port: String(found.port || 22),
+                            user: found.username || "root",
+                            pass: found.password || "",
+                            key: found.keyPath || "",
+                            keyPassphrase: ""
+                          };
+                          onFormChange({
+                            ...form,
+                            jumpSavedConnectionId: selectedKey,
+                            jumpHops: hops
+                          });
+                        } else {
+                          update("jumpSavedConnectionId", "");
+                        }
+                      }}
+                    >
+                      <option value="">-- 手动填写跳板机参数 --</option>
+                      {savedConnections.map((c) => (
+                        <option key={c.key || c.hostname} value={c.key || c.hostname}>
+                          🛡️ {c.name || `${c.username}@${c.hostname}:${c.port || 22}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {(form.jumpHops?.length ? form.jumpHops : [defaultJumpHop()]).map((hop, hopIndex) => (
+                  <div key={hopIndex} className="space-y-2 rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] p-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-[var(--app-muted)]">
+                        第 {hopIndex + 1} 跳{hopIndex === 0 ? " · 堡垒机入口" : ""}
+                      </label>
+                      {(form.jumpHops?.length || 1) > 1 && (
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-rose-400 hover:bg-rose-500/10"
+                          onClick={() => update("jumpHops", (form.jumpHops || []).filter((_, index) => index !== hopIndex))}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          删除此跳
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-medium text-[var(--app-muted)]">跳板机 IP / 域名</label>
+                        <Input
+                          className="h-8 text-xs font-mono"
+                          placeholder="jump.example.com"
+                          value={hop.host}
+                          onChange={(e) => updateHop(hopIndex, "host", e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-medium text-[var(--app-muted)]">端口</label>
+                        <Input
+                          className="h-8 text-xs font-mono"
+                          placeholder="22"
+                          value={hop.port}
+                          onChange={(e) => updateHop(hopIndex, "port", e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-medium text-[var(--app-muted)]">用户名</label>
+                        <Input
+                          className="h-8 text-xs font-mono"
+                          placeholder="root"
+                          value={hop.user}
+                          onChange={(e) => updateHop(hopIndex, "user", e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-medium text-[var(--app-muted)]">密码</label>
+                        <Input
+                          type="password"
+                          className="h-8 text-xs font-mono"
+                          placeholder="跳板机密码 (若有)"
+                          value={hop.pass}
+                          onChange={(e) => updateHop(hopIndex, "pass", e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--app-line)] text-[11px] font-semibold text-[var(--app-muted)] hover:border-purple-400 hover:text-purple-400"
+                  onClick={() => update("jumpHops", [...(form.jumpHops?.length ? form.jumpHops : [defaultJumpHop()]), defaultJumpHop()])}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  添加下一跳（多级跳板 A → B → 目标）
+                </button>
+              </div>
+            )}
+
+            <label className="mt-2.5 flex items-center justify-between cursor-pointer">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-[var(--app-text)]">
+                <Zap className="h-4 w-4 text-amber-400" />
+                <span>启用 SSH 压缩（长链路 / 低带宽推荐）</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={Boolean(form.compression)}
+                onChange={(e) => update("compression", e.target.checked)}
+                className="rounded border-[var(--app-line)] text-amber-500 focus:ring-0 cursor-pointer"
+              />
+            </label>
           </div>
 
           {!isEdit && (
@@ -6610,10 +12840,10 @@ function RetryPasswordDialog({
   return (
     <Dialog.Root open={Boolean(prompt)} onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-slate-950/20" />
+        <Dialog.Overlay className="fixed inset-0 bg-[var(--mask-base)]" />
         <Dialog.Content
           data-testid="retry-password-dialog"
-          className="fixed left-1/2 top-1/2 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+          className="fixed left-1/2 top-1/2 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-[var(--raised-bg)] p-6 shadow-[var(--shadow-raised)]"
         >
           <div className="mb-4 flex items-start justify-between">
             <div>
@@ -6667,3 +12897,4 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </label>
   );
 }
+

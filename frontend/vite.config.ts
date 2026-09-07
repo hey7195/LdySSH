@@ -8,6 +8,19 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    assetsDir: "assets"
+    assetsDir: "assets",
+    rollupOptions: {
+      output: {
+        // 依赖分组打包:长期稳定的三方库独立成 chunk,业务迭代不再让浏览器整包重下
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("@xterm")) return "xterm";
+          if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return "react-vendor";
+          if (id.includes("@radix-ui")) return "radix";
+          if (id.includes("lucide-react")) return "icons";
+          return "vendor";
+        }
+      }
+    }
   }
 });

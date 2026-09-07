@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>LdySSH GUI 重设计提案 · 三方向</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #14161a; font-family: 'Inter', 'Segoe UI', 'Microsoft YaHei', sans-serif; color: #d7dce3; padding: 40px 48px 80px; }
+  h1 { font-size: 26px; color: #fff; letter-spacing: 0.5px; }
+  .sub { color: #8b93a1; margin: 8px 0 40px; font-size: 14px; line-height: 1.7; }
+  .dir { margin-bottom: 72px; }
+  .dir-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+  .dir-head h2 { font-size: 20px; color: #fff; }
+  .dir-head .tag { font-size: 12px; padding: 3px 10px; border-radius: 99px; font-weight: 600; }
+  .dir-desc { color: #9aa3b2; font-size: 13.5px; line-height: 1.8; margin-bottom: 18px; max-width: 900px; }
+  .frame { width: 1240px; height: 740px; border-radius: 14px; overflow: hidden; box-shadow: 0 24px 70px rgba(0,0,0,.55); position: relative; }
+  .notes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 16px; width: 1240px; }
+  .note { background: #1b1e24; border: 1px solid #272b33; border-radius: 10px; padding: 12px 14px; font-size: 12.5px; line-height: 1.7; color: #aab3c0; }
+  .note b { color: #e8ecf2; display: block; margin-bottom: 4px; font-size: 12px; }
+  .mono { font-family: 'Cascadia Code', Consolas, monospace; }
+
+  /* ============ 方案 A 石墨工作站 ============ */
+  .a-shell { display: flex; flex-direction: column; background: #0b0d10; color: #c9d1dc; height: 100%; font-size: 13px; }
+  .a-titlebar { height: 38px; display: flex; align-items: center; border-bottom: 1px solid #1b1f26; padding: 0 14px; gap: 12px; flex-shrink: 0; }
+  .a-logo { font-weight: 700; color: #eef2f7; font-size: 12.5px; letter-spacing: 1px; }
+  .a-crumb { color: #5c6675; font-size: 12px; }
+  .a-crumb b { color: #8b96a5; font-weight: 500; }
+  .a-search { margin-left: auto; width: 240px; height: 24px; background: #12151b; border: 1px solid #22272f; border-radius: 5px; color: #5c6675; font-size: 11.5px; display: flex; align-items: center; padding: 0 10px; gap: 8px; }
+  .a-winctl { display: flex; gap: 18px; color: #4a5261; font-size: 12px; margin-left: 16px; }
+  .a-body { flex: 1; display: flex; min-height: 0; }
+  .a-rail { width: 46px; border-right: 1px solid #1b1f26; display: flex; flex-direction: column; align-items: center; padding-top: 10px; gap: 4px; flex-shrink: 0; }
+  .a-rail .ic { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 15px; color: #6b7686; }
+  .a-rail .ic.on { background: #16202a; color: #57d6c9; box-shadow: inset 2px 0 0 #57d6c9; }
+  .a-hosts { width: 218px; border-right: 1px solid #1b1f26; padding: 10px 8px; flex-shrink: 0; overflow: hidden; }
+  .a-hcap { font-size: 10px; letter-spacing: 2px; color: #4a5261; padding: 4px 8px 8px; }
+  .a-host { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 6px; color: #939ca9; }
+  .a-host .dot { width: 7px; height: 7px; border-radius: 50%; background: #2c333d; flex-shrink: 0; }
+  .a-host.on { background: #131a22; color: #e6ebf1; }
+  .a-host.on .dot { background: #57d6c9; box-shadow: 0 0 8px #57d6c966; }
+  .a-host .nm { font-size: 12.5px; flex: 1; }
+  .a-host .ip { font-size: 10.5px; color: #4a5261; }
+  .a-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .a-tabs { height: 36px; display: flex; align-items: stretch; border-bottom: 1px solid #1b1f26; padding: 0 6px; flex-shrink: 0; }
+  .a-tab { display: flex; align-items: center; gap: 8px; padding: 0 16px; font-size: 12.5px; color: #5c6675; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .a-tab.on { color: #e8edf3; border-bottom-color: #57d6c9; }
+  .a-tab .x { color: #3c434e; font-size: 11px; }
+  .a-add { color: #3c434e; padding: 0 12px; display: flex; align-items: center; }
+  .a-termwrap { flex: 1; background: #0d1014; padding: 14px 18px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.75; color: #b6c2cf; overflow: hidden; }
+  .a-p { color: #57d6c9; }
+  .a-cmd { color: #e8edf3; }
+  .a-out { color: #7d8794; }
+  .a-ok { color: #7dd97a; }
+  .a-right { width: 250px; border-left: 1px solid #1b1f26; display: flex; flex-direction: column; flex-shrink: 0; }
+  .a-wtabs { display: flex; border-bottom: 1px solid #1b1f26; }
+  .a-wtab { flex: 1; text-align: center; padding: 9px 0; font-size: 10.5px; letter-spacing: 1.5px; color: #4a5261; text-transform: lowercase; }
+  .a-wtab.on { color: #57d6c9; box-shadow: inset 0 -2px 0 #57d6c9; }
+  .a-wbody { padding: 10px; }
+  .a-cmditem { padding: 7px 9px; border-radius: 6px; color: #939ca9; font-size: 12px; display: flex; justify-content: space-between; }
+  .a-cmditem:hover { background: #131a22; }
+  .a-cmditem .k { color: #3e4650; font-size: 10.5px; }
+  .a-status { height: 28px; border-top: 1px solid #1b1f26; display: flex; align-items: center; padding: 0 14px; gap: 0; font-family: 'Cascadia Code', Consolas, monospace; font-size: 11px; color: #5c6675; flex-shrink: 0; }
+  .a-status b { color: #8b96a5; font-weight: 500; }
+  .a-status .sep { margin: 0 12px; color: #262c35; }
+
+  /* ============ 方案 B 极光玻璃 ============ */
+  .b-shell { height: 100%; position: relative; overflow: hidden; color: #e8f0f4; font-size: 13px;
+    background: linear-gradient(135deg, #0a1628 0%, #0d2137 34%, #123a4a 62%, #0e2c3e 100%); }
+  .b-shell::before { content: ''; position: absolute; inset: 0;
+    background:
+      radial-gradient(560px 340px at 82% 12%, rgba(94, 234, 212, .16), transparent 60%),
+      radial-gradient(480px 420px at 12% 88%, rgba(129, 140, 248, .18), transparent 62%),
+      radial-gradient(300px 300px at 55% 45%, rgba(244, 114, 182, .07), transparent 60%); }
+  .b-shell::after { content: ''; position: absolute; inset: 0; background-image:
+      radial-gradient(1.5px 1.5px at 40px 60px, rgba(255,255,255,.5), transparent),
+      radial-gradient(1px 1px at 200px 30px, rgba(255,255,255,.4), transparent),
+      radial-gradient(1.5px 1.5px at 340px 140px, rgba(255,255,255,.35), transparent),
+      radial-gradient(1px 1px at 520px 80px, rgba(255,255,255,.45), transparent),
+      radial-gradient(1.5px 1.5px at 90px 240px, rgba(255,255,255,.3), transparent); opacity: .5; }
+  .b-glass { position: absolute; background: rgba(13, 20, 30, 0.52); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,.10); border-radius: 16px; box-shadow: 0 12px 40px rgba(2, 8, 16, .45); z-index: 2; }
+  .b-title { position: absolute; top: 14px; left: 20px; z-index: 3; display: flex; align-items: center; gap: 12px; }
+  .b-title .lg { font-weight: 800; letter-spacing: 1px; font-size: 13px; background: linear-gradient(90deg, #6ee7d3, #7dd3fc); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .b-title .path { font-size: 11.5px; color: rgba(232, 240, 244, .55); }
+  .b-dock { left: 20px; top: 76px; width: 56px; height: 380px; display: flex; flex-direction: column; align-items: center; padding-top: 14px; gap: 8px; }
+  .b-dock .ic { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 17px; color: rgba(232,240,244,.65); }
+  .b-dock .ic.on { background: linear-gradient(135deg, rgba(110,231,211,.25), rgba(125,211,252,.18)); color: #7ff0dc; border: 1px solid rgba(110,231,211,.35); box-shadow: 0 0 18px rgba(110,231,211,.25); }
+  .b-hosts { left: 92px; top: 76px; width: 224px; height: 380px; padding: 14px; }
+  .b-hosts h4 { font-size: 10.5px; letter-spacing: 2.5px; color: rgba(232,240,244,.4); margin-bottom: 10px; font-weight: 600; }
+  .b-host { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; font-size: 12.5px; color: rgba(232,240,244,.75); }
+  .b-host.on { background: rgba(110,231,211,.12); border: 1px solid rgba(110,231,211,.25); color: #eafffa; }
+  .b-host .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .b-term { left: 336px; right: 300px; top: 76px; bottom: 64px; background: rgba(6, 12, 20, 0.62); padding: 16px 18px;
+    font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.8; color: #c4d7de; overflow: hidden; }
+  .b-term .p { color: #6ee7d3; }
+  .b-term .out { color: rgba(196,215,222,.55); }
+  .b-term .ok { color: #86e7a8; }
+  .b-tabs { position: absolute; top: 40px; left: 336px; z-index: 3; display: flex; gap: 8px; }
+  .b-tab { padding: 6px 16px; border-radius: 99px; font-size: 11.5px; color: rgba(232,240,244,.6); background: rgba(13,20,30,.5); border: 1px solid rgba(255,255,255,.1); backdrop-filter: blur(12px); }
+  .b-tab.on { color: #06121a; background: linear-gradient(90deg, #6ee7d3, #7dd3fc); font-weight: 700; border: none; box-shadow: 0 4px 20px rgba(110,231,211,.4); }
+  .b-right { right: 20px; top: 76px; width: 264px; height: 380px; padding: 14px; }
+  .b-right h4 { font-size: 10.5px; letter-spacing: 2.5px; color: rgba(232,240,244,.4); margin-bottom: 10px; }
+  .b-file { display: flex; justify-content: space-between; padding: 6px 9px; border-radius: 8px; font-size: 12px; color: rgba(232,240,244,.7); }
+  .b-file:hover { background: rgba(255,255,255,.06); }
+  .b-file .sz { color: rgba(232,240,244,.35); font-size: 10.5px; }
+  .b-status { left: 20px; right: 20px; bottom: 18px; height: 34px; display: flex; align-items: center; padding: 0 18px; gap: 18px; border-radius: 12px;
+    font-family: 'Cascadia Code', Consolas, monospace; font-size: 11px; color: rgba(232,240,244,.65); }
+  .b-spark { display: flex; align-items: flex-end; gap: 1.5px; height: 14px; }
+  .b-spark i { width: 3px; border-radius: 1px; background: linear-gradient(180deg, #6ee7d3, rgba(110,231,211,.2)); }
+  .b-lbl { font-size: 10px; letter-spacing: 1px; color: rgba(232,240,244,.4); }
+
+  /* ============ 方案 C 指令甲板 ============ */
+  .c-shell { display: flex; height: 100%; background: #0c0e12; color: #cdd5df; font-size: 13px; }
+  .c-stack { width: 240px; border-right: 1px solid #1d212a; display: flex; flex-direction: column; flex-shrink: 0; }
+  .c-sh { height: 40px; display: flex; align-items: center; padding: 0 14px; gap: 8px; border-bottom: 1px solid #1d212a; }
+  .c-sh .lg { font-weight: 700; color: #eef2f7; font-size: 12px; }
+  .c-sh .plus { margin-left: auto; width: 22px; height: 22px; border-radius: 6px; background: #171b22; color: #7d8794; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .c-sess { flex: 1; overflow: hidden; padding: 8px; }
+  .c-sessitem { padding: 9px 10px; border-radius: 8px; margin-bottom: 3px; border: 1px solid transparent; }
+  .c-sessitem.on { background: #141924; border-color: #263043; box-shadow: inset 3px 0 0 #8b9dff; }
+  .c-sess-top { display: flex; align-items: center; gap: 8px; }
+  .c-sess-top .t { font-size: 12.5px; color: #dfe6ee; font-weight: 550; }
+  .c-sess-top .st { margin-left: auto; font-size: 9.5px; padding: 2px 7px; border-radius: 4px; letter-spacing: .5px; }
+  .c-st-on { background: #12251a; color: #63d47c; }
+  .c-st-jump { background: #1d1a2e; color: #a78bfa; }
+  .c-meta { display: flex; gap: 10px; margin-top: 5px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 10px; color: #525c6b; }
+  .c-bar { height: 3px; border-radius: 2px; background: #1a1f28; margin-top: 7px; overflow: hidden; }
+  .c-bar i { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, #3b82f6, #8b9dff); }
+  .c-foot { border-top: 1px solid #1d212a; padding: 10px 14px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 10.5px; color: #525c6b; line-height: 2; }
+  .c-foot b { color: #8b96a5; font-weight: 500; }
+  .c-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .c-top { height: 40px; border-bottom: 1px solid #1d212a; display: flex; align-items: center; padding: 0 16px; gap: 14px; flex-shrink: 0; }
+  .c-top .name { font-weight: 650; color: #eef2f7; font-size: 13px; }
+  .c-top .crumb { font-family: 'Cascadia Code', Consolas, monospace; font-size: 11px; color: #525c6b; }
+  .c-top .kbd { margin-left: auto; display: flex; gap: 6px; align-items: center; color: #525c6b; font-size: 10.5px; }
+  .c-top .kbd span { border: 1px solid #262c37; border-radius: 4px; padding: 2px 6px; font-size: 10px; background: #14181f; }
+  .c-term { flex: 1; background: #0a0c10; padding: 14px 18px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.75; color: #b6c2cf; overflow: hidden; }
+  .c-p { color: #8b9dff; }
+  .c-out { color: #7d8794; }
+  .c-ok { color: #7dd97a; }
+  .c-hint { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 14px; height: 88px; background: #171b24; border: 1px solid #262c37; border-left: none; border-radius: 8px 0 0 8px; display: flex; align-items: center; justify-content: center; color: #525c6b; font-size: 9px; letter-spacing: 1px; writing-mode: vertical-rl; }
+  .c-bottombar { height: 26px; border-top: 1px solid #1d212a; display: flex; align-items: center; padding: 0 14px; gap: 14px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 10.5px; color: #525c6b; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<h1>LdySSH GUI 重设计提案</h1>
+<p class="sub">三个方向,均基于你现有的 CSS 变量体系与组件结构,可直接在浏览器里查看效果。看完告诉我编号,我再出对应的落地实施清单。<br>共同前提:不改终端交互逻辑、不改功能布局职责,只动「视觉与空间组织」。</p>
+
+<!-- ================= 方案 A ================= -->
+<div class="dir">
+  <div class="dir-head"><h2>方案 A · 石墨工作站</h2><span class="tag" style="background:#16202a;color:#57d6c9;">专业深色 · 改造成本:中</span></div>
+  <p class="dir-desc">针对现在「圆角盒子套圆角盒子」的视觉噪音:全部改为<b>平面 + 1px 发丝线分区</b>,唯一的强调色收敛为青绿一处。主机列表单行化提升密度,标签页改为下划线式,状态栏从彩色胶囊变成一条等宽字体 telemetry。整体气质从「工具箱」转向「专业终端工作站」(JetBrains / Warp 路线)。</p>
+
+  <div class="frame" style="cursor:default;">
+    <div class="a-shell">
+      <div class="a-titlebar">
+        <span class="a-logo">LdySSH</span>
+        <span class="a-crumb"><b>prod-web-01</b> / var/log · root</span>
+        <div class="a-search">⌕ 快速连接或执行命令… <span style="margin-left:auto;">Ctrl K</span></div>
+        <div class="a-winctl"><span>—</span><span>▢</span><span>✕</span></div>
+      </div>
+      <div class="a-body">
+        <div class="a-rail">
+          <div class="ic on">⌨</div><div class="ic">🖥</div><div class="ic">📊</div><div class="ic">🔌</div><div class="ic">⚛</div><div class="ic">🧩</div><div class="ic">⚙</div>
+        </div>
+        <div class="a-hosts">
+          <div class="a-hcap">生产环境</div>
+          <div class="a-host on"><span class="dot"></span><span class="nm">prod-web-01</span><span class="ip">10.0.0.8</span></div>
+          <div class="a-host"><span class="dot"></span><span class="nm">prod-web-02</span><span class="ip">10.0.0.9</span></div>
+          <div class="a-host"><span class="dot"></span><span class="nm">prod-db-master</span><span class="ip">10.0.1.2</span></div>
+          <div class="a-hcap" style="margin-top:12px;">测试环境</div>
+          <div class="a-host"><span class="dot"></span><span class="nm">staging-app</span><span class="ip">172.16.0.5</span></div>
+        </div>
+        <div class="a-main">
+          <div class="a-tabs">
+            <div class="a-tab on"><span>prod-web-01</span><span class="x">✕</span></div>
+            <div class="a-tab"><span>prod-web-02</span><span class="x">✕</span></div>
+            <div class="a-tab"><span>Local Shell</span><span class="x">✕</span></div>
+            <div class="a-add">+</div>
+          </div>
+          <div class="a-termwrap">
+            <div><span class="a-p">root@prod-web-01</span>:<span class="a-p">/var/log</span>$ <span class="a-cmd">tail -f nginx/access.log</span></div>
+            <div class="a-out">10.0.0.8 - - [16/Aug/2026:15:42:01] "GET /api/health HTTP/1.1" 200 15ms</div>
+            <div class="a-out">10.0.0.9 - - [16/Aug/2026:15:42:01] "GET /api/health HTTP/1.1" 200 12ms</div>
+            <div><span class="a-p">root@prod-web-01</span>:<span class="a-p">/var/log</span>$ <span class="a-cmd">df -h /data</span></div>
+            <div class="a-out">/dev/sdb1  2.0T  1.3T  612G  68% /data</div>
+            <div><span class="a-ok">✔ 检查完成</span></div>
+            <div><span class="a-p">root@prod-web-01</span>:<span class="a-p">/var/log</span>$ <span style="background:#57d6c9;color:#0b0d10;">&nbsp;</span></div>
+          </div>
+        </div>
+        <div class="a-right">
+          <div class="a-wtabs"><div class="a-wtab on">commands</div><div class="a-wtab">files</div><div class="a-wtab">ai</div></div>
+          <div class="a-wbody">
+            <div class="a-cmditem">查看负载概览<span class="k">htop</span></div>
+            <div class="a-cmditem">磁盘使用<span class="k">df -h</span></div>
+            <div class="a-cmditem">释放缓存<span class="k">sync</span></div>
+            <div class="a-cmditem">网络连接<span class="k">ss -tlp</span></div>
+            <div class="a-cmditem">日志跟踪<span class="k">tailf</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="a-status">
+        <b>CPU 12%</b><span class="sep">·</span><b>MEM 38%</b><span class="sep">·</span><b>DISK 68%</b><span class="sep">·</span><b>NET ↑2.1MB/s ↓340KB/s</b><span class="sep">·</span><span>跳板池 1 连接 · 3 会话</span>
+        <span style="margin-left:auto;color:#3e4650;">UTF-8 · 132×34 · 4.2ms</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><b>核心改动 1 · 去卡片化</b>所有面板背景色统一为同层灰阶,区域之间只用 1px 发丝线(--app-line 提对比)分隔;圆角从 xl 收到 6px,只保留在悬停态与输入框。</div>
+    <div class="note"><b>核心改动 2 · 强调色收敛</b>现在 emerald/purple/amber 多色并存;收敛为唯一青绿 #57d6c9(活动态、光标、在线点),purple 仅保留跳板标识一处,减少视觉岔路。</div>
+    <div class="note"><b>核心改动 3 · 等宽 telemetry 状态栏</b>底部一条 28px 高的等宽信息流替代所有 pill;新增「跳板池 1 连接 · N 会话」这类你真正关心的运维元信息。</div>
+  </div>
+</div>
+
+<!-- ================= 方案 B ================= -->
+<div class="dir">
+  <div class="dir-head"><h2>方案 B · 极光玻璃</h2><span class="tag" style="background:rgba(110,231,211,.14);color:#6ee7d3;">壁纸沉浸 · 改造成本:低</span></div>
+  <p class="dir-desc">把你已经支持的<b>背景壁纸</b>从「终端区贴图」升级为「整个应用的氛围底」:所有面板变成悬浮的磨砂玻璃卡片(acrylic blur),壁纸透出来形成景深。强调色用 emerald→cyan 渐变,配合柔光焦点。左栏变成独立悬浮 dock。气质:夜间运维的「驾驶舱感」,截图发群里很好看。</p>
+
+  <div class="frame" style="cursor:default;">
+    <div class="b-shell">
+      <div class="b-title"><span class="lg">LdySSH</span><span class="path">prod-web-01 · 跳板链 2 跳 · 15ms</span></div>
+      <div class="b-tabs"><div class="b-tab on">prod-web-01</div><div class="b-tab">prod-web-02</div><div class="b-tab">Local Shell</div></div>
+      <div class="b-glass b-dock">
+        <div class="ic on">⌨</div><div class="ic">🖥</div><div class="ic">📊</div><div class="ic">🔌</div><div class="ic">⚛</div><div class="ic">🧩</div><div class="ic">⚙</div>
+      </div>
+      <div class="b-glass b-hosts">
+        <h4>主 机</h4>
+        <div class="b-host on"><span class="dot" style="background:#6ee7d3;box-shadow:0 0 10px #6ee7d3;"></span>prod-web-01</div>
+        <div class="b-host"><span class="dot" style="background:rgba(232,240,244,.25);"></span>prod-web-02</div>
+        <div class="b-host"><span class="dot" style="background:rgba(232,240,244,.25);"></span>prod-db-master</div>
+        <div class="b-host"><span class="dot" style="background:#f472b6;"></span>staging-app</div>
+      </div>
+      <div class="b-glass b-term">
+        <div><span class="p">root@prod-web-01</span> <span style="color:rgba(196,215,222,.4)">/var/log $</span> tail -f access.log</div>
+        <div class="out">10.0.0.8 "GET /api/health" 200 15ms</div>
+        <div class="out">10.0.0.9 "GET /api/health" 200 12ms</div>
+        <div><span class="p">root@prod-web-01</span> <span style="color:rgba(196,215,222,.4)">$</span> sftp upload dist.tar.gz</div>
+        <div class="ok">✔ 已上传 45.2MB / 45.2MB · 96MB/s</div>
+        <div><span class="p">$</span> <span style="background:#6ee7d3;color:#06121a;">&nbsp;</span></div>
+      </div>
+      <div class="b-glass b-right">
+        <h4>文 件</h4>
+        <div class="b-file">📁 nginx<span class="sz">dir</span></div>
+        <div class="b-file">📄 access.log<span class="sz">2.4G</span></div>
+        <div class="b-file">📄 error.log<span class="sz">180M</span></div>
+        <div class="b-file">⚙ nginx.conf<span class="sz">4K</span></div>
+      </div>
+      <div class="b-glass b-status">
+        <span class="b-lbl">CPU</span>
+        <div class="b-spark"><i style="height:5px"></i><i style="height:9px"></i><i style="height:7px"></i><i style="height:12px"></i><i style="height:8px"></i><i style="height:14px"></i><i style="height:10px"></i></div>
+        <span>12%</span>
+        <span class="b-lbl" style="margin-left:8px;">NET</span>
+        <div class="b-spark"><i style="height:8px"></i><i style="height:12px"></i><i style="height:14px"></i><i style="height:9px"></i><i style="height:13px"></i><i style="height:7px"></i><i style="height:11px"></i></div>
+        <span>↑2.1MB/s</span>
+        <span style="margin-left:auto;color:rgba(232,240,244,.4);">MEM 38% · DISK 68%</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><b>核心改动 1 · 全面玻璃化</b>面板改 rgba 半透明 + backdrop-blur(18px) + 1px 内描边;壁纸铺满全窗口而不是只在终端后面,一键切换壁纸即换整套氛围。</div>
+    <div class="note"><b>核心改动 2 · 悬浮 dock + 玻璃标签</b>左侧功能栏独立成悬浮玻璃 dock,终端标签变成顶部悬浮胶囊,激活项渐变发光——空间层次立刻出来。</div>
+    <div class="note"><b>核心改动 3 · sparkline 状态栏</b>CPU/NET 用 60px 微型走势图代替纯数字,玻璃底条承载;数据你的监控轮询已有,只是换个画法。</div>
+  </div>
+</div>
+
+<!-- ================= 方案 C ================= -->
+<div class="dir">
+  <div class="dir-head"><h2>方案 C · 指令甲板</h2><span class="tag" style="background:#1a1e2e;color:#8b9dff;">密度重构 · 改造成本:高</span></div>
+  <p class="dir-desc">布局级的重构:<b>顶部标签页 → 左侧垂直会话栈</b>。每个会话一张卡片,内含状态徽章(在线/跳板链)、CPU/NET 迷你条——15+ 会话不拥挤,一眼看清全局。右侧工作栏默认收成边缘把手,悬停/快捷键滑出,终端获得最大空间。气质:tmux 的空间效率 + 现代皮肤。</p>
+
+  <div class="frame" style="cursor:default;">
+    <div class="c-shell">
+      <div class="c-stack">
+        <div class="c-sh"><span class="lg">会话 · 6</span><span class="plus">+</span></div>
+        <div class="c-sess">
+          <div class="c-sessitem on">
+            <div class="c-sess-top"><span class="t">prod-web-01</span><span class="st c-st-jump">跳板×2</span></div>
+            <div class="c-meta"><span>CPU 12%</span><span>MEM 38%</span><span>15ms</span></div>
+            <div class="c-bar"><i style="width:12%"></i></div>
+          </div>
+          <div class="c-sessitem">
+            <div class="c-sess-top"><span class="t">prod-web-02</span><span class="st c-st-on">在线</span></div>
+            <div class="c-meta"><span>CPU 8%</span><span>MEM 41%</span><span>16ms</span></div>
+            <div class="c-bar"><i style="width:8%"></i></div>
+          </div>
+          <div class="c-sessitem">
+            <div class="c-sess-top"><span class="t">prod-db-master</span><span class="st c-st-on">在线</span></div>
+            <div class="c-meta"><span>CPU 74%</span><span>MEM 82%</span><span>12ms</span></div>
+            <div class="c-bar"><i style="width:74%"></i></div>
+          </div>
+          <div class="c-sessitem">
+            <div class="c-sess-top"><span class="t">staging-app</span><span class="st" style="background:#231c1c;color:#f472b6;">重连中</span></div>
+            <div class="c-meta"><span>第 2/5 次</span></div>
+          </div>
+          <div class="c-sessitem">
+            <div class="c-sess-top"><span class="t">Local Shell</span></div>
+            <div class="c-meta"><span>busybox sh</span></div>
+          </div>
+        </div>
+        <div class="c-foot">
+          <div><b>跳板池</b> bastion-01 → 02 · 1 连接</div>
+          <div><b>传输</b> 1 任务 96MB/s</div>
+        </div>
+      </div>
+      <div class="c-main" style="position:relative;">
+        <div class="c-top">
+          <span class="name">prod-web-01</span>
+          <span class="crumb">~ /var/log · root · 132×34</span>
+          <div class="kbd"><span>Ctrl 1</span>命令 <span>Ctrl 2</span>文件 <span>Ctrl 3</span>AI <span>Ctrl K</span>连接</div>
+        </div>
+        <div class="c-term">
+          <div><span class="c-p">root@prod-web-01</span>:<span class="c-p">/var/log</span>$ <span style="color:#e8edf3;">docker logs --tail 20 api</span></div>
+          <div class="c-out">[15:42:01] GET /api/health 200 15ms</div>
+          <div class="c-out">[15:42:02] GET /api/users 200 42ms</div>
+          <div class="c-out">[15:42:04] WARN slow query 1.2s</div>
+          <div><span class="c-p">root@prod-web-01</span>:<span class="c-p">/var/log</span>$ <span class="c-ok">✔</span> <span style="background:#8b9dff;color:#0c0e12;">&nbsp;</span></div>
+        </div>
+        <div class="c-hint">C O M M A N D S</div>
+        <div class="c-bottombar"><span>UTF-8</span><span>·</span><span>终端 1/6</span><span>·</span><span>分屏:关闭</span><span style="margin-left:auto;">就绪</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><b>核心改动 1 · 垂直会话栈</b>顶部标签横向空间有限,7 个以上就挤;垂直栈每项 52px,24 个会话一目了然,且能常驻展示每台机器的健康度(监控数据现成)。</div>
+    <div class="note"><b>核心改动 2 · 工作栏把手化</b>Commands/Files/AI 默认收起为右缘 14px 把手,悬停或 Ctrl+1/2/3 滑出;终端宽度直接多出 ~250px,配合分屏才够用。</div>
+    <div class="note"><b>核心改动 3 · 运维元信息上移</b>跳板池状态、传输任务从底部状态栏移到会话栈底部(离视线更近);顶栏只留当前会话面包屑 + 快捷键提示。</div>
+  </div>
+</div>
+
+<p class="sub" style="margin-top:0;">选择建议:A 是「稳健的专业化」,不动布局只动皮,风险最低;B 是「氛围升级」,工作量最小且完全建立在你的壁纸功能上;C 是「体验重构」,收益最大但要动标签系统。<br>可以混搭,比如「A 的配色 + C 的垂直会话栈」。告诉我想深入哪个,我出落地改动清单。</p>
+
+</body>
+</html>

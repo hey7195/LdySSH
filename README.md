@@ -255,10 +255,9 @@ C++ Release 编译：
 
 ## 8. 打包
 
-先完成前端构建和 C++ Release 编译：
+在仓库根目录执行前端构建和 C++ Release 编译：
 
 ```powershell
-cd E:\adb\tools\LdSSH
 cd frontend
 npm run build
 cd ..

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { CommandFolder } from "./bridge";
-import { buildCommandSuggestions, defaultCommandSuggestionApplyKey, isFullScreenCommand, recordCommandHistory } from "./commandSuggestions";
+import { buildCommandSuggestions, checkDangerousCommand, defaultCommandSuggestionApplyKey, isFullScreenCommand, recordCommandHistory } from "./commandSuggestions";
 
 describe("command suggestions", () => {
   const folders: CommandFolder[] = [
@@ -14,8 +14,8 @@ describe("command suggestions", () => {
     }
   ];
 
-  test("defaults suggestion apply key to Alt+Enter", () => {
-    expect(defaultCommandSuggestionApplyKey).toBe("altEnter");
+  test("defaults suggestion apply key to Tab", () => {
+    expect(defaultCommandSuggestionApplyKey).toBe("tab");
   });
 
   test("prioritizes session history before local shortcuts and built-in Linux commands", () => {
@@ -38,7 +38,7 @@ describe("command suggestions", () => {
     });
 
     expect(suggestions.every((item) => item.source === "linux")).toBe(true);
-    expect(suggestions.map((item) => item.command).slice(0, 3)).toEqual(["docker ps", "df -h", "du -sh *"]);
+    expect(suggestions.map((item) => item.command).slice(0, 3)).toEqual(["docker ps", "docker ps -a", "docker compose up -d"]);
   });
 
   test("includes distilled linuxcool command names in built-in Linux suggestions", () => {
@@ -84,5 +84,29 @@ describe("command suggestions", () => {
     expect(isFullScreenCommand("vim /tmp/a.txt")).toBe(true);
     expect(isFullScreenCommand("sudo vi /etc/hosts")).toBe(true);
     expect(isFullScreenCommand("ls -la")).toBe(false);
+  });
+
+  test("identifies dangerous destruction commands correctly regardless of parameter positions", () => {
+    expect(checkDangerousCommand("rm -rf /").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm / -r").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm / -rf").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm -r / -f").isDangerous).toBe(true);
+    expect(checkDangerousCommand("sudo rm /var -r").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm --no-preserve-root /").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm -rf *").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm -rf /*").isDangerous).toBe(true);
+    expect(checkDangerousCommand("rm -f -r /var/log/*").isDangerous).toBe(true);
+    expect(checkDangerousCommand("mkfs.ext4 /dev/sda1").isDangerous).toBe(true);
+    expect(checkDangerousCommand("dd if=/dev/zero of=/dev/sdb").isDangerous).toBe(true);
+    expect(checkDangerousCommand("reboot").isDangerous).toBe(true);
+    expect(checkDangerousCommand("systemctl reboot").isDangerous).toBe(true);
+    expect(checkDangerousCommand("shutdown -h now").isDangerous).toBe(true);
+    expect(checkDangerousCommand("chmod -R 777 /").isDangerous).toBe(true);
+    expect(checkDangerousCommand("docker system prune -a").isDangerous).toBe(true);
+    expect(checkDangerousCommand("kubectl delete ns --all").isDangerous).toBe(true);
+
+    expect(checkDangerousCommand("ls -la").isDangerous).toBe(false);
+    expect(checkDangerousCommand("cat /etc/passwd").isDangerous).toBe(false);
+    expect(checkDangerousCommand("rm -rf ./node_modules").isDangerous).toBe(false);
   });
 });

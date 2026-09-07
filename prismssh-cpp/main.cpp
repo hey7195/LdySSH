@@ -9,6 +9,7 @@
 #include <tchar.h>
 #include <wrl.h>
 #include <WebView2.h>
+#include <WebView2EnvironmentOptions.h>
 #include <shlwapi.h>
 #include <fstream>
 #include <sstream>
@@ -38,6 +39,8 @@
 #include "chatgpt_subwindow.h"
 #include "ui_assets.hpp"
 
+#include <gdiplus.h>
+#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "winhttp.lib")
@@ -61,6 +64,15 @@ HANDLE hJob = NULL;
 ComPtr<ICoreWebView2Controller> webviewController;
 ComPtr<ICoreWebView2> webviewWindow;
 ComPtr<ICoreWebView2Environment> webviewEnv;
+
+void RevealMainWebView() {
+    if (webviewController != nullptr) {
+        webviewController->put_IsVisible(TRUE);
+    }
+    if (hWnd) {
+        KillTimer(hWnd, 1002);
+    }
+}
 
 struct HeartbeatUpdate {
     std::string hostname;
@@ -106,6 +118,46 @@ static bool TakePendingTerminalSize(const std::string& sessionId, TerminalSize& 
 static void ClearPendingTerminalSize(const std::string& sessionId) {
     std::lock_guard<std::mutex> lock(pendingTerminalSizeMutex);
     pendingTerminalSizes.erase(sessionId);
+}
+
+// 自动转换 Windows 本地 ANSI/GBK 编码为标准 UTF-8，防止 nlohmann::json 抛出 json.exception.type_error.316
+inline std::string EnsureValidUtf8(const std::string& str) {
+    if (str.empty()) return "";
+
+    // 1. 先校验是否已经是标准 UTF-8
+    int wlen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, str.c_str(), (int)str.size(), NULL, 0);
+    if (wlen > 0) return str;
+
+    // 2. 若不是标准 UTF-8，则按 Windows 本地 ANSI/GBK (CP_ACP) 转为 UTF-8
+    wlen = MultiByteToWideChar(CP_ACP, 0, str.c_str(), (int)str.size(), NULL, 0);
+    if (wlen > 0) {
+        std::wstring wstr(wlen, L'\0');
+        MultiByteToWideChar(CP_ACP, 0, str.c_str(), (int)str.size(), &wstr[0], wlen);
+        int ulen = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), wlen, NULL, 0, NULL, NULL);
+        if (ulen > 0) {
+            std::string utf8(ulen, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), wlen, &utf8[0], ulen, NULL, NULL);
+            return utf8;
+        }
+    }
+
+    // 3. 安全兜底过滤
+    std::string safeStr;
+    safeStr.reserve(str.size());
+    for (unsigned char c : str) {
+        if (c < 128 || (c >= 0xC0 && c <= 0xF4)) safeStr.push_back(c);
+        else safeStr.push_back('?');
+    }
+    return safeStr;
+}
+
+// 替换掉 dump() 中可能的非 UTF-8 异常
+inline std::string SafeDumpJson(const nlohmann::json& j) {
+    try {
+        return j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    } catch (...) {
+        return "{}";
+    }
 }
 
 static void ProcessSessionInputQueue(std::string sessionId) {
@@ -373,6 +425,33 @@ std::wstring ShowOpenFileDialog(const std::wstring& title = L"Select file") {
         return std::wstring(szFile);
     }
     return L"";
+}
+
+std::wstring ShowOpenFolderDialog(const std::wstring& title = L"选择文件夹") {
+    std::wstring folderPath;
+    IFileDialog* pfd = NULL;
+    if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd)))) {
+        DWORD dwOptions;
+        if (SUCCEEDED(pfd->GetOptions(&dwOptions))) {
+            pfd->SetOptions(dwOptions | FOS_PICKFOLDERS);
+        }
+        if (!title.empty()) {
+            pfd->SetTitle(title.c_str());
+        }
+        if (SUCCEEDED(pfd->Show(hWnd))) {
+            IShellItem* psi = NULL;
+            if (SUCCEEDED(pfd->GetResult(&psi))) {
+                PWSTR pszPath = NULL;
+                if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath))) {
+                    folderPath = pszPath;
+                    CoTaskMemFree(pszPath);
+                }
+                psi->Release();
+            }
+        }
+        pfd->Release();
+    }
+    return folderPath;
 }
 
 bool OpenLocalFile(const std::wstring& filePath) {
@@ -872,7 +951,12 @@ ProcessRunResult RunHiddenProcessCapture(
     if (inputRead) CloseHandle(inputRead);
 
     if (!created) {
-        result.error = "CreateProcessW failed: " + std::to_string(GetLastError());
+        DWORD errCode = GetLastError();
+        if (errCode == ERROR_FILE_NOT_FOUND || errCode == 2) {
+            result.error = "未找到 codex 命令行可执行文件。请先在系统中安装 Codex (npm install -g @openai/codex) 或在配置中设置可执行文件绝对路径。";
+        } else {
+            result.error = "CreateProcessW failed: " + std::to_string(errCode);
+        }
         if (inputWrite) CloseHandle(inputWrite);
         CloseHandle(readPipe);
         return result;
@@ -924,10 +1008,8 @@ ProcessRunResult RunHiddenProcessCapture(
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     CloseHandle(readPipe);
-    if (stdinThread.joinable()) {
-        stdinThread.join();
-    }
-
+    result.output = EnsureValidUtf8(result.output);
+    result.error = EnsureValidUtf8(result.error);
     return result;
 }
 
@@ -968,6 +1050,24 @@ static nlohmann::json BuildSavedConnectionObject(const nlohmann::json& params) {
     connObj["jumpKey"] = SafeGetJsonString(params, "jumpKey", "");
     connObj["jumpKeyPassphrase"] = SafeGetJsonString(params, "jumpKeyPassphrase", "");
     PutEncryptedSecret(connObj, "jumpPass", "jumpPass_encrypted", SafeGetJsonString(params, "jumpPass", ""));
+
+    // 多级跳板链与压缩开关原样持久化
+    if (params.contains("jumpChain") && params["jumpChain"].is_array()) {
+        nlohmann::json chain = nlohmann::json::array();
+        for (const auto& hop : params["jumpChain"]) {
+            if (!hop.is_object()) continue;
+            nlohmann::json hopObj;
+            hopObj["host"] = SafeGetJsonString(hop, "host", "");
+            hopObj["port"] = SafeGetJsonInt(hop, "port", 22);
+            hopObj["user"] = SafeGetJsonString(hop, "user", "");
+            hopObj["key"] = SafeGetJsonString(hop, "key", "");
+            hopObj["keyPassphrase"] = SafeGetJsonString(hop, "keyPassphrase", "");
+            PutEncryptedSecret(hopObj, "pass", "pass_encrypted", SafeGetJsonString(hop, "pass", ""));
+            chain.push_back(hopObj);
+        }
+        connObj["jumpChain"] = chain;
+    }
+    connObj["compression"] = SafeGetJsonBool(params, "compression", false);
 
     connObj["proxyType"] = SafeGetJsonString(params, "proxyType", "none");
     connObj["proxyHost"] = SafeGetJsonString(params, "proxyHost", "");
@@ -1022,6 +1122,20 @@ static bool SaveConnectionConfig(const std::string& oldKey, const nlohmann::json
         if (oldConn.contains("password_encrypted")) {
             connObj["password_encrypted"] = oldConn["password_encrypted"];
         }
+        // 编辑时空密码的跳转沿用旧链对应位置的密文
+        if (connObj.contains("jumpChain") && connObj["jumpChain"].is_array() && oldConn.contains("jumpChain") && oldConn["jumpChain"].is_array()) {
+            size_t idx = 0;
+            for (auto& hop : connObj["jumpChain"]) {
+                if (idx >= oldConn["jumpChain"].size()) break;
+                const nlohmann::json& oldHop = oldConn["jumpChain"][idx];
+                if (hop.is_object() && oldHop.is_object() &&
+                    SafeGetJsonString(hop, "pass", "").empty() && oldHop.contains("pass_encrypted")) {
+                    hop["pass"] = oldHop.value("pass", "");
+                    hop["pass_encrypted"] = oldHop["pass_encrypted"];
+                }
+                ++idx;
+            }
+        }
     }
     conns[savedKey] = connObj;
 
@@ -1033,12 +1147,219 @@ static bool SaveConnectionConfig(const std::string& oldKey, const nlohmann::json
     return true;
 }
 
+static std::vector<nlohmann::json> ParseWindTermSessionsFromJson(const std::string& content) {
+    std::vector<nlohmann::json> result;
+    if (content.empty()) return result;
+    try {
+        auto root = nlohmann::json::parse(content);
+        std::vector<nlohmann::json> items;
+        if (root.is_array()) {
+            for (auto& elem : root) items.push_back(elem);
+        } else if (root.is_object()) {
+            if (root.contains("sessions") && root["sessions"].is_array()) {
+                for (auto& elem : root["sessions"]) items.push_back(elem);
+            } else {
+                for (auto it = root.begin(); it != root.end(); ++it) {
+                    if (it.value().is_object()) items.push_back(it.value());
+                }
+            }
+        }
+
+        for (auto& item : items) {
+            std::string host = "";
+            if (item.contains("session.host") && item["session.host"].is_string()) {
+                host = item["session.host"].get<std::string>();
+            } else if (item.contains("host") && item["host"].is_string()) {
+                host = item["host"].get<std::string>();
+            } else if (item.contains("session.target") && item["session.target"].is_string()) {
+                host = item["session.target"].get<std::string>();
+            } else if (item.contains("target") && item["target"].is_string()) {
+                host = item["target"].get<std::string>();
+            }
+            if (host.empty()) continue;
+
+            std::string name = "";
+            if (item.contains("session.name") && item["session.name"].is_string()) {
+                name = item["session.name"].get<std::string>();
+            } else if (item.contains("name") && item["name"].is_string()) {
+                name = item["name"].get<std::string>();
+            }
+            if (name.empty()) name = host;
+
+            int port = 22;
+            if (item.contains("session.port")) {
+                if (item["session.port"].is_number()) port = item["session.port"].get<int>();
+                else if (item["session.port"].is_string()) {
+                    try { port = std::stoi(item["session.port"].get<std::string>()); } catch(...) {}
+                }
+            } else if (item.contains("port")) {
+                if (item["port"].is_number()) port = item["port"].get<int>();
+                else if (item["port"].is_string()) {
+                    try { port = std::stoi(item["port"].get<std::string>()); } catch(...) {}
+                }
+            }
+
+            std::string user = "root";
+            if (item.contains("session.user") && item["session.user"].is_string()) {
+                user = item["session.user"].get<std::string>();
+            } else if (item.contains("user") && item["user"].is_string()) {
+                user = item["user"].get<std::string>();
+            } else if (item.contains("username") && item["username"].is_string()) {
+                user = item["username"].get<std::string>();
+            }
+
+            if (host.find('@') != std::string::npos) {
+                size_t atIdx = host.find('@');
+                user = host.substr(0, atIdx);
+                host = host.substr(atIdx + 1);
+            }
+            if (host.find(':') != std::string::npos) {
+                size_t colIdx = host.find(':');
+                try { port = std::stoi(host.substr(colIdx + 1)); } catch(...) {}
+                host = host.substr(0, colIdx);
+            }
+
+            std::string group = "WindTerm";
+            if (item.contains("session.group") && item["session.group"].is_string() && !item["session.group"].get<std::string>().empty()) {
+                group = item["session.group"].get<std::string>();
+            } else if (item.contains("group") && item["group"].is_string() && !item["group"].get<std::string>().empty()) {
+                group = item["group"].get<std::string>();
+            }
+
+            std::string desc = "";
+            if (item.contains("session.description") && item["session.description"].is_string()) {
+                desc = item["session.description"].get<std::string>();
+            } else if (item.contains("description") && item["description"].is_string()) {
+                desc = item["description"].get<std::string>();
+            }
+
+            std::string password = "";
+            if (item.contains("session.password") && item["session.password"].is_string()) {
+                password = item["session.password"].get<std::string>();
+            } else if (item.contains("password") && item["password"].is_string()) {
+                password = item["password"].get<std::string>();
+            } else if (item.contains("session.autoLogin") && item["session.autoLogin"].is_object()) {
+                auto& al = item["session.autoLogin"];
+                if (al.contains("password") && al["password"].is_string()) {
+                    password = al["password"].get<std::string>();
+                }
+            }
+
+            std::string keyPath = "";
+            if (item.contains("session.identityFile") && item["session.identityFile"].is_string()) {
+                keyPath = item["session.identityFile"].get<std::string>();
+            } else if (item.contains("identityFile") && item["identityFile"].is_string()) {
+                keyPath = item["identityFile"].get<std::string>();
+            } else if (item.contains("keyPath") && item["keyPath"].is_string()) {
+                keyPath = item["keyPath"].get<std::string>();
+            }
+
+            nlohmann::json conn;
+            conn["name"] = name;
+            conn["hostname"] = host;
+            conn["port"] = port;
+            conn["username"] = user.empty() ? "root" : user;
+            conn["password"] = password;
+            conn["keyPath"] = keyPath;
+            conn["group"] = group;
+            conn["folder"] = group;
+            conn["description"] = desc;
+            conn["save"] = true;
+            conn["hasPassword"] = !password.empty();
+            result.push_back(conn);
+        }
+    } catch (...) {}
+    return result;
+}
+
+static std::vector<nlohmann::json> ParseWindTermSnippetsFromJson(const std::string& content) {
+    std::vector<nlohmann::json> folders;
+    if (content.empty()) return folders;
+    try {
+        auto root = nlohmann::json::parse(content);
+        std::vector<nlohmann::json> items;
+        if (root.is_array()) {
+            for (auto& elem : root) items.push_back(elem);
+        } else if (root.is_object()) {
+            if (root.contains("snippets") && root["snippets"].is_array()) {
+                for (auto& elem : root["snippets"]) items.push_back(elem);
+            } else {
+                for (auto it = root.begin(); it != root.end(); ++it) {
+                    if (it.value().is_object()) items.push_back(it.value());
+                }
+            }
+        }
+
+        std::unordered_map<std::string, std::vector<nlohmann::json>> groupMap;
+        for (auto& item : items) {
+            std::string name = "";
+            if (item.contains("snippet.name") && item["snippet.name"].is_string()) name = item["snippet.name"].get<std::string>();
+            else if (item.contains("name") && item["name"].is_string()) name = item["name"].get<std::string>();
+            else if (item.contains("title") && item["title"].is_string()) name = item["title"].get<std::string>();
+
+            std::string body = "";
+            if (item.contains("snippet.body") && item["snippet.body"].is_string()) body = item["snippet.body"].get<std::string>();
+            else if (item.contains("snippet.command") && item["snippet.command"].is_string()) body = item["snippet.command"].get<std::string>();
+            else if (item.contains("command") && item["command"].is_string()) body = item["command"].get<std::string>();
+            else if (item.contains("cmd") && item["cmd"].is_string()) body = item["cmd"].get<std::string>();
+            if (body.empty() && name.empty()) continue;
+            if (name.empty()) name = body;
+
+            while (!body.empty() && (body.back() == '\n' || body.back() == '\r')) {
+                body.pop_back();
+            }
+
+            std::string group = "WindTerm 快捷指令";
+            if (item.contains("snippet.group") && item["snippet.group"].is_string() && !item["snippet.group"].get<std::string>().empty()) {
+                group = item["snippet.group"].get<std::string>();
+            } else if (item.contains("group") && item["group"].is_string() && !item["group"].get<std::string>().empty()) {
+                group = item["group"].get<std::string>();
+            } else if (item.contains("category") && item["category"].is_string() && !item["category"].get<std::string>().empty()) {
+                group = item["category"].get<std::string>();
+            }
+
+            std::string desc = "";
+            if (item.contains("snippet.description") && item["snippet.description"].is_string()) desc = item["snippet.description"].get<std::string>();
+            else if (item.contains("description") && item["description"].is_string()) desc = item["description"].get<std::string>();
+
+            nlohmann::json cmd;
+            cmd["id"] = "wt_cmd_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + "_" + std::to_string(rand() % 10000);
+            cmd["name"] = name;
+            cmd["command"] = body;
+            cmd["description"] = desc;
+            cmd["autoExecute"] = false;
+            groupMap[group].push_back(cmd);
+        }
+
+        int folderIdx = 1;
+        for (auto& kv : groupMap) {
+            nlohmann::json folder;
+            folder["id"] = "wt_folder_" + std::to_string(folderIdx++);
+            folder["name"] = kv.first;
+            folder["commands"] = kv.second;
+            folders.push_back(folder);
+        }
+    } catch (...) {}
+    return folders;
+}
+
 // API router and handler
 void HandleApiCall(const std::string& reqId, const std::string& action, const nlohmann::json& args) {
     nlohmann::json response;
     response["id"] = reqId;
     
     try {
+        if (action == "app_ready" || action == "dom_ready") {
+            RevealMainWebView();
+            response["status"] = "success";
+            response["result"] = "true";
+            std::wstring responseW = Utf8ToUtf16(response.dump());
+            if (webviewWindow != nullptr) {
+                webviewWindow->PostWebMessageAsJson(responseW.c_str());
+            }
+            return;
+        }
+
         if (action == "fallback_retry") {
             std::wstring exeDir = GetExeDirectory();
             std::wstring uiPath = exeDir + L"\\ui";
@@ -1110,6 +1431,18 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                             conn["jumpPass"] = "";
                         }
                         conn.erase("jumpPass_encrypted");
+                    }
+
+                    if (conn.contains("jumpChain") && conn["jumpChain"].is_array()) {
+                        for (auto& hop : conn["jumpChain"]) {
+                            if (!hop.is_object()) continue;
+                            if (hop.contains("pass_encrypted") && hop["pass_encrypted"].get<bool>()) {
+                                std::string encryptedHopPass = hop.value("pass", "");
+                                std::string decryptedHopPass = fernetKey.empty() ? "" : DecryptFernetPassword(fernetKey, encryptedHopPass);
+                                hop["pass"] = decryptedHopPass.empty() ? "" : decryptedHopPass;
+                                hop.erase("pass_encrypted");
+                            }
+                        }
                     }
 
                     if (conn.contains("proxyPass_encrypted") && conn["proxyPass_encrypted"].get<bool>()) {
@@ -1388,6 +1721,492 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
+        else if (action == "detect_finalshell_commands") {
+            nlohmann::json retObj;
+            retObj["success"] = false;
+            retObj["detected"] = false;
+
+            std::vector<std::wstring> candidatePaths;
+            candidatePaths.push_back(L"D:\\finalshell\\config.json");
+            candidatePaths.push_back(L"C:\\finalshell\\config.json");
+            candidatePaths.push_back(L"E:\\finalshell\\config.json");
+            candidatePaths.push_back(L"F:\\finalshell\\config.json");
+
+            WCHAR appData[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                candidatePaths.push_back(std::wstring(appData) + L"\\finalshell\\config.json");
+            }
+            WCHAR userProfile[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\.finalshell\\config.json");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\AppData\\Roaming\\finalshell\\config.json");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\AppData\\Local\\finalshell\\config.json");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\Desktop\\FinalShell\\config.json");
+            }
+
+            for (const auto& path : candidatePaths) {
+                DWORD attr = GetFileAttributesW(path.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::string content = ReadFileToUtf8(path);
+                    if (!content.empty()) {
+                        try {
+                            auto jsonCfg = nlohmann::json::parse(content);
+                            if (jsonCfg.contains("quick_commands")) {
+                                auto& qc = jsonCfg["quick_commands"];
+                                int cmdCount = 0;
+                                int folderCount = 0;
+                                if (qc.is_array()) {
+                                    folderCount = (int)qc.size();
+                                    for (auto& g : qc) {
+                                        if (g.contains("commands") && g["commands"].is_array()) {
+                                            cmdCount += (int)g["commands"].size();
+                                        }
+                                    }
+                                } else if (qc.is_object()) {
+                                    folderCount = 1;
+                                    if (qc.contains("commands") && qc["commands"].is_array()) {
+                                        cmdCount += (int)qc["commands"].size();
+                                    }
+                                }
+
+                                int ulen = WideCharToMultiByte(CP_UTF8, 0, path.c_str(), (int)path.size(), NULL, 0, NULL, NULL);
+                                std::string utf8Path = "";
+                                if (ulen > 0) {
+                                    utf8Path.resize(ulen);
+                                    WideCharToMultiByte(CP_UTF8, 0, path.c_str(), (int)path.size(), &utf8Path[0], ulen, NULL, NULL);
+                                }
+
+                                retObj["success"] = true;
+                                retObj["detected"] = true;
+                                retObj["configPath"] = utf8Path;
+                                retObj["commandCount"] = cmdCount;
+                                retObj["folderCount"] = folderCount;
+                                retObj["rawJson"] = content;
+                                break;
+                            }
+                        } catch (...) {}
+                    }
+                }
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "detect_finalshell_hosts") {
+            nlohmann::json retObj;
+            retObj["success"] = false;
+            retObj["detected"] = false;
+            retObj["hosts"] = nlohmann::json::array();
+
+            std::vector<std::wstring> candidateDirs;
+            candidateDirs.push_back(L"D:\\finalshell\\conn");
+            candidateDirs.push_back(L"C:\\finalshell\\conn");
+            candidateDirs.push_back(L"E:\\finalshell\\conn");
+            candidateDirs.push_back(L"F:\\finalshell\\conn");
+
+            WCHAR appData[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                candidateDirs.push_back(std::wstring(appData) + L"\\finalshell\\conn");
+                candidateDirs.push_back(std::wstring(appData) + L"\\FinalShell\\conn");
+            }
+            WCHAR userProfile[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                candidateDirs.push_back(std::wstring(userProfile) + L"\\.finalshell\\conn");
+                candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Roaming\\finalshell\\conn");
+                candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Roaming\\FinalShell\\conn");
+                candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Local\\finalshell\\conn");
+                candidateDirs.push_back(std::wstring(userProfile) + L"\\Desktop\\FinalShell\\conn");
+            }
+
+            for (const auto& dir : candidateDirs) {
+                DWORD attr = GetFileAttributesW(dir.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::wstring searchPattern = dir + L"\\*.json";
+                    WIN32_FIND_DATAW fd;
+                    HANDLE hFind = FindFirstFileW(searchPattern.c_str(), &fd);
+                    if (hFind != INVALID_HANDLE_VALUE) {
+                        nlohmann::json hostList = nlohmann::json::array();
+                        do {
+                            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                                std::wstring filePath = dir + L"\\" + fd.cFileName;
+                                std::string content = ReadFileToUtf8(filePath);
+                                if (!content.empty()) {
+                                    try {
+                                        auto cfg = nlohmann::json::parse(content);
+                                        int64_t deleteTime = cfg.value("delete_time", 0LL);
+                                        if (deleteTime > 0) continue;
+
+                                        std::string host = cfg.value("host", "");
+                                        if (host.empty()) continue;
+
+                                        std::string name = cfg.value("name", "");
+                                        std::string user = cfg.value("user_name", "root");
+                                        int port = cfg.value("port", 22);
+                                        std::string encPass = cfg.value("password", "");
+                                        std::string decPass = DecryptFinalShellPassword(encPass);
+                                        std::string desc = cfg.value("description", "");
+
+                                        nlohmann::json item;
+                                        item["name"] = name.empty() ? host : name;
+                                        item["hostname"] = host;
+                                        item["port"] = port;
+                                        item["username"] = user.empty() ? "root" : user;
+                                        item["password"] = decPass;
+                                        item["group"] = "FinalShell";
+                                        item["folder"] = "FinalShell";
+                                        item["description"] = desc;
+                                        item["save"] = true;
+                                        item["hasPassword"] = !decPass.empty();
+                                        hostList.push_back(item);
+                                    } catch (...) {}
+                                }
+                            }
+                        } while (FindNextFileW(hFind, &fd));
+                        FindClose(hFind);
+
+                        if (!hostList.empty()) {
+                            retObj["success"] = true;
+                            retObj["detected"] = true;
+                            retObj["connDir"] = Utf16ToUtf8(dir);
+                            retObj["hostCount"] = (int)hostList.size();
+                            retObj["hosts"] = hostList;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "import_finalshell_hosts") {
+            std::string customDir = (args.size() > 0 && args[0].is_string()) ? args[0].get<std::string>() : "";
+            std::vector<std::wstring> candidateDirs;
+            if (!customDir.empty()) {
+                candidateDirs.push_back(Utf8ToUtf16(customDir));
+            } else {
+                candidateDirs.push_back(L"D:\\finalshell\\conn");
+                candidateDirs.push_back(L"C:\\finalshell\\conn");
+                candidateDirs.push_back(L"E:\\finalshell\\conn");
+                candidateDirs.push_back(L"F:\\finalshell\\conn");
+                WCHAR appData[MAX_PATH] = { 0 };
+                if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                    candidateDirs.push_back(std::wstring(appData) + L"\\finalshell\\conn");
+                    candidateDirs.push_back(std::wstring(appData) + L"\\FinalShell\\conn");
+                }
+                WCHAR userProfile[MAX_PATH] = { 0 };
+                if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                    candidateDirs.push_back(std::wstring(userProfile) + L"\\.finalshell\\conn");
+                    candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Roaming\\finalshell\\conn");
+                    candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Roaming\\FinalShell\\conn");
+                    candidateDirs.push_back(std::wstring(userProfile) + L"\\AppData\\Local\\finalshell\\conn");
+                    candidateDirs.push_back(std::wstring(userProfile) + L"\\Desktop\\FinalShell\\conn");
+                }
+            }
+
+            int importedCount = 0;
+            nlohmann::json importedList = nlohmann::json::array();
+            for (const auto& dir : candidateDirs) {
+                DWORD attr = GetFileAttributesW(dir.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::wstring searchPattern = dir + L"\\*.json";
+                    WIN32_FIND_DATAW fd;
+                    HANDLE hFind = FindFirstFileW(searchPattern.c_str(), &fd);
+                    if (hFind != INVALID_HANDLE_VALUE) {
+                        do {
+                            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                                std::wstring filePath = dir + L"\\" + fd.cFileName;
+                                std::string content = ReadFileToUtf8(filePath);
+                                if (!content.empty()) {
+                                    try {
+                                        auto cfg = nlohmann::json::parse(content);
+                                        int64_t deleteTime = cfg.value("delete_time", 0LL);
+                                        if (deleteTime > 0) continue;
+
+                                        std::string host = cfg.value("host", "");
+                                        if (host.empty()) continue;
+
+                                        std::string name = cfg.value("name", "");
+                                        std::string user = cfg.value("user_name", "root");
+                                        int port = cfg.value("port", 22);
+                                        std::string encPass = cfg.value("password", "");
+                                        std::string decPass = DecryptFinalShellPassword(encPass);
+                                        std::string desc = cfg.value("description", "");
+
+                                        nlohmann::json params;
+                                        params["name"] = name.empty() ? host : name;
+                                        params["hostname"] = host;
+                                        params["port"] = port;
+                                        params["username"] = user.empty() ? "root" : user;
+                                        params["password"] = decPass;
+                                        params["group"] = "FinalShell";
+                                        params["folder"] = "FinalShell";
+                                        params["description"] = desc;
+                                        params["save"] = true;
+
+                                        std::string savedKey;
+                                        std::string saveErr;
+                                        if (SaveConnectionConfig("", params, savedKey, saveErr)) {
+                                            importedCount++;
+                                            params["key"] = savedKey;
+                                            importedList.push_back(params);
+                                        }
+                                    } catch (...) {}
+                                }
+                            }
+                        } while (FindNextFileW(hFind, &fd));
+                        FindClose(hFind);
+                        if (importedCount > 0) break;
+                    }
+                }
+            }
+
+            nlohmann::json retObj;
+            retObj["success"] = (importedCount > 0);
+            retObj["imported"] = importedCount;
+            retObj["hosts"] = importedList;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "detect_windterm_hosts") {
+            nlohmann::json retObj;
+            retObj["success"] = false;
+            retObj["detected"] = false;
+            retObj["hosts"] = nlohmann::json::array();
+
+            std::vector<std::wstring> candidatePaths;
+            candidatePaths.push_back(L"D:\\WindTerm\\profiles\\global\\user.sessions");
+            candidatePaths.push_back(L"D:\\WindTerm\\profiles\\user.sessions");
+            candidatePaths.push_back(L"C:\\WindTerm\\profiles\\global\\user.sessions");
+            candidatePaths.push_back(L"C:\\WindTerm\\profiles\\user.sessions");
+            candidatePaths.push_back(L"E:\\WindTerm\\profiles\\global\\user.sessions");
+            candidatePaths.push_back(L"E:\\WindTerm\\profiles\\user.sessions");
+            candidatePaths.push_back(L"F:\\WindTerm\\profiles\\global\\user.sessions");
+
+            WCHAR appData[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\user.sessions");
+                candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\user.sessions");
+            }
+            WCHAR userProfile[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\user.sessions");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\AppData\\Local\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\Desktop\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\Desktop\\WindTerm\\profiles\\user.sessions");
+            }
+
+            for (const auto& path : candidatePaths) {
+                DWORD attr = GetFileAttributesW(path.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::string content = ReadFileToUtf8(path);
+                    if (!content.empty()) {
+                        auto parsedHosts = ParseWindTermSessionsFromJson(content);
+                        if (!parsedHosts.empty()) {
+                            retObj["success"] = true;
+                            retObj["detected"] = true;
+                            retObj["configPath"] = Utf16ToUtf8(path);
+                            retObj["hostCount"] = (int)parsedHosts.size();
+                            retObj["hosts"] = parsedHosts;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "import_windterm_hosts") {
+            std::string customPath = (args.size() > 0 && args[0].is_string()) ? args[0].get<std::string>() : "";
+            std::vector<std::wstring> candidatePaths;
+            if (!customPath.empty()) {
+                std::wstring wCustom = Utf8ToUtf16(customPath);
+                DWORD attr = GetFileAttributesW(wCustom.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES) {
+                    if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+                        candidatePaths.push_back(wCustom + L"\\profiles\\global\\user.sessions");
+                        candidatePaths.push_back(wCustom + L"\\profiles\\user.sessions");
+                        candidatePaths.push_back(wCustom + L"\\global\\user.sessions");
+                        candidatePaths.push_back(wCustom + L"\\user.sessions");
+                    } else {
+                        candidatePaths.push_back(wCustom);
+                    }
+                }
+            } else {
+                candidatePaths.push_back(L"D:\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(L"D:\\WindTerm\\profiles\\user.sessions");
+                candidatePaths.push_back(L"C:\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(L"C:\\WindTerm\\profiles\\user.sessions");
+                candidatePaths.push_back(L"E:\\WindTerm\\profiles\\global\\user.sessions");
+                candidatePaths.push_back(L"F:\\WindTerm\\profiles\\global\\user.sessions");
+                WCHAR appData[MAX_PATH] = { 0 };
+                if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                    candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\global\\user.sessions");
+                    candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\user.sessions");
+                    candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\global\\user.sessions");
+                    candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\user.sessions");
+                }
+                WCHAR userProfile[MAX_PATH] = { 0 };
+                if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                    candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\global\\user.sessions");
+                    candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\user.sessions");
+                    candidatePaths.push_back(std::wstring(userProfile) + L"\\AppData\\Local\\WindTerm\\profiles\\global\\user.sessions");
+                    candidatePaths.push_back(std::wstring(userProfile) + L"\\Desktop\\WindTerm\\profiles\\global\\user.sessions");
+                }
+            }
+
+            int importedCount = 0;
+            nlohmann::json importedList = nlohmann::json::array();
+            for (const auto& path : candidatePaths) {
+                DWORD attr = GetFileAttributesW(path.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::string content = ReadFileToUtf8(path);
+                    if (!content.empty()) {
+                        auto parsedHosts = ParseWindTermSessionsFromJson(content);
+                        for (auto& hostParams : parsedHosts) {
+                            std::string savedKey;
+                            std::string saveErr;
+                            if (SaveConnectionConfig("", hostParams, savedKey, saveErr)) {
+                                importedCount++;
+                                hostParams["key"] = savedKey;
+                                importedList.push_back(hostParams);
+                            }
+                        }
+                        if (importedCount > 0) break;
+                    }
+                }
+            }
+
+            nlohmann::json retObj;
+            retObj["success"] = (importedCount > 0);
+            retObj["imported"] = importedCount;
+            retObj["hosts"] = importedList;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "detect_windterm_commands") {
+            nlohmann::json retObj;
+            retObj["success"] = false;
+            retObj["detected"] = false;
+            retObj["folders"] = nlohmann::json::array();
+
+            std::vector<std::wstring> candidatePaths;
+            candidatePaths.push_back(L"D:\\WindTerm\\profiles\\terminal\\user.snippets");
+            candidatePaths.push_back(L"D:\\WindTerm\\profiles\\user.snippets");
+            candidatePaths.push_back(L"C:\\WindTerm\\profiles\\terminal\\user.snippets");
+            candidatePaths.push_back(L"C:\\WindTerm\\profiles\\user.snippets");
+            candidatePaths.push_back(L"E:\\WindTerm\\profiles\\terminal\\user.snippets");
+            candidatePaths.push_back(L"F:\\WindTerm\\profiles\\terminal\\user.snippets");
+
+            WCHAR appData[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\terminal\\user.snippets");
+                candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\user.snippets");
+                candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\terminal\\user.snippets");
+            }
+            WCHAR userProfile[MAX_PATH] = { 0 };
+            if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, userProfile))) {
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\terminal\\user.snippets");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\.windterm\\profiles\\user.snippets");
+                candidatePaths.push_back(std::wstring(userProfile) + L"\\Desktop\\WindTerm\\profiles\\terminal\\user.snippets");
+            }
+
+            for (const auto& path : candidatePaths) {
+                DWORD attr = GetFileAttributesW(path.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::string content = ReadFileToUtf8(path);
+                    if (!content.empty()) {
+                        auto parsedFolders = ParseWindTermSnippetsFromJson(content);
+                        int totalCmds = 0;
+                        for (auto& f : parsedFolders) {
+                            if (f.contains("commands") && f["commands"].is_array()) {
+                                totalCmds += (int)f["commands"].size();
+                            }
+                        }
+                        if (totalCmds > 0) {
+                            retObj["success"] = true;
+                            retObj["detected"] = true;
+                            retObj["configPath"] = Utf16ToUtf8(path);
+                            retObj["commandCount"] = totalCmds;
+                            retObj["folderCount"] = (int)parsedFolders.size();
+                            retObj["folders"] = parsedFolders;
+                            retObj["rawJson"] = content;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "import_windterm_commands") {
+            std::string inputStr = (args.size() > 0 && args[0].is_string()) ? args[0].get<std::string>() : "";
+            std::vector<nlohmann::json> parsedFolders;
+            if (!inputStr.empty() && (inputStr[0] == '[' || inputStr[0] == '{')) {
+                parsedFolders = ParseWindTermSnippetsFromJson(inputStr);
+            } else if (!inputStr.empty()) {
+                std::wstring wPath = Utf8ToUtf16(inputStr);
+                DWORD attr = GetFileAttributesW(wPath.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES) {
+                    if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+                        std::vector<std::wstring> subPaths = {
+                            wPath + L"\\profiles\\terminal\\user.snippets",
+                            wPath + L"\\profiles\\user.snippets",
+                            wPath + L"\\terminal\\user.snippets",
+                            wPath + L"\\user.snippets"
+                        };
+                        for (auto& sp : subPaths) {
+                            std::string c = ReadFileToUtf8(sp);
+                            if (!c.empty()) {
+                                parsedFolders = ParseWindTermSnippetsFromJson(c);
+                                if (!parsedFolders.empty()) break;
+                            }
+                        }
+                    } else {
+                        std::string c = ReadFileToUtf8(wPath);
+                        if (!c.empty()) parsedFolders = ParseWindTermSnippetsFromJson(c);
+                    }
+                }
+            } else {
+                std::vector<std::wstring> candidatePaths = {
+                    L"D:\\WindTerm\\profiles\\terminal\\user.snippets",
+                    L"D:\\WindTerm\\profiles\\user.snippets",
+                    L"C:\\WindTerm\\profiles\\terminal\\user.snippets",
+                    L"C:\\WindTerm\\profiles\\user.snippets"
+                };
+                WCHAR appData[MAX_PATH] = { 0 };
+                if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                    candidatePaths.push_back(std::wstring(appData) + L"\\kingtoolbox\\WindTerm\\profiles\\terminal\\user.snippets");
+                    candidatePaths.push_back(std::wstring(appData) + L"\\WindTerm\\profiles\\terminal\\user.snippets");
+                }
+                for (auto& cp : candidatePaths) {
+                    std::string c = ReadFileToUtf8(cp);
+                    if (!c.empty()) {
+                        parsedFolders = ParseWindTermSnippetsFromJson(c);
+                        if (!parsedFolders.empty()) break;
+                    }
+                }
+            }
+
+            int importedCount = 0;
+            for (auto& f : parsedFolders) {
+                if (f.contains("commands") && f["commands"].is_array()) {
+                    importedCount += (int)f["commands"].size();
+                }
+            }
+
+            nlohmann::json retObj;
+            retObj["success"] = (importedCount > 0);
+            retObj["importedCount"] = importedCount;
+            retObj["folders"] = parsedFolders;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "hermes_http_request") {
             std::string paramsStr = args[0].get<std::string>();
             auto params = nlohmann::json::parse(paramsStr);
@@ -1489,14 +2308,14 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 retObj["running"] = job.running;
                 retObj["completed"] = job.completed;
                 retObj["commandPreview"] = job.commandPreview;
-                retObj["output"] = job.result.output;
-                retObj["error"] = job.result.error;
+                retObj["output"] = EnsureValidUtf8(job.result.output);
+                retObj["error"] = EnsureValidUtf8(job.result.error);
                 retObj["exitCode"] = job.result.exitCode;
                 retObj["timedOut"] = job.result.timedOut;
             }
 
             response["status"] = "success";
-            response["result"] = retObj.dump();
+            response["result"] = SafeDumpJson(retObj);
         }
         else if (action == "run_codex") {
             std::string paramsStr = args[0].get<std::string>();
@@ -1525,14 +2344,14 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             } else {
                 ProcessRunResult run = RunHiddenProcessCapture(invocation.commandLine, invocation.workingDirectory, prompt, 120000);
                 retObj["success"] = run.success;
-                retObj["output"] = run.output;
-                retObj["error"] = run.error;
+                retObj["output"] = EnsureValidUtf8(run.output);
+                retObj["error"] = EnsureValidUtf8(run.error);
                 retObj["exitCode"] = run.exitCode;
                 retObj["timedOut"] = run.timedOut;
             }
 
             response["status"] = "success";
-            response["result"] = retObj.dump();
+            response["result"] = SafeDumpJson(retObj);
         }
         else if (action == "create_local_session") {
             std::string sessionId = globalSessionManager.CreateLocalSession();
@@ -1551,13 +2370,29 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::string keyPath = SafeGetJsonString(params, "keyPath", "");
             std::string keyPassphrase = SafeGetJsonString(params, "keyPassphrase", "");
             
-            // 提取堡垒机代理参数
+            // 提取堡垒机代理参数(兼容单跳字段 + 多级跳板链)
             std::string jumpHost = SafeGetJsonString(params, "jumpHost", "");
             int jumpPort = SafeGetJsonInt(params, "jumpPort", 22);
             std::string jumpUser = SafeGetJsonString(params, "jumpUser", "");
             std::string jumpPass = SafeGetJsonString(params, "jumpPass", "");
             std::string jumpKey = SafeGetJsonString(params, "jumpKey", "");
             std::string jumpKeyPassphrase = SafeGetJsonString(params, "jumpKeyPassphrase", "");
+            std::vector<JumpHopConfig> jumpHops;
+            if (params.contains("jumpChain") && params["jumpChain"].is_array()) {
+                for (const auto& hop : params["jumpChain"]) {
+                    if (!hop.is_object()) continue;
+                    JumpHopConfig hopCfg;
+                    hopCfg.host = SafeGetJsonString(hop, "host", "");
+                    hopCfg.port = SafeGetJsonInt(hop, "port", 22);
+                    hopCfg.user = SafeGetJsonString(hop, "user", "");
+                    hopCfg.pass = SafeGetJsonString(hop, "pass", "");
+                    hopCfg.key = SafeGetJsonString(hop, "key", "");
+                    hopCfg.keyPassphrase = SafeGetJsonString(hop, "keyPassphrase", "");
+                    if (!hopCfg.host.empty()) {
+                        jumpHops.push_back(hopCfg);
+                    }
+                }
+            }
 
             // 提取 SOCKS5 / HTTP 代理参数
             std::string proxyType = SafeGetJsonString(params, "proxyType", "none");
@@ -1565,6 +2400,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             int proxyPort = SafeGetJsonInt(params, "proxyPort", 1080);
             std::string proxyUser = SafeGetJsonString(params, "proxyUser", "");
             std::string proxyPass = SafeGetJsonString(params, "proxyPass", "");
+            bool compression = SafeGetJsonBool(params, "compression", false);
 
             std::string storeKey = hostname + "@" + username;
             
@@ -1576,10 +2412,10 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 }
             }
 
-            std::thread([sessId, hostname, port, username, password, keyPath, keyPassphrase, storeKey, reqId, jumpHost, jumpPort, jumpUser, jumpPass, jumpKey, jumpKeyPassphrase, proxyType, proxyHost, proxyPort, proxyUser, proxyPass]() {
+            std::thread([sessId, hostname, port, username, password, keyPath, keyPassphrase, storeKey, reqId, jumpHost, jumpPort, jumpUser, jumpPass, jumpKey, jumpKeyPassphrase, jumpHops, proxyType, proxyHost, proxyPort, proxyUser, proxyPass, compression]() {
                 auto session = std::make_shared<SSHSession>(sessId);
                 PrismLog("INFO", "SSHSession connect initiated asynchronously for " + storeKey);
-                
+
                 JumpHostConfig jc;
                 jc.jumpHost = jumpHost;
                 jc.jumpPort = jumpPort;
@@ -1587,6 +2423,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 jc.jumpPass = jumpPass;
                 jc.jumpKey = jumpKey;
                 jc.jumpKeyPassphrase = jumpKeyPassphrase;
+                jc.hops = jumpHops;
 
                 ProxyConfig pc;
                 pc.proxyType = proxyType;
@@ -1595,7 +2432,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                 pc.proxyUser = proxyUser;
                 pc.proxyPass = proxyPass;
 
-                bool success = session->Connect(hostname, port, username, password, keyPath, keyPassphrase, 80, 24, jc, pc);
+                bool success = session->Connect(hostname, port, username, password, keyPath, keyPassphrase, 80, 24, jc, pc, compression);
                 
                 nlohmann::json response;
                 response["id"] = reqId;
@@ -1655,9 +2492,6 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             if (session) {
                 output = session->GetOutput();
             }
-            if (!output.empty()) {
-                PrismLog("INFO", "get_output data length from " + sessId + ": " + std::to_string(output.length()) + " bytes");
-            }
             
             nlohmann::json retObj;
             retObj["output"] = Base64Encode(output); // Encode to base64 for binary safety
@@ -1681,6 +2515,389 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             std::wstring path = ShowOpenFileDialog(Utf8ToUtf16(titleUtf8));
             nlohmann::json retObj;
             retObj["filePath"] = Utf16ToUtf8(path);
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "show_open_folder_dialog") {
+            std::string titleUtf8 = args.empty() ? "" : args[0].get<std::string>();
+            std::wstring path = ShowOpenFolderDialog(Utf8ToUtf16(titleUtf8));
+            nlohmann::json retObj;
+            retObj["folderPath"] = Utf16ToUtf8(path);
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "launch_scrcpy") {
+            std::string dirUtf8 = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+            std::string extraArgsUtf8 = args.size() > 2 ? args[2].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+            std::wstring extraArgs = Utf8ToUtf16(extraArgsUtf8);
+
+            // Trim quotes or trailing slashes
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+            while (!scrcpyDir.empty() && (scrcpyDir.front() == L' ' || scrcpyDir.front() == L'"')) {
+                scrcpyDir.erase(scrcpyDir.begin());
+            }
+
+            std::wstring exePath;
+            if (!scrcpyDir.empty()) {
+                // Check if scrcpyDir ends with scrcpy.exe
+                if (scrcpyDir.size() >= 10 && _wcsicmp(scrcpyDir.c_str() + scrcpyDir.size() - 10, L"scrcpy.exe") == 0) {
+                    exePath = scrcpyDir;
+                    size_t lastSlash = scrcpyDir.find_last_of(L"\\/");
+                    if (lastSlash != std::wstring::npos) {
+                        scrcpyDir = scrcpyDir.substr(0, lastSlash);
+                    }
+                } else {
+                    exePath = scrcpyDir + L"\\scrcpy.exe";
+                }
+            } else {
+                exePath = L"scrcpy.exe";
+            }
+
+            // Command line
+            std::wstring cmdLine = L"\"" + exePath + L"\"";
+            if (!serial.empty()) {
+                cmdLine += L" -s \"" + serial + L"\"";
+            }
+            if (!extraArgs.empty()) {
+                cmdLine += L" " + extraArgs;
+            }
+
+            STARTUPINFOW si;
+            PROCESS_INFORMATION pi;
+            ZeroMemory(&si, sizeof(si));
+            si.cb = sizeof(si);
+            ZeroMemory(&pi, sizeof(pi));
+
+            LPCWSTR lpCurrentDirectory = scrcpyDir.empty() ? NULL : scrcpyDir.c_str();
+
+            BOOL success = CreateProcessW(
+                NULL,
+                &cmdLine[0],
+                NULL,
+                NULL,
+                FALSE,
+                0,
+                NULL,
+                lpCurrentDirectory,
+                &si,
+                &pi
+            );
+
+            nlohmann::json retObj;
+            if (success) {
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                retObj["success"] = true;
+                retObj["command"] = Utf16ToUtf8(cmdLine);
+            } else {
+                DWORD errCode = GetLastError();
+                retObj["success"] = false;
+                retObj["error"] = "启动 Scrcpy 失败 (Windows 错误码 " + std::to_string(errCode) + ")，请确认目录有效并包含 scrcpy.exe！";
+            }
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "get_adb_devices") {
+            std::string dirUtf8 = args.empty() ? "" : args[0].get<std::string>();
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+            while (!scrcpyDir.empty() && (scrcpyDir.front() == L' ' || scrcpyDir.front() == L'"')) {
+                scrcpyDir.erase(scrcpyDir.begin());
+            }
+
+            std::wstring adbPath;
+            if (!scrcpyDir.empty()) {
+                if (scrcpyDir.size() >= 10 && _wcsicmp(scrcpyDir.c_str() + scrcpyDir.size() - 10, L"scrcpy.exe") == 0) {
+                    size_t lastSlash = scrcpyDir.find_last_of(L"\\/");
+                    if (lastSlash != std::wstring::npos) {
+                        adbPath = scrcpyDir.substr(0, lastSlash) + L"\\adb.exe";
+                    } else {
+                        adbPath = L"adb.exe";
+                    }
+                } else {
+                    adbPath = scrcpyDir + L"\\adb.exe";
+                }
+            } else {
+                adbPath = L"adb.exe";
+            }
+
+            std::wstring cmd = L"\"" + adbPath + L"\" devices -l";
+            std::wstring workDir = scrcpyDir;
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, workDir, "", 8000);
+
+            // If failed with directory adb, fallback to PATH adb
+            if (!run.success && adbPath != L"adb.exe") {
+                cmd = L"adb devices -l";
+                run = RunHiddenProcessCapture(cmd, L"", "", 8000);
+            }
+
+            nlohmann::json retObj;
+            std::vector<nlohmann::json> devices;
+            std::string out = run.output;
+
+            if (run.success) {
+                std::istringstream stream(out);
+                std::string line;
+                while (std::getline(stream, line)) {
+                    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) {
+                        line.pop_back();
+                    }
+                    if (line.empty() || line.find("List of devices") != std::string::npos || line.find("* daemon") != std::string::npos) {
+                        continue;
+                    }
+
+                    // Format: serial state [key:val ...]
+                    std::istringstream lineStream(line);
+                    std::string serial, state;
+                    if (lineStream >> serial >> state) {
+                        nlohmann::json dev;
+                        dev["serial"] = serial;
+                        dev["state"] = state;
+                        std::string extra;
+                        while (lineStream >> extra) {
+                            size_t colon = extra.find(':');
+                            if (colon != std::string::npos) {
+                                std::string key = extra.substr(0, colon);
+                                std::string val = extra.substr(colon + 1);
+                                dev[key] = val;
+                            }
+                        }
+                        devices.push_back(dev);
+                    }
+                }
+                retObj["success"] = true;
+                retObj["devices"] = devices;
+                retObj["rawOutput"] = out;
+            } else {
+                retObj["success"] = false;
+                retObj["error"] = run.error.empty() ? "执行 adb devices 失败，请检查 ADB 工具路径" : run.error;
+                retObj["devices"] = nlohmann::json::array();
+                retObj["rawOutput"] = run.error;
+            }
+
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_connect") {
+            std::string dirUtf8 = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::string targetUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring target = Utf8ToUtf16(targetUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\" connect " + target;
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 10000);
+            if (!run.success && adbPath != L"adb.exe") {
+                cmd = L"adb connect " + target;
+                run = RunHiddenProcessCapture(cmd, L"", "", 10000);
+            }
+
+            nlohmann::json retObj;
+            retObj["success"] = run.success;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_install_apk") {
+            std::string dirUtf8 = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+            std::string apkPathUtf8 = args.size() > 2 ? args[2].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+            std::wstring apkPath = Utf8ToUtf16(apkPathUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\"";
+            if (!serial.empty()) {
+                cmd += L" -s \"" + serial + L"\"";
+            }
+            cmd += L" install -r \"" + apkPath + L"\"";
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 120000);
+            if (!run.success && adbPath != L"adb.exe") {
+                cmd = L"adb";
+                if (!serial.empty()) {
+                    cmd += L" -s \"" + serial + L"\"";
+                }
+                cmd += L" install -r \"" + apkPath + L"\"";
+                run = RunHiddenProcessCapture(cmd, L"", "", 120000);
+            }
+
+            nlohmann::json retObj;
+            bool isSuccess = run.success && (run.output.find("Success") != std::string::npos);
+            retObj["success"] = isSuccess;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error.empty() ? (isSuccess ? "" : ("安装异常: " + run.output)) : run.error;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_screencap") {
+            std::string dirUtf8 = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            wchar_t tempPath[MAX_PATH];
+            GetTempPathW(MAX_PATH, tempPath);
+            std::wstring screenFile = std::wstring(tempPath) + L"ldyssh_screen_" + std::to_wstring(GetTickCount64()) + L".png";
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            
+            std::wstring cmd = L"cmd.exe /c \"\"" + adbPath + L"\"";
+            if (!serial.empty()) {
+                cmd += L" -s \"" + serial + L"\"";
+            }
+            cmd += L" exec-out screencap -p > \"" + screenFile + L"\"\"";
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 15000);
+
+            nlohmann::json retObj;
+            if (GetFileAttributesW(screenFile.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                std::string rawBytes = ReadFileToUtf8(screenFile);
+                if (rawBytes.size() > 100) {
+                    retObj["success"] = true;
+                    retObj["filePath"] = Utf16ToUtf8(screenFile);
+                    retObj["base64"] = Base64Encode(rawBytes);
+                } else {
+                    retObj["success"] = false;
+                    retObj["error"] = "截屏数据异常，请确认设备已正常在线";
+                }
+            } else {
+                retObj["success"] = false;
+                retObj["error"] = run.error.empty() ? "截屏失败" : run.error;
+            }
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_reboot") {
+            std::string dirUtf8 = args.size() > 0 ? args[0].get<std::string>() : "";
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\"";
+            if (!serial.empty()) {
+                cmd += L" -s \"" + serial + L"\"";
+            }
+            cmd += L" reboot";
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 10000);
+            nlohmann::json retObj;
+            retObj["success"] = run.success;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_tcpip") {
+            std::string dirUtf8 = args.empty() ? "" : args[0].get<std::string>();
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+            int port = args.size() > 2 ? args[2].get<int>() : 5555;
+            if (port <= 0) port = 5555;
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\"";
+            if (!serial.empty()) {
+                cmd += L" -s \"" + serial + L"\"";
+            }
+            cmd += L" tcpip " + std::to_wstring(port);
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 10000);
+            nlohmann::json retObj;
+            retObj["success"] = run.success;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_pair") {
+            std::string dirUtf8 = args.empty() ? "" : args[0].get<std::string>();
+            std::string ipPortUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+            std::string pairCodeUtf8 = args.size() > 2 ? args[2].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring ipPort = Utf8ToUtf16(ipPortUtf8);
+            std::wstring pairCode = Utf8ToUtf16(pairCodeUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\" pair \"" + ipPort + L"\" \"" + pairCode + L"\"";
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 15000);
+            nlohmann::json retObj;
+            retObj["success"] = run.success;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
+        else if (action == "adb_keyevent") {
+            std::string dirUtf8 = args.empty() ? "" : args[0].get<std::string>();
+            std::string serialUtf8 = args.size() > 1 ? args[1].get<std::string>() : "";
+            std::string keyCodeUtf8 = args.size() > 2 ? args[2].get<std::string>() : "";
+
+            std::wstring scrcpyDir = Utf8ToUtf16(dirUtf8);
+            std::wstring serial = Utf8ToUtf16(serialUtf8);
+            std::wstring keyCode = Utf8ToUtf16(keyCodeUtf8);
+
+            while (!scrcpyDir.empty() && (scrcpyDir.back() == L'\\' || scrcpyDir.back() == L'/' || scrcpyDir.back() == L' ' || scrcpyDir.back() == L'"')) {
+                scrcpyDir.pop_back();
+            }
+
+            std::wstring adbPath = scrcpyDir.empty() ? L"adb.exe" : (scrcpyDir + L"\\adb.exe");
+            std::wstring cmd = L"\"" + adbPath + L"\"";
+            if (!serial.empty()) {
+                cmd += L" -s \"" + serial + L"\"";
+            }
+            cmd += L" shell input keyevent " + keyCode;
+
+            ProcessRunResult run = RunHiddenProcessCapture(cmd, scrcpyDir, "", 8000);
+            nlohmann::json retObj;
+            retObj["success"] = run.success;
+            retObj["output"] = run.output;
+            retObj["error"] = run.error;
             response["status"] = "success";
             response["result"] = retObj.dump();
         }
@@ -1817,6 +3034,20 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = "null";
         }
+        else if (action == "is_admin") {
+            BOOL isAdmin = FALSE;
+            PSID adminGroup = NULL;
+            SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
+            if (AllocateAndInitializeSid(&ntAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &adminGroup)) {
+                CheckTokenMembership(NULL, adminGroup, &isAdmin);
+                FreeSid(adminGroup);
+            }
+            nlohmann::json retObj;
+            retObj["isAdmin"] = (isAdmin == TRUE);
+            retObj["success"] = true;
+            response["status"] = "success";
+            response["result"] = retObj.dump();
+        }
         else if (action == "create_session") {
             std::string sessionId = "ssh_" + std::to_string(GetTickCount64()) + "_" + std::to_string(rand() % 1000);
             response["status"] = "success";
@@ -1856,8 +3087,90 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
                     retObj["error"] = "Failed to parse system stats";
                 }
             } else {
-                retObj["success"] = false;
-                retObj["error"] = "Session not found";
+                try {
+                    nlohmann::json stats = nlohmann::json::object();
+                    MEMORYSTATUSEX memStatus;
+                    memStatus.dwLength = sizeof(memStatus);
+                    if (GlobalMemoryStatusEx(&memStatus)) {
+                        stats["memory_usage"] = std::to_string(memStatus.dwMemoryLoad) + "%";
+                        DWORDLONG usedBytes = memStatus.ullTotalPhys - memStatus.ullAvailPhys;
+                        char buf[64];
+                        if (usedBytes >= 1073741824ULL) {
+                            sprintf_s(buf, "%.1fG", (double)usedBytes / (1024.0 * 1024.0 * 1024.0));
+                        } else {
+                            sprintf_s(buf, "%lluM", usedBytes / (1024 * 1024));
+                        }
+                        stats["memory_used"] = buf;
+                        if (memStatus.ullTotalPhys >= 1073741824ULL) {
+                            sprintf_s(buf, "%.1fG", (double)memStatus.ullTotalPhys / (1024.0 * 1024.0 * 1024.0));
+                        } else {
+                            sprintf_s(buf, "%lluM", memStatus.ullTotalPhys / (1024 * 1024));
+                        }
+                        stats["memory_total"] = buf;
+                    }
+                    ULARGE_INTEGER freeBytesAvail, totalBytes, totalFreeBytes;
+                    if (GetDiskFreeSpaceExW(L"C:\\", &freeBytesAvail, &totalBytes, &totalFreeBytes)) {
+                        DWORDLONG used = totalBytes.QuadPart - totalFreeBytes.QuadPart;
+                        double usage = (double)used / totalBytes.QuadPart * 100.0;
+                        char buf[64];
+                        sprintf_s(buf, "%.1f%%", usage);
+                        stats["disk_usage"] = buf;
+                        sprintf_s(buf, "%.1f GB", (double)used / (1024.0 * 1024.0 * 1024.0));
+                        stats["disk_used"] = buf;
+                        sprintf_s(buf, "%.1f GB", (double)totalBytes.QuadPart / (1024.0 * 1024.0 * 1024.0));
+                        stats["disk_total"] = buf;
+                    }
+                    static FILETIME prevIdleTime = {0, 0};
+                    static FILETIME prevKernelTime = {0, 0};
+                    static FILETIME prevUserTime = {0, 0};
+                    FILETIME idleTime, kernelTime, userTime;
+                    if (GetSystemTimes(&idleTime, &kernelTime, &userTime)) {
+                        ULARGE_INTEGER idle, kernel, user;
+                        idle.LowPart = idleTime.dwLowDateTime; idle.HighPart = idleTime.dwHighDateTime;
+                        kernel.LowPart = kernelTime.dwLowDateTime; kernel.HighPart = kernelTime.dwHighDateTime;
+                        user.LowPart = userTime.dwLowDateTime; user.HighPart = userTime.dwHighDateTime;
+                        ULARGE_INTEGER pIdle, pKernel, pUser;
+                        pIdle.LowPart = prevIdleTime.dwLowDateTime; pIdle.HighPart = prevIdleTime.dwHighDateTime;
+                        pKernel.LowPart = prevKernelTime.dwLowDateTime; pKernel.HighPart = prevKernelTime.dwHighDateTime;
+                        pUser.LowPart = prevUserTime.dwLowDateTime; pUser.HighPart = prevUserTime.dwHighDateTime;
+                        ULONGLONG diffSys = (kernel.QuadPart - pKernel.QuadPart) + (user.QuadPart - pUser.QuadPart);
+                        ULONGLONG diffIdle = idle.QuadPart - pIdle.QuadPart;
+                        double cpuUsage = 0.0;
+                        if (diffSys > 0 && pKernel.QuadPart > 0) {
+                            cpuUsage = (double)(diffSys - diffIdle) / diffSys * 100.0;
+                            if (cpuUsage < 0) cpuUsage = 0.0;
+                            if (cpuUsage > 100.0) cpuUsage = 100.0;
+                        }
+                        prevIdleTime = idleTime;
+                        prevKernelTime = kernelTime;
+                        prevUserTime = userTime;
+                        char buf[64];
+                        sprintf_s(buf, "%.1f%%", cpuUsage);
+                        stats["cpu_usage"] = buf;
+                    }
+                    DWORD uptimeMs = GetTickCount();
+                    DWORD upSec = uptimeMs / 1000;
+                    DWORD upDays = upSec / 86400;
+                    DWORD upHours = (upSec % 86400) / 3600;
+                    DWORD upMins = (upSec % 3600) / 60;
+                    char upBuf[64];
+                    if (upDays > 0) {
+                        sprintf_s(upBuf, "up %u days, %02u:%02u", upDays, upHours, upMins);
+                    } else {
+                        sprintf_s(upBuf, "up %02u:%02u", upHours, upMins);
+                    }
+                    stats["uptime"] = upBuf;
+                    stats["load_avg"] = "-";
+                    stats["load_avg_str"] = "load average: -";
+                    stats["rx_speed"] = "-";
+                    stats["tx_speed"] = "-";
+                    stats["traffic_str"] = "本地终端";
+                    retObj["success"] = true;
+                    retObj["stats"] = stats;
+                } catch(...) {
+                    retObj["success"] = false;
+                    retObj["error"] = "Failed to query local stats";
+                }
             }
             response["status"] = "success";
             response["result"] = retObj.dump();
@@ -2294,7 +3607,7 @@ void HandleApiCall(const std::string& reqId, const std::string& action, const nl
             response["status"] = "success";
             response["result"] = res.dump();
         }
-        else if (action == "download_file_content") {
+        else if (action == "download_file_content" || action == "read_file_content") {
             std::string sessId = args[0].get<std::string>();
             std::string path = args[1].get<std::string>();
             auto sshSess = std::dynamic_pointer_cast<SSHSession>(globalSessionManager.GetSession(sessId));
@@ -2678,6 +3991,10 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         LaunchPythonBackend(L"..\\..\\..\\prismssh.py");
     }
 
+    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+    ULONG_PTR gdiplusToken = 0;
+    Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+
     WNDCLASSEX wcex;
     wcex.cbSize = sizeof(WNDCLASSEX);
     wcex.style = CS_HREDRAW | CS_VREDRAW;
@@ -2687,7 +4004,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     wcex.hInstance = hInstance;
     wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wcex.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wcex.hbrBackground = CreateSolidBrush(RGB(9, 13, 22));
     wcex.lpszMenuName = NULL;
     wcex.lpszClassName = _T("LdySSHCppWindowClass");
     wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
@@ -2724,10 +4041,36 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     DWORD dwCornerPreference = DWMWCP_ROUND;
     DwmSetWindowAttribute(hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, &dwCornerPreference, sizeof(dwCornerPreference));
 
+    SetTimer(hWnd, 1002, 16, NULL);
+    SetTimer(hWnd, 9999, 2500, [](HWND h, UINT, UINT_PTR id, DWORD) {
+        KillTimer(h, id);
+        RevealMainWebView();
+    });
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
 
-    HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
+    std::wstring configDir = GetConfigDirectory();
+    std::wstring webviewDataDir = configDir + L"\\EBWebView";
+    CreateDirectoryW(configDir.c_str(), NULL);
+    CreateDirectoryW(webviewDataDir.c_str(), NULL);
+
+    auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+    if (options) {
+        options->put_AdditionalBrowserArguments(
+            L"--disable-background-networking "
+            L"--disable-component-update "
+            L"--disable-domain-reliability "
+            L"--disable-sync "
+            L"--no-first-run "
+            L"--enable-fast-unload "
+            L"--enable-smooth-scrolling "
+            L"--enable-zero-copy "
+            L"--disable-gpu-shader-disk-cache "
+            L"--disable-features=msEdgeLocalDataStore,msWebOOUI,msPdfOOUI,Translate,CalculateNativeWinOcclusion"
+        );
+    }
+
+    HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, webviewDataDir.c_str(), options.Get(),
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
                 if (FAILED(result)) return result;
@@ -2741,16 +4084,30 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                         webviewController = controller;
                         webviewController->get_CoreWebView2(&webviewWindow);
 
+                        // Keep webview invisible initially while loading and parsing, allowing native 60FPS splash screen to run seamlessly
+                        webviewController->put_IsVisible(FALSE);
+
+                        webviewWindow->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                            [](ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+                                if (hWnd) {
+                                    SetTimer(hWnd, 9998, 200, [](HWND h, UINT, UINT_PTR id, DWORD) {
+                                        KillTimer(h, id);
+                                        RevealMainWebView();
+                                    });
+                                }
+                                return S_OK;
+                            }).Get(), nullptr);
+
                         Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
                         if (SUCCEEDED(webviewWindow->get_Settings(&settings)) && settings) {
                             settings->put_AreDefaultContextMenusEnabled(FALSE);
                         }
 
-                        // Set main WebView2 default background to transparent to prevent white flashing/edges
+                        // Set main WebView2 default background to dark color to match app theme
                         Microsoft::WRL::ComPtr<ICoreWebView2Controller2> controller2;
                         if (SUCCEEDED(webviewController->QueryInterface(IID_PPV_ARGS(&controller2)))) {
-                            COREWEBVIEW2_COLOR transparentColor = { 0, 0, 0, 0 };
-                            controller2->put_DefaultBackgroundColor(transparentColor);
+                            COREWEBVIEW2_COLOR appDarkColor = { 255, 11, 14, 20 };
+                            controller2->put_DefaultBackgroundColor(appDarkColor);
                         }
 
                         RECT bounds;
@@ -2810,6 +4167,12 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                             L"            if (response && response.action === 'push_output') {\n"
                             L"                if (typeof window.handlePushOutput === 'function') {\n"
                             L"                    window.handlePushOutput(response.sessionId, response.data);\n"
+                            L"                }\n"
+                            L"                return;\n"
+                            L"            }\n"
+                            L"            if (response && response.action === 'session_closed') {\n"
+                            L"                if (typeof window.handleSessionClosed === 'function') {\n"
+                            L"                    window.handleSessionClosed(response.sessionId);\n"
                             L"                }\n"
                             L"                return;\n"
                             L"            }\n"
@@ -2985,6 +4348,277 @@ static void CloseApplication(HWND targetHWnd) {
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_TIMER:
+        if (wParam == 1002) {
+            RECT rc;
+            GetClientRect(hWnd, &rc);
+            int cx = (rc.right - rc.left) / 2;
+            int cy = (rc.bottom - rc.top) / 2;
+            RECT centerArea = { cx - 220, cy - 150, cx + 220, cy + 150 };
+            InvalidateRect(hWnd, &centerArea, FALSE);
+            return 0;
+        }
+        break;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        if (hdc) {
+            RECT rc;
+            GetClientRect(hWnd, &rc);
+            int width = rc.right - rc.left;
+            int height = rc.bottom - rc.top;
+
+            HDC memDC = CreateCompatibleDC(hdc);
+            HBITMAP memBitmap = CreateCompatibleBitmap(hdc, width, height);
+            HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+
+            static int s_animTick = 0;
+            s_animTick++;
+
+            {
+                Gdiplus::Graphics g(memDC);
+                g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+                g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+
+                // Deep premium dark background #090d16
+                Gdiplus::SolidBrush bgBrush(Gdiplus::Color(255, 9, 13, 22));
+                g.FillRectangle(&bgBrush, 0, 0, width, height);
+
+                int cx = width / 2;
+                int cy = height / 2;
+
+                // Ambient breathing center glow
+                float glowPulse = (sinf(s_animTick * 0.05f) + 1.0f) * 0.5f; // 0.0 to 1.0
+                int glowRadius = (int)(160 + glowPulse * 25);
+                Gdiplus::GraphicsPath glowPath;
+                glowPath.AddEllipse(cx - glowRadius, cy - glowRadius - 10, glowRadius * 2, glowRadius * 2);
+                Gdiplus::PathGradientBrush glowBrush(&glowPath);
+                BYTE glowAlpha = (BYTE)(35 + glowPulse * 20);
+                glowBrush.SetCenterColor(Gdiplus::Color(glowAlpha, 16, 185, 129));
+                Gdiplus::Color surroundColor = Gdiplus::Color(0, 9, 13, 22);
+                int count = 1;
+                glowBrush.SetSurroundColors(&surroundColor, &count);
+                g.FillPath(&glowBrush, &glowPath);
+
+                // Floating Logo container (70x70 rounded rectangle with emerald-to-cyan gradient)
+                float logoFloat = sinf(s_animTick * 0.06f) * 4.0f;
+                int logoSize = 70;
+                int logoX = cx - logoSize / 2;
+                int logoY = (int)((cy - 108) + logoFloat);
+                float logoCenterX = (float)cx;
+                float logoCenterY = (float)(logoY + logoSize / 2);
+
+                // Orbiting dashed halo ring around logo
+                Gdiplus::Pen orbitPen(Gdiplus::Color(45, 6, 182, 212), 1.0f);
+                orbitPen.SetDashStyle(Gdiplus::DashStyleDash);
+                g.DrawEllipse(&orbitPen, logoCenterX - 55.0f, logoCenterY - 22.0f, 110.0f, 44.0f);
+
+                // Orbiting quantum electron particle
+                float orbitAngle = s_animTick * 0.06f;
+                float electronX = logoCenterX + cosf(orbitAngle) * 55.0f;
+                float electronY = logoCenterY + sinf(orbitAngle) * 22.0f;
+
+                Gdiplus::SolidBrush electronGlow(Gdiplus::Color(70, 56, 189, 248));
+                g.FillEllipse(&electronGlow, electronX - 5.0f, electronY - 5.0f, 10.0f, 10.0f);
+                Gdiplus::SolidBrush electronDot(Gdiplus::Color(255, 255, 255, 255));
+                g.FillEllipse(&electronDot, electronX - 2.5f, electronY - 2.5f, 5.0f, 5.0f);
+
+                Gdiplus::GraphicsPath logoPath;
+                int rad = 22;
+                logoPath.AddArc(logoX, logoY, rad, rad, 180, 90);
+                logoPath.AddArc(logoX + logoSize - rad, logoY, rad, rad, 270, 90);
+                logoPath.AddArc(logoX + logoSize - rad, logoY + logoSize - rad, rad, rad, 0, 90);
+                logoPath.AddArc(logoX, logoY + logoSize - rad, rad, rad, 90, 90);
+                logoPath.CloseFigure();
+
+                Gdiplus::LinearGradientBrush logoGrad(
+                    Gdiplus::Point(logoX, logoY),
+                    Gdiplus::Point(logoX + logoSize, logoY + logoSize),
+                    Gdiplus::Color(255, 16, 185, 129),
+                    Gdiplus::Color(255, 6, 182, 212)
+                );
+                g.FillPath(&logoGrad, &logoPath);
+
+                Gdiplus::Pen logoBorder(Gdiplus::Color(130, 255, 255, 255), 1.2f);
+                g.DrawPath(&logoBorder, &logoPath);
+
+                // Draw crisp terminal icon ">_" inside badge
+                Gdiplus::Pen iconPen(Gdiplus::Color(255, 255, 255, 255), 2.6f);
+                iconPen.SetStartCap(Gdiplus::LineCapRound);
+                iconPen.SetEndCap(Gdiplus::LineCapRound);
+                iconPen.SetLineJoin(Gdiplus::LineJoinRound);
+
+                // ">" chevron
+                Gdiplus::Point chevronPts[3] = {
+                    Gdiplus::Point(logoX + 23, logoY + 25),
+                    Gdiplus::Point(logoX + 34, logoY + 35),
+                    Gdiplus::Point(logoX + 23, logoY + 45)
+                };
+                g.DrawLines(&iconPen, chevronPts, 3);
+                // "_" underline
+                g.DrawLine(&iconPen, logoX + 38, logoY + 45, logoX + 50, logoY + 45);
+
+                // Dynamic jumping & glowing wave characters: "L d y S S H"
+                Gdiplus::FontFamily fontFamily(L"Segoe UI");
+                Gdiplus::Font titleFont(&fontFamily, 20, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                Gdiplus::StringFormat charFormat;
+                charFormat.SetAlignment(Gdiplus::StringAlignmentCenter);
+                charFormat.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+
+                const wchar_t* titleLetters[] = { L"L", L"d", L"y", L"S", L"S", L"H" };
+                float letterWidths[] = { 15.0f, 15.0f, 13.0f, 14.0f, 14.0f, 16.0f };
+                float totalTitleW = 0.0f;
+                for (int i = 0; i < 6; i++) totalTitleW += letterWidths[i];
+                float curCharX = cx - totalTitleW / 2.0f;
+
+                for (int i = 0; i < 6; i++) {
+                    float wavePhase = (s_animTick * 0.10f) - i * 0.55f;
+                    float charYOffset = sinf(wavePhase) * 4.0f;
+                    float glowVal = (sinf(wavePhase) + 1.0f) * 0.5f; // 0.0 to 1.0
+
+                    BYTE cr = (BYTE)(255 - glowVal * (255 - 52));
+                    BYTE cg = (BYTE)(255 - glowVal * (255 - 211));
+                    BYTE cb = (BYTE)(255 - glowVal * (255 - 153));
+
+                    Gdiplus::SolidBrush charBrush(Gdiplus::Color(255, cr, cg, cb));
+                    Gdiplus::RectF charRect(curCharX - 1.0f, (cy - 18.0f) + charYOffset, letterWidths[i] + 2.0f, 28.0f);
+                    g.DrawString(titleLetters[i], -1, &titleFont, charRect, &charFormat, &charBrush);
+                    curCharX += letterWidths[i];
+                }
+
+                // Dynamic jumping & glowing Chinese characters: "正 在 启 动 终 端 工 作 台"
+                Gdiplus::FontFamily cnFamily(L"Microsoft YaHei");
+                Gdiplus::Font cnFont(&cnFamily, 13, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                Gdiplus::StringFormat cnFormat;
+                cnFormat.SetAlignment(Gdiplus::StringAlignmentCenter);
+                cnFormat.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+
+                const wchar_t* cnChars[] = { L"正", L"在", L"启", L"动", L"终", L"端", L"工", L"作", L"台" };
+                float cnCharW = 16.0f;
+                float totalCnW = 9 * cnCharW + 24.0f; // includes 3 dots
+                float startCnX = cx - totalCnW / 2.0f;
+
+                for (int i = 0; i < 9; i++) {
+                    float wavePhase = (s_animTick * 0.10f) - i * 0.38f;
+                    float cnYOffset = sinf(wavePhase) * 3.5f;
+                    float glowVal = (sinf(wavePhase) + 1.0f) * 0.5f;
+
+                    BYTE cnr = (BYTE)(148 + glowVal * (52 - 148));
+                    BYTE cng = (BYTE)(163 + glowVal * (211 - 163));
+                    BYTE cnb = (BYTE)(184 + glowVal * (153 - 184));
+
+                    Gdiplus::SolidBrush cnCharBrush(Gdiplus::Color(255, cnr, cng, cnb));
+                    Gdiplus::RectF cnRect(startCnX + i * cnCharW, (cy + 16.0f) + cnYOffset, cnCharW, 22.0f);
+                    g.DrawString(cnChars[i], -1, &cnFont, cnRect, &cnFormat, &cnCharBrush);
+                }
+
+                // 3 jumping dots after Chinese text
+                for (int d = 0; d < 3; d++) {
+                    float dotPhase = (s_animTick * 0.10f) - (9 + d) * 0.38f;
+                    float dotOffset = sinf(dotPhase) * 3.5f;
+                    float dotGlow = (sinf(dotPhase) + 1.0f) * 0.5f;
+
+                    BYTE dotR = (BYTE)(148 + dotGlow * (52 - 148));
+                    BYTE dotG = (BYTE)(163 + dotGlow * (211 - 163));
+                    BYTE dotB = (BYTE)(184 + dotGlow * (153 - 184));
+
+                    Gdiplus::SolidBrush dotBrush(Gdiplus::Color(255, dotR, dotG, dotB));
+                    Gdiplus::RectF dotRect(startCnX + 9 * cnCharW + d * 7.0f, (cy + 16.0f) + dotOffset, 8.0f, 22.0f);
+                    g.DrawString(L".", -1, &cnFont, dotRect, &cnFormat, &dotBrush);
+                }
+
+                // 14-Cell Futuristic Cyber Energy Matrix Loading Track
+                int cellCount = 14;
+                float cellWidth = 13.0f;
+                float cellHeight = 7.0f;
+                float cellGap = 4.0f;
+                float totalCellsWidth = cellCount * cellWidth + (cellCount - 1) * cellGap;
+                float startCellsX = cx - totalCellsWidth / 2.0f;
+                float cellsY = cy + 48.0f;
+
+                float wavePos = fmodf((float)s_animTick * 0.22f, (float)cellCount + 4.0f) - 2.0f;
+
+                for (int c = 0; c < cellCount; c++) {
+                    float dist = fabsf((float)c - wavePos);
+                    float activeGlow = 0.0f;
+                    if (dist < 3.2f) {
+                        activeGlow = 1.0f - (dist / 3.2f);
+                    }
+
+                    float cellX = startCellsX + c * (cellWidth + cellGap);
+                    Gdiplus::GraphicsPath cellPath;
+                    float cr = 3.0f;
+                    cellPath.AddArc(cellX, cellsY, cr, cr, 180, 90);
+                    cellPath.AddArc(cellX + cellWidth - cr, cellsY, cr, cr, 270, 90);
+                    cellPath.AddArc(cellX + cellWidth - cr, cellsY + cellHeight - cr, cr, cr, 0, 90);
+                    cellPath.AddArc(cellX, cellsY + cellHeight - cr, cr, cr, 90, 90);
+                    cellPath.CloseFigure();
+
+                    if (activeGlow > 0.05f) {
+                        BYTE cellR = (BYTE)(16 + activeGlow * (56 - 16));
+                        BYTE cellG = (BYTE)(185 + activeGlow * (189 - 185));
+                        BYTE cellB = (BYTE)(129 + activeGlow * (248 - 129));
+                        BYTE cellA = (BYTE)(70 + activeGlow * 185);
+
+                        Gdiplus::SolidBrush activeBrush(Gdiplus::Color(cellA, cellR, cellG, cellB));
+                        g.FillPath(&activeBrush, &cellPath);
+                    } else {
+                        Gdiplus::SolidBrush dimBrush(Gdiplus::Color(30, 255, 255, 255));
+                        g.FillPath(&dimBrush, &cellPath);
+                    }
+
+                    Gdiplus::Pen cellBorder(Gdiplus::Color(activeGlow > 0.2f ? 110 : 30, 255, 255, 255), 1.0f);
+                    g.DrawPath(&cellBorder, &cellPath);
+                }
+
+                // Micro pill badge [ • 核心服务就绪 ]
+                int badgeWidth = 120;
+                int badgeHeight = 24;
+                int badgeX = cx - badgeWidth / 2;
+                int badgeY = cy + 72;
+
+                Gdiplus::GraphicsPath badgePath;
+                int bRad = 12;
+                badgePath.AddArc(badgeX, badgeY, bRad, bRad, 180, 90);
+                badgePath.AddArc(badgeX + badgeWidth - bRad, badgeY, bRad, bRad, 270, 90);
+                badgePath.AddArc(badgeX + badgeWidth - bRad, badgeY + badgeHeight - bRad, bRad, bRad, 0, 90);
+                badgePath.AddArc(badgeX, badgeY + badgeHeight - bRad, bRad, bRad, 90, 90);
+                badgePath.CloseFigure();
+
+                Gdiplus::SolidBrush badgeBg(Gdiplus::Color(25, 255, 255, 255));
+                g.FillPath(&badgeBg, &badgePath);
+                Gdiplus::Pen badgeBorder(Gdiplus::Color(30, 255, 255, 255), 1.0f);
+                g.DrawPath(&badgeBorder, &badgePath);
+
+                // Pulsing Green dot
+                float dotPulse = (sinf(s_animTick * 0.15f) + 1.0f) * 0.5f;
+                int dotSize = (int)(6 + dotPulse * 2.5f);
+                Gdiplus::SolidBrush dotBrush(Gdiplus::Color(255, 16, 185, 129));
+                g.FillEllipse(&dotBrush, (float)(badgeX + 12 - (dotSize - 6) / 2), (float)(badgeY + 9 - (dotSize - 6) / 2), (float)dotSize, (float)dotSize);
+
+                // Badge text
+                Gdiplus::Font badgeFont(&cnFamily, 11, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                Gdiplus::SolidBrush badgeTextBrush(Gdiplus::Color(255, 148, 163, 184));
+                Gdiplus::RectF badgeTextRect((Gdiplus::REAL)(badgeX + 22), (Gdiplus::REAL)(badgeY + 1), (Gdiplus::REAL)(badgeWidth - 24), (Gdiplus::REAL)(badgeHeight));
+                Gdiplus::StringFormat bFormat;
+                bFormat.SetAlignment(Gdiplus::StringAlignmentNear);
+                bFormat.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                g.DrawString(L"核心服务就绪", -1, &badgeFont, badgeTextRect, &bFormat, &badgeTextBrush);
+            }
+
+            BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+
+            SelectObject(memDC, oldBitmap);
+            DeleteObject(memBitmap);
+            DeleteDC(memDC);
+
+            EndPaint(hWnd, &ps);
+            return 0;
+        }
+        break;
+    }
     case WM_GETMINMAXINFO: {
         auto mmi = reinterpret_cast<MINMAXINFO*>(lParam);
         HMONITOR monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
@@ -3037,6 +4671,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         if (chatgptHWnd != NULL && IsWindowVisible(chatgptHWnd)) {
             SetWindowPos(chatgptHWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+        break;
+
+    case WM_SETFOCUS:
+    case WM_ACTIVATE:
+        if (webviewController != nullptr && (message == WM_SETFOCUS || LOWORD(wParam) != WA_INACTIVE)) {
+            webviewController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
         }
         break;
 

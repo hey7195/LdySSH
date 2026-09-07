@@ -15,6 +15,7 @@ declare global {
     windowMaximize?: () => void;
     windowClose?: () => void;
     handlePushOutput?: (sessionId: string, data: string) => void;
+    handleSessionClosed?: (sessionId: string) => void;
   }
 }
 
@@ -63,11 +64,77 @@ export const nativeBridge = {
   getSavedConnections() {
     return callNative<Record<string, SavedConnection>>("get_saved_connections", {});
   },
+  appReady() {
+    return callNative("app_ready", {});
+  },
   deleteSavedConnection(key: string) {
     return callNative<{ success: boolean; error?: string }>("delete_saved_connection", { success: false }, key);
   },
   getCommandLibrary() {
     return callNative<CommandLibraryResult>("get_command_library", { success: false, folders: [] });
+  },
+  detectFinalShellCommands() {
+    return callNative<{
+      success: boolean;
+      detected: boolean;
+      configPath?: string;
+      rawJson?: string;
+      commandCount?: number;
+      folderCount?: number;
+    }>("detect_finalshell_commands", { success: false, detected: false });
+  },
+  detectFinalShellHosts() {
+    return callNative<{
+      success: boolean;
+      detected: boolean;
+      connDir?: string;
+      hostCount?: number;
+      hosts?: SavedConnection[];
+    }>("detect_finalshell_hosts", { success: false, detected: false, hosts: [] });
+  },
+  importFinalShellHosts(connDir = "") {
+    return callNative<{
+      success: boolean;
+      imported: number;
+      hosts?: SavedConnection[];
+      error?: string;
+    }>("import_finalshell_hosts", { success: false, imported: 0, hosts: [] }, connDir);
+  },
+  detectWindTermCommands() {
+    return callNative<{
+      success: boolean;
+      detected: boolean;
+      configPath?: string;
+      rawJson?: string;
+      commandCount?: number;
+      folderCount?: number;
+      folders?: CommandFolder[];
+    }>("detect_windterm_commands", { success: false, detected: false, folders: [] });
+  },
+  importWindTermCommands(rawJsonOrPath = "") {
+    return callNative<{
+      success: boolean;
+      importedCount: number;
+      folders?: CommandFolder[];
+      error?: string;
+    }>("import_windterm_commands", { success: false, importedCount: 0, folders: [] }, rawJsonOrPath);
+  },
+  detectWindTermHosts() {
+    return callNative<{
+      success: boolean;
+      detected: boolean;
+      configPath?: string;
+      hostCount?: number;
+      hosts?: SavedConnection[];
+    }>("detect_windterm_hosts", { success: false, detected: false, hosts: [] });
+  },
+  importWindTermHosts(customPath = "") {
+    return callNative<{
+      success: boolean;
+      imported: number;
+      hosts?: SavedConnection[];
+      error?: string;
+    }>("import_windterm_hosts", { success: false, imported: 0, hosts: [] }, customPath);
   },
   saveCommandLibrary(folders: CommandFolder[]) {
     return callNative<{ success: boolean; error?: string }>("save_command_library", { success: false }, JSON.stringify(folders));
@@ -82,6 +149,113 @@ export const nativeBridge = {
       sessionId,
       remotePath,
       localPath
+    );
+  },
+  startDownloadWithProgress(sessionId: string, remotePath: string, localPath: string, downloadId: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "start_direct_download_with_progress",
+      { success: false, error: "Bridge unavailable" },
+      sessionId,
+      remotePath,
+      localPath,
+      downloadId
+    );
+  },
+  getDownloadProgress(sessionId: string, downloadId: string) {
+    return callNative<{
+      success: boolean;
+      id?: string;
+      transferred?: number;
+      downloaded?: number;
+      total?: number;
+      percentage?: number;
+      completed?: boolean;
+      status?: "downloading" | "completed" | "error" | "cancelled";
+      error?: string;
+    }>(
+      "get_download_progress",
+      { success: false, error: "Bridge unavailable" },
+      sessionId,
+      downloadId
+    );
+  },
+  cancelDownload(sessionId: string, downloadId: string) {
+    return callNative<{ success: boolean }>(
+      "cancel_download",
+      { success: false },
+      sessionId,
+      downloadId
+    );
+  },
+  uploadFile(sessionId: string, localPath: string, remotePath: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "upload_file",
+      { success: false, error: "Upload bridge unavailable" },
+      sessionId,
+      localPath,
+      remotePath
+    );
+  },
+  startUploadWithProgress(sessionId: string, localPath: string, remotePath: string, uploadId: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "upload_from_path_with_progress",
+      { success: false, error: "Bridge unavailable" },
+      sessionId,
+      localPath,
+      remotePath,
+      uploadId
+    );
+  },
+  startUploadContentWithProgress(sessionId: string, content: string, remotePath: string, uploadId: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "start_upload_with_progress",
+      { success: false, error: "Bridge unavailable" },
+      sessionId,
+      content,
+      remotePath,
+      uploadId
+    );
+  },
+  getUploadProgress(sessionId: string, uploadId: string) {
+    return callNative<{
+      success: boolean;
+      id?: string;
+      transferred?: number;
+      total?: number;
+      percentage?: number;
+      completed?: boolean;
+      status?: "uploading" | "completed" | "error" | "cancelled";
+      error?: string;
+    }>(
+      "get_upload_progress",
+      { success: false, error: "Bridge unavailable" },
+      sessionId,
+      uploadId
+    );
+  },
+  cancelUpload(sessionId: string, uploadId: string) {
+    return callNative<{ success: boolean }>(
+      "cancel_upload",
+      { success: false },
+      sessionId,
+      uploadId
+    );
+  },
+  uploadFileContent(sessionId: string, content: string, remotePath: string) {
+    return callNative<{ success: boolean; error?: string }>(
+      "upload_file_content",
+      { success: false, error: "Upload content bridge unavailable" },
+      sessionId,
+      content,
+      remotePath
+    );
+  },
+  readFileContent(sessionId: string, remotePath: string) {
+    return callNative<{ success: boolean; content?: string; error?: string }>(
+      "download_file_content",
+      { success: false, error: "Download file content bridge unavailable" },
+      sessionId,
+      remotePath
     );
   },
   connect(sessionId: string, params: ConnectParams) {
@@ -101,6 +275,101 @@ export const nativeBridge = {
   showOpenFileDialog(title = "") {
     return callNative<{ filePath?: string }>("show_open_file_dialog", {}, title);
   },
+  showOpenFolderDialog(title = "") {
+    return callNative<{ folderPath?: string }>("show_open_folder_dialog", {}, title);
+  },
+  launchScrcpy(scrcpyDir: string, serial: string, extraArgs = "") {
+    return callNative<{ success: boolean; command?: string; error?: string }>(
+      "launch_scrcpy",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial,
+      extraArgs
+    );
+  },
+  getAdbDevices(scrcpyDir = "") {
+    return callNative<{
+      success: boolean;
+      devices: Array<{
+        serial: string;
+        state: string;
+        model?: string;
+        product?: string;
+        device?: string;
+        transport_id?: string;
+      }>;
+      rawOutput?: string;
+      error?: string;
+    }>("get_adb_devices", { success: false, devices: [] }, scrcpyDir);
+  },
+  adbConnect(scrcpyDir: string, target: string) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_connect",
+      { success: false },
+      scrcpyDir,
+      target
+    );
+  },
+  installApk(scrcpyDir: string, serial: string, apkPath: string) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_install_apk",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial,
+      apkPath
+    );
+  },
+  screencapAdb(scrcpyDir: string, serial: string) {
+    return callNative<{ success: boolean; filePath?: string; base64?: string; error?: string }>(
+      "adb_screencap",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial
+    );
+  },
+  rebootAdb(scrcpyDir: string, serial: string) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_reboot",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial
+    );
+  },
+  adbTcpip(scrcpyDir: string, serial: string, port = 5555) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_tcpip",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial,
+      port
+    );
+  },
+  adbPair(scrcpyDir: string, ipPort: string, pairCode: string) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_pair",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      ipPort,
+      pairCode
+    );
+  },
+  adbKeyevent(scrcpyDir: string, serial: string, keyCode: string) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "adb_keyevent",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      serial,
+      keyCode
+    );
+  },
+  runAdbCommand(scrcpyDir: string, args: string[]) {
+    return callNative<{ success: boolean; output?: string; error?: string }>(
+      "run_adb_command",
+      { success: false, error: "Native bridge unavailable" },
+      scrcpyDir,
+      args
+    );
+  },
   showSaveFileDialog(defaultName: string) {
     return callNative<{ filePath?: string }>("show_save_file_dialog", {}, defaultName);
   },
@@ -117,6 +386,9 @@ export const nativeBridge = {
       name,
       content
     );
+  },
+  isAdmin() {
+    return callNative<{ success: boolean; isAdmin?: boolean }>("is_admin", { success: false, isAdmin: false });
   },
   getWebFavorites() {
     return callNative<WebFavorite[]>("get_web_favorites", []);
@@ -195,7 +467,63 @@ export interface SavedConnection {
   password?: string;
   password_unavailable?: boolean;
   group?: string;
+  folder?: string;
+  tags?: string[];
   keyPath?: string;
+  environment?: "prod" | "staging" | "local";
+  useJumpHost?: boolean;
+  jumpHost?: string;
+  jumpPort?: number;
+  jumpUser?: string;
+  jumpPass?: string;
+  jumpKey?: string;
+  jumpKeyPassphrase?: string;
+  jumpSavedConnectionId?: string;
+  jumpChain?: JumpHop[];
+  compression?: boolean;
+  description?: string;
+  remarks?: string;
+}
+
+export interface JumpHop {
+  host: string;
+  port?: number;
+  user?: string;
+  pass?: string;
+  key?: string;
+  keyPassphrase?: string;
+}
+
+export interface SshKeyPair {
+  id: string;
+  name: string;
+  type: "ed25519" | "rsa";
+  publicKey: string;
+  privateKey: string;
+  fingerprint: string;
+  createdAt: string;
+}
+
+export interface TransferTask {
+  id: string;
+  name: string;
+  type: "upload" | "download";
+  localPath: string;
+  remotePath: string;
+  size: number;
+  progress: number;
+  status: "queued" | "transferring" | "completed" | "error";
+  speed?: string;
+  error?: string;
+}
+
+export interface FilePermissions {
+  owner: { read: boolean; write: boolean; execute: boolean };
+  group: { read: boolean; write: boolean; execute: boolean };
+  others: { read: boolean; write: boolean; execute: boolean };
+  octal: string;
+  ownerName?: string;
+  groupName?: string;
 }
 
 export interface CommandItem {
@@ -296,7 +624,19 @@ export interface ConnectParams {
   keyPath?: string;
   save?: boolean;
   group?: string;
+  folder?: string;
+  tags?: string[];
   preservePassword?: boolean;
+  environment?: "prod" | "staging" | "local";
+  useJumpHost?: boolean;
+  jumpHost?: string;
+  jumpPort?: number;
+  jumpUser?: string;
+  jumpPass?: string;
+  jumpKey?: string;
+  jumpKeyPassphrase?: string;
+  jumpChain?: JumpHop[];
+  compression?: boolean;
 }
 
 export interface NativeResult {

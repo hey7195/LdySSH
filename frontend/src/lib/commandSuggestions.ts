@@ -1,7 +1,8 @@
 import type { CommandFolder } from "./bridge";
+import { LINUX_SHELL_DICTIONARY, getCommandUsageFrequency } from "./terminalIntelliSense";
 
 export type CommandSuggestionSource = "history" | "shortcut" | "linux";
-export type CommandSuggestionApplyKey = "tab" | "ctrlSpace" | "altEnter" | "custom";
+export type CommandSuggestionApplyKey = "enter" | "tab" | "ctrlSpace" | "altEnter" | "shiftTab" | "arrowRight" | "custom";
 
 export interface CommandSuggestionCustomApplyKey {
   key: string;
@@ -35,7 +36,7 @@ const MAX_HISTORY_ITEMS = 80;
 const MAX_SUGGESTIONS = 6;
 const FULL_SCREEN_COMMANDS = new Set(["vi", "vim", "nvim", "nano", "less", "more", "man", "top", "htop", "watch", "tmux", "screen"]);
 
-export const defaultCommandSuggestionApplyKey: CommandSuggestionApplyKey = "altEnter";
+export const defaultCommandSuggestionApplyKey: CommandSuggestionApplyKey = "tab";
 export const defaultCommandSuggestionSources: CommandSuggestionSources = {
   history: true,
   shortcuts: true,
@@ -43,6 +44,11 @@ export const defaultCommandSuggestionSources: CommandSuggestionSources = {
 };
 
 const LINUXCOOL_COMMAND_DESCRIPTIONS: Record<string, string> = {
+  adb: "Android 调试桥命令行工具 (Android Debug Bridge)",
+  redroid: "云手机 ReDroid 安卓容器环境",
+  waydroid: "Wayland 原生 Linux 安卓容器系统",
+  scrcpy: "Android 屏幕实时镜像与操控工具",
+  fastboot: "Android Bootloader 刷机与诊断工具",
   "apt-get": "APT 软件包管理工具",
   cat: "在终端设备上显示文件内容",
   cd: "切换当前工作目录",
@@ -122,26 +128,79 @@ const LINUXCOOL_COMMAND_DESCRIPTIONS: Record<string, string> = {
 };
 
 const LINUX_COMMANDS: Array<Omit<CommandSuggestion, "id" | "source">> = [
-  { label: "ls", command: "ls -la" },
+  { label: "ls -la", command: "ls -la" },
+  { label: "ls -lh", command: "ls -lh" },
   { label: "cd", command: "cd " },
   { label: "cat", command: "cat " },
-  { label: "grep", command: "grep -R " },
-  { label: "find", command: "find . -name " },
+  { label: "chmod +x", command: "chmod +x " },
+  { label: "chmod 755", command: "chmod 755 " },
+  { label: "chmod -R 755", command: "chmod -R 755 " },
+  { label: "chown -R www-data", command: "chown -R www-data:www-data " },
+  { label: "chown -R root", command: "chown -R root:root " },
+  { label: "grep -rnI", command: "grep -rnI " },
+  { label: "grep -i", command: "grep -i " },
+  { label: "grep -E", command: "grep -E " },
+  { label: "find . -name", command: "find . -name " },
+  { label: "find / -size +100M", command: "find / -size +100M" },
   { label: "systemctl status", command: "systemctl status " },
-  { label: "journalctl", command: "journalctl -u " },
+  { label: "systemctl restart", command: "systemctl restart " },
+  { label: "systemctl start", command: "systemctl start " },
+  { label: "systemctl stop", command: "systemctl stop " },
+  { label: "systemctl enable", command: "systemctl enable " },
+  { label: "systemctl daemon-reload", command: "systemctl daemon-reload" },
+  { label: "journalctl -u", command: "journalctl -u " },
+  { label: "journalctl -f", command: "journalctl -f -n 100" },
   { label: "docker ps", command: "docker ps" },
+  { label: "docker ps -a", command: "docker ps -a" },
+  { label: "docker compose up -d", command: "docker compose up -d" },
+  { label: "docker compose down", command: "docker compose down" },
+  { label: "docker logs -f", command: "docker logs -f --tail 100 " },
+  { label: "docker exec -it", command: "docker exec -it " },
+  { label: "docker images", command: "docker images" },
+  { label: "docker system prune", command: "docker system prune -f" },
   { label: "podman ps", command: "podman ps" },
-  { label: "ps", command: "ps aux" },
+  { label: "podman ps -a", command: "podman ps -a" },
+  { label: "kubectl get pods", command: "kubectl get pods -A" },
+  { label: "kubectl logs -f", command: "kubectl logs -f --tail=100 " },
+  { label: "kubectl exec -it", command: "kubectl exec -it " },
+  { label: "kubectl describe pod", command: "kubectl describe pod " },
+  { label: "ps aux", command: "ps aux" },
+  { label: "ps -ef", command: "ps -ef" },
   { label: "top", command: "top" },
-  { label: "free", command: "free -m" },
-  { label: "df", command: "df -h" },
-  { label: "du", command: "du -sh *" },
-  { label: "tar", command: "tar -czf archive.tar.gz " },
-  { label: "curl", command: "curl -I " },
-  { label: "wget", command: "wget " },
+  { label: "htop", command: "htop" },
+  { label: "btop", command: "btop" },
+  { label: "free -h", command: "free -h" },
+  { label: "free -m", command: "free -m" },
+  { label: "df -h", command: "df -h" },
+  { label: "du -sh *", command: "du -sh *" },
+  { label: "du -h --max-depth=1", command: "du -h --max-depth=1" },
+  { label: "tar -zxvf", command: "tar -zxvf " },
+  { label: "tar -czvf", command: "tar -czvf " },
+  { label: "tar -xvf", command: "tar -xvf " },
+  { label: "curl -I", command: "curl -I " },
+  { label: "curl -v", command: "curl -v " },
+  { label: "curl -X POST", command: "curl -X POST " },
+  { label: "wget -c", command: "wget -c " },
   { label: "ssh", command: "ssh user@host" },
-  { label: "scp", command: "scp " },
-  { label: "iptables", command: "iptables -L -n" }
+  { label: "scp -P 22", command: "scp -P 22 " },
+  { label: "rsync -avz", command: "rsync -avz --progress " },
+  { label: "netstat -tulnp", command: "netstat -tulnp" },
+  { label: "ss -tuln", command: "ss -tuln" },
+  { label: "ufw status", command: "ufw status verbose" },
+  { label: "ufw allow 80", command: "ufw allow 80/tcp" },
+  { label: "iptables -L -n", command: "iptables -L -n -v" },
+  { label: "tail -f", command: "tail -f " },
+  { label: "tail -n 100", command: "tail -n 100 " },
+  { label: "sed 's/old/new/g'", command: "sed -i 's/old/new/g' " },
+  { label: "awk '{print $1}'", command: "awk '{print $1}' " },
+  { label: "kill -9", command: "kill -9 " },
+  { label: "pkill -9", command: "pkill -9 " },
+  { label: "crontab -l", command: "crontab -l" },
+  { label: "crontab -e", command: "crontab -e" },
+  { label: "dmesg -wH", command: "dmesg -wH --color=always" },
+  { label: "perf top", command: "perf top -g" },
+  { label: "strace -c -p", command: "strace -c -p " },
+  { label: "lsof -i :8080", command: "lsof -i :8080" }
 ];
 
 const LINUXCOOL_COMMAND_NAMES = [
@@ -467,8 +526,20 @@ const LINUXCOOL_COMMAND_NAMES = [
   "tty"
 ];
 
+// 动态全量展开 LINUX_SHELL_DICTIONARY 中所有的 命令 + 参数/选项 组合
+const DICTIONARY_PARAMETRIZED_SUGGESTIONS: Array<Omit<CommandSuggestion, "id" | "source">> = LINUX_SHELL_DICTIONARY.flatMap((item) =>
+  item.completions.map((comp) => {
+    const fullCmd = `${item.prefix} ${comp}`.trim();
+    return {
+      label: fullCmd,
+      command: fullCmd
+    };
+  })
+);
+
 const LINUX_COMMAND_SUGGESTIONS: Array<Omit<CommandSuggestion, "id" | "source">> = [
   ...LINUX_COMMANDS,
+  ...DICTIONARY_PARAMETRIZED_SUGGESTIONS,
   ...LINUXCOOL_COMMAND_NAMES.map((command) => ({ label: command, command }))
 ];
 
@@ -542,6 +613,15 @@ export function buildCommandSuggestions(
     });
   }
 
+  suggestions.sort((a, b) => {
+    const freqA = getCommandUsageFrequency(a.command);
+    const freqB = getCommandUsageFrequency(b.command);
+    if (freqB !== freqA) {
+      return freqB - freqA;
+    }
+    return 0;
+  });
+
   return suggestions.slice(0, limit);
 }
 
@@ -551,6 +631,255 @@ export function isFullScreenCommand(command: string) {
   if (!firstCommand) return false;
   const executable = firstCommand.split(/[\\/]/).at(-1) || firstCommand;
   return FULL_SCREEN_COMMANDS.has(executable);
+}
+
+export interface DangerousCommandInfo {
+  isDangerous: boolean;
+  patternName?: string;
+  warningText?: string;
+}
+
+export interface CustomDangerousRule {
+  id: string;
+  name: string;
+  pattern: string;
+  warningText: string;
+  enabled: boolean;
+}
+
+export interface AuditLogRecord {
+  id: string;
+  timestamp: number;
+  command: string;
+  patternName: string;
+  warningText: string;
+  action: "intercepted_cancelled" | "intercepted_force_sent";
+  hostTitle?: string;
+}
+
+export function checkDangerousCommand(command: string, customRules: CustomDangerousRule[] = []): DangerousCommandInfo {
+  const clean = command.trim();
+  if (!clean) return { isDangerous: false };
+
+  // 用户自定义高危规则优先审查
+  for (const rule of customRules) {
+    if (!rule.enabled || !rule.pattern) continue;
+    try {
+      const reg = new RegExp(rule.pattern, "i");
+      if (reg.test(clean)) {
+        return {
+          isDangerous: true,
+          patternName: rule.name || "自定义高危拦截规则",
+          warningText: rule.warningText || `匹配自定义拦截规则: ${rule.pattern}`
+        };
+      }
+    } catch {
+      // 忽略非法正则表达式
+    }
+  }
+
+  // 1. Fork 炸弹特例识别
+  if (/:{\s*:\|:&\s*};:/.test(clean.replace(/\s+/g, ""))) {
+    return {
+      isDangerous: true,
+      patternName: "Fork 炸弹无限进程剥离",
+      warningText: "Fork 炸弹会瞬间耗尽系统 CPU 与进程 PID 资源，导致服务器死机卡死！"
+    };
+  }
+
+  // 按管道符 | 或命令连接符 ; && || 拆分出多个子命令独立审查
+  const subCommands = clean.split(/;|&&|\|\||\|/).map((cmd) => cmd.trim()).filter(Boolean);
+
+  for (const subCmd of subCommands) {
+    const info = checkSingleCommandTokens(subCmd);
+    if (info.isDangerous) return info;
+  }
+
+  return { isDangerous: false };
+}
+
+function checkSingleCommandTokens(rawCmd: string): DangerousCommandInfo {
+  // Token 化处理
+  const tokens = rawCmd.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return { isDangerous: false };
+
+  // 剔除前缀修饰符 sudo / doas / pkexec / env / nohup / time / xargs
+  let startIndex = 0;
+  while (startIndex < tokens.length) {
+    const current = tokens[startIndex].toLowerCase();
+    if (["sudo", "doas", "pkexec", "env", "nohup", "time", "xargs", "busybox"].includes(current)) {
+      startIndex++;
+      continue;
+    }
+    if (current.includes("=") && !current.startsWith("-")) {
+      startIndex++;
+      continue;
+    }
+    break;
+  }
+
+  const cmdTokens = tokens.slice(startIndex);
+  if (cmdTokens.length === 0) return { isDangerous: false };
+
+  const rawExec = cmdTokens[0];
+  const exec = rawExec.split(/[\\/]/).at(-1)?.toLowerCase() || rawExec.toLowerCase();
+  const args = cmdTokens.slice(1);
+
+  // 1. rm 删除命令（支持参数在目标前、目标后或混合位置）
+  if (exec === "rm") {
+    let hasRecursive = false;
+    let hasForce = false;
+    let hasNoPreserveRoot = false;
+    const targets: string[] = [];
+
+    for (const arg of args) {
+      if (arg === "--no-preserve-root") {
+        hasNoPreserveRoot = true;
+        continue;
+      }
+      if (arg.startsWith("--recursive")) {
+        hasRecursive = true;
+        continue;
+      }
+      if (arg.startsWith("--force")) {
+        hasForce = true;
+        continue;
+      }
+      if (arg.startsWith("-") && !arg.startsWith("--")) {
+        const flags = arg.slice(1);
+        if (/[rR]/.test(flags)) hasRecursive = true;
+        if (/[fF]/.test(flags)) hasForce = true;
+        continue;
+      }
+      targets.push(arg);
+    }
+
+    // 判断目标是否涉及危险路径、通配符或系统根目录
+    const isDangerousTarget = targets.some((t) => {
+      const cleanT = t.trim();
+      return (
+        cleanT === "/" ||
+        cleanT === "/*" ||
+        cleanT === "*" ||
+        cleanT === "~" ||
+        cleanT === "~/" ||
+        cleanT === "." ||
+        cleanT === "./" ||
+        cleanT === ".." ||
+        cleanT === "../" ||
+        /^(\/|\*|~\/|\.\/|\.\.\/)+$/.test(cleanT) ||
+        /^\/(bin|boot|dev|etc|home|lib|lib64|media|mnt|opt|proc|root|run|sbin|srv|sys|tmp|usr|var)(\/.*)?$/.test(cleanT)
+      );
+    });
+
+    if (hasNoPreserveRoot || (hasRecursive && (isDangerousTarget || targets.length === 0))) {
+      return {
+        isDangerous: true,
+        patternName: "rm 级联强制删除",
+        warningText: `该命令包含 rm 递归删除参数，涉及路径 (${targets.join(" ") || "全盘"})，将导致数据永久不可逆清空！`
+      };
+    }
+  }
+
+  // 2. 关机与重启命令 (reboot, shutdown, poweroff, halt, init 0, init 6, systemctl reboot)
+  if (["reboot", "shutdown", "poweroff", "halt"].includes(exec)) {
+    return {
+      isDangerous: true,
+      patternName: "服务器关机与重启",
+      warningText: "该命令将导致服务器立即断开所有网络与 SSH 连接并重启/关机！"
+    };
+  }
+
+  if (exec === "init") {
+    const firstArg = args[0];
+    if (firstArg === "0" || firstArg === "6") {
+      return {
+        isDangerous: true,
+        patternName: `init ${firstArg} 关机与重启`,
+        warningText: `该命令 init ${firstArg} 将导致服务器立即关机或重启！`
+      };
+    }
+  }
+
+  if (exec === "systemctl") {
+    const subCmd = args[0]?.toLowerCase();
+    if (["reboot", "poweroff", "halt", "kexec", "suspend", "hibernate"].includes(subCmd)) {
+      return {
+        isDangerous: true,
+        patternName: "systemctl 重启与关机",
+        warningText: `systemctl ${subCmd} 会导致系统网络中断并关机重启！`
+      };
+    }
+  }
+
+  // 3. 磁盘格式化与分区改写 (mkfs, fdisk, gdisk, parted, sfdisk)
+  if (exec.startsWith("mkfs") || ["fdisk", "gdisk", "parted", "sfdisk"].includes(exec)) {
+    return {
+      isDangerous: true,
+      patternName: "磁盘格式化与分区改写",
+      warningText: "格式化或改写磁盘分区表将直接抹除目标磁盘分区的全部文件数据！"
+    };
+  }
+
+  // 4. dd 物理底层块覆盖
+  if (exec === "dd") {
+    const hasDangerousOf = args.some((arg) => {
+      const lower = arg.toLowerCase();
+      return lower.startsWith("of=/dev/") && !lower.startsWith("of=/dev/null") && !lower.startsWith("of=/dev/zero");
+    });
+    if (hasDangerousOf) {
+      return {
+        isDangerous: true,
+        patternName: "dd 磁盘物理块改写",
+        warningText: "直接向 /dev/ 块设备写入数据将破坏磁盘 MBR/GPT 分区表或存储介质！"
+      };
+    }
+  }
+
+  // 5. 全局 chmod / chown 递归修改 (chmod -R 777 /)
+  if (exec === "chmod" || exec === "chown") {
+    const hasRecursive = args.some((a) => a === "-R" || a === "-r" || a.startsWith("--recursive"));
+    const hasGlobalPerm = args.some((a) => a === "777" || a === "0777" || a === "a+rwx");
+    const hasRootTarget = args.some((a) => a === "/" || a === "/*" || a === "*" || a === ".");
+
+    if (hasRecursive && (hasGlobalPerm || hasRootTarget)) {
+      return {
+        isDangerous: true,
+        patternName: `${exec} -R 全局权限改写`,
+        warningText: "将系统路径递归修改权限/所有者会导致 Linux 安全体系崩溃并无法再次通过 SSH 登录！"
+      };
+    }
+  }
+
+  // 6. 容器/集群全局毁灭性命令 (docker, kubectl)
+  if (exec === "docker") {
+    const joined = args.join(" ").toLowerCase();
+    if (joined.includes("system prune -a") || joined.includes("rmi -f") || joined.includes("rm -f $(docker ps")) {
+      return {
+        isDangerous: true,
+        patternName: "Docker 批量容器/镜像清空",
+        warningText: "该命令将批量强制销毁所有运行中的容器或本地镜像！"
+      };
+    }
+  }
+
+  if (exec === "kubectl") {
+    const joined = args.join(" ").toLowerCase();
+    if (
+      joined.includes("delete ns --all") ||
+      joined.includes("delete namespace --all") ||
+      joined.includes("delete all --all") ||
+      joined.includes("delete node")
+    ) {
+      return {
+        isDangerous: true,
+        patternName: "Kubernetes 集群资源全量删除",
+        warningText: "该命令将批量清空 K8s 命名空间、节点或全部集群 Workload 资源！"
+      };
+    }
+  }
+
+  return { isDangerous: false };
 }
 
 function normalizeCommand(command: string) {

@@ -5,9 +5,285 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="./favicon.ico" />
     <title>LdySSH</title>
+    <style>
+      html, body, #root {
+        background-color: #090d16;
+        color: #f8fafc;
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      }
+      .app-startup-splash {
+        position: fixed;
+        inset: 0;
+        background: radial-gradient(circle at 50% 45%, #111a2e 0%, #090d16 75%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        user-select: none;
+        z-index: 999999;
+      }
+      .app-startup-glow {
+        position: absolute;
+        width: 360px;
+        height: 360px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(16, 185, 129, 0.2) 0%, rgba(6, 182, 212, 0.08) 50%, transparent 70%);
+        filter: blur(50px);
+        pointer-events: none;
+        animation: splashGlowPulse 2.8s ease-in-out infinite alternate;
+      }
+      @keyframes splashGlowPulse {
+        0% { transform: scale(0.85); opacity: 0.5; }
+        100% { transform: scale(1.2); opacity: 1; }
+      }
+      .app-startup-card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        z-index: 2;
+      }
+      .app-startup-logo-container {
+        position: relative;
+        margin-bottom: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .app-startup-orbit {
+        position: absolute;
+        width: 110px;
+        height: 44px;
+        border-radius: 50%;
+        border: 1px dashed rgba(6, 182, 212, 0.4);
+        animation: orbitSpin 4s linear infinite;
+        pointer-events: none;
+      }
+      .app-startup-orbit::after {
+        content: '';
+        position: absolute;
+        top: -3px;
+        left: 50%;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #38bdf8;
+        box-shadow: 0 0 10px #38bdf8, 0 0 16px #38bdf8;
+      }
+      @keyframes orbitSpin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      .app-startup-logo {
+        width: 70px;
+        height: 70px;
+        border-radius: 22px;
+        background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 14px 38px -4px rgba(16, 185, 129, 0.5), inset 0 1.5px 1.5px rgba(255, 255, 255, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        animation: splashLogoFloat 2.6s ease-in-out infinite alternate;
+      }
+      @keyframes splashLogoFloat {
+        0% { transform: translateY(0); }
+        100% { transform: translateY(-5px); }
+      }
+      .app-startup-title {
+        font-size: 26px;
+        font-weight: 800;
+        color: #ffffff;
+        letter-spacing: 0.06em;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 1.5px;
+      }
+      .app-startup-title span {
+        display: inline-block;
+        animation: letterWave 2s ease-in-out infinite;
+        animation-delay: calc(var(--i) * 0.12s);
+      }
+      @keyframes letterWave {
+        0%, 100% {
+          transform: translateY(0);
+          color: #ffffff;
+          text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+        50% {
+          transform: translateY(-5px);
+          color: #34d399;
+          text-shadow: 0 0 16px rgba(52, 211, 153, 0.8), 0 0 24px rgba(6, 182, 212, 0.5);
+        }
+      }
+      .app-startup-subtitle {
+        font-size: 13.5px;
+        font-weight: 600;
+        margin-bottom: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2.5px;
+      }
+      .app-startup-subtitle span {
+        display: inline-block;
+        color: #94a3b8;
+        animation: chineseLetterWave 1.8s ease-in-out infinite;
+        animation-delay: calc(var(--i) * 0.08s);
+      }
+      @keyframes chineseLetterWave {
+        0%, 100% {
+          transform: translateY(0);
+          color: #94a3b8;
+          text-shadow: none;
+        }
+        50% {
+          transform: translateY(-4px);
+          color: #34d399;
+          text-shadow: 0 0 10px rgba(52, 211, 153, 0.85), 0 0 18px rgba(6, 182, 212, 0.45);
+        }
+      }
+      .app-startup-cyber-track {
+        display: flex;
+        gap: 4px;
+        padding: 5px 8px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 99px;
+        box-shadow: inset 0 1px 4px rgba(0,0,0,0.6);
+      }
+      .app-cyber-cell {
+        width: 12px;
+        height: 6px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.08);
+        animation: cyberCellPulse 1.4s ease-in-out infinite;
+        animation-delay: calc(var(--c) * 0.08s);
+      }
+      @keyframes cyberCellPulse {
+        0%, 100% {
+          background: rgba(255, 255, 255, 0.08);
+          box-shadow: none;
+          transform: scale(0.9);
+        }
+        40% {
+          background: #10b981;
+          box-shadow: 0 0 8px #10b981, 0 0 14px #38bdf8;
+          transform: scale(1.15);
+        }
+        60% {
+          background: #38bdf8;
+          box-shadow: 0 0 10px #38bdf8;
+          transform: scale(1.1);
+        }
+      }
+      .app-startup-badges {
+        display: flex;
+        gap: 12px;
+        margin-top: 20px;
+      }
+      .app-startup-badge {
+        font-size: 11px;
+        font-weight: 600;
+        color: #94a3b8;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 4px 12px;
+        border-radius: 99px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .app-startup-badge-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #10b981;
+        box-shadow: 0 0 8px #10b981;
+        animation: badgeDotPulse 1.2s ease-in-out infinite alternate;
+      }
+      @keyframes badgeDotPulse {
+        0% { opacity: 0.5; transform: scale(0.8); }
+        100% { opacity: 1; transform: scale(1.3); box-shadow: 0 0 12px #34d399; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="app-startup-splash">
+        <div class="app-startup-glow"></div>
+        <div class="app-startup-card">
+          <div class="app-startup-logo-container">
+            <div class="app-startup-orbit"></div>
+            <div class="app-startup-logo">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+            </div>
+          </div>
+          <div class="app-startup-title">
+            <span style="--i:0">L</span>
+            <span style="--i:1">d</span>
+            <span style="--i:2">y</span>
+            <span style="--i:3">S</span>
+            <span style="--i:4">S</span>
+            <span style="--i:5">H</span>
+          </div>
+          <div class="app-startup-subtitle">
+            <span style="--i:0">正</span>
+            <span style="--i:1">在</span>
+            <span style="--i:2">启</span>
+            <span style="--i:3">动</span>
+            <span style="--i:4">终</span>
+            <span style="--i:5">端</span>
+            <span style="--i:6">工</span>
+            <span style="--i:7">作</span>
+            <span style="--i:8">台</span>
+            <span style="--i:9">.</span>
+            <span style="--i:10">.</span>
+            <span style="--i:11">.</span>
+          </div>
+          <div class="app-startup-cyber-track">
+            <div class="app-cyber-cell" style="--c:0"></div>
+            <div class="app-cyber-cell" style="--c:1"></div>
+            <div class="app-cyber-cell" style="--c:2"></div>
+            <div class="app-cyber-cell" style="--c:3"></div>
+            <div class="app-cyber-cell" style="--c:4"></div>
+            <div class="app-cyber-cell" style="--c:5"></div>
+            <div class="app-cyber-cell" style="--c:6"></div>
+            <div class="app-cyber-cell" style="--c:7"></div>
+            <div class="app-cyber-cell" style="--c:8"></div>
+            <div class="app-cyber-cell" style="--c:9"></div>
+            <div class="app-cyber-cell" style="--c:10"></div>
+            <div class="app-cyber-cell" style="--c:11"></div>
+            <div class="app-cyber-cell" style="--c:12"></div>
+            <div class="app-cyber-cell" style="--c:13"></div>
+          </div>
+          <div class="app-startup-badges">
+            <div class="app-startup-badge">
+              <span class="app-startup-badge-dot"></span>
+              <span>核心服务就绪</span>
+            </div>
+            <div class="app-startup-badge">
+              <span style="color:#38bdf8">⚡</span>
+              <span>PTY内核加速中</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+        try { window.chrome?.webview?.postMessage(JSON.stringify({ id: 'dom_ready', action: 'dom_ready', args: [] })); } catch(e) {}
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

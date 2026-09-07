@@ -2,15 +2,8 @@
 paramiko>=3.0.0
 cryptography>=41.0.0
 
-# Optional Dependencies for Enhanced Features
-# Install with: pip install -r requirements.txt
-
 # Web
 pywebview
-
-# SSH and Cryptography
-paramiko>=3.0.0
-cryptography>=41.0.0
 
 # System Information (cross-platform compatibility)
 psutil>=5.9.0

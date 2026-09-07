@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <winsock2.h>
@@ -36,8 +37,9 @@ struct DynamicListenerArgs {
 };
 
 struct JumpTunnelArgs {
+    std::shared_ptr<JumpPoolEntry> pool;
+    LIBSSH2_SESSION* viaSession = NULL;   // 在哪一跳的 session 上开 direct-tcpip
     SOCKET listenSock;
-    LIBSSH2_SESSION* jumpSshSession;
     std::string targetHost;
     int targetPort;
 };
@@ -70,50 +72,83 @@ static std::string BuildLibssh2AlgorithmSummary(LIBSSH2_SESSION* session) {
         "], cipher_sc=[" + JoinSupportedLibssh2Algorithms(session, LIBSSH2_METHOD_CRYPT_SC) + "]";
 }
 
-static void SockToChannelPump(SOCKET sock, LIBSSH2_CHANNEL* channel, bool* active) {
-    char buf[16384];
-    while (*active) {
+// 本地 -> 跳板通道:对共享跳板 session 的每次 libssh2 调用都持池锁,非阻塞 + EAGAIN 重试
+static void SockToChannelPump(SOCKET sock, LIBSSH2_CHANNEL* channel, JumpPoolEntry* pool, bool* active) {
+    char buf[32768];
+    while (*active && pool->alive) {
         int nRecv = recv(sock, buf, sizeof(buf), 0);
         if (nRecv <= 0) {
             break;
         }
         int totalSent = 0;
-        while (totalSent < nRecv && *active) {
-            int nSent = libssh2_channel_write(channel, buf + totalSent, nRecv - totalSent);
-            if (nSent < 0) {
-                if (nSent == LIBSSH2_ERROR_EAGAIN) {
-                    Sleep(5);
-                    continue;
-                }
-                break;
+        bool channelDead = false;
+        while (totalSent < nRecv && *active && pool->alive) {
+            int nSent;
+            {
+                std::lock_guard<std::mutex> lock(pool->ioMutex);
+                nSent = libssh2_channel_write(channel, buf + totalSent, nRecv - totalSent);
             }
-            totalSent += nSent;
+            if (nSent > 0) {
+                totalSent += nSent;
+                continue;
+            }
+            if (nSent == LIBSSH2_ERROR_EAGAIN) {
+                Sleep(2);
+                continue;
+            }
+            channelDead = true;
+            break;
+        }
+        if (channelDead || totalSent < nRecv) {
+            break;
         }
     }
     *active = false;
 }
 
-static void ChannelToSockPump(LIBSSH2_CHANNEL* channel, SOCKET sock, bool* active) {
-    char buf[16384];
-    while (*active) {
-        int nRead = libssh2_channel_read(channel, buf, sizeof(buf));
-        if (nRead < 0) {
-            if (nRead == LIBSSH2_ERROR_EAGAIN) {
-                Sleep(5);
-                continue;
-            }
-            break;
+// 跳板通道 -> 本地:select 共享跳板 socket,持锁非阻塞 drain 后再写本地 socket
+static void ChannelToSockPump(LIBSSH2_CHANNEL* channel, SOCKET sock, JumpPoolEntry* pool, bool* active) {
+    char buf[32768];
+    std::string drained;
+    while (*active && pool->alive) {
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(pool->sock, &fd);
+        timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 15000;
+        if (select(0, &fd, NULL, NULL, &tv) <= 0) {
+            continue;
         }
-        if (nRead == 0) {
-            break;
-        }
-        int totalSent = 0;
-        while (totalSent < nRead && *active) {
-            int nSent = send(sock, buf + totalSent, nRead - totalSent, 0);
-            if (nSent <= 0) {
+        drained.clear();
+        bool channelDead = false;
+        {
+            std::lock_guard<std::mutex> lock(pool->ioMutex);
+            while (drained.size() < 262144) {
+                int nRead = libssh2_channel_read(channel, buf, sizeof(buf));
+                if (nRead > 0) {
+                    drained.append(buf, nRead);
+                    continue;
+                }
+                if (nRead == LIBSSH2_ERROR_EAGAIN) {
+                    break;
+                }
+                // 0 或其他负值:通道 EOF/出错
+                channelDead = true;
                 break;
             }
+        }
+        int totalSent = 0;
+        while (totalSent < (int)drained.size() && *active) {
+            int nSent = send(sock, drained.data() + totalSent, (int)drained.size() - totalSent, 0);
+            if (nSent <= 0) {
+                *active = false;
+                return;
+            }
             totalSent += nSent;
+        }
+        if (channelDead) {
+            break;
         }
     }
     *active = false;
@@ -121,35 +156,375 @@ static void ChannelToSockPump(LIBSSH2_CHANNEL* channel, SOCKET sock, bool* activ
 
 static DWORD WINAPI JumpTunnelListenerThread(LPVOID param) {
     std::unique_ptr<JumpTunnelArgs> args((JumpTunnelArgs*)param);
-    
+
     SOCKET clientSock = accept(args->listenSock, NULL, NULL);
     if (clientSock == INVALID_SOCKET) {
         return 0;
     }
-    
-    LIBSSH2_CHANNEL* jumpChannel = libssh2_channel_direct_tcpip_ex(
-        args->jumpSshSession, 
-        args->targetHost.c_str(), 
-        args->targetPort, 
-        "127.0.0.1", 
-        0
-    );
-    
+
+    // 在指定跳的 session 上开通 direct-tcpip 通道:持锁 + 非阻塞 EAGAIN 重试
+    LIBSSH2_CHANNEL* jumpChannel = NULL;
+    while (args->pool->alive) {
+        {
+            std::lock_guard<std::mutex> lock(args->pool->ioMutex);
+            jumpChannel = libssh2_channel_direct_tcpip_ex(
+                args->viaSession,
+                args->targetHost.c_str(),
+                args->targetPort,
+                "127.0.0.1",
+                0
+            );
+            if (jumpChannel) {
+                break;
+            }
+            if (libssh2_session_last_errno(args->viaSession) != LIBSSH2_ERROR_EAGAIN) {
+                break;
+            }
+        }
+        Sleep(5);
+    }
+
     if (!jumpChannel) {
         closesocket(clientSock);
         return 0;
     }
-    
+
     bool tunnelActive = true;
-    std::thread t1(SockToChannelPump, clientSock, jumpChannel, &tunnelActive);
-    std::thread t2(ChannelToSockPump, jumpChannel, clientSock, &tunnelActive);
-    
+    std::thread t1(SockToChannelPump, clientSock, jumpChannel, args->pool.get(), &tunnelActive);
+    std::thread t2(ChannelToSockPump, jumpChannel, clientSock, args->pool.get(), &tunnelActive);
+
     if (t1.joinable()) t1.join();
     if (t2.joinable()) t2.join();
-    
-    libssh2_channel_free(jumpChannel);
+
+    {
+        std::lock_guard<std::mutex> lock(args->pool->ioMutex);
+        libssh2_channel_free(jumpChannel);
+    }
     closesocket(clientSock);
     return 0;
+}
+
+// 池条目保活线程:30 秒一次对链上每一跳发 keepalive,防止堡垒机/NAT 空闲断链
+static DWORD WINAPI JumpPoolKeepaliveThread(LPVOID param) {
+    std::shared_ptr<JumpPoolEntry>* holder = (std::shared_ptr<JumpPoolEntry>*)param;
+    std::shared_ptr<JumpPoolEntry> entry = *holder;
+    delete holder;
+
+    auto lastSend = std::chrono::steady_clock::now();
+    while (entry->alive) {
+        Sleep(1000);
+        if (!entry->alive) {
+            break;
+        }
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastSend).count() < 30) {
+            continue;
+        }
+        lastSend = now;
+        std::lock_guard<std::mutex> lock(entry->ioMutex);
+        if (!entry->alive) {
+            break;
+        }
+        for (LIBSSH2_SESSION* hopSession : entry->hopSessions) {
+            if (!hopSession) continue;
+            int secondsToNext = 0;
+            libssh2_keepalive_send(hopSession, &secondsToNext);
+        }
+    }
+    return 0;
+}
+
+JumpConnectionPool globalJumpPool;
+
+// 引用归零或竞态弃用时的统一销毁:收线程、断链上所有 session、关 socket
+static void DestroyJumpPoolEntry(const std::shared_ptr<JumpPoolEntry>& entry) {
+    entry->alive = false;
+    if (entry->hKeepaliveThread) {
+        WaitForSingleObject(entry->hKeepaliveThread, 3000);
+        CloseHandle(entry->hKeepaliveThread);
+        entry->hKeepaliveThread = NULL;
+    }
+
+    // 先关各跳传输 socket:FIN 会让桥接泵的 recv 返回 0,通道随之关闭
+    for (SOCKET s : entry->hopSocks) {
+        if (s != INVALID_SOCKET) closesocket(s);
+    }
+    entry->hopSocks.clear();
+    if (entry->sock != INVALID_SOCKET) {
+        closesocket(entry->sock);
+        entry->sock = INVALID_SOCKET;
+    }
+
+    // 反向断开链上每一跳 session
+    for (auto it = entry->hopSessions.rbegin(); it != entry->hopSessions.rend(); ++it) {
+        if (*it) {
+            libssh2_session_disconnect(*it, "Jump Pool Shutdown");
+            libssh2_session_free(*it);
+        }
+    }
+    entry->hopSessions.clear();
+
+    // 收桥接线程与监听 socket
+    for (HANDLE h : entry->bridgeThreads) {
+        if (h) {
+            WaitForSingleObject(h, 500);
+            CloseHandle(h);
+        }
+    }
+    entry->bridgeThreads.clear();
+    for (SOCKET s : entry->bridgeListenSocks) {
+        if (s != INVALID_SOCKET) closesocket(s);
+    }
+    entry->bridgeListenSocks.clear();
+}
+
+std::string JumpConnectionPool::BuildKey(const JumpHostConfig& config) {
+    // 逐跳取凭据指纹入键,链不同自然分池
+    std::string key;
+    for (const JumpHopConfig& hop : config.EffectiveHops()) {
+        std::string cred = hop.key.empty()
+            ? ("pass:" + hop.pass)
+            : ("key:" + hop.key + ":" + hop.keyPassphrase);
+        if (!key.empty()) key += "|";
+        key += hop.host + ":" + std::to_string(hop.port) + ":" + hop.user +
+            ":" + CalculateHmacSha256("ldyssh-jump-pool", cred);
+    }
+    return key;
+}
+
+// 在 transport socket 上完成握手与认证(创建期阻塞模式);失败时调用方负责回收 session
+static bool HandshakeAndAuthHop(LIBSSH2_SESSION* session, SOCKET transportSock, const JumpHopConfig& hop, const std::string& hopLabel, std::string& lastError) {
+    if (libssh2_session_handshake(session, transportSock) != 0) {
+        lastError = hopLabel + " SSH handshake failed";
+        return false;
+    }
+
+    int auth = -1;
+    if (!hop.key.empty()) {
+        std::string localKeyPath = Utf8ToLocalAnsi(hop.key);
+        auth = libssh2_userauth_publickey_fromfile(
+            session,
+            hop.user.c_str(),
+            NULL,
+            localKeyPath.c_str(),
+            hop.keyPassphrase.empty() ? NULL : hop.keyPassphrase.c_str()
+        );
+    } else {
+        auth = libssh2_userauth_password(session, hop.user.c_str(), hop.pass.c_str());
+    }
+
+    if (auth != 0) {
+        char* err_msg = NULL;
+        int err_len = 0;
+        libssh2_session_last_error(session, &err_msg, &err_len, 0);
+        lastError = hopLabel + " auth failed: " + (err_msg ? std::string(err_msg, err_len) : "unknown");
+        return false;
+    }
+    return true;
+}
+
+std::shared_ptr<JumpPoolEntry> JumpConnectionPool::Create(const JumpHostConfig& config, std::string& lastError) {
+    std::vector<JumpHopConfig> hops = config.EffectiveHops();
+    if (hops.empty()) {
+        lastError = "Jump host config is empty";
+        return nullptr;
+    }
+
+    auto entry = std::make_shared<JumpPoolEntry>();
+    entry->key = BuildKey(config);
+
+    // 逐跳建链:第一跳直连 TCP,后续每一跳经上一跳的 direct-tcpip 隧道本地桥接
+    for (size_t i = 0; i < hops.size(); ++i) {
+        const JumpHopConfig& hop = hops[i];
+        std::string hopLabel = "jump hop " + std::to_string(i + 1) + " (" + hop.host + ")";
+
+        SOCKET transportSock = INVALID_SOCKET;
+        LIBSSH2_SESSION* hopSession = NULL;
+
+        if (i == 0) {
+            // 第一跳:直连 TCP
+            transportSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (transportSock == INVALID_SOCKET) {
+                lastError = "Failed to create jump socket";
+                return nullptr;
+            }
+
+            struct addrinfo hints = { 0 }, *hopAddrs = NULL;
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            hints.ai_protocol = IPPROTO_TCP;
+            std::string hopPortStr = std::to_string(hop.port);
+            if (getaddrinfo(hop.host.c_str(), hopPortStr.c_str(), &hints, &hopAddrs) != 0) {
+                closesocket(transportSock);
+                lastError = "getaddrinfo failed for " + hopLabel;
+                DestroyJumpPoolEntry(entry);
+                return nullptr;
+            }
+
+            bool hopConnected = false;
+            for (struct addrinfo* addr = hopAddrs; addr != NULL; addr = addr->ai_next) {
+                if (connect(transportSock, addr->ai_addr, (int)addr->ai_addrlen) == 0) {
+                    hopConnected = true;
+                    break;
+                }
+            }
+            freeaddrinfo(hopAddrs);
+
+            if (!hopConnected) {
+                closesocket(transportSock);
+                lastError = "Failed to connect to " + hopLabel;
+                DestroyJumpPoolEntry(entry);
+                return nullptr;
+            }
+        } else {
+            // 中间跳:本地随机监听 -> 上一跳 session 上的 direct-tcpip 桥接 -> 本地连接承载该跳 SSH
+            SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            struct sockaddr_in listenAddr = { 0 };
+            listenAddr.sin_family = AF_INET;
+            listenAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+            listenAddr.sin_port = 0;
+
+            if (listenSock == INVALID_SOCKET ||
+                bind(listenSock, (struct sockaddr*)&listenAddr, sizeof(listenAddr)) != 0 ||
+                listen(listenSock, 1) != 0) {
+                if (listenSock != INVALID_SOCKET) closesocket(listenSock);
+                lastError = hopLabel + " local bridge bind failed";
+                DestroyJumpPoolEntry(entry);
+                return nullptr;
+            }
+
+            int addrLen = sizeof(listenAddr);
+            getsockname(listenSock, (struct sockaddr*)&listenAddr, &addrLen);
+            int bridgePort = ntohs(listenAddr.sin_port);
+
+            JumpTunnelArgs* targs = new JumpTunnelArgs();
+            targs->pool = entry;
+            targs->viaSession = entry->hopSessions.back();
+            targs->listenSock = listenSock;
+            targs->targetHost = hop.host;
+            targs->targetPort = hop.port;
+            HANDLE hBridge = CreateThread(NULL, 0, JumpTunnelListenerThread, targs, 0, NULL);
+            if (!hBridge) {
+                closesocket(listenSock);
+                delete targs;
+                lastError = "Failed to start bridge thread for " + hopLabel;
+                DestroyJumpPoolEntry(entry);
+                return nullptr;
+            }
+            entry->bridgeListenSocks.push_back(listenSock);
+            entry->bridgeThreads.push_back(hBridge);
+
+            transportSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            struct sockaddr_in bridgeConnect = { 0 };
+            bridgeConnect.sin_family = AF_INET;
+            bridgeConnect.sin_addr.s_addr = inet_addr("127.0.0.1");
+            bridgeConnect.sin_port = htons((u_short)bridgePort);
+            if (connect(transportSock, (struct sockaddr*)&bridgeConnect, sizeof(bridgeConnect)) != 0) {
+                closesocket(transportSock);
+                lastError = "Failed to reach " + hopLabel + " through previous hop";
+                DestroyJumpPoolEntry(entry);
+                return nullptr;
+            }
+        }
+
+        hopSession = libssh2_session_init();
+        if (!hopSession) {
+            closesocket(transportSock);
+            lastError = "Failed to init ssh session for " + hopLabel;
+            DestroyJumpPoolEntry(entry);
+            return nullptr;
+        }
+
+        if (!HandshakeAndAuthHop(hopSession, transportSock, hop, hopLabel, lastError)) {
+            libssh2_session_free(hopSession);
+            closesocket(transportSock);
+            DestroyJumpPoolEntry(entry);
+            return nullptr;
+        }
+
+        // 池化 IO 全部走 ioMutex + EAGAIN,session 置非阻塞;keepalive 每 30s
+        libssh2_session_set_blocking(hopSession, 0);
+        libssh2_keepalive_config(hopSession, 1, 30);
+
+        entry->hopSocks.push_back(transportSock);
+        entry->hopSessions.push_back(hopSession);
+        if (i == 0) {
+            entry->sock = transportSock;
+        }
+    }
+
+    auto* holder = new std::shared_ptr<JumpPoolEntry>(entry);
+    entry->hKeepaliveThread = CreateThread(NULL, 0, JumpPoolKeepaliveThread, holder, 0, NULL);
+    if (!entry->hKeepaliveThread) {
+        delete holder;
+    }
+
+    std::string chainDesc;
+    for (const JumpHopConfig& hop : hops) {
+        if (!chainDesc.empty()) chainDesc += " -> ";
+        chainDesc += hop.host;
+    }
+    PrismLog("INFO", "JumpConnectionPool established bastion chain (" + std::to_string(hops.size()) + " hops): " + chainDesc);
+    return entry;
+}
+
+std::shared_ptr<JumpPoolEntry> JumpConnectionPool::Acquire(const JumpHostConfig& config, std::string& lastError) {
+    std::string key = BuildKey(config);
+    {
+        std::lock_guard<std::mutex> lock(poolMutex);
+        auto it = entries.find(key);
+        if (it != entries.end() && it->second->alive) {
+            it->second->refCount++;
+            std::vector<JumpHopConfig> hops = config.EffectiveHops();
+            std::string firstHost = hops.empty() ? std::string("(unknown)") : hops.front().host;
+            PrismLog("INFO", "JumpConnectionPool reusing bastion connection: " + firstHost +
+                " (pooled sessions=" + std::to_string(it->second->refCount.load()) + ")");
+            return it->second;
+        }
+    }
+
+    // 建连耗时(网络+认证),不持池锁,避免阻塞其他会话的 Acquire/Release
+    std::shared_ptr<JumpPoolEntry> created = Create(config, lastError);
+    if (!created) {
+        return nullptr;
+    }
+
+    std::lock_guard<std::mutex> lock(poolMutex);
+    auto it = entries.find(key);
+    if (it != entries.end() && it->second->alive) {
+        // 并发竞态:别的线程先建好了,弃用自己这条,复用已有
+        it->second->refCount++;
+        DestroyJumpPoolEntry(created);
+        return it->second;
+    }
+    created->refCount = 1;
+    entries[key] = created;
+    return created;
+}
+
+void JumpConnectionPool::Release(const std::shared_ptr<JumpPoolEntry>& entry) {
+    if (!entry) {
+        return;
+    }
+
+    bool destroy = false;
+    {
+        std::lock_guard<std::mutex> lock(poolMutex);
+        destroy = (entry->refCount.fetch_sub(1) == 1);
+        if (destroy) {
+            auto it = entries.find(entry->key);
+            if (it != entries.end() && it->second == entry) {
+                entries.erase(it);
+            }
+        }
+    }
+    if (!destroy) {
+        return;
+    }
+
+    // 引用归零:此时所有会话的隧道线程已退出,只剩 keepalive 线程需要收掉
+    DestroyJumpPoolEntry(entry);
+    PrismLog("INFO", "JumpConnectionPool closed bastion connection: " + entry->key);
 }
 
 static DWORD WINAPI LocalForwardListenerThread(LPVOID param);
@@ -233,8 +608,29 @@ void SSHSession::Resize(int cols, int rows) {
     }
 }
 
+void SSHSession::ReleaseJumpResources() {
+    // 先关监听 socket 唤醒 accept,再等线程退出,最后归还池引用
+    if (jumpListenSock != INVALID_SOCKET) {
+        closesocket(jumpListenSock);
+        jumpListenSock = INVALID_SOCKET;
+    }
+    if (hJumpThread) {
+        WaitForSingleObject(hJumpThread, 500);
+        CloseHandle(hJumpThread);
+        hJumpThread = NULL;
+    }
+    if (jumpPoolEntry) {
+        globalJumpPool.Release(jumpPoolEntry);
+        jumpPoolEntry = nullptr;
+    }
+}
+
 void SSHSession::Disconnect() {
-    if (!running) return;
+    if (!running) {
+        // 连接中途失败的兜底:归还在池里占用的堡垒机连接,避免常驻登录
+        ReleaseJumpResources();
+        return;
+    }
     running = false;
 
     // Stop all port forwards
@@ -300,25 +696,8 @@ void SSHSession::Disconnect() {
         hReadThread = NULL;
     }
 
-    // 关闭并清理堡垒机第一跳的资源
-    if (jumpListenSock != INVALID_SOCKET) {
-        closesocket(jumpListenSock);
-        jumpListenSock = INVALID_SOCKET;
-    }
-    if (hJumpThread) {
-        WaitForSingleObject(hJumpThread, 500);
-        CloseHandle(hJumpThread);
-        hJumpThread = NULL;
-    }
-    if (jumpSshSession) {
-        libssh2_session_disconnect(jumpSshSession, "Jump Host Shutdown");
-        libssh2_session_free(jumpSshSession);
-        jumpSshSession = NULL;
-    }
-    if (jumpSock != INVALID_SOCKET) {
-        closesocket(jumpSock);
-        jumpSock = INVALID_SOCKET;
-    }
+    // 关闭本地中转并归还共享堡垒机连接(最后一个引用归零时才真正断开跳板)
+    ReleaseJumpResources();
 }
 
 bool SSHSession::IsConnected() {
@@ -504,7 +883,7 @@ static bool ConnectHttpProxy(SOCKET s, const std::string& targetHost, int target
 }
 
 // Connect options implementation
-bool SSHSession::Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath, const std::string& keyPassphrase, int cols, int rows, const JumpHostConfig& jumpConfig, const ProxyConfig& proxyConfig) {
+bool SSHSession::Connect(const std::string& hostname, int port, const std::string& username, const std::string& password, const std::string& keyPath, const std::string& keyPassphrase, int cols, int rows, const JumpHostConfig& jumpConfig, const ProxyConfig& proxyConfig, bool compression) {
     lastError = "";
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
@@ -517,122 +896,47 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
     std::string connectHost = hostname;
 
     if (hasJump) {
-        PrismLog("INFO", "SSHSession connecting via Jump Host: " + jumpConfig.jumpHost);
-        
-        // 1. 建立与堡垒机的第一跳 TCP 连接
-        jumpSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (jumpSock == INVALID_SOCKET) {
-            lastError = "Failed to create jump socket";
+        std::vector<JumpHopConfig> hops = jumpConfig.EffectiveHops();
+        PrismLog("INFO", "SSHSession connecting via pooled Jump Host chain (" + std::to_string(hops.size()) + " hops): " + jumpConfig.jumpHost);
+
+        // 1-2. 从共享池取堡垒机链路(命中则免二次登录),失败时错误信息与直连时一致
+        jumpPoolEntry = globalJumpPool.Acquire(jumpConfig, lastError);
+        if (!jumpPoolEntry) {
             return false;
         }
-        
-        struct addrinfo hints = { 0 }, *jumpAddrs = NULL;
-        hints.ai_family = AF_INET;
-        hints.ai_socktype = SOCK_STREAM;
-        hints.ai_protocol = IPPROTO_TCP;
-        std::string jumpPortStr = std::to_string(jumpConfig.jumpPort);
-        if (getaddrinfo(jumpConfig.jumpHost.c_str(), jumpPortStr.c_str(), &hints, &jumpAddrs) != 0) {
-            closesocket(jumpSock);
-            jumpSock = INVALID_SOCKET;
-            lastError = "getaddrinfo failed for jump host: " + jumpConfig.jumpHost;
-            return false;
-        }
-        
-        bool jumpConnected = false;
-        for (struct addrinfo* addr = jumpAddrs; addr != NULL; addr = addr->ai_next) {
-            if (connect(jumpSock, addr->ai_addr, (int)addr->ai_addrlen) == 0) {
-                jumpConnected = true;
-                break;
-            }
-        }
-        freeaddrinfo(jumpAddrs);
-        
-        if (!jumpConnected) {
-            closesocket(jumpSock);
-            jumpSock = INVALID_SOCKET;
-            lastError = "Failed to connect to jump host: " + jumpConfig.jumpHost;
-            return false;
-        }
-        
-        // 2. 第一跳 SSH 握手与鉴权
-        jumpSshSession = libssh2_session_init();
-        if (!jumpSshSession) {
-            closesocket(jumpSock);
-            jumpSock = INVALID_SOCKET;
-            lastError = "Failed to init jump ssh session";
-            return false;
-        }
-        
-        int jumpHandshake = libssh2_session_handshake(jumpSshSession, jumpSock);
-        if (jumpHandshake != 0) {
-            libssh2_session_free(jumpSshSession);
-            jumpSshSession = NULL;
-            closesocket(jumpSock);
-            jumpSock = INVALID_SOCKET;
-            lastError = "Jump host SSH handshake failed";
-            return false;
-        }
-        
-        int jumpAuth = -1;
-        if (!jumpConfig.jumpKey.empty()) {
-            std::string localKeyPath = Utf8ToLocalAnsi(jumpConfig.jumpKey);
-            jumpAuth = libssh2_userauth_publickey_fromfile(
-                jumpSshSession,
-                jumpConfig.jumpUser.c_str(),
-                NULL,
-                localKeyPath.c_str(),
-                jumpConfig.jumpKeyPassphrase.empty() ? NULL : jumpConfig.jumpKeyPassphrase.c_str()
-            );
-        } else {
-            jumpAuth = libssh2_userauth_password(jumpSshSession, jumpConfig.jumpUser.c_str(), jumpConfig.jumpPass.c_str());
-        }
-        
-        if (jumpAuth != 0) {
-            char* err_msg = NULL;
-            int err_len = 0;
-            libssh2_session_last_error(jumpSshSession, &err_msg, &err_len, 0);
-            lastError = "Jump host auth failed: " + (err_msg ? std::string(err_msg, err_len) : "unknown");
-            libssh2_session_free(jumpSshSession);
-            jumpSshSession = NULL;
-            closesocket(jumpSock);
-            jumpSock = INVALID_SOCKET;
-            return false;
-        }
-        
+
         // 3. 开启本地环回代理端口监听
         jumpListenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         struct sockaddr_in listenAddr = { 0 };
         listenAddr.sin_family = AF_INET;
         listenAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
         listenAddr.sin_port = 0; // 随机端口
-        
+
         if (bind(jumpListenSock, (struct sockaddr*)&listenAddr, sizeof(listenAddr)) != 0) {
             closesocket(jumpListenSock);
             jumpListenSock = INVALID_SOCKET;
-            libssh2_session_disconnect(jumpSshSession, "Bind Failed");
-            libssh2_session_free(jumpSshSession);
-            jumpSshSession = NULL;
-            closesocket(jumpSock);
-            jumpSock = INVALID_SOCKET;
+            globalJumpPool.Release(jumpPoolEntry);
+            jumpPoolEntry = nullptr;
             lastError = "Jump host tunnel bind failed";
             return false;
         }
         listen(jumpListenSock, 1);
-        
+
         int len = sizeof(listenAddr);
         getsockname(jumpListenSock, (struct sockaddr*)&listenAddr, &len);
         int localListenPort = ntohs(listenAddr.sin_port);
-        
-        // 4. 启动后台中转线程
+
+        // 4. 启动后台中转线程(在链路最后一跳的 session 上开通 direct-tcpip 通道)
         JumpTunnelArgs* args = new JumpTunnelArgs();
+        args->pool = jumpPoolEntry;
+        args->viaSession = jumpPoolEntry->LastHopSession();
         args->listenSock = jumpListenSock;
-        args->jumpSshSession = jumpSshSession;
         args->targetHost = hostname;
         args->targetPort = port;
-        
+
         hJumpThread = CreateThread(NULL, 0, JumpTunnelListenerThread, args, 0, NULL);
-        
-        // 5. 让第二跳的握手目标直接指向本地随机监听端口！
+
+        // 5. 让第二跳的握手目标直接指向本地随机监听端口!
         connectHost = "127.0.0.1";
         connectPort = localListenPort;
     }
@@ -699,7 +1003,7 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
         PrismLog("INFO", "Proxy handshake success to target " + connectHost + ":" + std::to_string(connectPort));
     }
 
-    int bufSize = 256 * 1024;
+    int bufSize = 4 * 1024 * 1024; // 4MB 高速千兆套接字缓冲
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (char*)&bufSize, sizeof(bufSize));
     setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (char*)&bufSize, sizeof(bufSize));
     BOOL noDelay = TRUE;
@@ -711,6 +1015,12 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
         sock = INVALID_SOCKET;
         lastError = "libssh2_session_init failed";
         return false;
+    }
+
+    // 压缩必须在握手前声明,才会与服务端协商 zlib;对长链路/低带宽的跳板场景收益明显
+    if (compression) {
+        libssh2_session_flag(sshSession, LIBSSH2_FLAG_COMPRESS, 1);
+        PrismLog("INFO", "SSH compression enabled for " + hostname + ":" + std::to_string(port));
     }
 
     int handshake_res = libssh2_session_handshake(sshSession, sock);
@@ -769,7 +1079,31 @@ bool SSHSession::Connect(const std::string& hostname, int port, const std::strin
         return false;
     }
 
-    int pty_res = libssh2_channel_request_pty(sshChannel, "xterm-256color");
+    // Standard RFC 4254 terminal modes:
+    // Opcode (1 byte) + 4-byte uint32 (big endian)
+    // VERASE (3) = 127 (0x7F, ^?)
+    // VWERASE (14) = 23 (0x17, ^W)
+    // VINTR (1) = 3 (0x03, ^C)
+    // VKILL (4) = 21 (0x15, ^U)
+    // TTY_OP_END (0)
+    static const unsigned char tty_modes[] = {
+        3, 0, 0, 0, 127,  // VERASE = 127 (^?)
+        14, 0, 0, 0, 23,  // VWERASE = 23 (^W)
+        1, 0, 0, 0, 3,    // VINTR = 3 (^C)
+        4, 0, 0, 0, 21,   // VKILL = 21 (^U)
+        0                 // TTY_OP_END
+    };
+
+    int pty_res = libssh2_channel_request_pty_ex(
+        sshChannel,
+        "xterm-256color",
+        (unsigned int)strlen("xterm-256color"),
+        (const char*)tty_modes,
+        sizeof(tty_modes),
+        cols > 0 ? cols : 80,
+        rows > 0 ? rows : 24,
+        0, 0
+    );
     if (pty_res != 0) {
         char *err_msg = NULL;
         int err_msg_len = 0;
@@ -1019,7 +1353,7 @@ DWORD WINAPI SSHSession::StaticReadThread(LPVOID param) {
 }
 
 void SSHSession::ReadLoop() {
-    char buffer[16384];
+    char buffer[32768];
     auto lastKeepalive = std::chrono::steady_clock::now();
     while (running && sshChannel) {
         fd_set fd;
@@ -1027,7 +1361,7 @@ void SSHSession::ReadLoop() {
         FD_SET(sock, &fd);
         timeval tv;
         tv.tv_sec = 0;
-        tv.tv_usec = 50000;
+        tv.tv_usec = 15000;
         int select_res = select(0, &fd, NULL, NULL, &tv);
         if (select_res > 0) {
             std::lock_guard<std::mutex> lock(sshMutex);
@@ -1037,13 +1371,35 @@ void SSHSession::ReadLoop() {
             int readBytes = libssh2_channel_read(sshChannel, buffer, sizeof(buffer) - 1);
             if (readBytes > 0) {
                 std::string accum(buffer, readBytes);
-                
+
                 while (accum.size() < 65536) {
                     int readNow = libssh2_channel_read(sshChannel, buffer, sizeof(buffer) - 1);
                     if (readNow > 0) {
                         accum.append(buffer, readNow);
                     } else {
                         break;
+                    }
+                }
+
+                // 大流量聚合窗口:首批已读满 8KB 且尚未到 64KB 时,最多再等 4ms 凑大批量,
+                // 降低 base64/JSON/PostMessage 的消息条数;交互小包(命令回显)不进此路径,零延迟
+                for (int burst = 0; burst < 2 && accum.size() >= 8192 && accum.size() < 65536 && running && sshChannel; ++burst) {
+                    fd_set burstFd;
+                    FD_ZERO(&burstFd);
+                    FD_SET(sock, &burstFd);
+                    timeval burstTv;
+                    burstTv.tv_sec = 0;
+                    burstTv.tv_usec = 2000;
+                    if (select(0, &burstFd, NULL, NULL, &burstTv) <= 0) {
+                        break;
+                    }
+                    while (accum.size() < 65536) {
+                        int readNow = libssh2_channel_read(sshChannel, buffer, sizeof(buffer) - 1);
+                        if (readNow > 0) {
+                            accum.append(buffer, readNow);
+                        } else {
+                            break;
+                        }
                     }
                 }
 
@@ -1062,29 +1418,79 @@ void SSHSession::ReadLoop() {
                 nlohmann::json pushMsg;
                 pushMsg["action"] = "push_output";
                 pushMsg["sessionId"] = sessionId;
-                pushMsg["data"] = Base64Encode("\r\n[SSH Connection closed]\r\n");
+                pushMsg["data"] = Base64Encode("\r\n\x1b[33m[SSH Connection closed by remote host]\x1b[0m\r\n");
                 
                 if (hWnd != NULL) {
                     std::wstring* pStr = new std::wstring(Utf8ToUtf16(pushMsg.dump()));
                     if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pStr)) {
                         delete pStr;
                     }
+
+                    nlohmann::json closeMsg;
+                    closeMsg["action"] = "session_closed";
+                    closeMsg["sessionId"] = sessionId;
+                    std::wstring* pCloseStr = new std::wstring(Utf8ToUtf16(closeMsg.dump()));
+                    if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pCloseStr)) {
+                        delete pCloseStr;
+                    }
                 }
                 running = false;
                 break;
             }
         } else if (select_res < 0) {
+            nlohmann::json pushMsg;
+            pushMsg["action"] = "push_output";
+            pushMsg["sessionId"] = sessionId;
+            pushMsg["data"] = Base64Encode("\r\n\x1b[31m[SSH Connection error - socket closed]\x1b[0m\r\n");
+
+            if (hWnd != NULL) {
+                std::wstring* pStr = new std::wstring(Utf8ToUtf16(pushMsg.dump()));
+                if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pStr)) {
+                    delete pStr;
+                }
+
+                nlohmann::json closeMsg;
+                closeMsg["action"] = "session_closed";
+                closeMsg["sessionId"] = sessionId;
+                std::wstring* pCloseStr = new std::wstring(Utf8ToUtf16(closeMsg.dump()));
+                if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pCloseStr)) {
+                    delete pCloseStr;
+                }
+            }
             running = false;
             break;
         }
 
-        // Periodically send keepalive every 10 seconds
+        // Periodically send keepalive every 5 seconds to rapidly detect host shutdown/disconnect
         auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastKeepalive).count() >= 10) {
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastKeepalive).count() >= 5) {
             std::lock_guard<std::mutex> lock(sshMutex);
             if (sshSession && running) {
                 int seconds_to_next = 0;
-                libssh2_keepalive_send(sshSession, &seconds_to_next);
+                int ka_res = libssh2_keepalive_send(sshSession, &seconds_to_next);
+                if (ka_res < 0 && ka_res != LIBSSH2_ERROR_EAGAIN) {
+                    nlohmann::json pushMsg;
+                    pushMsg["action"] = "push_output";
+                    pushMsg["sessionId"] = sessionId;
+                    pushMsg["data"] = Base64Encode("\r\n\x1b[31m[SSH Connection lost - host unreachable]\x1b[0m\r\n");
+
+                    if (hWnd != NULL) {
+                        std::wstring* pStr = new std::wstring(Utf8ToUtf16(pushMsg.dump()));
+                        if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pStr)) {
+                            delete pStr;
+                        }
+
+                        nlohmann::json closeMsg;
+                        closeMsg["action"] = "session_closed";
+                        closeMsg["sessionId"] = sessionId;
+                        std::wstring* pCloseStr = new std::wstring(Utf8ToUtf16(closeMsg.dump()));
+                        if (!PostMessageW(hWnd, WM_POST_WEB_MESSAGE, 0, (LPARAM)pCloseStr)) {
+                            delete pCloseStr;
+                        }
+                    }
+                    running = false;
+                    break;
+                }
             }
             lastKeepalive = now;
         }
@@ -1463,6 +1869,18 @@ std::string SSHSession::GetSystemInfo() {
     return info.dump();
 }
 
+static std::string LocalFormatSpeed(double bytes_per_sec) {
+    char buf[64];
+    if (bytes_per_sec >= 1024.0 * 1024.0) {
+        sprintf_s(buf, "%.2f MB/s", bytes_per_sec / (1024.0 * 1024.0));
+    } else if (bytes_per_sec >= 1024.0) {
+        sprintf_s(buf, "%.1f KB/s", bytes_per_sec / 1024.0);
+    } else {
+        sprintf_s(buf, "%.0f B/s", bytes_per_sec);
+    }
+    return buf;
+}
+
 std::string SSHSession::GetSystemStats() {
     std::string os = DetectOS();
     nlohmann::json stats = nlohmann::json::object();
@@ -1503,8 +1921,18 @@ std::string SSHSession::GetSystemStats() {
             char buf[64];
             sprintf_s(buf, "%.1f%%", usage_percent);
             stats["memory_usage"] = buf;
-            stats["memory_used"] = std::to_string(used_kb / 1024) + " MB";
-            stats["memory_total"] = std::to_string(total_kb / 1024) + " MB";
+            if (used_kb >= 1048576) {
+                sprintf_s(buf, "%.1fG", (double)used_kb / 1048576.0);
+            } else {
+                sprintf_s(buf, "%lldM", used_kb / 1024);
+            }
+            stats["memory_used"] = buf;
+            if (total_kb >= 1048576) {
+                sprintf_s(buf, "%.1fG", (double)total_kb / 1048576.0);
+            } else {
+                sprintf_s(buf, "%lldM", total_kb / 1024);
+            }
+            stats["memory_total"] = buf;
         }
 
         std::string disk_info = ExecuteCommand("wmic logicaldisk where size!=0 get size,freespace,caption");
@@ -1530,10 +1958,71 @@ std::string SSHSession::GetSystemStats() {
                 break;
             }
         }
+
+        std::string ns_out = ExecuteCommand("netstat -e");
+        unsigned long long cur_rx = 0, cur_tx = 0;
+        auto ns_lines = SplitString(ns_out, '\n');
+        for (auto& line : ns_lines) {
+            std::string trimmed = TrimString(line);
+            if (trimmed.rfind("Bytes", 0) == 0 || trimmed.rfind("字节", 0) == 0) {
+                auto parts = SplitStringWhitespace(trimmed);
+                if (parts.size() >= 3) {
+                    try {
+                        cur_rx = std::stoull(parts[1]);
+                        cur_tx = std::stoull(parts[2]);
+                    } catch(...) {}
+                }
+                break;
+            }
+        }
+        auto now = std::chrono::steady_clock::now();
+        double seconds = 1.0;
+        if (lastNetTime.time_since_epoch().count() > 0) {
+            seconds = std::chrono::duration<double>(now - lastNetTime).count();
+            if (seconds <= 0) seconds = 1.0;
+        }
+        lastNetTime = now;
+        double down_speed = 0;
+        double up_speed = 0;
+        if (lastRxBytes.count("total") > 0 && cur_rx >= lastRxBytes["total"]) {
+            down_speed = (cur_rx - lastRxBytes["total"]) / seconds;
+        }
+        if (lastTxBytes.count("total") > 0 && cur_tx >= lastTxBytes["total"]) {
+            up_speed = (cur_tx - lastTxBytes["total"]) / seconds;
+        }
+        lastRxBytes["total"] = cur_rx;
+        lastTxBytes["total"] = cur_tx;
+        stats["rx_speed"] = LocalFormatSpeed(down_speed);
+        stats["tx_speed"] = LocalFormatSpeed(up_speed);
+        stats["traffic_str"] = "↑" + LocalFormatSpeed(up_speed) + " ↓" + LocalFormatSpeed(down_speed);
     } else if (os == "linux") {
-        std::string cpu_info = ExecuteCommand("cat /proc/stat | grep \"cpu \" | head -1");
-        if (!cpu_info.empty()) {
-            auto parts = SplitStringWhitespace(cpu_info);
+        std::string combined_out = ExecuteCommand("sh -c 'cat /proc/stat 2>/dev/null | head -1; echo \"===MEM===\"; cat /proc/meminfo 2>/dev/null | grep -E \"MemTotal|MemAvailable\"; echo \"===NET===\"; cat /proc/net/dev 2>/dev/null; echo \"===DISK===\"; df -h / 2>/dev/null | tail -1; echo \"===UPTIME===\"; uptime 2>/dev/null || cat /proc/loadavg 2>/dev/null' 2>/dev/null");
+        
+        std::string cpu_section, mem_section, net_section, disk_section, uptime_section;
+        if (!combined_out.empty()) {
+            size_t mem_pos = combined_out.find("===MEM===");
+            size_t net_pos = combined_out.find("===NET===");
+            size_t disk_pos = combined_out.find("===DISK===");
+            size_t uptime_pos = combined_out.find("===UPTIME===");
+            
+            if (mem_pos != std::string::npos && net_pos != std::string::npos && disk_pos != std::string::npos) {
+                cpu_section = combined_out.substr(0, mem_pos);
+                mem_section = combined_out.substr(mem_pos + 9, net_pos - (mem_pos + 9));
+                net_section = combined_out.substr(net_pos + 9, disk_pos - (net_pos + 9));
+                if (uptime_pos != std::string::npos) {
+                    disk_section = combined_out.substr(disk_pos + 10, uptime_pos - (disk_pos + 10));
+                    uptime_section = combined_out.substr(uptime_pos + 12);
+                } else {
+                    disk_section = combined_out.substr(disk_pos + 10);
+                }
+            } else {
+                cpu_section = combined_out;
+            }
+        }
+        
+        // 1. CPU
+        if (!cpu_section.empty()) {
+            auto parts = SplitStringWhitespace(cpu_section);
             if (parts.size() >= 8) {
                 try {
                     long long idle = std::stoll(parts[4]);
@@ -1541,7 +2030,6 @@ std::string SSHSession::GetSystemStats() {
                     for (size_t i = 1; i < 8 && i < parts.size(); ++i) {
                         total += std::stoll(parts[i]);
                     }
-                    
                     double usage = 0.0;
                     if (lastCpuTotal > 0 && total > lastCpuTotal) {
                         long long diff_idle = idle - lastCpuIdle;
@@ -1552,37 +2040,21 @@ std::string SSHSession::GetSystemStats() {
                     } else {
                         usage = total > 0 ? (double)(total - idle) / total * 100.0 : 0.0;
                     }
-                    
                     lastCpuIdle = idle;
                     lastCpuTotal = total;
-                    
                     char buf[64];
                     sprintf_s(buf, "%.1f%%", usage);
                     stats["cpu_usage"] = buf;
                 } catch (...) {}
             }
         } else {
-            std::string vm_output = ExecuteCommand("vmstat 1 2 | tail -1");
-            auto parts = SplitStringWhitespace(vm_output);
-            if (parts.size() >= 15) {
-                try {
-                    double idle = std::stod(parts[parts.size() - 3]);
-                    double usage = 100.0 - idle;
-                    char buf[64];
-                    sprintf_s(buf, "%.1f%%", usage);
-                    stats["cpu_usage"] = buf;
-                } catch (...) {
-                    stats["cpu_usage"] = "0.0%";
-                }
-            } else {
-                stats["cpu_usage"] = "0.0%";
-            }
+            stats["cpu_usage"] = "0.0%";
         }
-
-        std::string mem_info = ExecuteCommand("cat /proc/meminfo | grep -E \"MemTotal|MemAvailable\"");
+        
+        // 2. Memory
         long long mem_total = 0;
         long long mem_available = 0;
-        auto mem_lines = SplitString(mem_info, '\n');
+        auto mem_lines = SplitString(mem_section, '\n');
         for (auto& line : mem_lines) {
             line = TrimString(line);
             auto parts = SplitStringWhitespace(line);
@@ -1600,17 +2072,100 @@ std::string SSHSession::GetSystemStats() {
             char buf[64];
             sprintf_s(buf, "%.1f%%", usage_percent);
             stats["memory_usage"] = buf;
-            stats["memory_used"] = std::to_string(mem_used / (1024 * 1024)) + " MB";
-            stats["memory_total"] = std::to_string(mem_total / (1024 * 1024)) + " MB";
+            if (mem_used >= 1073741824) {
+                sprintf_s(buf, "%.1fG", (double)mem_used / (1024.0 * 1024.0 * 1024.0));
+            } else {
+                sprintf_s(buf, "%lldM", mem_used / (1024 * 1024));
+            }
+            stats["memory_used"] = buf;
+            if (mem_total >= 1073741824) {
+                sprintf_s(buf, "%.1fG", (double)mem_total / (1024.0 * 1024.0 * 1024.0));
+            } else {
+                sprintf_s(buf, "%lldM", mem_total / (1024 * 1024));
+            }
+            stats["memory_total"] = buf;
         }
-
-        std::string disk_info = ExecuteCommand("df -h / | tail -1");
-        if (!disk_info.empty()) {
-            auto parts = SplitStringWhitespace(disk_info);
+        
+        // 3. Network Traffic & Speed
+        unsigned long long cur_rx = 0, cur_tx = 0;
+        auto dev_lines = SplitString(net_section, '\n');
+        for (auto& line : dev_lines) {
+            std::string trimmed = TrimString(line);
+            size_t colon_pos = trimmed.find(":");
+            if (colon_pos != std::string::npos) {
+                std::string iface_name = TrimString(trimmed.substr(0, colon_pos));
+                if (iface_name == "lo") continue;
+                std::string traffic_data = trimmed.substr(colon_pos + 1);
+                auto parts = SplitStringWhitespace(traffic_data);
+                if (parts.size() >= 9) {
+                    try {
+                        cur_rx += std::stoull(parts[0]);
+                        cur_tx += std::stoull(parts[8]);
+                    } catch (...) {}
+                }
+            }
+        }
+        auto now = std::chrono::steady_clock::now();
+        double seconds = 1.0;
+        if (lastNetTime.time_since_epoch().count() > 0) {
+            seconds = std::chrono::duration<double>(now - lastNetTime).count();
+            if (seconds <= 0) seconds = 1.0;
+        }
+        lastNetTime = now;
+        double down_speed = 0;
+        double up_speed = 0;
+        if (lastRxBytes.count("total") > 0 && cur_rx >= lastRxBytes["total"]) {
+            down_speed = (cur_rx - lastRxBytes["total"]) / seconds;
+        }
+        if (lastTxBytes.count("total") > 0 && cur_tx >= lastTxBytes["total"]) {
+            up_speed = (cur_tx - lastTxBytes["total"]) / seconds;
+        }
+        lastRxBytes["total"] = cur_rx;
+        lastTxBytes["total"] = cur_tx;
+        stats["rx_speed"] = LocalFormatSpeed(down_speed);
+        stats["tx_speed"] = LocalFormatSpeed(up_speed);
+        stats["traffic_str"] = "↑" + LocalFormatSpeed(up_speed) + " ↓" + LocalFormatSpeed(down_speed);
+        
+        // 4. Disk Usage
+        disk_section = TrimString(disk_section);
+        if (!disk_section.empty()) {
+            auto parts = SplitStringWhitespace(disk_section);
             if (parts.size() >= 6) {
                 stats["disk_total"] = parts[1];
                 stats["disk_used"] = parts[2];
                 stats["disk_usage"] = parts[4];
+            }
+        }
+
+        // 5. Uptime & Load Average
+        uptime_section = TrimString(uptime_section);
+        if (!uptime_section.empty()) {
+            stats["uptime_raw"] = uptime_section;
+            size_t load_pos = uptime_section.find("load average:");
+            if (load_pos == std::string::npos) {
+                load_pos = uptime_section.find("load averages:");
+            }
+            if (load_pos != std::string::npos) {
+                std::string loads = TrimString(uptime_section.substr(load_pos + 13));
+                stats["load_avg"] = loads;
+                stats["load_avg_str"] = "load average: " + loads;
+            } else {
+                auto parts = SplitStringWhitespace(uptime_section);
+                if (parts.size() >= 3) {
+                    std::string loads = parts[0] + ", " + parts[1] + ", " + parts[2];
+                    stats["load_avg"] = loads;
+                    stats["load_avg_str"] = "load average: " + loads;
+                }
+            }
+            size_t up_pos = uptime_section.find("up ");
+            if (up_pos != std::string::npos) {
+                size_t comma_users = uptime_section.find("user", up_pos);
+                if (comma_users != std::string::npos) {
+                    size_t last_comma = uptime_section.rfind(',', comma_users);
+                    if (last_comma != std::string::npos && last_comma > up_pos) {
+                        stats["uptime"] = TrimString(uptime_section.substr(up_pos + 3, last_comma - (up_pos + 3)));
+                    }
+                }
             }
         }
     } else {
@@ -1645,7 +2200,7 @@ std::string SSHSession::GetProcessList() {
             }
         }
     } else if (os == "linux") {
-        std::string output = ExecuteCommand("ps aux --sort=-%cpu | head -11");
+        std::string output = ExecuteCommand("ps aux --sort=-%cpu | head -n 50");
         auto lines = SplitString(output, '\n');
         int count = 0;
         for (auto& line : lines) {
@@ -1659,12 +2214,16 @@ std::string SSHSession::GetProcessList() {
                     cmd += " " + parts[i];
                 }
                 nlohmann::json proc;
-                proc["name"] = cmd.size() > 30 ? cmd.substr(0, 30) + "..." : cmd;
+                proc["user"] = parts[0];
                 proc["pid"] = parts[1];
                 proc["cpu"] = parts[2] + "%";
                 proc["memory"] = parts[3] + "%";
+                proc["stat"] = parts[7];
+                proc["name"] = cmd;
+                proc["command"] = parts[10];
+                proc["args"] = cmd;
                 process_array.push_back(proc);
-                if (++count >= 10) break;
+                if (++count >= 40) break;
             }
         }
     }
@@ -1723,18 +2282,6 @@ std::string SSHSession::GetDiskUsage() {
         }
     }
     return disk_array.dump();
-}
-
-static std::string LocalFormatSpeed(double bytes_per_sec) {
-    char buf[64];
-    if (bytes_per_sec >= 1024.0 * 1024.0) {
-        sprintf_s(buf, "%.2f MB/s", bytes_per_sec / (1024.0 * 1024.0));
-    } else if (bytes_per_sec >= 1024.0) {
-        sprintf_s(buf, "%.1f KB/s", bytes_per_sec / 1024.0);
-    } else {
-        sprintf_s(buf, "%.0f B/s", bytes_per_sec);
-    }
-    return buf;
 }
 
 std::string SSHSession::GetNetworkInfo() {
@@ -2919,7 +3466,11 @@ bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& re
                 return false;
             }
         }
-        Sleep(5);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
 
     auto pipeline = std::make_shared<SftpPipeline>(8);
@@ -2927,24 +3478,26 @@ bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& re
     std::string readError = "";
     
     std::thread readerThread([localPath, pipeline, &readSuccess, &readError]() {
-        std::ifstream in(localPath.c_str(), std::ios::binary);
-        if (!in.is_open()) {
+        FILE* fp = _wfopen(localPath.c_str(), L"rb");
+        if (!fp) {
             readSuccess = false;
             readError = "Failed to open local file for reading";
             pipeline->Cancel();
             return;
         }
+        setvbuf(fp, NULL, _IOFBF, 524288);
         
-        char buffer[32768];
+        const int bufLen = 262144;
+        std::vector<char> buffer(bufLen);
         while (true) {
-            in.read(buffer, sizeof(buffer));
-            std::streamsize bytesRead = in.gcount();
-            if (bytesRead <= 0) break;
+            size_t bytesRead = fread(buffer.data(), 1, bufLen, fp);
+            if (bytesRead == 0) break;
             
             auto block = std::make_shared<SftpBlock>();
-            block->data.assign(buffer, buffer + bytesRead);
+            block->data.assign(buffer.data(), buffer.data() + bytesRead);
             if (!pipeline->Push(block)) break;
         }
+        fclose(fp);
         
         auto eofBlock = std::make_shared<SftpBlock>();
         eofBlock->is_eof = true;
@@ -2972,7 +3525,11 @@ bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& re
             }
             if (rc < 0) {
                 if (rc == LIBSSH2_ERROR_EAGAIN) {
-                    Sleep(5);
+                    fd_set fd;
+                    FD_ZERO(&fd);
+                    FD_SET(sock, &fd);
+                    timeval tv = { 0, 1000 };
+                    select(0, &fd, NULL, NULL, &tv);
                     continue;
                 }
                 lastError = "write failed";
@@ -3001,7 +3558,11 @@ bool SSHSession::UploadFile(const std::wstring& localPath, const std::string& re
             c_rc = libssh2_sftp_close(handle);
         }
         if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-        Sleep(5);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
     
     return success;
@@ -3030,7 +3591,11 @@ bool SSHSession::DownloadFile(const std::string& remotePath, const std::wstring&
                 return false;
             }
         }
-        Sleep(5);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
 
     auto pipeline = std::make_shared<SftpPipeline>(8);
@@ -3038,40 +3603,46 @@ bool SSHSession::DownloadFile(const std::string& remotePath, const std::wstring&
     std::string writeError = "";
     
     std::thread writerThread([localPath, pipeline, &writeSuccess, &writeError]() {
-        std::ofstream out(localPath.c_str(), std::ios::binary);
-        if (!out.is_open()) {
+        FILE* fp = _wfopen(localPath.c_str(), L"wb");
+        if (!fp) {
             writeSuccess = false;
             writeError = "Failed to open local file for writing";
             pipeline->Cancel();
             return;
         }
+        setvbuf(fp, NULL, _IOFBF, 524288);
         
         while (true) {
             auto block = pipeline->Pop();
             if (!block || block->is_eof) break;
             
-            out.write(block->data.data(), block->data.size());
-            if (!out) {
+            size_t written = fwrite(block->data.data(), 1, block->data.size(), fp);
+            if (written != block->data.size()) {
                 writeSuccess = false;
                 writeError = "write to local file failed";
                 pipeline->Cancel();
                 break;
             }
         }
-        out.close();
+        fclose(fp);
     });
 
     bool success = true;
-    char buffer[32768];
+    const int bufLen = 262144;
+    std::vector<char> buffer(bufLen);
     while (true) {
         int rc = 0;
         {
             std::lock_guard<std::mutex> lock(sshMutex);
-            rc = libssh2_sftp_read(handle, buffer, sizeof(buffer));
+            rc = libssh2_sftp_read(handle, buffer.data(), bufLen);
         }
         if (rc < 0) {
             if (rc == LIBSSH2_ERROR_EAGAIN) {
-                Sleep(5);
+                fd_set fd;
+                FD_ZERO(&fd);
+                FD_SET(sock, &fd);
+                timeval tv = { 0, 1000 };
+                select(0, &fd, NULL, NULL, &tv);
                 continue;
             }
             lastError = "read failed";
@@ -3087,7 +3658,7 @@ bool SSHSession::DownloadFile(const std::string& remotePath, const std::wstring&
         }
         
         auto block = std::make_shared<SftpBlock>();
-        block->data.assign(buffer, buffer + rc);
+        block->data.assign(buffer.data(), buffer.data() + rc);
         if (!pipeline->Push(block)) break;
     }
 
@@ -3107,7 +3678,11 @@ bool SSHSession::DownloadFile(const std::string& remotePath, const std::wstring&
             c_rc = libssh2_sftp_close(handle);
         }
         if (c_rc != LIBSSH2_ERROR_EAGAIN) break;
-        Sleep(5);
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(sock, &fd);
+        timeval tv = { 0, 1000 };
+        select(0, &fd, NULL, NULL, &tv);
     }
 
     if (!success) {

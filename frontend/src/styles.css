@@ -1,28 +1,363 @@
 @import "tailwindcss";
 
+/* ============================================================
+   LdySSH Ultra-Premium Design System (Linear / Cursor / Warp Aesthetic)
+   ============================================================ */
+
 :root {
   color-scheme: light;
-  --app-bg: #f6f8fb;
-  --app-text: #0f172a;
-  --app-muted: #64748b;
-  --app-line: #d9e2ef;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
+
+  --app-bg: #f8fafc;
   --panel-bg: #ffffff;
+  --sidebar-bg: #f1f5f9;
   --subtle-bg: #f8fafc;
-  --terminal-bg: #020617;
+  --raised-bg: #ffffff;
+  --ground-bg: #f1f5f9;
+
+  --app-text: #0f172a;
+  --text-secondary: #334155;
+  --app-muted: #64748b;
+  --text-quaternary: #94a3b8;
+
+  --app-line: #e2e8f0;
+  --app-line-subtle: #f1f5f9;
+  --fill-1: #f8fafc;
+  --fill-2: #f1f5f9;
+  --fill-3: #e2e8f0;
+
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --accent-active: #047857;
+  --accent-soft: rgba(16, 185, 129, 0.08);
+  --accent-soft-strong: rgba(16, 185, 129, 0.16);
+  --accent-text: #059669;
+  --on-accent: #ffffff;
+  --text-selected: rgba(16, 185, 129, 0.15);
+  
+  --accent-grad: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+  --accent-glow: 0 4px 20px rgba(16, 185, 129, 0.25);
+  --accent-grad-soft: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(6, 182, 212, 0.08) 100%);
+
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.08);
+  --success-text: #059669;
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --danger-soft: rgba(239, 68, 68, 0.08);
+  --danger-text: #dc2626;
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.08);
+  --warning-text: #d97706;
+
+  --terminal-bg: #0b0e14;
   --terminal-text: #e5e7eb;
+  --mask-base: rgba(15, 23, 42, 0.45);
+
+  --shadow-raised: 0 10px 30px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --shadow-input: 0 1px 2px rgba(15, 23, 42, 0.03);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 120ms;
+  --dur-med: 180ms;
 }
 
 .app-root[data-theme="dark"] {
   color-scheme: dark;
-  --app-bg: #0f172a;
-  --app-text: #e5e7eb;
-  --app-muted: #94a3b8;
-  --app-line: #334155;
-  --panel-bg: #111827;
-  --subtle-bg: #1e293b;
-  --terminal-bg: #020617;
-  --terminal-text: #e5e7eb;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* 极致黑曜石沉浸专业工作站 (Linear / Cursor Pro 级) */
+  --app-bg: #07090e;
+  --panel-bg: #0d1017;
+  --sidebar-bg: #090c12;
+  --subtle-bg: #121620;
+  --raised-bg: #151a26;
+  --ground-bg: #07090e;
+
+  --app-text: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --app-muted: #717d96;
+  --text-quaternary: #475569;
+
+  --app-line: rgba(255, 255, 255, 0.07);
+  --app-line-subtle: rgba(255, 255, 255, 0.04);
+  --fill-1: rgba(255, 255, 255, 0.03);
+  --fill-2: rgba(255, 255, 255, 0.06);
+  --fill-3: rgba(255, 255, 255, 0.10);
+
+  --accent: #10b981;
+  --accent-hover: #34d399;
+  --accent-active: #059669;
+  --accent-soft: rgba(16, 185, 129, 0.12);
+  --accent-soft-strong: rgba(16, 185, 129, 0.22);
+  --accent-text: #34d399;
+  --on-accent: #ffffff;
+  --text-selected: rgba(16, 185, 129, 0.22);
+
+  --accent-grad: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+  --accent-glow: 0 0 25px rgba(16, 185, 129, 0.25);
+  --accent-grad-soft: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(6, 182, 212, 0.12) 100%);
+
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.12);
+  --success-text: #34d399;
+  --danger: #f43f5e;
+  --danger-hover: #e11d48;
+  --danger-soft: rgba(244, 63, 94, 0.12);
+  --danger-text: #fb7185;
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.12);
+  --warning-text: #fbbf24;
+
+  --terminal-bg: #07090e;
+  --terminal-text: #f8fafc;
+
+  --mask-base: rgba(0, 0, 0, 0.75);
+  --shadow-raised: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), 0 20px 40px -15px rgba(0, 0, 0, 0.8);
+  --shadow-input: inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
 }
+
+.app-root[data-theme="cyber"] {
+  color-scheme: dark;
+  --app-bg: #050807;
+  --panel-bg: #0a0f0d;
+  --sidebar-bg: #070b09;
+  --subtle-bg: #0e1411;
+  --raised-bg: #121a16;
+  --ground-bg: #050807;
+
+  --app-text: rgba(230, 255, 240, 0.95);
+  --text-secondary: rgba(180, 230, 205, 0.65);
+  --app-muted: rgba(150, 210, 180, 0.42);
+  --text-quaternary: rgba(130, 190, 160, 0.25);
+
+  --app-line: rgba(16, 185, 129, 0.12);
+  --app-line-subtle: rgba(16, 185, 129, 0.06);
+  --fill-1: rgba(16, 185, 129, 0.04);
+  --fill-2: rgba(16, 185, 129, 0.08);
+  --fill-3: rgba(16, 185, 129, 0.15);
+
+  --accent: #10b981;
+  --accent-hover: #34d399;
+  --accent-active: #059669;
+  --accent-soft: rgba(16, 185, 129, 0.12);
+  --accent-soft-strong: rgba(16, 185, 129, 0.22);
+  --accent-text: #34d399;
+  --on-accent: #000000;
+  --text-selected: rgba(16, 185, 129, 0.25);
+  --accent-grad: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+  --accent-glow: 0 0 18px rgba(16, 185, 129, 0.35);
+  --accent-grad-soft: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(6, 182, 212, 0.12) 100%);
+
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.12);
+  --success-text: #34d399;
+  --danger: #ff4756;
+  --danger-soft: rgba(255, 71, 86, 0.12);
+  --danger-text: #ff6b78;
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.12);
+  --warning-text: #fbbf24;
+
+  --terminal-bg: #030504;
+  --terminal-text: #a7f3d0;
+  --mask-base: rgba(0, 0, 0, 0.7);
+}
+
+.app-root[data-theme="nordic"] {
+  color-scheme: dark;
+  --app-bg: #0a0e17;
+  --panel-bg: #111827;
+  --sidebar-bg: #0d1320;
+  --subtle-bg: #182235;
+  --raised-bg: #1f2b42;
+  --ground-bg: #0a0e17;
+
+  --app-text: rgba(241, 245, 249, 0.95);
+  --text-secondary: rgba(203, 213, 225, 0.7);
+  --app-muted: rgba(148, 163, 184, 0.48);
+  --text-quaternary: rgba(148, 163, 184, 0.28);
+
+  --app-line: rgba(255, 255, 255, 0.08);
+  --app-line-subtle: rgba(255, 255, 255, 0.04);
+  --fill-1: rgba(255, 255, 255, 0.04);
+  --fill-2: rgba(255, 255, 255, 0.08);
+  --fill-3: rgba(255, 255, 255, 0.14);
+
+  --accent: #38bdf8;
+  --accent-hover: #7dd3fc;
+  --accent-active: #0284c7;
+  --accent-soft: rgba(56, 189, 248, 0.12);
+  --accent-soft-strong: rgba(56, 189, 248, 0.22);
+  --accent-text: #38bdf8;
+  --on-accent: #0f172a;
+  --text-selected: rgba(56, 189, 248, 0.25);
+  --accent-grad: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
+  --accent-glow: 0 4px 18px rgba(56, 189, 248, 0.3);
+  --accent-grad-soft: linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(37, 99, 235, 0.12) 100%);
+
+  --success: #14b8a6;
+  --success-soft: rgba(20, 184, 166, 0.12);
+  --success-text: #2dd4bf;
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.15);
+  --danger-text: #f87171;
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.15);
+  --warning-text: #fbbf24;
+
+  --terminal-bg: #0b1329;
+  --terminal-text: #e0f2fe;
+  --mask-base: rgba(0, 0, 0, 0.65);
+}
+
+/* ============ 石墨工作站:平面 + 发丝线,唯一青绿强调 ============ */
+.app-root[data-theme="graphite"] {
+  color-scheme: dark;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  --app-bg: #0b0d10;
+  --panel-bg: #101318;
+  --sidebar-bg: #0d1014;
+  --subtle-bg: #14181e;
+  --raised-bg: #171b22;
+  --ground-bg: #0b0d10;
+
+  --app-text: #e8edf3;
+  --text-secondary: #c3ccd7;
+  --app-muted: #6b7686;
+  --text-quaternary: #454e5c;
+
+  --app-line: #1f242c;
+  --app-line-subtle: #171b21;
+  --fill-1: #12151b;
+  --fill-2: #171b22;
+  --fill-3: #1e232b;
+
+  --accent: #3fc7b7;
+  --accent-hover: #57d6c9;
+  --accent-active: #2ea99b;
+  --accent-soft: rgba(87, 214, 201, 0.10);
+  --accent-soft-strong: rgba(87, 214, 201, 0.18);
+  --accent-text: #57d6c9;
+  --on-accent: #06121a;
+  --text-selected: rgba(87, 214, 201, 0.20);
+  --accent-grad: linear-gradient(135deg, #57d6c9 0%, #3fc7b7 100%);
+  --accent-glow: 0 0 20px rgba(87, 214, 201, 0.18);
+  --accent-grad-soft: linear-gradient(135deg, rgba(87, 214, 201, 0.10) 0%, rgba(63, 199, 183, 0.10) 100%);
+
+  --success: #6fce7f;
+  --success-soft: rgba(111, 206, 127, 0.10);
+  --success-text: #8bd996;
+  --danger: #e0646d;
+  --danger-hover: #c74f58;
+  --danger-soft: rgba(224, 100, 109, 0.10);
+  --danger-text: #ef8b92;
+  --warning: #d9a13f;
+  --warning-soft: rgba(217, 161, 63, 0.10);
+  --warning-text: #e5b565;
+
+  --terminal-bg: #0d1014;
+  --terminal-text: #c9d1dc;
+  --mask-base: rgba(0, 0, 0, 0.70);
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-input: 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+
+/* 石墨:圆角收敛为 6px,投影收敛为细边,呈现平面工作站质感 */
+.app-root[data-theme="graphite"] .rounded-xl,
+.app-root[data-theme="graphite"] .rounded-2xl,
+.app-root[data-theme="graphite"] .rounded-3xl,
+.app-root[data-theme="graphite"] .rounded-full.\!rounded-full {
+  border-radius: 6px;
+}
+.app-root[data-theme="graphite"] .rounded-2xl,
+.app-root[data-theme="graphite"] .rounded-3xl {
+  box-shadow: none;
+}
+
+/* ============ 极光玻璃:壁纸沉浸 + 磨砂面板 ============ */
+.app-root[data-theme="aurora"] {
+  color-scheme: dark;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* 无壁纸时的极光渐变兜底;有壁纸时 app-root 内联背景覆盖 */
+  background-image:
+    radial-gradient(560px 340px at 82% 12%, rgba(94, 234, 212, 0.14), transparent 60%),
+    radial-gradient(480px 420px at 12% 88%, rgba(129, 140, 248, 0.16), transparent 62%),
+    radial-gradient(300px 300px at 55% 45%, rgba(244, 114, 182, 0.06), transparent 60%),
+    linear-gradient(135deg, #0a1628 0%, #0d2137 34%, #123a4a 62%, #0e2c3e 100%);
+  background-size: cover;
+  background-attachment: fixed;
+
+  --app-bg: rgba(6, 12, 22, 0.55);
+  --panel-bg: rgba(10, 18, 32, 0.70);
+  --sidebar-bg: rgba(8, 14, 26, 0.65);
+  --subtle-bg: rgba(255, 255, 255, 0.08);
+  --raised-bg: rgba(16, 26, 42, 0.75);
+  --ground-bg: rgba(6, 12, 20, 0.75);
+
+  --app-text: #ffffff;
+  --text-secondary: #e2e8f0;
+  --app-muted: #94a3b8;
+  --text-quaternary: #64748b;
+
+  --app-line: rgba(255, 255, 255, 0.15);
+  --app-line-subtle: rgba(255, 255, 255, 0.08);
+  --fill-1: rgba(255, 255, 255, 0.10);
+  --fill-2: rgba(255, 255, 255, 0.16);
+  --fill-3: rgba(255, 255, 255, 0.24);
+
+  --accent: #34d3bd;
+  --accent-hover: #6ee7d3;
+  --accent-active: #14b8a5;
+  --accent-soft: rgba(52, 211, 189, 0.18);
+  --accent-soft-strong: rgba(52, 211, 189, 0.28);
+  --accent-text: #34d3bd;
+  --on-accent: #06121a;
+  --text-selected: rgba(52, 211, 189, 0.30);
+  --accent-grad: linear-gradient(135deg, #34d3bd 0%, #38bdf8 100%);
+  --accent-glow: 0 0 24px rgba(52, 211, 189, 0.40);
+  --accent-grad-soft: linear-gradient(135deg, rgba(52, 211, 189, 0.20) 0%, rgba(56, 189, 248, 0.20) 100%);
+
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.18);
+  --success-text: #34d399;
+  --danger: #f43f5e;
+  --danger-hover: #e11d48;
+  --danger-soft: rgba(244, 63, 94, 0.18);
+  --danger-text: #fb7185;
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.18);
+  --warning-text: #fbbf24;
+
+  --terminal-bg: rgba(6, 12, 20, 0.45);
+  --terminal-text: #ffffff;
+  --shadow-raised: 0 12px 40px rgba(2, 8, 16, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+  --shadow-input: 0 1px 2px rgba(2, 8, 16, 0.4);
+}
+
+/* 极光:仅在弹窗等特定浮层启用 blur，保持侧边栏与工作区壁纸通透明亮 */
+.app-root[data-theme="aurora"] .modal-backdrop,
+.app-root[data-theme="aurora"] [role="dialog"],
+.app-root[data-theme="aurora"] [role="menu"] {
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+}
+
+/* 状态灯发光 */
+.app-root span.rounded-full.bg-emerald-500 {
+  box-shadow: 0 0 8px var(--success);
+}
+.app-root span.rounded-full.bg-amber-500 {
+  box-shadow: 0 0 8px var(--warning);
+}
+.app-root span.rounded-full.bg-rose-500 {
+  box-shadow: 0 0 8px var(--danger);
+}
+
+/* ---------------- 基础 ---------------- */
 
 * {
   box-sizing: border-box;
@@ -41,20 +376,98 @@ body {
   background: var(--app-bg);
   color: var(--app-text);
   font-family:
-    Inter,
-    "Segoe UI",
     "PingFang SC",
     "Microsoft YaHei",
+    Inter,
+    "Segoe UI",
+    "Helvetica Neue",
     Arial,
     sans-serif;
-  text-rendering: geometricPrecision;
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
+
+::selection {
+  background: var(--text-selected);
+}
+
+/* 交互元素颜色过渡；位置/形变不全局加 transition，避免布局抖动 */
+button,
+a,
+input,
+textarea,
+select,
+[role="button"] {
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    opacity var(--dur-fast) ease;
+}
+
+/* 按压反馈：scale 0.97，100–160ms */
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled):active,
+  [role="button"]:not(:disabled):active {
+    transform: scale(0.97);
+    transition-duration: 100ms;
+  }
+}
+
+/* focus-visible：kimiBlue 焦点环 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible),
+select:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 滚动条：细、低存在感的填充色 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-3) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--fill-3);
+  border-radius: 8px;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-quaternary);
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------- 终端 ---------------- */
 
 .xterm {
   height: 100%;
@@ -73,6 +486,7 @@ textarea {
   background-color: var(--terminal-bg);
   background-position: center;
   background-size: cover;
+  background-attachment: fixed;
   color: var(--terminal-text);
 }
 
@@ -80,34 +494,7 @@ textarea {
   background: transparent;
 }
 
-.app-root[data-theme="dark"] .bg-white,
-.app-root[data-theme="dark"] .bg-slate-50,
-.app-root[data-theme="dark"] .bg-\[\#eef2f7\],
-.app-root[data-theme="dark"] .bg-\[\#f6f8fb\] {
-  background-color: var(--panel-bg) !important;
-}
-
-.app-root[data-theme="dark"] .bg-slate-100 {
-  background-color: var(--subtle-bg) !important;
-}
-
-.app-root[data-theme="dark"] .text-slate-950,
-.app-root[data-theme="dark"] .text-slate-900,
-.app-root[data-theme="dark"] .text-slate-800,
-.app-root[data-theme="dark"] .text-slate-700 {
-  color: var(--app-text) !important;
-}
-
-.app-root[data-theme="dark"] .text-slate-600,
-.app-root[data-theme="dark"] .text-slate-500,
-.app-root[data-theme="dark"] .text-slate-400 {
-  color: var(--app-muted) !important;
-}
-
-.app-root[data-theme="dark"] .border-slate-200,
-.app-root[data-theme="dark"] .border-slate-300 {
-  border-color: var(--app-line) !important;
-}
+/* ---------------- 窗口拖拽区 ---------------- */
 
 .pywebview-drag-region {
   -webkit-app-region: drag;
@@ -116,6 +503,285 @@ textarea {
 .no-drag,
 button,
 input,
-textarea {
+textarea,
+select {
   -webkit-app-region: no-drag;
+}
+
+/* ============================================================
+   Tailwind 类 → 语义令牌重映射
+   覆盖原 slate/blue/emerald/rose/amber 直写色值，
+   深浅主题各自映射到对应令牌，逻辑层零改动
+   ============================================================ */
+
+/* ---------- 中性表面（bg-white / bg-slate-*） ---------- */
+
+.app-root .bg-white,
+.app-root .bg-slate-50 {
+  background-color: var(--panel-bg) !important;
+}
+.app-root .hover\:bg-white:hover {
+  background-color: var(--fill-2) !important;
+}
+.app-root .bg-\[\#eef2f7\],
+.app-root .bg-\[\#f6f8fb\] {
+  background-color: var(--app-bg) !important;
+}
+.app-root .bg-slate-100 {
+  background-color: var(--fill-2) !important;
+}
+.app-root .bg-slate-200 {
+  background-color: var(--fill-2) !important;
+}
+.app-root .bg-slate-300 {
+  background-color: var(--fill-3) !important;
+}
+
+/* 深色下卡片阴影调暗 */
+.app-root[data-theme="dark"] .shadow-sm,
+.app-root[data-theme="dark"] .shadow,
+.app-root[data-theme="dark"] .shadow-md {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35) !important;
+}
+
+/* ---------- 中性文本 ---------- */
+
+.app-root .text-slate-950,
+.app-root .text-slate-900,
+.app-root .text-slate-800 {
+  color: var(--app-text) !important;
+}
+.app-root .text-slate-700,
+.app-root .text-slate-600 {
+  color: var(--text-secondary) !important;
+}
+.app-root .text-slate-500,
+.app-root .text-slate-400 {
+  color: var(--app-muted) !important;
+}
+.app-root .text-slate-300 {
+  color: var(--text-quaternary) !important;
+}
+
+/* ---------- 中性边框 ---------- */
+
+.app-root .border-slate-100,
+.app-root .border-slate-200,
+.app-root .border-slate-300 {
+  border-color: var(--app-line) !important;
+}
+.app-root .ring-slate-200,
+.app-root .ring-slate-300 {
+  --tw-ring-color: var(--app-line) !important;
+}
+
+/* ---------- 主强调 blue → kimiBlue ---------- */
+
+.app-root .bg-blue-500,
+.app-root .bg-blue-600 {
+  background-color: var(--accent) !important;
+}
+.app-root .hover\:bg-blue-700:hover {
+  background-color: var(--accent-hover) !important;
+}
+.app-root .bg-blue-50,
+.app-root .bg-blue-100 {
+  background-color: var(--accent-soft) !important;
+}
+.app-root .bg-blue-100\/60 {
+  background-color: var(--accent-soft) !important;
+}
+.app-root .hover\:bg-blue-50:hover,
+.app-root .hover\:bg-blue-100\/60:hover {
+  background-color: var(--accent-soft-strong) !important;
+}
+.app-root .text-blue-600,
+.app-root .text-blue-700 {
+  color: var(--accent-text) !important;
+}
+.app-root .border-blue-100,
+.app-root .border-blue-200,
+.app-root .border-blue-300 {
+  border-color: var(--accent-soft-strong) !important;
+}
+.app-root .border-blue-500 {
+  border-color: var(--accent) !important;
+}
+.app-root .ring-blue-100 {
+  --tw-ring-color: var(--accent-soft-strong) !important;
+}
+
+/* ---------- 成功 emerald → positiveGreen ---------- */
+
+.app-root .bg-emerald-500 {
+  background-color: var(--success) !important;
+}
+.app-root .bg-emerald-50 {
+  background-color: var(--success-soft) !important;
+}
+.app-root .text-emerald-700 {
+  color: var(--success-text) !important;
+}
+.app-root .border-emerald-200 {
+  border-color: var(--success-soft) !important;
+}
+
+/* ---------- 危险 rose → danger ---------- */
+
+.app-root .bg-rose-500 {
+  background-color: var(--danger) !important;
+}
+.app-root .bg-rose-50 {
+  background-color: var(--danger-soft) !important;
+}
+.app-root .hover\:bg-rose-50:hover {
+  background-color: var(--danger-soft) !important;
+}
+.app-root .text-rose-500,
+.app-root .text-rose-600 {
+  color: var(--danger-text) !important;
+}
+.app-root .text-rose-700 {
+  color: var(--danger-text) !important;
+}
+.app-root .hover\:text-rose-600:hover,
+.app-root .hover\:text-rose-700:hover {
+  color: var(--danger) !important;
+}
+.app-root .border-rose-100,
+.app-root .border-rose-200 {
+  border-color: var(--danger-soft) !important;
+}
+
+/* ---------- 警告 amber/yellow → orange ---------- */
+
+.app-root .bg-amber-400,
+.app-root .bg-amber-500 {
+  background-color: var(--warning) !important;
+}
+.app-root .bg-amber-50 {
+  background-color: var(--warning-soft) !important;
+}
+.app-root .text-amber-500,
+.app-root .text-amber-600 {
+  color: var(--warning) !important;
+}
+.app-root .text-amber-800 {
+  color: var(--warning-text) !important;
+}
+.app-root .border-amber-200,
+.app-root .border-amber-300 {
+  border-color: var(--warning-soft) !important;
+}
+
+/* ---------- 品牌渐变主按钮 ---------- */
+
+.btn-primary-grad {
+  background: var(--accent-grad);
+  color: #ffffff;
+  box-shadow: var(--accent-glow);
+}
+.btn-primary-grad:hover:not(:disabled) {
+  filter: brightness(1.1);
+  box-shadow: var(--accent-glow);
+}
+.btn-primary-grad:active:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+/* 卡片悬浮提升 */
+.card-lift {
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) ease,
+    background-color var(--dur-fast) ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .card-lift:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  }
+}
+.app-root[data-theme="dark"] .card-lift:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* ---------- hover 中性填充统一 ---------- */
+
+.app-root .hover\:bg-slate-50:hover,
+.app-root .hover\:bg-slate-100:hover {
+  background-color: var(--fill-1) !important;
+}
+.app-root .hover\:bg-slate-200:hover {
+  background-color: var(--fill-2) !important;
+}
+.app-root .hover\:text-slate-800:hover,
+.app-root .hover\:text-slate-700:hover {
+  color: var(--app-text) !important;
+}
+
+/* ---------- 浮层（下拉/菜单/弹窗）边缘与阴影 ---------- */
+
+.app-root .fixed .bg-white.rounded-lg,
+.app-root .fixed .bg-white.rounded-xl,
+.app-root .fixed .bg-white.rounded-md {
+  background-color: var(--raised-bg) !important;
+  box-shadow: var(--shadow-raised);
+}
+
+/* 深色下浮层需要可见边缘：0.5px 级分隔线 */
+.app-root[data-theme="dark"] .fixed .rounded-lg,
+.app-root[data-theme="dark"] .fixed .rounded-xl,
+.app-root[data-theme="dark"] .fixed .rounded-md {
+  border-color: var(--app-line) !important;
+}
+
+/* ---------- 遮罩层 ---------- */
+
+.app-root .bg-black\/40,
+.app-root .bg-black\/50,
+.app-root .bg-black\/60,
+.app-root .bg-slate-900\/40,
+.app-root .bg-slate-900\/50,
+.app-root .bg-slate-900\/60 {
+  background-color: var(--mask-base) !important;
+}
+
+/* ---------- 弹窗进入动效：scale(0.96) + 淡入，150–200ms ---------- */
+
+@keyframes ldy-modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ldy-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.app-root .fixed.inset-0 > .rounded-lg,
+.app-root .fixed.inset-0 > .rounded-xl,
+.app-root .fixed.inset-0 .bg-white.rounded-lg {
+  animation: ldy-modal-in var(--dur-med) var(--ease-out);
+}
+
+.app-root .fixed.inset-0 {
+  animation: ldy-fade-in var(--dur-fast) ease;
+}
+
+/* ---------- 标签页激活态（border-b-white 抵消边框 hack） ---------- */
+
+.app-root[data-theme="dark"] .border-b-white {
+  border-bottom-color: var(--panel-bg) !important;
+}
+.app-root[data-theme="light"] .border-b-white,
+.app-root:not([data-theme]) .border-b-white {
+  border-bottom-color: #ffffff !important;
 }
