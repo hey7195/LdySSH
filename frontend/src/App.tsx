@@ -5890,6 +5890,8 @@ function TerminalWorkspace({
           onActivate={onActivate}
           splitMode={splitMode}
           onToggleSplit={onToggleSplit}
+          terminalCwd={terminalCwd}
+          onStartUpload={onStartUpload}
         />
         {visible && !rightSidebarCollapsed && (
           <TerminalRightSidebar
@@ -6470,7 +6472,9 @@ function TerminalSurface({
   onOutput,
   onActivate,
   splitMode = "none",
-  onToggleSplit
+  onToggleSplit,
+  terminalCwd,
+  onStartUpload
 }: {
   visible: boolean;
   sessions?: SessionTab[];
@@ -6498,6 +6502,8 @@ function TerminalSurface({
   onActivate?: (sessionId: string) => void;
   splitMode?: "none" | "horizontal" | "vertical";
   onToggleSplit?: (sessionId: string, mode: "none" | "horizontal" | "vertical") => void;
+  terminalCwd?: string;
+  onStartUpload?: (sessionId: string, remoteDir: string, filePath?: string, fileName?: string, fileContent?: string, fileSize?: number) => Promise<void>;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
@@ -6511,6 +6517,9 @@ function TerminalSurface({
   const pushSeenRef = useRef<Record<string, boolean>>({});
   const highlightRulesRef = useRef(highlightRules);
   const secondaryIdRef = useRef<string | undefined>(undefined);
+
+  // 终端视口直接拖拽文件上传状态
+  const [isTerminalDragging, setIsTerminalDragging] = useState(false);
 
   // 副分屏终端引用与状态
   const secondaryContainerRef = useRef<HTMLDivElement | null>(null);
@@ -7313,6 +7322,31 @@ function TerminalSurface({
         sendInputToSessions(activeSession.id, "\x1bd");
         return false;
       }
+      // 分屏与广播高频快捷键
+      if (event.type === "keydown" && isCtrlOrMeta && event.shiftKey && (key === "d" || event.code === "KeyD")) {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleSplit?.(activeSession.id, "horizontal");
+        return false;
+      }
+      if (event.type === "keydown" && isCtrlOrMeta && event.shiftKey && (key === "e" || event.code === "KeyE")) {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleSplit?.(activeSession.id, "vertical");
+        return false;
+      }
+      if (event.type === "keydown" && isCtrlOrMeta && event.shiftKey && (key === "w" || event.code === "KeyW")) {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleSplit?.(activeSession.id, "none");
+        return false;
+      }
+      if (event.type === "keydown" && isCtrlOrMeta && event.shiftKey && (key === "b" || event.code === "KeyB")) {
+        event.preventDefault();
+        event.stopPropagation();
+        useAppStore.getState().setCommandBroadcastingEnabled(!useAppStore.getState().commandBroadcastingEnabled);
+        return false;
+      }
       if (!handleCommandSuggestionKey(event)) {
         return false;
       }
@@ -7399,8 +7433,8 @@ function TerminalSurface({
       if (!result.output) return;
       const output = decodeTerminalOutput(result.output, decoderRef);
       maybeLeaveRawCommandMode(output);
-      writeHighlightedOrRaw(terminal, output, highlightRulesRef.current);
       onOutput(activeSession.id, output);
+      enqueueTerminalWrite(activeSession.id, output);
     };
     const interval = window.setInterval(() => void pollOutput(false), 160);
     const watchdog = window.setInterval(() => void pollOutput(true), 5000);
@@ -7546,6 +7580,31 @@ function TerminalSurface({
         sendInputToSessions(secondarySession.id, "\x1bd");
         return false;
       }
+      // 分屏与广播快捷键
+      if (event.type === "keydown" && isCtrlOrMeta && event.shiftKey && (key === "d" || event.code === "KeyD")) {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleSplit?.(secondarySession.id, "horizontal");
+        return false;
+      }
+      if (event.type === "keydown" && isCtrlOrMeta && event.shiftKey && (key === "e" || event.code === "KeyE")) {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleSplit?.(secondarySession.id, "vertical");
+        return false;
+      }
+      if (event.type === "keydown" && isCtrlOrMeta && event.shiftKey && (key === "w" || event.code === "KeyW")) {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleSplit?.(secondarySession.id, "none");
+        return false;
+      }
+      if (event.type === "keydown" && isCtrlOrMeta && event.shiftKey && (key === "b" || event.code === "KeyB")) {
+        event.preventDefault();
+        event.stopPropagation();
+        useAppStore.getState().setCommandBroadcastingEnabled(!useAppStore.getState().commandBroadcastingEnabled);
+        return false;
+      }
       return true;
     });
     term.writeln(`\x1b[36m${secondarySession.title}\x1b[0m`);
@@ -7555,7 +7614,15 @@ function TerminalSurface({
     term.onData((data) => {
       const input = stripTerminalGeneratedReplies(data);
       if (!input) return;
-      sendTerminalInput(secondarySession.id, input);
+      if (useAppStore.getState().commandBroadcastingEnabled && sessions) {
+        sessions.forEach((s) => {
+          if (s.connected || s.status === "connected") {
+            sendTerminalInput(s.id, input);
+          }
+        });
+      } else {
+        sendTerminalInput(secondarySession.id, input);
+      }
     });
 
     secondaryTerminalRef.current = term;
@@ -7577,8 +7644,8 @@ function TerminalSurface({
       const result = await nativeBridge.getOutput(secondarySession.id);
       if (!result.output) return;
       const output = decodeTerminalOutput(result.output, secondaryDecoderRef);
-      writeHighlightedOrRaw(term, output, highlightRulesRef.current);
       onOutput(secondarySession.id, output);
+      enqueueTerminalWrite(secondarySession.id, output);
     };
     const interval = window.setInterval(() => void pollOutput(false), 160);
     const watchdog = window.setInterval(() => void pollOutput(true), 5000);
@@ -7748,6 +7815,28 @@ function TerminalSurface({
     backgroundSize: "cover"
   } as CSSProperties;
 
+  async function handleTerminalDropFiles(files: FileList) {
+    if (!activeSession || activeSession.kind !== "ssh" || files.length === 0) return;
+    const targetDir = terminalCwd || "/root";
+    const fileArray = Array.from(files);
+    for (let i = 0; i < fileArray.length; i++) {
+      const file = fileArray[i];
+      const localPath = (file as any).path;
+      if (localPath) {
+        if (onStartUpload) {
+          await onStartUpload(activeSession.id, targetDir, localPath, file.name, undefined, file.size);
+        } else {
+          void nativeBridge.uploadFile(activeSession.id, localPath, `${targetDir}/${file.name}`);
+        }
+      } else {
+        const content = await file.text();
+        if (onStartUpload) {
+          await onStartUpload(activeSession.id, targetDir, undefined, file.name, content, file.size);
+        }
+      }
+    }
+  }
+
   return (
     <div
       className="terminal-shell relative h-full min-h-0 overflow-hidden"
@@ -7755,6 +7844,26 @@ function TerminalSurface({
       data-terminal-theme={terminalTheme}
       style={terminalStyle}
       tabIndex={0}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (activeSession?.kind === "ssh" && activeSession.connected) {
+          setIsTerminalDragging(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsTerminalDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsTerminalDragging(false);
+        if (activeSession?.kind === "ssh" && activeSession.connected && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          void handleTerminalDropFiles(e.dataTransfer.files);
+        }
+      }}
       onPointerDown={() => {
         if (!isSplit) focusTerminal();
       }}
@@ -7764,6 +7873,14 @@ function TerminalSurface({
       onKeyDown={handleTerminalKeyDown}
       onContextMenu={openTerminalMenu}
     >
+      {/* 终端直接拖拽释放文件上传遮罩 */}
+      {isTerminalDragging && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center border-2 border-dashed border-emerald-500 bg-emerald-950/85 p-6 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md select-none pointer-events-none">
+          <Upload className="h-12 w-12 text-emerald-400 animate-bounce" />
+          <div className="mt-3 text-base font-black text-white">释放文件以立即上传至当前服务器工作目录</div>
+          <div className="mt-1 font-mono text-xs font-bold text-emerald-300">目标路径: {terminalCwd || "/root"}</div>
+        </div>
+      )}
       {!isSplit || !primarySession ? (
         <div ref={containerRef} className="h-full min-h-0 overflow-hidden" />
       ) : (
@@ -8858,8 +8975,13 @@ function sendTerminalInput(sessionId: string | undefined, text: string) {
 const TERMINAL_HIGHLIGHT_SKIP_BYTES = 65536;
 
 function writeHighlightedOrRaw(target: XTerm, output: string, rules: HighlightRule[]) {
+  if (!output || !target) return;
   const normalized = normalizeTerminalInverseVideo(decodeLessHexUtf8(output));
-  target.write(normalized.length > TERMINAL_HIGHLIGHT_SKIP_BYTES ? normalized : applyHighlightRules(normalized, rules));
+  if (normalized.length > TERMINAL_HIGHLIGHT_SKIP_BYTES || !rules || rules.length === 0) {
+    target.write(normalized);
+  } else {
+    target.write(applyHighlightRules(normalized, rules));
+  }
 }
 
 function attachFastRenderer(terminal: XTerm) {
